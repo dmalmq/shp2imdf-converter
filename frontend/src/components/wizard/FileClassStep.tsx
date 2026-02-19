@@ -1,4 +1,5 @@
 import type { ImportedFile } from "../../api/client";
+import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { ConfidenceDot } from "../shared/ConfidenceDot";
 import { PreviewMap } from "../shared/PreviewMap";
 
@@ -42,18 +43,20 @@ export function FileClassStep({
   onSelectStem,
   onHoverStem
 }: Props) {
+  const { t } = useUiLanguage();
+
   return (
     <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(430px,1fr)]">
       <div className="min-w-0 rounded border bg-white p-5">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Step 2: File Classification</h2>
+          <h2 className="text-lg font-semibold">{t("Step 2: File Classification", "Step 2: ファイル分類")}</h2>
           <button
             type="button"
             className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-60"
             disabled={loading}
             onClick={onDetectAll}
           >
-            {loading ? "Detecting..." : "Detect All"}
+            {loading ? t("Detecting...", "検出中...") : t("Detect All", "一括検出")}
           </button>
         </div>
         <div className="max-h-[440px] overflow-auto rounded border">
@@ -67,11 +70,11 @@ export function FileClassStep({
             </colgroup>
             <thead className="sticky top-0 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
               <tr>
-                <th className="px-3 py-2.5">Filename</th>
-                <th className="px-3 py-2.5">Geometry</th>
-                <th className="px-3 py-2.5">Count</th>
-                <th className="px-3 py-2.5">IMDF Type</th>
-                <th className="px-3 py-2.5">Confidence</th>
+                <th className="px-3 py-2.5">{t("Filename", "ファイル名")}</th>
+                <th className="px-3 py-2.5">{t("Geometry", "ジオメトリ")}</th>
+                <th className="px-3 py-2.5">{t("Count", "件数")}</th>
+                <th className="px-3 py-2.5">{t("IMDF Type", "IMDF 種別")}</th>
+                <th className="px-3 py-2.5">{t("Confidence", "信頼度")}</th>
               </tr>
             </thead>
             <tbody>
@@ -98,7 +101,7 @@ export function FileClassStep({
                         onChange={(event) => onChangeType(file.stem, event.target.value)}
                         onClick={(event) => event.stopPropagation()}
                       >
-                        <option value="">Unknown</option>
+                        <option value="">{t("Unknown", "未設定")}</option>
                         {TYPE_OPTIONS.map((option) => (
                           <option key={option} value={option}>
                             {option}
@@ -118,9 +121,9 @@ export function FileClassStep({
       </div>
 
       <div className="rounded border bg-white p-5">
-        <h3 className="mb-2 text-sm font-semibold text-slate-700">Preview Map</h3>
+        <h3 className="mb-2 text-sm font-semibold text-slate-700">{t("Preview Map", "プレビューマップ")}</h3>
         <p className="mb-3 text-xs text-slate-500">
-          Hover a row to zoom/highlight. Click a row to isolate that file.
+          {t("Hover a row to zoom/highlight. Click a row to isolate that file.", "行にカーソルを置くと強調表示・ズームします。クリックでそのファイルのみ表示します。")}
         </p>
         <PreviewMap features={features} selectedStem={selectedStem} hoveredStem={hoveredStem} />
       </div>

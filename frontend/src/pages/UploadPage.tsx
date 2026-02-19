@@ -6,6 +6,7 @@ import { importShapefiles, type ImportResponse } from "../api/client";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
+import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
 
 
@@ -18,6 +19,7 @@ export function UploadPage() {
   const setSessionExpiredMessage = useAppStore((state) => state.setSessionExpiredMessage);
   const pushToast = useToast();
   const handleApiError = useApiErrorHandler();
+  const { t } = useUiLanguage();
 
   const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
   const [progress, setProgress] = useState(0);
@@ -37,17 +39,17 @@ export function UploadPage() {
 
   const fileCountLabel = useMemo(() => {
     if (queuedFiles.length === 0) {
-      return "No files selected";
+      return t("No files selected", "ファイルが選択されていません");
     }
-    return `${queuedFiles.length} file(s) selected`;
-  }, [queuedFiles.length]);
+    return t(`${queuedFiles.length} file(s) selected`, `${queuedFiles.length} 件のファイルを選択`);
+  }, [queuedFiles.length, t]);
 
   const runImport = async () => {
     if (queuedFiles.length === 0) {
-      setError("Select shapefile components or a zip before importing.");
+      setError(t("Select shapefile components or a zip before importing.", "シェープファイル一式または ZIP を選択してください。"));
       pushToast({
-        title: "No files selected",
-        description: "Select shapefile components or a zip before importing.",
+        title: t("No files selected", "ファイル未選択"),
+        description: t("Select shapefile components or a zip before importing.", "シェープファイル一式または ZIP を選択してください。"),
         variant: "error"
       });
       return;
@@ -64,19 +66,21 @@ export function UploadPage() {
       setCleanupSummary(payload.cleanup_summary);
       setCurrentScreen("upload");
       pushToast({
-        title: "Import complete",
-        description: `${payload.files.length} shapefile groups imported.`,
+        title: t("Import complete", "インポート完了"),
+        description: t(`${payload.files.length} shapefile groups imported.`, `${payload.files.length} 件のファイルグループを取り込みました。`),
         variant: "success"
       });
       if (payload.warnings.length > 0) {
         pushToast({
-          title: "Import warnings",
-          description: `${payload.warnings.length} warning(s) reported during import.`,
+          title: t("Import warnings", "インポート警告"),
+          description: t(`${payload.warnings.length} warning(s) reported during import.`, `${payload.warnings.length} 件の警告があります。`),
           variant: "info"
         });
       }
     } catch (caught) {
-      const message = handleApiError(caught, "Import failed", { title: "Import failed" });
+      const message = handleApiError(caught, t("Import failed", "インポートに失敗しました"), {
+        title: t("Import failed", "インポート失敗")
+      });
       setError(message);
     } finally {
       setLoading(false);
@@ -92,7 +96,10 @@ export function UploadPage() {
     <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-6 p-6">
       <h1 className="text-3xl font-semibold">SHP to IMDF Converter</h1>
       <p className="text-sm text-slate-600">
-        Upload shapefile component files (.shp/.dbf/.shx/.prj) or a zip archive.
+        {t(
+          "Upload shapefile component files (.shp/.dbf/.shx/.prj) or a zip archive.",
+          "シェープファイル構成ファイル（.shp/.dbf/.shx/.prj）または ZIP をアップロードしてください。"
+        )}
       </p>
 
       <section
@@ -103,9 +110,9 @@ export function UploadPage() {
       >
         <input {...getInputProps()} />
         {isDragActive ? (
-          <p>Drop files here...</p>
+          <p>{t("Drop files here...", "ここにファイルをドロップ")}</p>
         ) : (
-          <p>Drag files/folders here, or click to browse.</p>
+          <p>{t("Drag files/folders here, or click to browse.", "ファイル/フォルダをドラッグするか、クリックして選択します。")}</p>
         )}
       </section>
 
@@ -133,9 +140,9 @@ export function UploadPage() {
           disabled={loading}
           className="rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-60"
         >
-          {loading ? "Importing..." : "Import Files"}
+          {loading ? t("Importing...", "インポート中...") : t("Import Files", "ファイルをインポート")}
         </button>
-        {loading && <span className="text-sm text-slate-700">Upload progress: {progress}%</span>}
+        {loading && <span className="text-sm text-slate-700">{t(`Upload progress: ${progress}%`, `アップロード進捗: ${progress}%`)}</span>}
       </div>
 
       {error && (
@@ -144,20 +151,20 @@ export function UploadPage() {
 
       {result && (
         <section className="rounded border bg-white p-4">
-          <h2 className="text-lg font-semibold">Cleanup Summary</h2>
+          <h2 className="text-lg font-semibold">{t("Cleanup Summary", "クリーンアップ結果")}</h2>
           <ul className="mt-2 text-sm">
-            <li>Multipolygons exploded: {result.cleanup_summary.multipolygons_exploded}</li>
-            <li>Rings closed: {result.cleanup_summary.rings_closed}</li>
-            <li>Features reoriented: {result.cleanup_summary.features_reoriented}</li>
-            <li>Empty features dropped: {result.cleanup_summary.empty_features_dropped}</li>
-            <li>Coordinates rounded: {result.cleanup_summary.coordinates_rounded}</li>
+            <li>{t("Multipolygons exploded", "マルチポリゴン分割数")}: {result.cleanup_summary.multipolygons_exploded}</li>
+            <li>{t("Rings closed", "リング補完数")}: {result.cleanup_summary.rings_closed}</li>
+            <li>{t("Features reoriented", "向き修正数")}: {result.cleanup_summary.features_reoriented}</li>
+            <li>{t("Empty features dropped", "空フィーチャ除外数")}: {result.cleanup_summary.empty_features_dropped}</li>
+            <li>{t("Coordinates rounded", "座標丸め数")}: {result.cleanup_summary.coordinates_rounded}</li>
           </ul>
           <button
             type="button"
             onClick={continueToWizard}
             className="mt-4 rounded bg-emerald-600 px-4 py-2 text-white"
           >
-            Continue to Wizard
+            {t("Continue to Wizard", "ウィザードへ進む")}
           </button>
         </section>
       )}

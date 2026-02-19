@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 from collections import Counter, defaultdict
-from itertools import combinations
 import re
 from typing import Any
 from uuid import UUID
@@ -12,6 +11,7 @@ from uuid import UUID
 from shapely.geometry import LineString, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
+from shapely.strtree import STRtree
 
 from backend.src.schemas import ValidationIssue, ValidationResponse, ValidationSummary
 
@@ -21,6 +21,38 @@ LINE_TYPES = {"opening", "detail"}
 NULL_GEOM_TYPES = {"address", "building"}
 LEVEL_LINKED_TYPES = {"unit", "opening", "fixture", "detail"}
 LABEL_RE = re.compile(r"^[A-Za-z]{2,3}([_-][A-Za-z0-9]{2,8})*$")
+
+
+def _iter_overlapping_pairs(
+    pairs: list[tuple[str, BaseGeometry]],
+) -> list[tuple[str, BaseGeometry, str, BaseGeometry]]:
+    """Find potentially overlapping unit pairs using an STRtree.
+
+    This avoids the O(n^2) full pairwise scan that becomes very slow on
+    large datasets while preserving exact overlap checks via intersection.
+    """
+
+    if len(pairs) < 2:
+        return []
+
+    ids = [fid for fid, _ in pairs]
+    geoms = [geom for _, geom in pairs]
+    tree = STRtree(geoms)
+    overlaps: list[tuple[str, BaseGeometry, str, BaseGeometry]] = []
+    seen_pairs: set[tuple[int, int]] = set()
+
+    for left_index, left_geom in enumerate(geoms):
+        candidate_indexes = tree.query(left_geom, predicate="intersects")
+        for right_index in candidate_indexes.tolist():
+            if right_index <= left_index:
+                continue
+            pair_key = (left_index, right_index)
+            if pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
+            overlaps.append((ids[left_index], left_geom, ids[right_index], geoms[right_index]))
+
+    return overlaps
 
 
 def _rows(feature_collection: dict[str, Any]) -> list[dict[str, Any]]:
@@ -324,7 +356,8 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
         for unit_id, unit_geom in pairs:
             if level_geom and not (level_geom.contains(unit_geom.centroid) or level_geom.touches(unit_geom.centroid)):
                 add_issue("warning", "unit_outside_level_warning", "Unit centroid is outside assigned level.", feature_id=unit_id)
-        for (left_id, left_geom), (right_id, right_geom) in combinations(pairs, 2):
+
+        for left_id, left_geom, right_id, right_geom in _iter_overlapping_pairs(pairs):
             overlap = left_geom.intersection(right_geom)
             if not overlap.is_empty and overlap.area > 0:
                 overlap_geojson = overlap.__geo_interface__
@@ -364,6 +397,8 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 if not (footprints_union.contains(centroid) or footprints_union.touches(centroid)):
                     add_issue("warning", "level_outside_footprint_warning", "Level centroid is outside footprint.", feature_id=fid)
 
+    level_boundary_cache: dict[str, BaseGeometry | None] = {}
+
     # Opening/detail warnings.
     for row in rows:
         fid = _feature_id(row)
@@ -375,7 +410,15 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
             geom = geoms_by_id[fid]
             if isinstance(geom, LineString):
                 level_id = props.get("level_id")
-                boundaries = unary_union([g.boundary for _, g in units_by_level.get(level_id, [])]).buffer(5e-6) if isinstance(level_id, str) and units_by_level.get(level_id) else None
+                boundaries = None
+                if isinstance(level_id, str):
+                    if level_id not in level_boundary_cache:
+                        level_units = units_by_level.get(level_id, [])
+                        if level_units:
+                            level_boundary_cache[level_id] = unary_union([g.boundary for _, g in level_units]).buffer(5e-6)
+                        else:
+                            level_boundary_cache[level_id] = None
+                    boundaries = level_boundary_cache[level_id]
                 if boundaries is not None and not geom.intersects(boundaries):
                     add_issue("warning", "opening_not_touching_boundary", "Opening does not touch any unit boundary.", feature_id=fid)
                 meters = geom.length * 111_320

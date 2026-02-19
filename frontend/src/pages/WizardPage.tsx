@@ -37,6 +37,7 @@ import { StepSidebar } from "../components/wizard/StepSidebar";
 import { SummaryStep } from "../components/wizard/SummaryStep";
 import { UnitMapStep } from "../components/wizard/UnitMapStep";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
+import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
 
 const STEP_ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -76,6 +77,49 @@ const EMPTY_FOOTPRINT: FootprintWizardState = {
 type StepValidation = {
   valid: boolean;
   reason: string | null;
+};
+
+const STEP_HELP_TEXT: Record<number, { en: string; ja: string }> = {
+  1: {
+    en: "Set venue basics like name, category, and address. These become your IMDF venue and address records.",
+    ja: "会場名・カテゴリ・住所などの基本情報を設定します。ここでの入力が IMDF の venue/address に使われます。"
+  },
+  2: {
+    en: "Confirm each source file type (unit/opening/fixture/detail). Correct classification keeps later mapping accurate.",
+    ja: "各ファイルの種別（unit/opening/fixture/detail）を確認します。ここが正しいと後続の変換が安定します。"
+  },
+  3: {
+    en: "Set floor levels and names so every feature is assigned to the correct level in IMDF.",
+    ja: "各ファイルの階層（レベル）と名称を設定します。すべての要素が正しい level に紐づきます。"
+  },
+  4: {
+    en: "Group level files into buildings and optionally define building-specific addresses.",
+    ja: "レベルファイルを建物ごとに割り当てます。必要に応じて建物別住所も設定できます。"
+  },
+  5: {
+    en: "Choose how unit attributes map to IMDF categories and names. Upload company mappings if needed.",
+    ja: "ユニット属性を IMDF カテゴリや名称へ対応付けます。必要なら会社コード対応表をアップロードします。"
+  },
+  6: {
+    en: "Map opening attributes such as category, door type, and accessibility-related fields.",
+    ja: "opening のカテゴリ、ドア種別、アクセシビリティ項目などの対応付けを行います。"
+  },
+  7: {
+    en: "Map fixture names and categories for non-unit physical objects.",
+    ja: "fixture（設備）の名称とカテゴリを対応付けます。"
+  },
+  8: {
+    en: "Detail features are exported as lightweight line features linked to levels only.",
+    ja: "detail は level のみを持つ軽量な線要素として出力されます。"
+  },
+  9: {
+    en: "Pick how footprint and venue outlines are derived from your source geometry.",
+    ja: "元データから footprint / venue 外形を作る方法を選択します。"
+  },
+  10: {
+    en: "Review configuration summary, then generate draft IMDF features and continue to review.",
+    ja: "設定内容を最終確認し、ドラフト生成してレビュー画面へ進みます。"
+  }
 };
 
 function toLevelItemsFromFiles(
@@ -145,8 +189,10 @@ export function WizardPage() {
   const setSessionExpiredMessage = useAppStore((state) => state.setSessionExpiredMessage);
   const handleApiError = useApiErrorHandler();
   const pushToast = useToast();
+  const { t, isJapanese } = useUiLanguage();
 
   const [step, setStep] = useState(1);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [features, setFeatures] = useState<
     {
@@ -160,6 +206,7 @@ export function WizardPage() {
   const openingCount = useMemo(() => files.filter((item) => item.detected_type === "opening").length, [files]);
   const fixtureCount = useMemo(() => files.filter((item) => item.detected_type === "fixture").length, [files]);
   const detailCount = useMemo(() => files.filter((item) => item.detected_type === "detail").length, [files]);
+  const stepHelp = STEP_HELP_TEXT[step] ?? STEP_HELP_TEXT[1];
 
   const projectComplete = useMemo(() => {
     const project = wizardState?.project;
@@ -201,51 +248,74 @@ export function WizardPage() {
     return {
       1: {
         valid: projectComplete,
-        reason: projectComplete ? null : "Complete required Project Info fields before continuing."
+        reason: projectComplete
+          ? null
+          : t("Complete required Project Info fields before continuing.", "必須のプロジェクト情報を入力してから進んでください。")
       },
       2: {
         valid: allClassified,
-        reason: allClassified ? null : "Assign an IMDF type for every imported file."
+        reason: allClassified
+          ? null
+          : t("Assign an IMDF type for every imported file.", "取り込んだすべてのファイルに IMDF 種別を設定してください。")
       },
       3: {
         valid: levelsComplete,
-        reason: levelsComplete ? null : "Set a detected level for each unit, opening, fixture, and detail file."
+        reason: levelsComplete
+          ? null
+          : t(
+              "Set a detected level for each unit, opening, fixture, and detail file.",
+              "unit/opening/fixture/detail の各ファイルにレベルを設定してください。"
+            )
       },
       4: {
         valid: buildingsComplete,
         reason: buildingsComplete
           ? null
-          : "Save at least one building and ensure each mapped source file is assigned to a building."
+          : t(
+              "Save at least one building and ensure each mapped source file is assigned to a building.",
+              "少なくとも1つの建物を保存し、対象ファイルを建物へ割り当ててください。"
+            )
       },
       5: {
         valid: unitMappingComplete,
-        reason: unitMappingComplete ? null : "Select a Unit code column before continuing."
+        reason: unitMappingComplete ? null : t("Select a Unit code column before continuing.", "Unit のコード列を選択してから進んでください。")
       },
       6: { valid: true, reason: null },
       7: { valid: true, reason: null },
       8: {
         valid: detailConfirmed,
-        reason: detailConfirmed ? null : "Confirm detail export settings before continuing."
+        reason: detailConfirmed
+          ? null
+          : t("Confirm detail export settings before continuing.", "detail の出力設定を確認してから進んでください。")
       },
       9: { valid: true, reason: null },
       10: { valid: true, reason: null }
     };
-  }, [files, projectComplete, wizardState]);
+  }, [files, projectComplete, t, wizardState]);
 
   const steps = useMemo(
     () => [
-      { id: 1, label: "Project Info" },
-      { id: 2, label: "File Classification" },
-      { id: 3, label: "Level Mapping" },
-      { id: 4, label: "Building Assignment" },
-      { id: 5, label: "Unit Mapping" },
-      { id: 6, label: openingCount ? "Opening Mapping" : "Opening Mapping (No files)" },
-      { id: 7, label: fixtureCount ? "Fixture Mapping" : "Fixture Mapping (No files)" },
-      { id: 8, label: detailCount ? "Detail Mapping" : "Detail Mapping (No files)" },
-      { id: 9, label: "Footprint Options" },
-      { id: 10, label: "Summary" }
+      { id: 1, label: t("Project Info", "プロジェクト情報") },
+      { id: 2, label: t("File Classification", "ファイル分類") },
+      { id: 3, label: t("Level Mapping", "レベル対応付け") },
+      { id: 4, label: t("Building Assignment", "建物割り当て") },
+      { id: 5, label: t("Unit Mapping", "Unit 対応付け") },
+      {
+        id: 6,
+        label: openingCount ? t("Opening Mapping", "Opening 対応付け") : t("Opening Mapping (No files)", "Opening 対応付け（対象なし）")
+      },
+      {
+        id: 7,
+        label: fixtureCount ? t("Fixture Mapping", "Fixture 対応付け") : t("Fixture Mapping (No files)", "Fixture 対応付け（対象なし）")
+      },
+      {
+        id: 8,
+        label: detailCount ? t("Detail Mapping", "Detail 設定") : t("Detail Mapping (No files)", "Detail 設定（対象なし）")
+      },
+      { id: 9, label: t("Footprint Options", "Footprint 設定") },
+      { id: 10, label: t("Summary", "概要") }
     ],
-    [detailCount, fixtureCount, openingCount]
+    [detailCount, fixtureCount, openingCount, t]
   );
 
   useEffect(() => {
@@ -284,8 +354,8 @@ export function WizardPage() {
           }))
         );
       } catch (error) {
-        const message = handleApiError(error, "Failed to load wizard state", {
-          title: "Failed to load wizard"
+        const message = handleApiError(error, t("Failed to load wizard state", "ウィザード情報の読み込みに失敗しました"), {
+          title: t("Failed to load wizard", "ウィザード読み込み失敗")
         });
         setWizardSaveStatus("error", message);
       } finally {
@@ -348,9 +418,15 @@ export function WizardPage() {
       await refreshFeatures();
       setLearningSuggestion(null);
       setWizardSaveStatus("saved");
-      pushToast({ title: "Detection complete", description: "File types were refreshed.", variant: "success" });
+      pushToast({
+        title: t("Detection complete", "検出完了"),
+        description: t("File types were refreshed.", "ファイル種別を更新しました。"),
+        variant: "success"
+      });
     } catch (error) {
-      const message = handleApiError(error, "Detect all failed", { title: "Detection failed" });
+      const message = handleApiError(error, t("Detect all failed", "一括検出に失敗しました"), {
+        title: t("Detection failed", "検出失敗")
+      });
       setWizardSaveStatus("error", message);
     }
   };
@@ -371,8 +447,8 @@ export function WizardPage() {
       await refreshFeatures();
       setWizardSaveStatus("saved");
     } catch (error) {
-      const message = handleApiError(error, "Failed to save file mapping", {
-        title: "Failed to save classification"
+      const message = handleApiError(error, t("Failed to save file mapping", "ファイル分類の保存に失敗しました"), {
+        title: t("Failed to save classification", "分類保存失敗")
       });
       setWizardSaveStatus("error", message);
     }
@@ -388,8 +464,8 @@ export function WizardPage() {
       setWizardState(response.wizard);
       setWizardSaveStatus("saved");
     } catch (error) {
-      const message = handleApiError(error, "Failed to save project info", {
-        title: "Failed to save project"
+      const message = handleApiError(error, t("Failed to save project info", "プロジェクト情報の保存に失敗しました"), {
+        title: t("Failed to save project", "保存失敗")
       });
       setWizardSaveStatus("error", message);
     }
@@ -405,8 +481,8 @@ export function WizardPage() {
       setWizardState(response.wizard);
       setWizardSaveStatus("saved");
     } catch (error) {
-      const message = handleApiError(error, "Failed to save building assignments", {
-        title: "Failed to save buildings"
+      const message = handleApiError(error, t("Failed to save building assignments", "建物割り当ての保存に失敗しました"), {
+        title: t("Failed to save buildings", "建物保存失敗")
       });
       setWizardSaveStatus("error", message);
     }
@@ -427,8 +503,8 @@ export function WizardPage() {
       setWizardState(response.wizard);
       setWizardSaveStatus("saved");
     } catch (error) {
-      const message = handleApiError(error, "Failed to save mappings", {
-        title: "Failed to save mappings"
+      const message = handleApiError(error, t("Failed to save mappings", "マッピングの保存に失敗しました"), {
+        title: t("Failed to save mappings", "保存失敗")
       });
       setWizardSaveStatus("error", message);
     }
@@ -444,8 +520,8 @@ export function WizardPage() {
       setWizardState(response.wizard);
       setWizardSaveStatus("saved");
     } catch (error) {
-      const message = handleApiError(error, "Failed to save footprint options", {
-        title: "Failed to save footprint"
+      const message = handleApiError(error, t("Failed to save footprint options", "Footprint 設定の保存に失敗しました"), {
+        title: t("Failed to save footprint", "Footprint 保存失敗")
       });
       setWizardSaveStatus("error", message);
     }
@@ -477,10 +553,14 @@ export function WizardPage() {
       await uploadCompanyMappings(sessionId, file);
       await refreshWizard();
       setWizardSaveStatus("saved");
-      pushToast({ title: "Mappings uploaded", description: "Company mappings were applied.", variant: "success" });
+      pushToast({
+        title: t("Mappings uploaded", "マッピングをアップロードしました"),
+        description: t("Company mappings were applied.", "会社コード対応を適用しました。"),
+        variant: "success"
+      });
     } catch (error) {
-      const message = handleApiError(error, "Failed to upload company mappings", {
-        title: "Upload failed"
+      const message = handleApiError(error, t("Failed to upload company mappings", "会社コード対応のアップロードに失敗しました"), {
+        title: t("Upload failed", "アップロード失敗")
       });
       setWizardSaveStatus("error", message);
     }
@@ -497,11 +577,15 @@ export function WizardPage() {
       await refreshFeatures();
       setCurrentScreen("review");
       setWizardSaveStatus("saved");
-      pushToast({ title: "Draft generated", description: "Opening review workspace.", variant: "success" });
+      pushToast({
+        title: t("Draft generated", "ドラフト生成完了"),
+        description: t("Opening review workspace.", "レビュー画面を開きます。"),
+        variant: "success"
+      });
       navigate("/review");
     } catch (error) {
-      const message = handleApiError(error, "Failed to generate draft features", {
-        title: "Generation failed"
+      const message = handleApiError(error, t("Failed to generate draft features", "ドラフト生成に失敗しました"), {
+        title: t("Generation failed", "生成失敗")
       });
       setWizardSaveStatus("error", message);
     }
@@ -630,8 +714,8 @@ export function WizardPage() {
     const currentValidation = stepValidation[step];
     if (step < 10 && currentValidation && !currentValidation.valid) {
       pushToast({
-        title: "Step incomplete",
-        description: currentValidation.reason ?? "Complete required fields before continuing.",
+        title: t("Step incomplete", "入力が不足しています"),
+        description: currentValidation.reason ?? t("Complete required fields before continuing.", "必須項目を入力してから進んでください。"),
         variant: "error"
       });
       return;
@@ -666,8 +750,8 @@ export function WizardPage() {
     if (blockingStep) {
       setStep(blockingStep);
       pushToast({
-        title: "Complete earlier steps first",
-        description: stepValidation[blockingStep]?.reason ?? "Complete required fields before continuing.",
+        title: t("Complete earlier steps first", "先の手順に進む前に入力が必要です"),
+        description: stepValidation[blockingStep]?.reason ?? t("Complete required fields before continuing.", "必須項目を入力してから進んでください。"),
         variant: "error"
       });
       return;
@@ -681,8 +765,8 @@ export function WizardPage() {
     if (blockingStep) {
       setStep(blockingStep);
       pushToast({
-        title: "Summary is locked",
-        description: stepValidation[blockingStep]?.reason ?? "Complete required fields before continuing.",
+        title: t("Summary is locked", "概要へ進むには入力が必要です"),
+        description: stepValidation[blockingStep]?.reason ?? t("Complete required fields before continuing.", "必須項目を入力してから進んでください。"),
         variant: "error"
       });
       return;
@@ -693,6 +777,10 @@ export function WizardPage() {
 
   const canGoNext = step < 10 && stepValidation[step]?.valid === true;
   const nextBlockedReason = step < 10 ? stepValidation[step]?.reason : null;
+
+  useEffect(() => {
+    setHelpOpen(false);
+  }, [step]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -718,19 +806,39 @@ export function WizardPage() {
     <main className="mx-auto flex min-h-screen w-full max-w-[1500px] flex-col gap-6 px-6 py-7 xl:px-8">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-semibold">Wizard</h1>
+          <h1 className="text-3xl font-semibold">{t("Wizard", "ウィザード")}</h1>
           <p className="text-sm text-slate-600">
-            Session: <span className="font-mono">{sessionId ?? "No active session"}</span>
+            {t("Session", "セッション")}: <span className="font-mono">{sessionId ?? t("No active session", "アクティブなセッションなし")}</span>
           </p>
         </div>
         <Link className="rounded bg-slate-700 px-3 py-2 text-sm text-white" to="/">
-          Back to Upload
+          {t("Back to Upload", "アップロードへ戻る")}
         </Link>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[20rem_minmax(0,1fr)]">
         <StepSidebar steps={steps} currentStep={step} onSelectStep={selectStep} onSkipToSummary={skipToSummary} />
         <div className="space-y-5">
+          <div className="rounded border bg-white px-4 py-3 text-sm">
+            <div className="flex items-center justify-between">
+              <p className="font-medium">{t("Step Help", "ステップヘルプ")}</p>
+              <button
+                type="button"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 text-sm font-semibold text-slate-700"
+                onClick={() => setHelpOpen((previous) => !previous)}
+                aria-label={t("Toggle step help", "ヘルプ表示の切り替え")}
+                title={t("Toggle step help", "ヘルプ表示の切り替え")}
+              >
+                ?
+              </button>
+            </div>
+            {helpOpen ? (
+              <p className="mt-2 text-slate-600">{isJapanese ? stepHelp.ja : stepHelp.en}</p>
+            ) : (
+              <p className="mt-2 text-slate-500">{t("Click ? for a short explanation of this step.", "このステップの説明は ? を押してください。")}</p>
+            )}
+          </div>
+
           {loading ? <WizardStepSkeleton /> : showStep()}
 
           {learningSuggestion && (
@@ -742,14 +850,14 @@ export function WizardPage() {
                   className="rounded bg-amber-600 px-3 py-1.5 text-xs text-white"
                   onClick={() => void applyLearningSuggestion()}
                 >
-                  Apply Learning
+                  {t("Apply Learning", "学習ルールを適用")}
                 </button>
                 <button
                   type="button"
                   className="rounded border border-amber-400 px-3 py-1.5 text-xs"
                   onClick={() => setLearningSuggestion(null)}
                 >
-                  Dismiss
+                  {t("Dismiss", "閉じる")}
                 </button>
               </div>
             </div>
@@ -757,12 +865,12 @@ export function WizardPage() {
 
           <div className="flex items-center justify-between rounded border bg-white px-5 py-3.5">
             <div className="text-sm">
-              {wizardSaveStatus === "saving" && "Saving..."}
-              {wizardSaveStatus === "saved" && "Saved"}
+              {wizardSaveStatus === "saving" && t("Saving...", "保存中...")}
+              {wizardSaveStatus === "saved" && t("Saved", "保存済み")}
               {wizardSaveStatus === "error" && (
-                <span className="text-red-700">Save failed: {wizardSaveError ?? "Unknown error"}</span>
+                <span className="text-red-700">{t("Save failed", "保存に失敗しました")}: {wizardSaveError ?? t("Unknown error", "不明なエラー")}</span>
               )}
-              {wizardSaveStatus === "idle" && "Idle"}
+              {wizardSaveStatus === "idle" && t("Idle", "待機中")}
               {!canGoNext && nextBlockedReason ? <p className="mt-1 text-xs text-amber-700">{nextBlockedReason}</p> : null}
             </div>
             <div className="flex gap-2">
@@ -772,7 +880,7 @@ export function WizardPage() {
                 disabled={step <= 1}
                 onClick={prevStep}
               >
-                Back
+                {t("Back", "戻る")}
               </button>
               <button
                 type="button"
@@ -780,7 +888,7 @@ export function WizardPage() {
                 disabled={!canGoNext}
                 onClick={nextStep}
               >
-                Next
+                {t("Next", "次へ")}
               </button>
             </div>
           </div>
