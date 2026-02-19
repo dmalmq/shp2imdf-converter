@@ -1,0 +1,11 @@
+{
+  "feature_type_keywords": {
+    "unit": ["space", "unit", "room", "area"],
+    "opening": ["opening", "door", "entry", "gate"],
+    "fixture": ["fixture", "fxt", "furniture"],
+    "detail": ["detail", "edge", "line", "curb"],
+    "level": ["floor", "level", "storey"],
+    "building": ["building", "bldg", "structure"],
+    "venue": ["venue", "site", "campus", "property"]
+  }
+}

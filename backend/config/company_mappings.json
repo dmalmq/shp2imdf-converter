@@ -1,0 +1,10 @@
+{
+  "default_category": "unspecified",
+  "mappings": {
+    "SHOP": "retail",
+    "FOOD": "foodservice",
+    "OFFICE": "office",
+    "WC": "restroom",
+    "TRANSIT": "transit"
+  }
+}

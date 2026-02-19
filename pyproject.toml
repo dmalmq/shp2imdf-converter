@@ -1,0 +1,12 @@
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+markers = [
+    "phase0: Test fixture generation",
+    "phase1: Foundation (importer, API, upload screen)",
+    "phase2: Wizard detection (detector, classification, levels)",
+    "phase3: Wizard mapping (mapper, config, generation setup)",
+    "phase4: Review (generator, map, table, selection)",
+    "phase5: Validation and export (converter, validator, autofix)",
+    "phase6: Polish and edge cases"
+]
+
