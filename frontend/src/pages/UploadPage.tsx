@@ -2,7 +2,10 @@ import { useMemo, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { useNavigate } from "react-router-dom";
 
-import { ImportResponse, importShapefiles } from "../api/client";
+import { importShapefiles, type ImportResponse } from "../api/client";
+import { SkeletonBlock } from "../components/shared/SkeletonBlock";
+import { useToast } from "../components/shared/ToastProvider";
+import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useAppStore } from "../store/useAppStore";
 
 
@@ -12,6 +15,9 @@ export function UploadPage() {
   const setCurrentScreen = useAppStore((state) => state.setCurrentScreen);
   const setFiles = useAppStore((state) => state.setFiles);
   const setCleanupSummary = useAppStore((state) => state.setCleanupSummary);
+  const setSessionExpiredMessage = useAppStore((state) => state.setSessionExpiredMessage);
+  const pushToast = useToast();
+  const handleApiError = useApiErrorHandler();
 
   const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
   const [progress, setProgress] = useState(0);
@@ -39,6 +45,11 @@ export function UploadPage() {
   const runImport = async () => {
     if (queuedFiles.length === 0) {
       setError("Select shapefile components or a zip before importing.");
+      pushToast({
+        title: "No files selected",
+        description: "Select shapefile components or a zip before importing.",
+        variant: "error"
+      });
       return;
     }
     setLoading(true);
@@ -46,13 +57,26 @@ export function UploadPage() {
     setError(null);
     try {
       const payload = await importShapefiles(queuedFiles, setProgress);
+      setSessionExpiredMessage(null);
       setResult(payload);
       setSessionId(payload.session_id);
       setFiles(payload.files);
       setCleanupSummary(payload.cleanup_summary);
       setCurrentScreen("upload");
+      pushToast({
+        title: "Import complete",
+        description: `${payload.files.length} shapefile groups imported.`,
+        variant: "success"
+      });
+      if (payload.warnings.length > 0) {
+        pushToast({
+          title: "Import warnings",
+          description: `${payload.warnings.length} warning(s) reported during import.`,
+          variant: "info"
+        });
+      }
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "Import failed";
+      const message = handleApiError(caught, "Import failed", { title: "Import failed" });
       setError(message);
     } finally {
       setLoading(false);
@@ -87,13 +111,19 @@ export function UploadPage() {
 
       <div className="rounded border bg-white p-4 text-sm">
         <p className="font-medium">{fileCountLabel}</p>
-        {queuedFiles.length > 0 && (
+        {loading ? (
+          <div className="mt-2 space-y-2">
+            <SkeletonBlock className="h-3 w-full" />
+            <SkeletonBlock className="h-3 w-11/12" />
+            <SkeletonBlock className="h-3 w-4/5" />
+          </div>
+        ) : queuedFiles.length > 0 ? (
           <ul className="mt-2 max-h-36 overflow-auto">
             {queuedFiles.map((file) => (
               <li key={`${file.name}-${file.lastModified}`}>{file.name}</li>
             ))}
           </ul>
-        )}
+        ) : null}
       </div>
 
       <div className="flex items-center gap-3">

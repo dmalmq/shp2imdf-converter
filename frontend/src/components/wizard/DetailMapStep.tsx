@@ -5,10 +5,13 @@ import type { ImportedFile } from "../../api/client";
 
 type Props = {
   files: ImportedFile[];
+  detailConfirmed: boolean;
+  saving: boolean;
+  onSave: (confirmed: boolean) => void;
 };
 
 
-export function DetailMapStep({ files }: Props) {
+export function DetailMapStep({ files, detailConfirmed, saving, onSave }: Props) {
   const detailFiles = useMemo(() => files.filter((item) => item.detected_type === "detail"), [files]);
   const detailFeatureCount = useMemo(
     () => detailFiles.reduce((sum, file) => sum + file.feature_count, 0),
@@ -30,13 +33,26 @@ export function DetailMapStep({ files }: Props) {
         </p>
       </div>
       {detailFiles.length > 0 && (
-        <ul className="mt-3 space-y-1 text-xs text-slate-600">
-          {detailFiles.map((file) => (
-            <li key={file.stem} className="font-mono">
-              {file.stem}
-            </li>
-          ))}
-        </ul>
+        <>
+          <label className="mt-4 flex items-start gap-2 rounded border border-slate-200 p-3 text-sm">
+            <input
+              type="checkbox"
+              checked={detailConfirmed}
+              onChange={(event) => onSave(event.target.checked)}
+              disabled={saving}
+            />
+            <span>
+              I confirm detail features should export as LineString geometry with only `level_id` properties.
+            </span>
+          </label>
+          <ul className="mt-3 space-y-1 text-xs text-slate-600">
+            {detailFiles.map((file) => (
+              <li key={file.stem} className="font-mono">
+                {file.stem}
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </section>
   );

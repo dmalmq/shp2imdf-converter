@@ -282,6 +282,13 @@ cd ..
 
 ### Environment Variables
 
+Copy the example file before running locally or on a shared
+host:
+
+```bash
+cp .env.example .env
+```
+
 Core variables (current behavior):
 
 | Variable            | Default | Description                           |
@@ -336,6 +343,7 @@ After initial setup, run a quick smoke test:
 # Backend importer/API sanity
 python -m pytest backend/tests/test_importer.py -v
 python -m pytest backend/tests/test_api.py -v
+python -m pytest backend/tests/test_edge_cases.py -v
 
 # Frontend sanity
 cd frontend
@@ -348,6 +356,21 @@ Then start backend and verify docs endpoint responds:
 ```powershell
 Invoke-WebRequest http://localhost:8000/docs | Select-Object -ExpandProperty StatusCode
 ```
+
+Then verify the Phase 6 UX polish items manually:
+
+1. Trigger an API error and confirm an error toast appears.
+2. Let a session expire (or use an invalid session ID) and
+   confirm the session-expired dialog appears.
+3. Confirm skeleton loaders show during wizard/review API
+   calls.
+4. Confirm shortcuts work in Review:
+   - `Ctrl+Z`: undo property edit
+   - `Escape`: clear selection
+   - `Enter`: confirm export download when export dialog is
+     open
+5. Confirm wizard `Next` is disabled when required step
+   fields are missing.
 
 ### Documentation Ownership
 
