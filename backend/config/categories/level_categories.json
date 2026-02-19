@@ -1,0 +1,14 @@
+{
+  "category_type": "level",
+  "categories": [
+    "arrivals",
+    "arrivals.domestic",
+    "arrivals.intl",
+    "departures",
+    "departures.domestic",
+    "departures.intl",
+    "parking",
+    "transit",
+    "unspecified"
+  ]
+}

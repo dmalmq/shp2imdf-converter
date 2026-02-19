@@ -45,6 +45,14 @@ type AppState = {
   setFiles: (files: ImportedFile[]) => void;
   setCleanupSummary: (summary: CleanupSummary | null) => void;
   setWizardState: (wizardState: WizardState | null) => void;
+  setSelectedFeatureIds: (ids: string[]) => void;
+  toggleSelectedFeatureId: (id: string, multi?: boolean) => void;
+  clearSelectedFeatureIds: () => void;
+  setFilters: (filters: Filters) => void;
+  setLayerVisibility: (layerVisibility: Record<string, boolean>) => void;
+  setValidationResults: (results: ValidationResults) => void;
+  pushEditHistory: (entry: Record<string, unknown>) => void;
+  popEditHistory: () => Record<string, unknown> | null;
   upsertFile: (file: ImportedFile) => void;
   setSelectedFileStem: (stem: string | null) => void;
   setHoveredFileStem: (stem: string | null) => void;
@@ -80,6 +88,39 @@ export const useAppStore = create<AppState>((set) => ({
   setFiles: (files) => set({ files }),
   setCleanupSummary: (cleanupSummary) => set({ cleanupSummary }),
   setWizardState: (wizardState) => set({ wizardState }),
+  setSelectedFeatureIds: (selectedFeatureIds) => set({ selectedFeatureIds }),
+  toggleSelectedFeatureId: (id, multi = false) =>
+    set((state) => {
+      const current = state.selectedFeatureIds;
+      if (multi) {
+        if (current.includes(id)) {
+          return { selectedFeatureIds: current.filter((item) => item !== id) };
+        }
+        return { selectedFeatureIds: [...current, id] };
+      }
+      if (current.length === 1 && current[0] === id) {
+        return { selectedFeatureIds: [] };
+      }
+      return { selectedFeatureIds: [id] };
+    }),
+  clearSelectedFeatureIds: () => set({ selectedFeatureIds: [] }),
+  setFilters: (filters) => set({ filters }),
+  setLayerVisibility: (layerVisibility) => set({ layerVisibility }),
+  setValidationResults: (validationResults) => set({ validationResults }),
+  pushEditHistory: (entry) => set((state) => ({ editHistory: [...state.editHistory, entry] })),
+  popEditHistory: () => {
+    let popped: Record<string, unknown> | null = null;
+    set((state) => {
+      if (state.editHistory.length === 0) {
+        popped = null;
+        return state;
+      }
+      const next = [...state.editHistory];
+      popped = next.pop() ?? null;
+      return { editHistory: next };
+    });
+    return popped;
+  },
   upsertFile: (file) =>
     set((state) => ({
       files: state.files.map((item) => (item.stem === file.stem ? file : item))

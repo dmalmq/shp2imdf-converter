@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 from backend.src.schemas import ImportedFile, UnitCodePreviewRow
+
+
+CATEGORY_FORMAT_RE = re.compile(r"^[a-z0-9]+(?:[._][a-z0-9]+)*$")
 
 
 def load_unit_categories(config_path: str | Path) -> tuple[set[str], str]:
@@ -18,13 +22,22 @@ def load_unit_categories(config_path: str | Path) -> tuple[set[str], str]:
     return categories, default_category
 
 
+def is_valid_category_value(value: str, valid_categories: set[str]) -> bool:
+    normalized = value.strip().lower()
+    if not normalized:
+        return False
+    if normalized in valid_categories:
+        return True
+    return bool(CATEGORY_FORMAT_RE.fullmatch(normalized))
+
+
 def normalize_company_mappings_payload(
     payload: dict[str, Any],
     valid_categories: set[str],
     fallback_default: str,
 ) -> tuple[dict[str, str], str]:
     raw_default = str(payload.get("default_category", fallback_default)).strip().lower()
-    default_category = raw_default if raw_default in valid_categories else fallback_default
+    default_category = raw_default if is_valid_category_value(raw_default, valid_categories) else fallback_default
 
     mappings: dict[str, str] = {}
     raw_mappings = payload.get("mappings", {})
@@ -34,7 +47,7 @@ def normalize_company_mappings_payload(
             if not code:
                 continue
             category = str(raw_category).strip().lower()
-            if category not in valid_categories:
+            if not is_valid_category_value(category, valid_categories):
                 category = default_category
             mappings[code] = category
     return mappings, default_category
@@ -80,7 +93,7 @@ def resolve_unit_category(
         return mapped, False
 
     normalized = code_text.lower()
-    if normalized in valid_categories:
+    if is_valid_category_value(normalized, valid_categories):
         return normalized, False
 
     return default_category, True
@@ -130,4 +143,3 @@ def build_unit_code_preview(
         )
 
     return sorted(aggregated.values(), key=lambda item: item.code)
-

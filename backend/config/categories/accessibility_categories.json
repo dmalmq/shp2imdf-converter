@@ -1,0 +1,15 @@
+{
+  "category_type": "accessibility",
+  "categories": [
+    "assisted.listening",
+    "braille",
+    "hearing",
+    "hearingloop",
+    "signlanginterpreter",
+    "tactilepaving",
+    "tdd",
+    "trs",
+    "volume",
+    "wheelchair"
+  ]
+}

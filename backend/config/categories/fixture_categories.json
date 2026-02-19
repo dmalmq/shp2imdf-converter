@@ -1,0 +1,20 @@
+{
+  "category_type": "fixture",
+  "categories": [
+    "baggagecarousel",
+    "boardinggate.desk",
+    "checkin.desk",
+    "checkin.kiosk",
+    "desk",
+    "equipment",
+    "furniture",
+    "immigration.desk",
+    "inspection.desk",
+    "obstruction",
+    "securityequipment",
+    "stage",
+    "vegetation",
+    "wall",
+    "water"
+  ]
+}

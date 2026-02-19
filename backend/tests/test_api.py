@@ -286,8 +286,8 @@ def test_company_mappings_upload_refreshes_preview(test_client, sample_dir: Path
     assert "OFFICE" in codes
 
 
-@pytest.mark.phase3
-def test_generate_draft_adds_unlocated_address_and_building(test_client, sample_dir: Path) -> None:
+@pytest.mark.phase4
+def test_generate_creates_review_ready_feature_set(test_client, sample_dir: Path) -> None:
     import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
     session_id = import_response.json()["session_id"]
 
@@ -309,16 +309,20 @@ def test_generate_draft_adds_unlocated_address_and_building(test_client, sample_
 
     generate_response = test_client.post(f"/api/session/{session_id}/generate")
     assert generate_response.status_code == 200
-    assert generate_response.json()["status"] == "draft"
+    assert generate_response.json()["status"] == "generated"
 
     features_response = test_client.get(f"/api/session/{session_id}/features")
     payload = features_response.json()
     feature_types = [item["feature_type"] for item in payload["features"]]
     assert "address" in feature_types
     assert "building" in feature_types
+    assert "level" in feature_types
+    assert "footprint" in feature_types
+    assert "unit" in feature_types
+    assert "venue" in feature_types
 
 
-@pytest.mark.phase3
+@pytest.mark.phase5
 def test_export_includes_manifest_json(test_client, sample_dir: Path) -> None:
     import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
     session_id = import_response.json()["session_id"]
@@ -338,6 +342,7 @@ def test_export_includes_manifest_json(test_client, sample_dir: Path) -> None:
         },
     )
     assert project_response.status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
 
     export_response = test_client.get(f"/api/session/{session_id}/export")
     assert export_response.status_code == 200
@@ -346,12 +351,197 @@ def test_export_includes_manifest_json(test_client, sample_dir: Path) -> None:
     with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
         names = set(archive.namelist())
         assert "manifest.json" in names
-        assert "features.geojson" in names
+        assert "address.geojson" in names
+        assert "venue.geojson" in names
+        assert "building.geojson" in names
+        assert "footprint.geojson" in names
+        assert "level.geojson" in names
+        assert "unit.geojson" in names
 
         manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
         assert manifest["version"] == "1.0.0"
         assert manifest["language"] == "en-US"
         assert isinstance(manifest["created"], str)
         assert manifest["created"]
-        assert manifest["generated_by"] == "shp2imdf-converter phase3"
+        assert manifest["generated_by"] == "shp2imdf-converter phase5"
         assert "extensions" in manifest
+
+        units = json.loads(archive.read("unit.geojson").decode("utf-8"))
+        assert units["type"] == "FeatureCollection"
+        if units["features"]:
+            properties = units["features"][0]["properties"]
+            assert "status" not in properties
+            assert "issues" not in properties
+            assert "metadata" not in properties
+
+
+@pytest.mark.phase4
+def test_patch_single_feature_properties(test_client, sample_dir: Path) -> None:
+    files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space")
+    import_response = test_client.post("/api/import", files=files)
+    session_id = import_response.json()["session_id"]
+
+    project_response = test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    )
+    assert project_response.status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    unit = next(item for item in features if item["feature_type"] == "unit")
+
+    patch_response = test_client.patch(
+        f"/api/session/{session_id}/features/{unit['id']}",
+        json={"properties": {"category": "office"}},
+    )
+    assert patch_response.status_code == 200
+    assert patch_response.json()["properties"]["category"] == "office"
+
+
+@pytest.mark.phase4
+def test_bulk_patch_and_delete_features(test_client, sample_dir: Path) -> None:
+    files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space")
+    import_response = test_client.post("/api/import", files=files)
+    session_id = import_response.json()["session_id"]
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    unit_ids = [item["id"] for item in features if item["feature_type"] == "unit"][:2]
+    assert len(unit_ids) == 2
+
+    bulk_patch = test_client.patch(
+        f"/api/session/{session_id}/features/bulk",
+        json={
+            "feature_ids": unit_ids,
+            "action": "patch",
+            "properties": {"category": "retail"},
+        },
+    )
+    assert bulk_patch.status_code == 200
+    assert bulk_patch.json()["updated_count"] == 2
+
+    bulk_delete = test_client.patch(
+        f"/api/session/{session_id}/features/bulk",
+        json={
+            "feature_ids": [unit_ids[0]],
+            "action": "delete",
+        },
+    )
+    assert bulk_delete.status_code == 200
+    assert bulk_delete.json()["deleted_count"] == 1
+
+
+@pytest.mark.phase5
+def test_validate_endpoint_updates_feature_statuses(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+
+    validate_response = test_client.post(f"/api/session/{session_id}/validate")
+    assert validate_response.status_code == 200
+    payload = validate_response.json()
+    assert "summary" in payload
+    assert "errors" in payload
+    assert "warnings" in payload
+
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    statuses = {item["properties"].get("status") for item in features}
+    assert statuses.intersection({"mapped", "warning", "error", "unspecified"})
+
+
+@pytest.mark.phase5
+def test_autofix_endpoint_returns_revalidation_payload(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/validate").status_code == 200
+
+    autofix_response = test_client.post(f"/api/session/{session_id}/autofix", json={"apply_prompted": False})
+    assert autofix_response.status_code == 200
+    payload = autofix_response.json()
+    assert "fixes_applied" in payload
+    assert "fixes_requiring_confirmation" in payload
+    assert "revalidation" in payload
+    assert "summary" in payload["revalidation"]
+
+
+@pytest.mark.phase5
+def test_export_blocked_when_validation_errors_exist(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    unit = next(item for item in features if item["feature_type"] == "unit")
+    assert test_client.patch(
+        f"/api/session/{session_id}/features/{unit['id']}",
+        json={"properties": {"level_id": None}},
+    ).status_code == 200
+
+    export_response = test_client.get(f"/api/session/{session_id}/export")
+    assert export_response.status_code == 400
+    assert "Export blocked" in export_response.json()["detail"]

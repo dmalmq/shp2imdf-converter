@@ -1,0 +1,8 @@
+{
+  "category_type": "footprint",
+  "categories": [
+    "aerial",
+    "ground",
+    "subterranean"
+  ]
+}

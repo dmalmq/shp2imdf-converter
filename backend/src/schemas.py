@@ -181,7 +181,81 @@ class WizardState(BaseModel):
     venue_address_feature: dict[str, Any] | None = None
     building_address_features: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-    generation_status: Literal["not_started", "draft_ready"] = "not_started"
+    generation_status: Literal["not_started", "draft_ready", "generated"] = "not_started"
+
+
+class ValidationIssue(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str | None = None
+    related_feature_id: str | None = None
+    check: str
+    message: str
+    severity: Literal["error", "warning"]
+    auto_fixable: bool = False
+    fix_description: str | None = None
+    overlap_geometry: dict[str, Any] | None = None
+
+
+class ValidationSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total_features: int = 0
+    by_type: dict[str, int] = Field(default_factory=dict)
+    error_count: int = 0
+    warning_count: int = 0
+    auto_fixable_count: int = 0
+    checks_passed: int = 0
+    checks_failed: int = 0
+    unspecified_count: int = 0
+    overlap_count: int = 0
+    opening_issues_count: int = 0
+
+
+class ValidationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    errors: list[ValidationIssue] = Field(default_factory=list)
+    warnings: list[ValidationIssue] = Field(default_factory=list)
+    passed: list[str] = Field(default_factory=list)
+    summary: ValidationSummary = Field(default_factory=ValidationSummary)
+
+
+class AutofixRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    apply_prompted: bool = False
+
+
+class AutofixApplied(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str | None = None
+    related_feature_id: str | None = None
+    check: str
+    action: str
+    description: str
+
+
+class AutofixPrompt(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str | None = None
+    related_feature_id: str | None = None
+    check: str
+    action: str
+    description: str
+    requires_confirmation: bool = True
+
+
+class AutofixResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fixes_applied: list[AutofixApplied] = Field(default_factory=list)
+    fixes_requiring_confirmation: list[AutofixPrompt] = Field(default_factory=list)
+    total_fixed: int = 0
+    total_requiring_confirmation: int = 0
+    revalidation: ValidationResponse
 
 
 class SessionRecord(BaseModel):
@@ -193,9 +267,11 @@ class SessionRecord(BaseModel):
     files: list[ImportedFile]
     cleanup_summary: CleanupSummary
     feature_collection: dict[str, Any]
+    source_feature_collection: dict[str, Any] | None = None
     warnings: list[str] = Field(default_factory=list)
     learned_keywords: dict[str, str] = Field(default_factory=dict)
     wizard: WizardState = Field(default_factory=WizardState)
+    validation: ValidationResponse | None = None
 
 
 class DetectResponse(BaseModel):
@@ -304,9 +380,43 @@ class GenerateResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session_id: str
-    status: Literal["draft"]
+    status: Literal["draft", "generated"]
     generated_feature_count: int
     message: str
+
+
+class FeatureResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    type: str
+    id: str
+    feature_type: str
+    geometry: dict[str, Any] | None
+    properties: dict[str, Any]
+
+
+class PatchFeatureRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    properties: dict[str, Any] | None = None
+    geometry: dict[str, Any] | None = None
+
+
+class BulkPatchFeaturesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    feature_ids: list[str] = Field(default_factory=list)
+    properties: dict[str, Any] | None = None
+    action: Literal["patch", "delete", "merge_units"] = "patch"
+    merge_name: str | None = None
+
+
+class BulkPatchFeaturesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    updated_count: int = 0
+    deleted_count: int = 0
+    merged_feature_id: str | None = None
 
 
 class ErrorResponse(BaseModel):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import copy
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
@@ -133,7 +134,8 @@ class SessionManager:
             last_accessed=now,
             files=files,
             cleanup_summary=cleanup_summary,
-            feature_collection=feature_collection,
+            feature_collection=copy.deepcopy(feature_collection),
+            source_feature_collection=copy.deepcopy(feature_collection),
             warnings=warnings or [],
             learned_keywords=learned_keywords or {},
         )
