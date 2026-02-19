@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.routers.export_router import router as export_router
 from backend.routers.features_router import router as features_router
 from backend.routers.generate_router import router as generate_router
 from backend.routers.import_router import router as import_router
@@ -79,6 +80,7 @@ app.include_router(import_router)
 app.include_router(features_router)
 app.include_router(wizard_router)
 app.include_router(generate_router)
+app.include_router(export_router)
 
 
 @app.get("/api/health")

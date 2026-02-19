@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
+import zipfile
 
 import pytest
 
@@ -314,3 +316,42 @@ def test_generate_draft_adds_unlocated_address_and_building(test_client, sample_
     feature_types = [item["feature_type"] for item in payload["features"]]
     assert "address" in feature_types
     assert "building" in feature_types
+
+
+@pytest.mark.phase3
+def test_export_includes_manifest_json(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+
+    project_response = test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en-US",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    )
+    assert project_response.status_code == 200
+
+    export_response = test_client.get(f"/api/session/{session_id}/export")
+    assert export_response.status_code == 200
+    assert export_response.headers["content-type"] == "application/zip"
+
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        names = set(archive.namelist())
+        assert "manifest.json" in names
+        assert "features.geojson" in names
+
+        manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+        assert manifest["version"] == "1.0.0"
+        assert manifest["language"] == "en-US"
+        assert isinstance(manifest["created"], str)
+        assert manifest["created"]
+        assert manifest["generated_by"] == "shp2imdf-converter phase3"
+        assert "extensions" in manifest
