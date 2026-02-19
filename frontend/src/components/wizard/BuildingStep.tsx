@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { AddressInput, BuildingWizardState } from "../../api/client";
+import { useUiLanguage } from "../../hooks/useUiLanguage";
 
 
 type Props = {
@@ -64,6 +65,7 @@ function normalizeForSave(buildings: BuildingWizardState[]): BuildingWizardState
 
 
 export function BuildingStep({ buildings, allFileStems, venueAddress, saving, onSave }: Props) {
+  const { t } = useUiLanguage();
   const [rows, setRows] = useState<BuildingWizardState[]>(
     () => (buildings.length ? buildings : [createDefaultBuilding(allFileStems)])
   );
@@ -84,7 +86,7 @@ export function BuildingStep({ buildings, allFileStems, venueAddress, saving, on
   return (
     <section className="rounded border bg-white p-5">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Step 4: Building Assignment</h2>
+        <h2 className="text-lg font-semibold">{t("Step 4: Building Assignment", "Step 4: 建物割り当て")}</h2>
         <div className="flex gap-2">
           <button
             type="button"
@@ -100,7 +102,7 @@ export function BuildingStep({ buildings, allFileStems, venueAddress, saving, on
               ])
             }
           >
-            Add Building
+            {t("Add Building", "建物を追加")}
           </button>
           <button
             type="button"
@@ -108,12 +110,15 @@ export function BuildingStep({ buildings, allFileStems, venueAddress, saving, on
             disabled={saving}
             onClick={() => onSave(normalizeForSave(rows))}
           >
-            {saving ? "Saving..." : "Save Buildings"}
+            {saving ? t("Saving...", "保存中...") : t("Save Buildings", "建物設定を保存")}
           </button>
         </div>
       </div>
       <p className="mb-3 text-xs text-slate-600">
-        Assigned file links: {assignedCount}. Building address defaults to venue address unless set to different.
+        {t(
+          `Assigned file links: ${assignedCount}. Building address defaults to venue address unless set to different.`,
+          `割り当て済みファイル: ${assignedCount}。建物住所は「別住所」にしない限り会場住所を使用します。`
+        )}
       </p>
 
       <div className="space-y-3">
@@ -127,14 +132,14 @@ export function BuildingStep({ buildings, allFileStems, venueAddress, saving, on
                   className="rounded border border-red-300 px-2 py-1 text-xs text-red-700"
                   onClick={() => setRows((prev) => prev.filter((_, i) => i !== index))}
                 >
-                  Remove
+                  {t("Remove", "削除")}
                 </button>
               )}
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
               <label className="text-sm">
-                <span className="mb-1 block text-slate-600">Building Name</span>
+                <span className="mb-1 block text-slate-600">{t("Building Name", "建物名")}</span>
                 <input
                   className="w-full rounded border px-2 py-1.5"
                   value={building.name ?? ""}
@@ -153,7 +158,7 @@ export function BuildingStep({ buildings, allFileStems, venueAddress, saving, on
                 />
               </label>
               <label className="text-sm">
-                <span className="mb-1 block text-slate-600">Category</span>
+                <span className="mb-1 block text-slate-600">{t("Category", "カテゴリ")}</span>
                 <select
                   className="w-full rounded border px-2 py-1.5"
                   value={building.category}
@@ -178,7 +183,7 @@ export function BuildingStep({ buildings, allFileStems, venueAddress, saving, on
                 </select>
               </label>
               <label className="text-sm">
-                <span className="mb-1 block text-slate-600">Restriction</span>
+                <span className="mb-1 block text-slate-600">{t("Restriction", "制限")}</span>
                 <select
                   className="w-full rounded border px-2 py-1.5"
                   value={building.restriction ?? ""}
@@ -195,13 +200,13 @@ export function BuildingStep({ buildings, allFileStems, venueAddress, saving, on
                     )
                   }
                 >
-                  <option value="">None</option>
+                  <option value="">{t("None", "なし")}</option>
                   <option value="employeesonly">employeesonly</option>
                   <option value="restricted">restricted</option>
                 </select>
               </label>
               <label className="text-sm">
-                <span className="mb-1 block text-slate-600">Address Mode</span>
+                <span className="mb-1 block text-slate-600">{t("Address Mode", "住所モード")}</span>
                 <select
                   className="w-full rounded border px-2 py-1.5"
                   value={building.address_mode}
@@ -233,12 +238,12 @@ export function BuildingStep({ buildings, allFileStems, venueAddress, saving, on
                     )
                   }
                 >
-                  <option value="same_as_venue">Same as venue</option>
-                  <option value="different_address">Different address</option>
+                  <option value="same_as_venue">{t("Same as venue", "会場住所と同じ")}</option>
+                  <option value="different_address">{t("Different address", "建物ごとに別住所")}</option>
                 </select>
               </label>
               <label className="text-sm md:col-span-2">
-                <span className="mb-1 block text-slate-600">Assigned Files (comma-separated stems)</span>
+                <span className="mb-1 block text-slate-600">{t("Assigned Files (comma-separated stems)", "割り当てファイル（カンマ区切り）")}</span>
                 <input
                   className="w-full rounded border px-2 py-1.5 font-mono text-xs"
                   value={building.file_stems.join(",")}
@@ -265,7 +270,7 @@ export function BuildingStep({ buildings, allFileStems, venueAddress, saving, on
             {building.address_mode === "different_address" && building.address && (
               <div className="mt-3 grid gap-3 rounded border border-slate-200 p-3 md:grid-cols-2">
                 <label className="text-sm">
-                  <span className="mb-1 block text-slate-600">Street Address</span>
+                  <span className="mb-1 block text-slate-600">{t("Street Address", "住所")}</span>
                   <input
                     className="w-full rounded border px-2 py-1.5"
                     value={building.address.address ?? ""}
@@ -284,7 +289,7 @@ export function BuildingStep({ buildings, allFileStems, venueAddress, saving, on
                   />
                 </label>
                 <label className="text-sm">
-                  <span className="mb-1 block text-slate-600">Locality</span>
+                  <span className="mb-1 block text-slate-600">{t("Locality", "市区町村")}</span>
                   <input
                     className="w-full rounded border px-2 py-1.5"
                     value={building.address.locality}
@@ -303,7 +308,7 @@ export function BuildingStep({ buildings, allFileStems, venueAddress, saving, on
                   />
                 </label>
                 <label className="text-sm">
-                  <span className="mb-1 block text-slate-600">Country</span>
+                  <span className="mb-1 block text-slate-600">{t("Country", "国")}</span>
                   <input
                     className="w-full rounded border px-2 py-1.5"
                     value={building.address.country}
@@ -322,7 +327,7 @@ export function BuildingStep({ buildings, allFileStems, venueAddress, saving, on
                   />
                 </label>
                 <label className="text-sm">
-                  <span className="mb-1 block text-slate-600">Province</span>
+                  <span className="mb-1 block text-slate-600">{t("Province", "都道府県 / 州")}</span>
                   <input
                     className="w-full rounded border px-2 py-1.5"
                     value={building.address.province ?? ""}

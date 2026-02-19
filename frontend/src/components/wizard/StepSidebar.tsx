@@ -1,3 +1,5 @@
+import { useUiLanguage } from "../../hooks/useUiLanguage";
+
 type Step = {
   id: number;
   label: string;
@@ -13,16 +15,18 @@ type Props = {
 
 
 export function StepSidebar({ steps, currentStep, onSelectStep, onSkipToSummary }: Props) {
+  const { t } = useUiLanguage();
+
   return (
     <aside className="w-full rounded border bg-white p-5 lg:w-80">
       <div className="mb-5 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-700">Wizard Steps</h2>
+        <h2 className="text-sm font-semibold text-slate-700">{t("Wizard Steps", "ウィザード手順")}</h2>
         <button
           type="button"
           className="text-xs text-blue-700 underline underline-offset-2"
           onClick={onSkipToSummary}
         >
-          Skip to Summary
+          {t("Skip to Summary", "概要へ移動")}
         </button>
       </div>
       <ol className="space-y-2.5">

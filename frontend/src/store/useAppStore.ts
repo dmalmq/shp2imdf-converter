@@ -4,6 +4,7 @@ import type { CleanupSummary, ImportedFile, LearningSuggestion, WizardState } fr
 
 type Screen = "upload" | "wizard" | "review";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
+export type UiLanguage = "en" | "ja";
 
 type Filters = {
   type?: string;
@@ -19,6 +20,7 @@ type ValidationResults = {
 };
 
 type AppState = {
+  uiLanguage: UiLanguage;
   sessionId: string | null;
   sessionExpiredMessage: string | null;
   currentScreen: Screen;
@@ -38,6 +40,7 @@ type AppState = {
   wizardSaveStatus: SaveStatus;
   wizardSaveError: string | null;
   learningSuggestion: LearningSuggestion | null;
+  setUiLanguage: (language: UiLanguage) => void;
   setSessionId: (sessionId: string | null) => void;
   setSessionExpiredMessage: (message: string | null) => void;
   clearSession: () => void;
@@ -63,7 +66,21 @@ type AppState = {
   setLearningSuggestion: (suggestion: LearningSuggestion | null) => void;
 };
 
+function readInitialLanguage(): UiLanguage {
+  if (typeof window !== "undefined") {
+    const saved = window.localStorage.getItem("ui_language");
+    if (saved === "en" || saved === "ja") {
+      return saved;
+    }
+    if (window.navigator.language.toLowerCase().startsWith("ja")) {
+      return "ja";
+    }
+  }
+  return "en";
+}
+
 const INITIAL_STATE = {
+  uiLanguage: readInitialLanguage(),
   sessionId: null,
   sessionExpiredMessage: null,
   currentScreen: "upload" as Screen,
@@ -87,6 +104,12 @@ const INITIAL_STATE = {
 
 export const useAppStore = create<AppState>((set) => ({
   ...INITIAL_STATE,
+  setUiLanguage: (uiLanguage) => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("ui_language", uiLanguage);
+    }
+    set({ uiLanguage });
+  },
   setSessionId: (sessionId) => set({ sessionId }),
   setSessionExpiredMessage: (sessionExpiredMessage) => set({ sessionExpiredMessage }),
   clearSession: () =>

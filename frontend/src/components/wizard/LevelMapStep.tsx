@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
 import type { ImportedFile, UpdateFileRequest } from "../../api/client";
+import { useUiLanguage } from "../../hooks/useUiLanguage";
 
 
 type Props = {
@@ -31,6 +32,7 @@ function makeDefaultShortName(ordinal: number | null): string {
 
 
 export function LevelMapStep({ files, saving, onPatchFile }: Props) {
+  const { t } = useUiLanguage();
   const levelFiles = useMemo(
     () => files.filter((item) => item.detected_type === "unit" || item.detected_type === "opening" || item.detected_type === "fixture" || item.detected_type === "detail"),
     [files]
@@ -88,21 +90,21 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
     <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,1fr)]">
       <div className="min-w-0 rounded border bg-white p-5">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Step 3: Level Mapping</h2>
-          {saving && <span className="text-xs text-slate-500">Saving...</span>}
+          <h2 className="text-lg font-semibold">{t("Step 3: Level Mapping", "Step 3: レベル対応付け")}</h2>
+          {saving && <span className="text-xs text-slate-500">{t("Saving...", "保存中...")}</span>}
         </div>
 
         <div className="max-h-[440px] overflow-auto rounded border">
           <table className="min-w-[980px] w-full border-collapse text-sm">
             <thead className="sticky top-0 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
               <tr>
-                <th className="px-3 py-2.5">Filename</th>
-                <th className="px-3 py-2.5">Type</th>
-                <th className="px-3 py-2.5">Detected Level</th>
-                <th className="px-3 py-2.5">Level Name</th>
-                <th className="px-3 py-2.5">Short Name</th>
-                <th className="px-3 py-2.5">Outdoor</th>
-                <th className="px-3 py-2.5">Category</th>
+                <th className="px-3 py-2.5">{t("Filename", "ファイル名")}</th>
+                <th className="px-3 py-2.5">{t("Type", "種別")}</th>
+                <th className="px-3 py-2.5">{t("Detected Level", "検出レベル")}</th>
+                <th className="px-3 py-2.5">{t("Level Name", "レベル名")}</th>
+                <th className="px-3 py-2.5">{t("Short Name", "短縮名")}</th>
+                <th className="px-3 py-2.5">{t("Outdoor", "屋外")}</th>
+                <th className="px-3 py-2.5">{t("Category", "カテゴリ")}</th>
               </tr>
             </thead>
             <tbody>
@@ -162,9 +164,9 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
       </div>
 
       <div className="rounded border bg-white p-5">
-        <h3 className="mb-2 text-sm font-semibold text-slate-700">Stacking Diagram</h3>
+        <h3 className="mb-2 text-sm font-semibold text-slate-700">{t("Stacking Diagram", "レベル構成図")}</h3>
         <p className="mb-4 text-xs text-slate-500">
-          Levels are ordered by ordinal from bottom to top.
+          {t("Levels are ordered by ordinal from bottom to top.", "レベルは下階から上階へ順に並びます。")}
         </p>
         <div className="space-y-2">
           {buckets.map((bucket) => {
@@ -172,8 +174,8 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
             const labelClass = hasDuplicate ? "border-red-400 bg-red-50 text-red-700" : "border-slate-300 bg-slate-50 text-slate-700";
             return (
               <div key={bucket.ordinal} className={`rounded border px-3 py-2 text-sm ${labelClass}`}>
-                <div className="font-semibold">Ordinal {bucket.ordinal}</div>
-                <div className="text-xs">{bucket.files.length} file(s)</div>
+                <div className="font-semibold">{t(`Ordinal ${bucket.ordinal}`, `階層 ${bucket.ordinal}`)}</div>
+                <div className="text-xs">{t(`${bucket.files.length} file(s)`, `${bucket.files.length} ファイル`)}</div>
               </div>
             );
           })}
@@ -182,7 +184,7 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
               key={`gap-${ordinal}`}
               className="rounded border border-dashed border-amber-400 bg-amber-50 px-3 py-2 text-xs text-amber-700"
             >
-              Gap at ordinal {ordinal}
+              {t(`Gap at ordinal ${ordinal}`, `階層 ${ordinal} に欠番があります`)}
             </div>
           ))}
         </div>

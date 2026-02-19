@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { ProjectWizardState } from "../../api/client";
+import { useUiLanguage } from "../../hooks/useUiLanguage";
 
 
 type Props = {
@@ -93,6 +94,7 @@ function normalizeForSave(payload: ProjectWizardState): ProjectWizardState {
 
 
 export function ProjectInfoStep({ project, saving, onSave }: Props) {
+  const { t } = useUiLanguage();
   const [form, setForm] = useState<ProjectWizardState>(() => project ?? createDefaultProject());
 
   useEffect(() => {
@@ -111,20 +113,20 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
   return (
     <section className="rounded border bg-white p-5">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Step 1: Project Info</h2>
+        <h2 className="text-lg font-semibold">{t("Step 1: Project Info", "Step 1: プロジェクト情報")}</h2>
         <button
           type="button"
           className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-60"
           disabled={!canSave || saving}
           onClick={() => onSave(normalizeForSave(form))}
         >
-          {saving ? "Saving..." : "Save Project Info"}
+          {saving ? t("Saving...", "保存中...") : t("Save Project Info", "プロジェクト情報を保存")}
         </button>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">Project Name</span>
+          <span className="mb-1 block text-slate-600">{t("Project Name", "プロジェクト名")}</span>
           <input
             className="w-full rounded border px-2 py-1.5"
             value={form.project_name ?? ""}
@@ -132,7 +134,7 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
           />
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">Language Tag</span>
+          <span className="mb-1 block text-slate-600">{t("Language Tag", "言語タグ")}</span>
           <input
             className="w-full rounded border px-2 py-1.5"
             value={form.language}
@@ -140,7 +142,7 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
           />
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">Venue Name *</span>
+          <span className="mb-1 block text-slate-600">{t("Venue Name *", "会場名 *")}</span>
           <input
             className="w-full rounded border px-2 py-1.5"
             value={form.venue_name}
@@ -148,7 +150,7 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
           />
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">Venue Category *</span>
+          <span className="mb-1 block text-slate-600">{t("Venue Category *", "会場カテゴリ *")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={form.venue_category}
@@ -162,19 +164,19 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
           </select>
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">Venue Restriction</span>
+          <span className="mb-1 block text-slate-600">{t("Venue Restriction", "会場の制限")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={form.venue_restriction ?? ""}
             onChange={(event) => setForm((prev) => ({ ...prev, venue_restriction: event.target.value || null }))}
           >
-            <option value="">None</option>
+            <option value="">{t("None", "なし")}</option>
             <option value="employeesonly">employeesonly</option>
             <option value="restricted">restricted</option>
           </select>
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">Venue Hours</span>
+          <span className="mb-1 block text-slate-600">{t("Venue Hours", "営業時間")}</span>
           <input
             className="w-full rounded border px-2 py-1.5"
             value={form.venue_hours ?? ""}
@@ -182,7 +184,7 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
           />
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">Venue Phone</span>
+          <span className="mb-1 block text-slate-600">{t("Venue Phone", "電話番号")}</span>
           <input
             className="w-full rounded border px-2 py-1.5"
             value={form.venue_phone ?? ""}
@@ -190,7 +192,7 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
           />
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">Venue Website</span>
+          <span className="mb-1 block text-slate-600">{t("Venue Website", "Webサイト")}</span>
           <input
             className="w-full rounded border px-2 py-1.5"
             value={form.venue_website ?? ""}
@@ -200,10 +202,10 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
       </div>
 
       <div className="mt-4 rounded border border-slate-200 p-3">
-        <h3 className="mb-2 text-sm font-semibold">Venue Address</h3>
+        <h3 className="mb-2 text-sm font-semibold">{t("Venue Address", "会場住所")}</h3>
         <div className="grid gap-3 md:grid-cols-2">
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Street Address</span>
+            <span className="mb-1 block text-slate-600">{t("Street Address", "住所")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.address ?? ""}
@@ -216,7 +218,7 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Unit/Suite</span>
+            <span className="mb-1 block text-slate-600">{t("Unit/Suite", "部屋番号")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.unit ?? ""}
@@ -229,7 +231,7 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Locality *</span>
+            <span className="mb-1 block text-slate-600">{t("Locality *", "市区町村 *")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.locality}
@@ -242,7 +244,7 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Country *</span>
+            <span className="mb-1 block text-slate-600">{t("Country *", "国 *")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.country}
@@ -255,7 +257,7 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Province / State</span>
+            <span className="mb-1 block text-slate-600">{t("Province / State", "都道府県 / 州")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.province ?? ""}
@@ -268,7 +270,7 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Postal Code</span>
+            <span className="mb-1 block text-slate-600">{t("Postal Code", "郵便番号")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.postal_code ?? ""}
@@ -281,7 +283,7 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Postal Code Extension</span>
+            <span className="mb-1 block text-slate-600">{t("Postal Code Extension", "郵便番号（拡張）")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.postal_code_ext ?? ""}
@@ -294,7 +296,7 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">Vanity Postal Code</span>
+            <span className="mb-1 block text-slate-600">{t("Vanity Postal Code", "カスタム郵便番号")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.postal_code_vanity ?? ""}
