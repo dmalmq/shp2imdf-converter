@@ -23,6 +23,8 @@ import {
   updateSessionFile,
   uploadCompanyMappings
 } from "../api/client";
+import { SkeletonBlock } from "../components/shared/SkeletonBlock";
+import { useToast } from "../components/shared/ToastProvider";
 import { BuildingStep } from "../components/wizard/BuildingStep";
 import { DetailMapStep } from "../components/wizard/DetailMapStep";
 import { FileClassStep } from "../components/wizard/FileClassStep";
@@ -34,10 +36,11 @@ import { ProjectInfoStep } from "../components/wizard/ProjectInfoStep";
 import { StepSidebar } from "../components/wizard/StepSidebar";
 import { SummaryStep } from "../components/wizard/SummaryStep";
 import { UnitMapStep } from "../components/wizard/UnitMapStep";
+import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useAppStore } from "../store/useAppStore";
 
-
 const STEP_ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail"]);
 
 const EMPTY_UNIT_MAPPING: UnitMappingState = {
   code_column: null,
@@ -70,6 +73,10 @@ const EMPTY_FOOTPRINT: FootprintWizardState = {
   venue_buffer_m: 5
 };
 
+type StepValidation = {
+  valid: boolean;
+  reason: string | null;
+};
 
 function toLevelItemsFromFiles(
   files: {
@@ -83,7 +90,7 @@ function toLevelItemsFromFiles(
   }[]
 ): LevelWizardItem[] {
   return files
-    .filter((item) => ["unit", "opening", "fixture", "detail"].includes(item.detected_type ?? ""))
+    .filter((item) => LEVEL_REQUIRED_TYPES.has(item.detected_type ?? ""))
     .map((item) => ({
       stem: item.stem,
       detected_type: item.detected_type,
@@ -95,6 +102,27 @@ function toLevelItemsFromFiles(
     }));
 }
 
+function isFormTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  const tag = target.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
+}
+
+function WizardStepSkeleton() {
+  return (
+    <section className="rounded border bg-white p-5">
+      <SkeletonBlock className="h-6 w-56" />
+      <div className="mt-4 space-y-3">
+        <SkeletonBlock className="h-10 w-full" />
+        <SkeletonBlock className="h-10 w-full" />
+        <SkeletonBlock className="h-10 w-full" />
+        <SkeletonBlock className="h-40 w-full" />
+      </div>
+    </section>
+  );
+}
 
 export function WizardPage() {
   const navigate = useNavigate();
@@ -114,6 +142,10 @@ export function WizardPage() {
   const setWizardSaveStatus = useAppStore((state) => state.setWizardSaveStatus);
   const learningSuggestion = useAppStore((state) => state.learningSuggestion);
   const setLearningSuggestion = useAppStore((state) => state.setLearningSuggestion);
+  const setSessionExpiredMessage = useAppStore((state) => state.setSessionExpiredMessage);
+  const handleApiError = useApiErrorHandler();
+  const pushToast = useToast();
+
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [features, setFeatures] = useState<
@@ -128,6 +160,77 @@ export function WizardPage() {
   const openingCount = useMemo(() => files.filter((item) => item.detected_type === "opening").length, [files]);
   const fixtureCount = useMemo(() => files.filter((item) => item.detected_type === "fixture").length, [files]);
   const detailCount = useMemo(() => files.filter((item) => item.detected_type === "detail").length, [files]);
+
+  const projectComplete = useMemo(() => {
+    const project = wizardState?.project;
+    if (!project) {
+      return false;
+    }
+    return Boolean(
+      project.venue_name.trim() &&
+        project.venue_category.trim() &&
+        project.address.locality.trim() &&
+        project.address.country.trim()
+    );
+  }, [wizardState]);
+
+  const stepValidation = useMemo<Record<number, StepValidation>>(() => {
+    const requiredLevelFiles = files.filter((item) => LEVEL_REQUIRED_TYPES.has(item.detected_type ?? ""));
+    const hasRequiredLevelFiles = requiredLevelFiles.length > 0;
+    const allClassified = files.every((item) => Boolean(item.detected_type));
+    const levelsComplete = !hasRequiredLevelFiles || requiredLevelFiles.every((item) => item.detected_level !== null);
+
+    const buildings = wizardState?.buildings ?? [];
+    const hasBuildingRows = buildings.length > 0;
+    const assignedStems = new Set(buildings.flatMap((item) => item.file_stems));
+    const allRequiredStemsAssigned = !hasRequiredLevelFiles || requiredLevelFiles.every((item) => assignedStems.has(item.stem));
+    const buildingAddressesValid = buildings.every((building) => {
+      if (building.address_mode !== "different_address") {
+        return true;
+      }
+      return Boolean(building.address?.locality?.trim() && building.address?.country?.trim());
+    });
+    const buildingsComplete = !hasRequiredLevelFiles || (hasBuildingRows && allRequiredStemsAssigned && buildingAddressesValid);
+
+    const hasUnitFiles = files.some((item) => item.detected_type === "unit");
+    const unitMappingComplete = !hasUnitFiles || Boolean(wizardState?.mappings.unit.code_column);
+
+    const hasDetailFiles = files.some((item) => item.detected_type === "detail");
+    const detailConfirmed = !hasDetailFiles || Boolean(wizardState?.mappings.detail_confirmed);
+
+    return {
+      1: {
+        valid: projectComplete,
+        reason: projectComplete ? null : "Complete required Project Info fields before continuing."
+      },
+      2: {
+        valid: allClassified,
+        reason: allClassified ? null : "Assign an IMDF type for every imported file."
+      },
+      3: {
+        valid: levelsComplete,
+        reason: levelsComplete ? null : "Set a detected level for each unit, opening, fixture, and detail file."
+      },
+      4: {
+        valid: buildingsComplete,
+        reason: buildingsComplete
+          ? null
+          : "Save at least one building and ensure each mapped source file is assigned to a building."
+      },
+      5: {
+        valid: unitMappingComplete,
+        reason: unitMappingComplete ? null : "Select a Unit code column before continuing."
+      },
+      6: { valid: true, reason: null },
+      7: { valid: true, reason: null },
+      8: {
+        valid: detailConfirmed,
+        reason: detailConfirmed ? null : "Confirm detail export settings before continuing."
+      },
+      9: { valid: true, reason: null },
+      10: { valid: true, reason: null }
+    };
+  }, [files, projectComplete, wizardState]);
 
   const steps = useMemo(
     () => [
@@ -144,19 +247,6 @@ export function WizardPage() {
     ],
     [detailCount, fixtureCount, openingCount]
   );
-
-  const projectComplete = useMemo(() => {
-    const project = wizardState?.project;
-    if (!project) {
-      return false;
-    }
-    return Boolean(
-      project.venue_name.trim() &&
-        project.venue_category.trim() &&
-        project.address.locality.trim() &&
-        project.address.country.trim()
-    );
-  }, [wizardState]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -176,6 +266,7 @@ export function WizardPage() {
         if (!active) {
           return;
         }
+        setSessionExpiredMessage(null);
         setFiles(fileResponse.files);
         setWizardState(wizardResponse.wizard);
         setFeatures(
@@ -193,7 +284,9 @@ export function WizardPage() {
           }))
         );
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to load wizard state";
+        const message = handleApiError(error, "Failed to load wizard state", {
+          title: "Failed to load wizard"
+        });
         setWizardSaveStatus("error", message);
       } finally {
         if (active) {
@@ -205,7 +298,7 @@ export function WizardPage() {
     return () => {
       active = false;
     };
-  }, [navigate, sessionId, setFiles, setWizardSaveStatus, setWizardState]);
+  }, [handleApiError, navigate, sessionId, setFiles, setSessionExpiredMessage, setWizardSaveStatus, setWizardState]);
 
   const refreshFeatures = async () => {
     if (!sessionId) {
@@ -255,8 +348,9 @@ export function WizardPage() {
       await refreshFeatures();
       setLearningSuggestion(null);
       setWizardSaveStatus("saved");
+      pushToast({ title: "Detection complete", description: "File types were refreshed.", variant: "success" });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Detect all failed";
+      const message = handleApiError(error, "Detect all failed", { title: "Detection failed" });
       setWizardSaveStatus("error", message);
     }
   };
@@ -277,7 +371,9 @@ export function WizardPage() {
       await refreshFeatures();
       setWizardSaveStatus("saved");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to save file mapping";
+      const message = handleApiError(error, "Failed to save file mapping", {
+        title: "Failed to save classification"
+      });
       setWizardSaveStatus("error", message);
     }
   };
@@ -292,7 +388,9 @@ export function WizardPage() {
       setWizardState(response.wizard);
       setWizardSaveStatus("saved");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to save project info";
+      const message = handleApiError(error, "Failed to save project info", {
+        title: "Failed to save project"
+      });
       setWizardSaveStatus("error", message);
     }
   };
@@ -307,7 +405,9 @@ export function WizardPage() {
       setWizardState(response.wizard);
       setWizardSaveStatus("saved");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to save building assignments";
+      const message = handleApiError(error, "Failed to save building assignments", {
+        title: "Failed to save buildings"
+      });
       setWizardSaveStatus("error", message);
     }
   };
@@ -327,7 +427,9 @@ export function WizardPage() {
       setWizardState(response.wizard);
       setWizardSaveStatus("saved");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to save mappings";
+      const message = handleApiError(error, "Failed to save mappings", {
+        title: "Failed to save mappings"
+      });
       setWizardSaveStatus("error", message);
     }
   };
@@ -342,7 +444,9 @@ export function WizardPage() {
       setWizardState(response.wizard);
       setWizardSaveStatus("saved");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to save footprint options";
+      const message = handleApiError(error, "Failed to save footprint options", {
+        title: "Failed to save footprint"
+      });
       setWizardSaveStatus("error", message);
     }
   };
@@ -373,8 +477,11 @@ export function WizardPage() {
       await uploadCompanyMappings(sessionId, file);
       await refreshWizard();
       setWizardSaveStatus("saved");
+      pushToast({ title: "Mappings uploaded", description: "Company mappings were applied.", variant: "success" });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to upload company mappings";
+      const message = handleApiError(error, "Failed to upload company mappings", {
+        title: "Upload failed"
+      });
       setWizardSaveStatus("error", message);
     }
   };
@@ -390,9 +497,12 @@ export function WizardPage() {
       await refreshFeatures();
       setCurrentScreen("review");
       setWizardSaveStatus("saved");
+      pushToast({ title: "Draft generated", description: "Opening review workspace.", variant: "success" });
       navigate("/review");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to generate draft features";
+      const message = handleApiError(error, "Failed to generate draft features", {
+        title: "Generation failed"
+      });
       setWizardSaveStatus("error", message);
     }
   };
@@ -485,7 +595,14 @@ export function WizardPage() {
     }
 
     if (step === 8) {
-      return <DetailMapStep files={files} />;
+      return (
+        <DetailMapStep
+          files={files}
+          detailConfirmed={wizardState?.mappings.detail_confirmed ?? false}
+          saving={wizardSaveStatus === "saving"}
+          onSave={(confirmed) => void saveMappings({ detail_confirmed: confirmed })}
+        />
+      );
     }
 
     if (step === 9) {
@@ -510,6 +627,16 @@ export function WizardPage() {
   };
 
   const nextStep = () => {
+    const currentValidation = stepValidation[step];
+    if (step < 10 && currentValidation && !currentValidation.valid) {
+      pushToast({
+        title: "Step incomplete",
+        description: currentValidation.reason ?? "Complete required fields before continuing.",
+        variant: "error"
+      });
+      return;
+    }
+
     const currentIndex = STEP_ORDER.indexOf(step);
     if (currentIndex === -1 || currentIndex >= STEP_ORDER.length - 1) {
       return;
@@ -517,8 +644,7 @@ export function WizardPage() {
     if (step === 3) {
       void syncLevels();
     }
-    const next = STEP_ORDER[currentIndex + 1];
-    setStep(next);
+    setStep(STEP_ORDER[currentIndex + 1]);
   };
 
   const prevStep = () => {
@@ -526,11 +652,67 @@ export function WizardPage() {
     if (currentIndex <= 0) {
       return;
     }
-    const previous = STEP_ORDER[currentIndex - 1];
-    setStep(previous);
+    setStep(STEP_ORDER[currentIndex - 1]);
   };
 
-  const canGoNext = step < 10 && (step !== 1 || projectComplete);
+  const selectStep = (targetStep: number) => {
+    const targetIndex = STEP_ORDER.indexOf(targetStep);
+    if (targetIndex <= 0) {
+      setStep(targetStep);
+      return;
+    }
+
+    const blockingStep = STEP_ORDER.slice(0, targetIndex).find((id) => !stepValidation[id]?.valid);
+    if (blockingStep) {
+      setStep(blockingStep);
+      pushToast({
+        title: "Complete earlier steps first",
+        description: stepValidation[blockingStep]?.reason ?? "Complete required fields before continuing.",
+        variant: "error"
+      });
+      return;
+    }
+
+    setStep(targetStep);
+  };
+
+  const skipToSummary = () => {
+    const blockingStep = STEP_ORDER.slice(0, 9).find((id) => !stepValidation[id]?.valid);
+    if (blockingStep) {
+      setStep(blockingStep);
+      pushToast({
+        title: "Summary is locked",
+        description: stepValidation[blockingStep]?.reason ?? "Complete required fields before continuing.",
+        variant: "error"
+      });
+      return;
+    }
+    setStep(10);
+    void syncLevels();
+  };
+
+  const canGoNext = step < 10 && stepValidation[step]?.valid === true;
+  const nextBlockedReason = step < 10 ? stepValidation[step]?.reason : null;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || event.defaultPrevented || isFormTarget(event.target)) {
+        return;
+      }
+      if (loading || wizardSaveStatus === "saving") {
+        return;
+      }
+      event.preventDefault();
+      if (step === 10) {
+        void confirmSummary();
+        return;
+      }
+      nextStep();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [loading, step, wizardSaveStatus, nextStep, confirmSummary]);
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-[1500px] flex-col gap-6 px-6 py-7 xl:px-8">
@@ -547,21 +729,9 @@ export function WizardPage() {
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[20rem_minmax(0,1fr)]">
-        <StepSidebar
-          steps={steps}
-          currentStep={step}
-          onSelectStep={setStep}
-          onSkipToSummary={() => {
-            setStep(10);
-            void syncLevels();
-          }}
-        />
+        <StepSidebar steps={steps} currentStep={step} onSelectStep={selectStep} onSkipToSummary={skipToSummary} />
         <div className="space-y-5">
-          {loading ? (
-            <div className="rounded border bg-white p-4 text-sm text-slate-600">Loading wizard data...</div>
-          ) : (
-            showStep()
-          )}
+          {loading ? <WizardStepSkeleton /> : showStep()}
 
           {learningSuggestion && (
             <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
@@ -588,11 +758,12 @@ export function WizardPage() {
           <div className="flex items-center justify-between rounded border bg-white px-5 py-3.5">
             <div className="text-sm">
               {wizardSaveStatus === "saving" && "Saving..."}
-              {wizardSaveStatus === "saved" && "Saved ✓"}
+              {wizardSaveStatus === "saved" && "Saved"}
               {wizardSaveStatus === "error" && (
                 <span className="text-red-700">Save failed: {wizardSaveError ?? "Unknown error"}</span>
               )}
               {wizardSaveStatus === "idle" && "Idle"}
+              {!canGoNext && nextBlockedReason ? <p className="mt-1 text-xs text-amber-700">{nextBlockedReason}</p> : null}
             </div>
             <div className="flex gap-2">
               <button
@@ -601,7 +772,7 @@ export function WizardPage() {
                 disabled={step <= 1}
                 onClick={prevStep}
               >
-                ← Back
+                Back
               </button>
               <button
                 type="button"
@@ -609,7 +780,7 @@ export function WizardPage() {
                 disabled={!canGoNext}
                 onClick={nextStep}
               >
-                Next →
+                Next
               </button>
             </div>
           </div>

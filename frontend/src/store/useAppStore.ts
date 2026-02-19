@@ -20,6 +20,7 @@ type ValidationResults = {
 
 type AppState = {
   sessionId: string | null;
+  sessionExpiredMessage: string | null;
   currentScreen: Screen;
   wizardStep: number;
   wizardData: Record<string, unknown>;
@@ -38,6 +39,8 @@ type AppState = {
   wizardSaveError: string | null;
   learningSuggestion: LearningSuggestion | null;
   setSessionId: (sessionId: string | null) => void;
+  setSessionExpiredMessage: (message: string | null) => void;
+  clearSession: () => void;
   setCurrentScreen: (screen: Screen) => void;
   setWizardStep: (step: number) => void;
   mergeWizardData: (payload: Record<string, unknown>) => void;
@@ -60,26 +63,39 @@ type AppState = {
   setLearningSuggestion: (suggestion: LearningSuggestion | null) => void;
 };
 
-export const useAppStore = create<AppState>((set) => ({
+const INITIAL_STATE = {
   sessionId: null,
-  currentScreen: "upload",
+  sessionExpiredMessage: null,
+  currentScreen: "upload" as Screen,
   wizardStep: 0,
-  wizardData: {},
-  geojsonData: null,
-  selectedFeatureIds: [],
-  filters: {},
-  layerVisibility: {},
-  validationResults: { errors: 0, warnings: 0 },
-  editHistory: [],
-  files: [],
-  cleanupSummary: null,
-  wizardState: null,
-  selectedFileStem: null,
-  hoveredFileStem: null,
-  wizardSaveStatus: "idle",
-  wizardSaveError: null,
-  learningSuggestion: null,
+  wizardData: {} as Record<string, unknown>,
+  geojsonData: null as Record<string, unknown> | null,
+  selectedFeatureIds: [] as string[],
+  filters: {} as Filters,
+  layerVisibility: {} as Record<string, boolean>,
+  validationResults: { errors: 0, warnings: 0 } as ValidationResults,
+  editHistory: [] as Array<Record<string, unknown>>,
+  files: [] as ImportedFile[],
+  cleanupSummary: null as CleanupSummary | null,
+  wizardState: null as WizardState | null,
+  selectedFileStem: null as string | null,
+  hoveredFileStem: null as string | null,
+  wizardSaveStatus: "idle" as SaveStatus,
+  wizardSaveError: null as string | null,
+  learningSuggestion: null as LearningSuggestion | null
+};
+
+export const useAppStore = create<AppState>((set) => ({
+  ...INITIAL_STATE,
   setSessionId: (sessionId) => set({ sessionId }),
+  setSessionExpiredMessage: (sessionExpiredMessage) => set({ sessionExpiredMessage }),
+  clearSession: () =>
+    set((state) => ({
+      ...INITIAL_STATE,
+      layerVisibility: state.layerVisibility,
+      currentScreen: "upload",
+      sessionExpiredMessage: null
+    })),
   setCurrentScreen: (currentScreen) => set({ currentScreen }),
   setWizardStep: (wizardStep) => set({ wizardStep }),
   mergeWizardData: (payload) =>

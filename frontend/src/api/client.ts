@@ -1,3 +1,5 @@
+import { ApiClientError, buildApiClientError } from "./errors";
+
 export type CleanupSummary = {
   multipolygons_exploded: number;
   rings_closed: number;
@@ -313,13 +315,17 @@ export async function importShapefiles(
 
     request.onload = () => {
       if (request.status >= 200 && request.status < 300) {
-        resolve(JSON.parse(request.responseText) as ImportResponse);
+        try {
+          resolve(JSON.parse(request.responseText) as ImportResponse);
+        } catch {
+          reject(new ApiClientError(request.status, "INVALID_RESPONSE", "Import returned invalid JSON."));
+        }
         return;
       }
-      reject(new Error(request.responseText || "Import failed"));
+      reject(buildApiClientError(request.status, request.responseText || ""));
     };
 
-    request.onerror = () => reject(new Error("Network error during upload"));
+    request.onerror = () => reject(new ApiClientError(0, "NETWORK_ERROR", "Network error during upload."));
     request.send(formData);
   });
 }
@@ -327,7 +333,7 @@ export async function importShapefiles(
 async function handleJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(body || `Request failed (${response.status})`);
+    throw buildApiClientError(response.status, body || "");
   }
   return (await response.json()) as T;
 }
@@ -527,7 +533,7 @@ export async function exportSessionArchive(sessionId: string): Promise<ExportArc
   const response = await fetch(`/api/session/${sessionId}/export`);
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(body || `Request failed (${response.status})`);
+    throw buildApiClientError(response.status, body || "");
   }
   const contentDisposition = response.headers.get("content-disposition") ?? "";
   const filenameMatch = contentDisposition.match(/filename=\"?([^\";]+)\"?/i);

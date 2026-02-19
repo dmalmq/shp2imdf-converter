@@ -13,15 +13,17 @@ import {
   type ValidationIssue,
   type ValidationResponse
 } from "../api/client";
-import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { FilterBar } from "../components/review/FilterBar";
 import { LayerTree } from "../components/review/LayerTree";
 import { MapPanel } from "../components/review/MapPanel";
 import { PropertiesPanel } from "../components/review/PropertiesPanel";
 import { TablePanel } from "../components/review/TablePanel";
+import { ErrorBoundary } from "../components/shared/ErrorBoundary";
+import { SkeletonBlock } from "../components/shared/SkeletonBlock";
+import { useToast } from "../components/shared/ToastProvider";
 import { type ReviewFeature, featureName } from "../components/review/types";
+import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useAppStore } from "../store/useAppStore";
-
 
 function normalizeFeature(item: Record<string, unknown>): ReviewFeature | null {
   if (typeof item.id !== "string" || typeof item.feature_type !== "string") {
@@ -50,7 +52,6 @@ function normalizeFeature(item: Record<string, unknown>): ReviewFeature | null {
   };
 }
 
-
 function levelLabel(feature: ReviewFeature): string {
   const shortName = feature.properties.short_name;
   if (shortName && typeof shortName === "object" && !Array.isArray(shortName)) {
@@ -73,7 +74,6 @@ function levelLabel(feature: ReviewFeature): string {
   return feature.id.slice(0, 8);
 }
 
-
 function featureLevelId(feature: ReviewFeature): string | null {
   if (feature.feature_type === "level") {
     return feature.id;
@@ -81,7 +81,6 @@ function featureLevelId(feature: ReviewFeature): string | null {
   const levelId = feature.properties.level_id;
   return typeof levelId === "string" ? levelId : null;
 }
-
 
 function applyFilters(features: ReviewFeature[], filters: Record<string, string | undefined>): ReviewFeature[] {
   const query = (filters.search ?? "").trim().toLowerCase();
@@ -121,6 +120,36 @@ function applyFilters(features: ReviewFeature[], filters: Record<string, string 
   });
 }
 
+function isFormTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  const tag = target.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
+}
+
+function MapLoadingSkeleton() {
+  return (
+    <div className="rounded border bg-white p-3">
+      <SkeletonBlock className="mb-3 h-5 w-32" />
+      <SkeletonBlock className="h-[520px] w-full" />
+    </div>
+  );
+}
+
+function TableLoadingSkeleton() {
+  return (
+    <div className="rounded border bg-white p-3">
+      <div className="space-y-2">
+        <SkeletonBlock className="h-8 w-full" />
+        <SkeletonBlock className="h-8 w-full" />
+        <SkeletonBlock className="h-8 w-full" />
+        <SkeletonBlock className="h-8 w-full" />
+        <SkeletonBlock className="h-8 w-full" />
+      </div>
+    </div>
+  );
+}
 
 export function ReviewPage() {
   const navigate = useNavigate();
@@ -137,6 +166,10 @@ export function ReviewPage() {
   const setLayerVisibility = useAppStore((state) => state.setLayerVisibility);
   const pushEditHistory = useAppStore((state) => state.pushEditHistory);
   const popEditHistory = useAppStore((state) => state.popEditHistory);
+
+  const handleApiError = useApiErrorHandler();
+  const pushToast = useToast();
+
   const [features, setFeatures] = useState<ReviewFeature[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +187,12 @@ export function ReviewPage() {
   const [autofixing, setAutofixing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+
+  const captureError = (caught: unknown, fallbackMessage: string, title: string) => {
+    const message = handleApiError(caught, fallbackMessage, { title });
+    setError(message);
+    return message;
+  };
 
   useEffect(() => {
     if (!sessionId) {
@@ -193,8 +232,7 @@ export function ReviewPage() {
       }
       setFeatures(rows);
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "Failed to load review data";
-      setError(message);
+      captureError(caught, "Failed to load review data", "Review load failed");
     } finally {
       setLoading(false);
     }
@@ -204,52 +242,8 @@ export function ReviewPage() {
     void loadFeatures();
   }, [sessionId]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const isUndo = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z";
-      if (!isUndo) {
-        return;
-      }
-      event.preventDefault();
-      if (!sessionId) {
-        return;
-      }
-      const popped = popEditHistory();
-      if (!popped) {
-        return;
-      }
-      const featureId = popped.featureId;
-      const previousProperties = popped.previousProperties;
-      if (typeof featureId !== "string" || !previousProperties || typeof previousProperties !== "object") {
-        return;
-      }
-      void patchSessionFeature(sessionId, featureId, {
-        properties: previousProperties as Record<string, unknown>
-      }).then((updated) => {
-        setFeatures((prev) =>
-          prev.map((item) =>
-            item.id === updated.id
-              ? {
-                  type: updated.type,
-                  id: updated.id,
-                  feature_type: updated.feature_type,
-                  geometry: updated.geometry as { type: string; coordinates: unknown } | null,
-                  properties: updated.properties as Record<string, unknown>
-                }
-              : item
-          )
-        );
-      });
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [popEditHistory, sessionId]);
-
   const levelOptions = useMemo(() => {
-    return features
-      .filter((item) => item.feature_type === "level")
-      .map((item) => ({ id: item.id, label: levelLabel(item) }));
+    return features.filter((item) => item.feature_type === "level").map((item) => ({ id: item.id, label: levelLabel(item) }));
   }, [features]);
 
   const addressOptions = useMemo(() => {
@@ -262,9 +256,7 @@ export function ReviewPage() {
   }, [features]);
 
   const featureTypes = useMemo(
-    () =>
-      [...new Set(features.map((item) => item.feature_type))]
-        .sort((a, b) => a.localeCompare(b)),
+    () => [...new Set(features.map((item) => item.feature_type))].sort((a, b) => a.localeCompare(b)),
     [features]
   );
 
@@ -300,20 +292,25 @@ export function ReviewPage() {
       featureId,
       previousProperties: previous.properties
     });
-    const updated = await patchSessionFeature(sessionId, featureId, { properties });
-    setFeatures((prev) =>
-      prev.map((item) =>
-        item.id === updated.id
-          ? {
-              type: updated.type,
-              id: updated.id,
-              feature_type: updated.feature_type,
-              geometry: updated.geometry as { type: string; coordinates: unknown } | null,
-              properties: updated.properties as Record<string, unknown>
-            }
-          : item
-      )
-    );
+
+    try {
+      const updated = await patchSessionFeature(sessionId, featureId, { properties });
+      setFeatures((prev) =>
+        prev.map((item) =>
+          item.id === updated.id
+            ? {
+                type: updated.type,
+                id: updated.id,
+                feature_type: updated.feature_type,
+                geometry: updated.geometry as { type: string; coordinates: unknown } | null,
+                properties: updated.properties as Record<string, unknown>
+              }
+            : item
+        )
+      );
+    } catch (caught) {
+      captureError(caught, "Failed to save feature", "Save failed");
+    }
   };
 
   const deleteFeature = async (featureId: string) => {
@@ -323,50 +320,70 @@ export function ReviewPage() {
     if (!window.confirm("Delete this feature?")) {
       return;
     }
-    await deleteSessionFeature(sessionId, featureId);
-    setFeatures((prev) => prev.filter((item) => item.id !== featureId));
-    setSelectedFeatureIds(selectedFeatureIds.filter((id) => id !== featureId));
+    try {
+      await deleteSessionFeature(sessionId, featureId);
+      setFeatures((prev) => prev.filter((item) => item.id !== featureId));
+      setSelectedFeatureIds(selectedFeatureIds.filter((id) => id !== featureId));
+      pushToast({ title: "Feature deleted", variant: "success" });
+    } catch (caught) {
+      captureError(caught, "Failed to delete feature", "Delete failed");
+    }
   };
 
   const applyBulkLevel = async () => {
     if (!sessionId || !bulkLevel || selectedFeatureIds.length === 0) {
       return;
     }
-    await patchSessionFeaturesBulk(sessionId, {
-      feature_ids: selectedFeatureIds,
-      action: "patch",
-      properties: {
-        level_id: bulkLevel
-      }
-    });
-    await loadFeatures();
+    try {
+      await patchSessionFeaturesBulk(sessionId, {
+        feature_ids: selectedFeatureIds,
+        action: "patch",
+        properties: {
+          level_id: bulkLevel
+        }
+      });
+      await loadFeatures();
+      pushToast({ title: "Bulk update applied", description: "Level reassignment completed.", variant: "success" });
+    } catch (caught) {
+      captureError(caught, "Bulk level update failed", "Bulk edit failed");
+    }
   };
 
   const applyBulkCategory = async () => {
     if (!sessionId || !bulkCategory || selectedFeatureIds.length === 0) {
       return;
     }
-    await patchSessionFeaturesBulk(sessionId, {
-      feature_ids: selectedFeatureIds,
-      action: "patch",
-      properties: {
-        category: bulkCategory
-      }
-    });
-    await loadFeatures();
+    try {
+      await patchSessionFeaturesBulk(sessionId, {
+        feature_ids: selectedFeatureIds,
+        action: "patch",
+        properties: {
+          category: bulkCategory
+        }
+      });
+      await loadFeatures();
+      pushToast({ title: "Bulk update applied", description: "Category reassignment completed.", variant: "success" });
+    } catch (caught) {
+      captureError(caught, "Bulk category update failed", "Bulk edit failed");
+    }
   };
 
   const mergeSelectedUnits = async () => {
     if (!sessionId || selectedFeatureIds.length < 2) {
       return;
     }
-    await patchSessionFeaturesBulk(sessionId, {
-      feature_ids: selectedFeatureIds,
-      action: "merge_units",
-      merge_name: mergeName || null
-    });
-    clearSelectedFeatureIds();
-    await loadFeatures();
+    try {
+      await patchSessionFeaturesBulk(sessionId, {
+        feature_ids: selectedFeatureIds,
+        action: "merge_units",
+        merge_name: mergeName || null
+      });
+      clearSelectedFeatureIds();
+      await loadFeatures();
+      pushToast({ title: "Units merged", variant: "success" });
+    } catch (caught) {
+      captureError(caught, "Failed to merge selected units", "Merge failed");
+    }
   };
 
   const deleteSelected = async () => {
@@ -376,12 +393,17 @@ export function ReviewPage() {
     if (!window.confirm(`Delete ${selectedFeatureIds.length} selected features?`)) {
       return;
     }
-    await patchSessionFeaturesBulk(sessionId, {
-      feature_ids: selectedFeatureIds,
-      action: "delete"
-    });
-    clearSelectedFeatureIds();
-    await loadFeatures();
+    try {
+      await patchSessionFeaturesBulk(sessionId, {
+        feature_ids: selectedFeatureIds,
+        action: "delete"
+      });
+      clearSelectedFeatureIds();
+      await loadFeatures();
+      pushToast({ title: "Selection deleted", variant: "success" });
+    } catch (caught) {
+      captureError(caught, "Failed to delete selected features", "Delete failed");
+    }
   };
 
   const backToWizard = () => {
@@ -441,10 +463,14 @@ export function ReviewPage() {
       const response = await validateSession(sessionId);
       applyPostValidationState(response);
       await loadFeatures();
+      pushToast({
+        title: "Validation complete",
+        description: `${response.summary.error_count} errors, ${response.summary.warning_count} warnings.`,
+        variant: response.summary.error_count > 0 ? "info" : "success"
+      });
       return response;
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "Validation failed";
-      setError(message);
+      captureError(caught, "Validation failed", "Validation failed");
       return null;
     } finally {
       setValidating(false);
@@ -473,9 +499,13 @@ export function ReviewPage() {
         applyPostValidationState(response.revalidation);
       }
       await loadFeatures();
+      pushToast({
+        title: "Auto-fix completed",
+        description: `${response.total_fixed} issue(s) fixed automatically.`,
+        variant: "success"
+      });
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "Auto-fix failed";
-      setError(message);
+      captureError(caught, "Auto-fix failed", "Auto-fix failed");
     } finally {
       setAutofixing(false);
     }
@@ -487,7 +517,9 @@ export function ReviewPage() {
       return;
     }
     if (validationResult.summary.error_count > 0) {
-      setError("Export is blocked until all validation errors are resolved.");
+      const message = "Export is blocked until all validation errors are resolved.";
+      setError(message);
+      pushToast({ title: "Export blocked", description: message, variant: "error" });
       return;
     }
     setExportDialogOpen(true);
@@ -510,13 +542,93 @@ export function ReviewPage() {
       link.remove();
       window.URL.revokeObjectURL(url);
       setExportDialogOpen(false);
+      pushToast({ title: "Export ready", description: `${response.filename} downloaded.`, variant: "success" });
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "Export failed";
-      setError(message);
+      captureError(caught, "Export failed", "Export failed");
     } finally {
       setExporting(false);
     }
   };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const isUndo = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z";
+      if (isUndo) {
+        if (isFormTarget(event.target)) {
+          return;
+        }
+        event.preventDefault();
+        if (!sessionId) {
+          return;
+        }
+        const popped = popEditHistory();
+        if (!popped) {
+          return;
+        }
+        const featureId = popped.featureId;
+        const previousProperties = popped.previousProperties;
+        if (typeof featureId !== "string" || !previousProperties || typeof previousProperties !== "object") {
+          return;
+        }
+        void patchSessionFeature(sessionId, featureId, {
+          properties: previousProperties as Record<string, unknown>
+        })
+          .then((updated) => {
+            setFeatures((prev) =>
+              prev.map((item) =>
+                item.id === updated.id
+                  ? {
+                      type: updated.type,
+                      id: updated.id,
+                      feature_type: updated.feature_type,
+                      geometry: updated.geometry as { type: string; coordinates: unknown } | null,
+                      properties: updated.properties as Record<string, unknown>
+                    }
+                  : item
+              )
+            );
+          })
+          .catch((caught) => {
+            captureError(caught, "Undo failed", "Undo failed");
+          });
+        return;
+      }
+
+      if (event.key === "Escape" && !isFormTarget(event.target)) {
+        event.preventDefault();
+        clearSelectedFeatureIds();
+        if (exportDialogOpen) {
+          setExportDialogOpen(false);
+        }
+        return;
+      }
+
+      if (
+        event.key === "Enter" &&
+        exportDialogOpen &&
+        !isFormTarget(event.target) &&
+        !exporting &&
+        !validating &&
+        validation &&
+        validation.summary.error_count === 0
+      ) {
+        event.preventDefault();
+        void downloadExport();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    clearSelectedFeatureIds,
+    downloadExport,
+    exportDialogOpen,
+    exporting,
+    popEditHistory,
+    sessionId,
+    validating,
+    validation
+  ]);
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-[1700px] flex-col gap-4 px-6 py-5">
@@ -527,7 +639,7 @@ export function ReviewPage() {
         </div>
         <div className="flex gap-2">
           <button type="button" className="rounded border px-3 py-1.5 text-sm" onClick={backToWizard}>
-            ← Back to Wizard
+            Back to Wizard
           </button>
           <button
             type="button"
@@ -563,7 +675,7 @@ export function ReviewPage() {
             onOverlayVisibilityChange={setOverlayVisibility}
           />
           {loading ? (
-            <div className="rounded border bg-white p-4 text-sm text-slate-600">Loading map...</div>
+            <MapLoadingSkeleton />
           ) : (
             <ErrorBoundary>
               <MapPanel
@@ -591,11 +703,7 @@ export function ReviewPage() {
           <div className="rounded border bg-white p-3">
             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
               <span>Selected: {selectedFeatureIds.length}</span>
-              <select
-                className="rounded border px-2 py-1"
-                value={bulkLevel}
-                onChange={(event) => setBulkLevel(event.target.value)}
-              >
+              <select className="rounded border px-2 py-1" value={bulkLevel} onChange={(event) => setBulkLevel(event.target.value)}>
                 <option value="">Reassign level...</option>
                 {levelOptions.map((option) => (
                   <option key={option.id} value={option.id}>
@@ -635,7 +743,7 @@ export function ReviewPage() {
           </div>
 
           {loading ? (
-            <div className="rounded border bg-white p-4 text-sm text-slate-600">Loading table...</div>
+            <TableLoadingSkeleton />
           ) : (
             <TablePanel
               features={filteredFeatures}
@@ -661,7 +769,7 @@ export function ReviewPage() {
       {validation ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded border bg-white px-4 py-3 text-sm">
           <div>
-            Validation: {validation.summary.error_count} errors · {validation.summary.warning_count} warnings ·{" "}
+            Validation: {validation.summary.error_count} errors - {validation.summary.warning_count} warnings -{" "}
             {validation.summary.auto_fixable_count} auto-fixable
           </div>
           <button
@@ -679,11 +787,9 @@ export function ReviewPage() {
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/35 p-4">
           <div className="w-full max-w-xl rounded border bg-white p-4 shadow-lg">
             <h3 className="text-lg font-semibold">Export IMDF</h3>
+            <p className="mt-1 text-sm text-slate-600">{validation.summary.total_features} features will be exported.</p>
             <p className="mt-1 text-sm text-slate-600">
-              {validation.summary.total_features} features will be exported.
-            </p>
-            <p className="mt-1 text-sm text-slate-600">
-              Validation: {validation.summary.error_count} errors · {validation.summary.warning_count} warnings
+              Validation: {validation.summary.error_count} errors - {validation.summary.warning_count} warnings
             </p>
             {validation.warnings.length > 0 ? (
               <div className="mt-3 max-h-36 overflow-auto rounded border bg-amber-50 p-2 text-xs text-amber-800">
