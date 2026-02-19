@@ -86,7 +86,7 @@ Key structural rules:
 
 **Frontend:**
 
-- `cd frontend && npm install`: Install deps
+- `cd frontend && npm ci`: Install deps
 - `cd frontend && npm run dev`: Dev server (port 5173,
   proxies API to backend)
 - `cd frontend && npm run build`: Production build to
@@ -187,6 +187,24 @@ both the REST API (`/api/...`) and the built React frontend
 `http://<pc-hostname>:8000` in their browser. No
 client-side installation required.
 
+Default profile stores sessions in memory, which is fine for
+local development. For shared multi-user usage, prefer a
+persistent session backend (filesystem or Redis) so active
+sessions survive service restarts.
+
+### Reproducible Setup Files
+
+Keep runtime setup in version-controlled files:
+
+- `environment.yml`: preferred pinned Python/geospatial env
+  for Windows hosts
+- `backend/requirements.txt`: pip fallback and CI install
+  input
+- `frontend/package-lock.json`: committed lockfile, installed
+  with `npm ci`
+- `.env.example`: documented runtime variables for all
+  environments
+
 ### Production Setup (Shared Windows PC)
 
 ```bash
@@ -194,14 +212,19 @@ client-side installation required.
 git clone <repo-url> shp2imdf
 cd shp2imdf
 
-# 2. Python environment
-conda create -n shp2imdf python=3.11 -y
+# 2. Python environment (preferred)
+conda env create -f environment.yml
 conda activate shp2imdf
+
+# If environment.yml is not available yet:
+# conda create -n shp2imdf python=3.11 -y
+# conda activate shp2imdf
+
 pip install -r backend/requirements.txt
 
 # 3. Build frontend
 cd frontend
-npm install
+npm ci
 npm run build
 cd ..
 
@@ -214,39 +237,32 @@ Colleagues open `http://<pc-hostname>:8000` or
 
 ### Running as a Windows Service
 
-Create a batch file to keep the server running:
-
-**`start_server.bat`:**
-
-```bat
-@echo off
-cd /d C:\path\to\shp2imdf
-call conda activate shp2imdf
-uvicorn backend.main:app --host 0.0.0.0 --port 8000
-```
-
-For automatic startup, either:
-
-- Add `start_server.bat` to the Windows Startup folder
-  (`shell:startup`)
-- Create a Scheduled Task that runs at system startup
-  with "Run whether user is logged on or not"
-- Use NSSM (Non-Sucking Service Manager) to register it
-  as a proper Windows service:
+Prefer NSSM and `conda run` instead of `conda activate` in a
+service context.
 
 ```bash
-nssm install shp2imdf "C:\path\to\start_server.bat"
+mkdir C:\path\to\shp2imdf\logs
+nssm install shp2imdf "C:\Users\<user>\miniconda3\condabin\conda.bat"
 nssm set shp2imdf AppDirectory "C:\path\to\shp2imdf"
+nssm set shp2imdf AppParameters "run -n shp2imdf uvicorn backend.main:app --host 0.0.0.0 --port 8000"
+nssm set shp2imdf AppStdout "C:\path\to\shp2imdf\logs\stdout.log"
+nssm set shp2imdf AppStderr "C:\path\to\shp2imdf\logs\stderr.log"
+nssm set shp2imdf AppRotateFiles 1
+nssm set shp2imdf Start SERVICE_AUTO_START
 nssm start shp2imdf
 ```
 
+If you prefer a batch file wrapper, call `conda run -n
+shp2imdf ...` in the batch file and keep logs redirected.
+
 ### Windows Firewall
 
-The shared PC may need a firewall rule to allow incoming
-connections on port 8000. Run in an elevated PowerShell:
+The shared PC may need a firewall rule for incoming traffic on
+port 8000. Restrict access to the local subnet where possible.
+Run in elevated PowerShell:
 
 ```powershell
-New-NetFirewallRule -DisplayName "SHP2IMDF" -Direction Inbound -Port 8000 -Protocol TCP -Action Allow
+New-NetFirewallRule -DisplayName "SHP2IMDF (LocalSubnet)" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow -RemoteAddress LocalSubnet -Profile Private
 ```
 
 ### Updating
@@ -258,7 +274,7 @@ cd C:\path\to\shp2imdf
 call conda activate shp2imdf
 pip install -r backend/requirements.txt
 cd frontend
-npm install
+npm ci
 npm run build
 cd ..
 # Restart the server (or restart the Windows service)
@@ -266,11 +282,25 @@ cd ..
 
 ### Environment Variables
 
+Core variables (current behavior):
+
 | Variable            | Default | Description                           |
 | ------------------- | ------- | ------------------------------------- |
 | `SESSION_TTL_HOURS` | 24      | Hours before inactive sessions expire |
 | `MAX_SESSIONS`      | 5       | Maximum concurrent sessions in memory |
 | `PORT`              | 8000    | Server port                           |
+
+Recommended variables before broader shared deployment:
+
+| Variable               | Default                 | Description                                    |
+| ---------------------- | ----------------------- | ---------------------------------------------- |
+| `HOST`                 | `0.0.0.0`               | Bind host for Uvicorn                          |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated allowed origins                |
+| `LOG_LEVEL`            | `INFO`                  | Application log level                          |
+| `MAX_UPLOAD_MB`        | `1024`                  | Max upload payload size                        |
+| `SESSION_BACKEND`      | `memory`                | `memory`, `filesystem`, or `redis`             |
+| `SESSION_DATA_DIR`     | `./data/sessions`       | Session path when `SESSION_BACKEND=filesystem` |
+| `TEMP_DATA_DIR`        | `./data/tmp`            | Temporary file/work directory                  |
 
 ### Development Setup
 
@@ -297,6 +327,35 @@ export default defineConfig({
   },
 });
 ```
+
+### Setup Smoke Test
+
+After initial setup, run a quick smoke test:
+
+```bash
+# Backend importer/API sanity
+python -m pytest backend/tests/test_importer.py -v
+python -m pytest backend/tests/test_api.py -v
+
+# Frontend sanity
+cd frontend
+npm run test
+npm run build
+```
+
+Then start backend and verify docs endpoint responds:
+
+```powershell
+Invoke-WebRequest http://localhost:8000/docs | Select-Object -ExpandProperty StatusCode
+```
+
+### Documentation Ownership
+
+To reduce drift between docs:
+
+- `DEVELOPMENT.md` is the setup/deployment source of truth
+- `README.md` stays as a short quickstart entry point
+- `SPEC.md` captures product and API behavior requirements
 
 ## Project Structure
 

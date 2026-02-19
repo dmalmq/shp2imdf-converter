@@ -35,6 +35,14 @@ platforms.
 - The application runs on a shared Windows PC that
   colleagues access via browser URL — no client-side
   installation
+- Shared-PC deployment defaults to local-subnet network
+  exposure and can be fronted by organizational TLS/auth
+  controls when required
+- Production profile supports persistent session storage so
+  in-progress projects survive service restarts until TTL
+  expiry
+- Setup is reproducible from committed environment specs and
+  lockfiles
 
 ### User Workflow
 
@@ -1933,17 +1941,25 @@ downloaded and re-uploaded.
 
 ### 11.1 Session Model
 
-The backend maintains an in-memory project session per
-import. A session ID is returned on import and passed with
-subsequent requests. Session holds imported GeoDataFrames,
-detection results, wizard configuration, mappings,
-generated features, and validation state.
+The backend maintains a project session per import. A session
+ID is returned on import and passed with subsequent requests.
+Each session holds imported GeoDataFrames, detection results,
+wizard configuration, mappings, generated features, and
+validation state.
+
+Session storage backend is configurable:
+
+- `memory` (default): simplest mode for local development
+- `filesystem` (recommended for shared single-PC deployment)
+- `redis` (optional for multi-process or multi-host setups)
+
+For filesystem mode, session data is written under
+`SESSION_DATA_DIR`.
 
 **Session cleanup:** Sessions expire after 24 hours of
 inactivity (no API requests). A background task runs
 every hour and prunes expired sessions to free memory.
-The TTL is configurable via an environment variable
-`SESSION_TTL_HOURS` (default 24).
+TTL is configurable via `SESSION_TTL_HOURS` (default 24).
 
 **Concurrent sessions:** Multiple users can have active
 sessions simultaneously. Each `POST /api/import` creates
@@ -1953,6 +1969,23 @@ enforced (configurable via `MAX_SESSIONS`). If the limit
 is reached, the oldest inactive session is evicted.
 The frontend shows a warning if the session was evicted
 and prompts the user to re-upload.
+
+With persistent backends (`filesystem` or `redis`), active
+sessions should survive process restarts until TTL expiry.
+
+### 11.1.1 Runtime Configuration
+
+| Variable               | Default                 | Description                        |
+| ---------------------- | ----------------------- | ---------------------------------- |
+| `SESSION_TTL_HOURS`    | `24`                    | Session inactivity TTL in hours    |
+| `MAX_SESSIONS`         | `5`                     | Maximum active sessions            |
+| `SESSION_BACKEND`      | `memory`                | `memory`, `filesystem`, or `redis` |
+| `SESSION_DATA_DIR`     | `./data/sessions`       | Filesystem backend storage path    |
+| `PORT`                 | `8000`                  | API/server port                    |
+| `HOST`                 | `0.0.0.0`               | API bind host                      |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated CORS origins       |
+| `MAX_UPLOAD_MB`        | `1024`                  | Upload payload limit               |
+| `LOG_LEVEL`            | `INFO`                  | Logging verbosity                  |
 
 ### 11.2 Endpoints
 
@@ -2208,8 +2241,9 @@ that exercise the full validation suite.
    matching the exact property structures from Section 2
 4. `backend/src/schemas.py` — Pydantic request/response
    models (including `cleanup_summary`)
-5. `backend/src/session.py` — in-memory session management
-   with TTL cleanup
+5. `backend/src/session.py` — session management abstraction
+   with memory backend (Phase 1) plus pluggable persistent
+   backends (filesystem/redis) and TTL cleanup
 6. `POST /api/import` — accepts files, creates session,
    returns file list with cleanup summary
 7. `GET /api/session/{id}/features` — returns GeoJSON
@@ -2602,6 +2636,8 @@ in LABELS format.
 71. Production build: FastAPI serves `frontend/dist/`
 72. Windows service setup documentation
 73. README
+74. `.env.example` documenting runtime variables
+75. Setup smoke-test checklist in docs
 
 **Backend Tests:**
 
