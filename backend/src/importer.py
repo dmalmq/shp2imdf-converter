@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from io import BytesIO
-import json
 from pathlib import Path
-import re
 import tempfile
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 from uuid import uuid4
 import zipfile
 
@@ -16,9 +14,10 @@ import geopandas as gpd
 import pandas as pd
 from pyproj import CRS
 from shapely import make_valid
-from shapely.geometry import LineString, MultiPolygon, Polygon, mapping, shape
+from shapely.geometry import MultiPolygon, Polygon, mapping, shape
 from shapely.geometry.polygon import orient
 
+from backend.src.detector import detect_files, load_keyword_map
 from backend.src.schemas import CleanupSummary, ImportedFile
 
 
@@ -38,37 +37,6 @@ class ImportArtifacts:
     cleanup_summary: CleanupSummary
     feature_collection: dict[str, Any]
     warnings: list[str]
-
-
-def _load_filename_keywords(config_path: str | Path) -> dict[str, list[str]]:
-    payload = json.loads(Path(config_path).read_text(encoding="utf-8"))
-    return payload.get("feature_type_keywords", {})
-
-
-def _infer_feature_type(stem: str, geometry_type: str, keywords: dict[str, list[str]]) -> tuple[str | None, str]:
-    lowered = stem.lower()
-    for feature_type, words in keywords.items():
-        if any(word.lower() in lowered for word in words):
-            return feature_type, "green"
-    if "Polygon" in geometry_type:
-        return "unit", "yellow"
-    if "LineString" in geometry_type:
-        return "opening", "yellow"
-    return None, "red"
-
-
-def _detect_level_from_stem(stem: str) -> int | None:
-    tokens = [token for token in re.split(r"[^A-Za-z0-9]+", stem.upper()) if token]
-    for token in tokens:
-        match_basement = re.fullmatch(r"B(\d+)", token)
-        if match_basement:
-            return -int(match_basement.group(1))
-        if token in {"GF", "G"}:
-            return 0
-        match_floor = re.fullmatch(r"(\d+)(F)?", token)
-        if match_floor:
-            return int(match_floor.group(1))
-    return None
 
 
 def _expand_archives(file_blobs: Sequence[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
@@ -290,7 +258,6 @@ def import_file_blobs(
     warnings: list[str] = []
     imported_files: list[ImportedFile] = []
     features: list[dict[str, Any]] = []
-    keywords = _load_filename_keywords(filename_keywords_path)
 
     for stem, files in sorted(grouped.items()):
         if ".shp" not in files:
@@ -300,8 +267,6 @@ def import_file_blobs(
         warnings.extend(file_warnings)
         cleaned = _clean_geodataframe(gdf, summary)
         geometry_type = _infer_geometry_type(cleaned)
-        detected_type, confidence = _infer_feature_type(stem, geometry_type, keywords)
-        detected_level = _detect_level_from_stem(stem)
         columns = [column for column in cleaned.columns if column != cleaned.geometry.name]
 
         imported_files.append(
@@ -310,14 +275,14 @@ def import_file_blobs(
                 geometry_type=geometry_type,
                 feature_count=int(len(cleaned)),
                 attribute_columns=columns,
-                detected_type=detected_type,
-                detected_level=detected_level,
-                confidence=confidence,
                 crs_detected=crs_detected,
                 warnings=file_warnings,
             )
         )
         features.extend(_extract_feature_rows(stem, cleaned))
+
+    keyword_map = load_keyword_map(filename_keywords_path)
+    imported_files = detect_files(imported_files, keyword_map, preserve_manual_levels=False)
 
     feature_collection = {"type": "FeatureCollection", "features": features}
     return ImportArtifacts(
@@ -335,4 +300,3 @@ def read_directory_as_blobs(directory: str | Path) -> list[tuple[str, bytes]]:
         if file.is_file():
             blobs.append((file.name, file.read_bytes()))
     return blobs
-

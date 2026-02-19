@@ -10,6 +10,7 @@ export function UploadPage() {
   const navigate = useNavigate();
   const setSessionId = useAppStore((state) => state.setSessionId);
   const setCurrentScreen = useAppStore((state) => state.setCurrentScreen);
+  const setFiles = useAppStore((state) => state.setFiles);
 
   const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
   const [progress, setProgress] = useState(0);
@@ -46,6 +47,7 @@ export function UploadPage() {
       const payload = await importShapefiles(queuedFiles, setProgress);
       setResult(payload);
       setSessionId(payload.session_id);
+      setFiles(payload.files);
       setCurrentScreen("upload");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Import failed";
@@ -130,4 +132,3 @@ export function UploadPage() {
     </main>
   );
 }
-
