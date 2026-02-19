@@ -1,0 +1,14 @@
+{
+  "default_category": "unspecified",
+  "categories": [
+    "unspecified",
+    "room",
+    "office",
+    "retail",
+    "foodservice",
+    "restroom",
+    "stairs",
+    "elevator",
+    "transit"
+  ]
+}
