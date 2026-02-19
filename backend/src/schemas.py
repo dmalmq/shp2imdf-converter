@@ -181,7 +181,7 @@ class WizardState(BaseModel):
     venue_address_feature: dict[str, Any] | None = None
     building_address_features: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-    generation_status: Literal["not_started", "draft_ready"] = "not_started"
+    generation_status: Literal["not_started", "draft_ready", "generated"] = "not_started"
 
 
 class SessionRecord(BaseModel):
@@ -193,6 +193,7 @@ class SessionRecord(BaseModel):
     files: list[ImportedFile]
     cleanup_summary: CleanupSummary
     feature_collection: dict[str, Any]
+    source_feature_collection: dict[str, Any] | None = None
     warnings: list[str] = Field(default_factory=list)
     learned_keywords: dict[str, str] = Field(default_factory=dict)
     wizard: WizardState = Field(default_factory=WizardState)
@@ -304,9 +305,43 @@ class GenerateResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session_id: str
-    status: Literal["draft"]
+    status: Literal["draft", "generated"]
     generated_feature_count: int
     message: str
+
+
+class FeatureResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    type: str
+    id: str
+    feature_type: str
+    geometry: dict[str, Any] | None
+    properties: dict[str, Any]
+
+
+class PatchFeatureRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    properties: dict[str, Any] | None = None
+    geometry: dict[str, Any] | None = None
+
+
+class BulkPatchFeaturesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    feature_ids: list[str] = Field(default_factory=list)
+    properties: dict[str, Any] | None = None
+    action: Literal["patch", "delete", "merge_units"] = "patch"
+    merge_name: str | None = None
+
+
+class BulkPatchFeaturesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    updated_count: int = 0
+    deleted_count: int = 0
+    merged_feature_id: str | None = None
 
 
 class ErrorResponse(BaseModel):

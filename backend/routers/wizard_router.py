@@ -118,6 +118,7 @@ def patch_wizard_project(session_id: str, payload: ProjectWizardRequest, request
         ]
     else:
         session.wizard.warnings = []
+    session.wizard.generation_status = "not_started"
 
     manager.save_session(session)
     return ProjectWizardResponse(
@@ -153,6 +154,7 @@ def patch_wizard_levels(session_id: str, payload: LevelsWizardRequest, request: 
         updated.level_category = item.category or "unspecified"
         updated_files.append(updated)
     session.files = updated_files
+    session.wizard.generation_status = "not_started"
 
     manager.save_session(session)
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
@@ -192,6 +194,7 @@ def patch_wizard_buildings(
 
     session.wizard.buildings = building_rows
     session.wizard.building_address_features = address_features
+    session.wizard.generation_status = "not_started"
 
     manager.save_session(session)
     return BuildingsWizardResponse(
@@ -222,6 +225,7 @@ def patch_wizard_mappings(
 
     _set_default_unit_mapping_column(session)
     _refresh_unit_preview(session, request)
+    session.wizard.generation_status = "not_started"
     manager.save_session(session)
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
 
@@ -236,6 +240,7 @@ def patch_wizard_footprint(
     session = _get_session_or_raise(session_id, request)
     seed_wizard_state(session)
     session.wizard.footprint = payload
+    session.wizard.generation_status = "not_started"
     manager.save_session(session)
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
 
@@ -267,6 +272,7 @@ async def upload_company_mappings(
     session.wizard.company_mappings = mappings
     session.wizard.company_default_category = default_category
     _, unresolved_count = _refresh_unit_preview(session, request)
+    session.wizard.generation_status = "not_started"
 
     manager.save_session(session)
     return CompanyMappingsUploadResponse(
@@ -276,4 +282,3 @@ async def upload_company_mappings(
         preview=session.wizard.mappings.unit.preview,
         unresolved_count=unresolved_count,
     )
-

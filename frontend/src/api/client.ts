@@ -200,9 +200,35 @@ export type CompanyMappingsUploadResponse = {
 
 export type GenerateResponse = {
   session_id: string;
-  status: "draft";
+  status: "draft" | "generated";
   generated_feature_count: number;
   message: string;
+};
+
+export type FeatureItem = {
+  type: "Feature";
+  id: string;
+  feature_type: string;
+  geometry: Record<string, unknown> | null;
+  properties: Record<string, unknown>;
+};
+
+export type FeaturePatchRequest = {
+  properties?: Record<string, unknown>;
+  geometry?: Record<string, unknown> | null;
+};
+
+export type BulkFeaturePatchRequest = {
+  feature_ids: string[];
+  action?: "patch" | "delete" | "merge_units";
+  properties?: Record<string, unknown>;
+  merge_name?: string | null;
+};
+
+export type BulkFeaturePatchResponse = {
+  updated_count: number;
+  deleted_count: number;
+  merged_feature_id: string | null;
 };
 
 export async function importShapefiles(
@@ -277,6 +303,50 @@ export async function fetchSessionFeatures(
 ): Promise<{ type: "FeatureCollection"; features: Record<string, unknown>[] }> {
   const response = await fetch(`/api/session/${sessionId}/features`);
   return handleJson<{ type: "FeatureCollection"; features: Record<string, unknown>[] }>(response);
+}
+
+export async function fetchSessionFeature(sessionId: string, featureId: string): Promise<FeatureItem> {
+  const response = await fetch(`/api/session/${sessionId}/features/${encodeURIComponent(featureId)}`);
+  return handleJson<FeatureItem>(response);
+}
+
+export async function patchSessionFeature(
+  sessionId: string,
+  featureId: string,
+  payload: FeaturePatchRequest
+): Promise<FeatureItem> {
+  const response = await fetch(`/api/session/${sessionId}/features/${encodeURIComponent(featureId)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  return handleJson<FeatureItem>(response);
+}
+
+export async function patchSessionFeaturesBulk(
+  sessionId: string,
+  payload: BulkFeaturePatchRequest
+): Promise<BulkFeaturePatchResponse> {
+  const response = await fetch(`/api/session/${sessionId}/features/bulk`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  return handleJson<BulkFeaturePatchResponse>(response);
+}
+
+export async function deleteSessionFeature(
+  sessionId: string,
+  featureId: string
+): Promise<{ session_id: string; deleted_id: string }> {
+  const response = await fetch(`/api/session/${sessionId}/features/${encodeURIComponent(featureId)}`, {
+    method: "DELETE"
+  });
+  return handleJson<{ session_id: string; deleted_id: string }>(response);
 }
 
 export async function fetchWizardState(sessionId: string): Promise<WizardStateResponse> {

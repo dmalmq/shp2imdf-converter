@@ -286,8 +286,8 @@ def test_company_mappings_upload_refreshes_preview(test_client, sample_dir: Path
     assert "OFFICE" in codes
 
 
-@pytest.mark.phase3
-def test_generate_draft_adds_unlocated_address_and_building(test_client, sample_dir: Path) -> None:
+@pytest.mark.phase4
+def test_generate_creates_review_ready_feature_set(test_client, sample_dir: Path) -> None:
     import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
     session_id = import_response.json()["session_id"]
 
@@ -309,13 +309,17 @@ def test_generate_draft_adds_unlocated_address_and_building(test_client, sample_
 
     generate_response = test_client.post(f"/api/session/{session_id}/generate")
     assert generate_response.status_code == 200
-    assert generate_response.json()["status"] == "draft"
+    assert generate_response.json()["status"] == "generated"
 
     features_response = test_client.get(f"/api/session/{session_id}/features")
     payload = features_response.json()
     feature_types = [item["feature_type"] for item in payload["features"]]
     assert "address" in feature_types
     assert "building" in feature_types
+    assert "level" in feature_types
+    assert "footprint" in feature_types
+    assert "unit" in feature_types
+    assert "venue" in feature_types
 
 
 @pytest.mark.phase3
@@ -355,3 +359,82 @@ def test_export_includes_manifest_json(test_client, sample_dir: Path) -> None:
         assert manifest["created"]
         assert manifest["generated_by"] == "shp2imdf-converter phase3"
         assert "extensions" in manifest
+
+
+@pytest.mark.phase4
+def test_patch_single_feature_properties(test_client, sample_dir: Path) -> None:
+    files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space")
+    import_response = test_client.post("/api/import", files=files)
+    session_id = import_response.json()["session_id"]
+
+    project_response = test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    )
+    assert project_response.status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    unit = next(item for item in features if item["feature_type"] == "unit")
+
+    patch_response = test_client.patch(
+        f"/api/session/{session_id}/features/{unit['id']}",
+        json={"properties": {"category": "office"}},
+    )
+    assert patch_response.status_code == 200
+    assert patch_response.json()["properties"]["category"] == "office"
+
+
+@pytest.mark.phase4
+def test_bulk_patch_and_delete_features(test_client, sample_dir: Path) -> None:
+    files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space")
+    import_response = test_client.post("/api/import", files=files)
+    session_id = import_response.json()["session_id"]
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    unit_ids = [item["id"] for item in features if item["feature_type"] == "unit"][:2]
+    assert len(unit_ids) == 2
+
+    bulk_patch = test_client.patch(
+        f"/api/session/{session_id}/features/bulk",
+        json={
+            "feature_ids": unit_ids,
+            "action": "patch",
+            "properties": {"category": "retail"},
+        },
+    )
+    assert bulk_patch.status_code == 200
+    assert bulk_patch.json()["updated_count"] == 2
+
+    bulk_delete = test_client.patch(
+        f"/api/session/{session_id}/features/bulk",
+        json={
+            "feature_ids": [unit_ids[0]],
+            "action": "delete",
+        },
+    )
+    assert bulk_delete.status_code == 200
+    assert bulk_delete.json()["deleted_count"] == 1
