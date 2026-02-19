@@ -14,8 +14,8 @@ type Props = {
 
 export function StepSidebar({ steps, currentStep, onSelectStep, onSkipToSummary }: Props) {
   return (
-    <aside className="w-full rounded border bg-white p-4 lg:w-72">
-      <div className="mb-4 flex items-center justify-between">
+    <aside className="w-full rounded border bg-white p-5 lg:w-80">
+      <div className="mb-5 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-700">Wizard Steps</h2>
         <button
           type="button"
@@ -25,7 +25,7 @@ export function StepSidebar({ steps, currentStep, onSelectStep, onSkipToSummary 
           Skip to Summary
         </button>
       </div>
-      <ol className="space-y-2">
+      <ol className="space-y-2.5">
         {steps.map((step) => {
           const isActive = currentStep === step.id;
           const enabled = step.enabled !== false;
@@ -35,7 +35,7 @@ export function StepSidebar({ steps, currentStep, onSelectStep, onSkipToSummary 
                 type="button"
                 disabled={!enabled}
                 onClick={() => onSelectStep(step.id)}
-                className={`w-full rounded px-3 py-2 text-left text-sm transition ${
+                className={`w-full rounded px-4 py-2.5 text-left text-[0.95rem] transition ${
                   isActive
                     ? "bg-blue-600 text-white"
                     : enabled
@@ -52,4 +52,3 @@ export function StepSidebar({ steps, currentStep, onSelectStep, onSkipToSummary 
     </aside>
   );
 }
-

@@ -85,32 +85,32 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
   }, [buckets]);
 
   return (
-    <section className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
-      <div className="rounded border bg-white p-4">
-        <div className="mb-3 flex items-center justify-between">
+    <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,1fr)]">
+      <div className="min-w-0 rounded border bg-white p-5">
+        <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Step 3: Level Mapping</h2>
           {saving && <span className="text-xs text-slate-500">Saving...</span>}
         </div>
 
-        <div className="max-h-[420px] overflow-auto rounded border">
-          <table className="w-full border-collapse text-sm">
+        <div className="max-h-[440px] overflow-auto rounded border">
+          <table className="min-w-[980px] w-full border-collapse text-sm">
             <thead className="sticky top-0 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
               <tr>
-                <th className="px-2 py-2">Filename</th>
-                <th className="px-2 py-2">Type</th>
-                <th className="px-2 py-2">Detected Level</th>
-                <th className="px-2 py-2">Level Name</th>
-                <th className="px-2 py-2">Short Name</th>
-                <th className="px-2 py-2">Outdoor</th>
-                <th className="px-2 py-2">Category</th>
+                <th className="px-3 py-2.5">Filename</th>
+                <th className="px-3 py-2.5">Type</th>
+                <th className="px-3 py-2.5">Detected Level</th>
+                <th className="px-3 py-2.5">Level Name</th>
+                <th className="px-3 py-2.5">Short Name</th>
+                <th className="px-3 py-2.5">Outdoor</th>
+                <th className="px-3 py-2.5">Category</th>
               </tr>
             </thead>
             <tbody>
               {levelFiles.map((file) => (
                 <tr key={file.stem} className="border-t">
-                  <td className="px-2 py-2 font-mono text-xs">{file.stem}</td>
-                  <td className="px-2 py-2">{file.detected_type}</td>
-                  <td className="px-2 py-2">
+                  <td className="px-3 py-2.5 font-mono text-xs">{file.stem}</td>
+                  <td className="px-3 py-2.5">{file.detected_type}</td>
+                  <td className="px-3 py-2.5">
                     <input
                       className="w-16 rounded border px-2 py-1"
                       type="number"
@@ -122,28 +122,28 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
                       }
                     />
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-3 py-2.5">
                     <input
                       className="w-32 rounded border px-2 py-1"
                       value={file.level_name ?? ""}
                       onChange={(event) => onPatchFile(file.stem, { level_name: event.target.value })}
                     />
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-3 py-2.5">
                     <input
                       className="w-20 rounded border px-2 py-1"
                       value={file.short_name ?? makeDefaultShortName(file.detected_level)}
                       onChange={(event) => onPatchFile(file.stem, { short_name: event.target.value })}
                     />
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-3 py-2.5">
                     <input
                       type="checkbox"
                       checked={file.outdoor}
                       onChange={(event) => onPatchFile(file.stem, { outdoor: event.target.checked })}
                     />
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-3 py-2.5">
                     <select
                       className="rounded border px-2 py-1"
                       value={file.level_category}
@@ -161,7 +161,7 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
         </div>
       </div>
 
-      <div className="rounded border bg-white p-4">
+      <div className="rounded border bg-white p-5">
         <h3 className="mb-2 text-sm font-semibold text-slate-700">Stacking Diagram</h3>
         <p className="mb-4 text-xs text-slate-500">
           Levels are ordered by ordinal from bottom to top.
@@ -190,4 +190,3 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
     </section>
   );
 }
-

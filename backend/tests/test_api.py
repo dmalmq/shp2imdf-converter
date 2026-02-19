@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import json
 from pathlib import Path
 
 import pytest
@@ -129,3 +130,187 @@ def test_apply_learning_updates_other_files(test_client, sample_dir: Path) -> No
     payload = response.json()
     gf = next(item for item in payload["files"] if item["stem"] == "JRTokyoSta_GF_Space")
     assert gf["detected_type"] == "opening"
+
+
+@pytest.mark.phase3
+def test_wizard_project_creates_venue_address_feature(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+
+    response = test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+                "province": "JP-13",
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["wizard"]["project"]["venue_name"] == "Tokyo Station"
+    assert payload["address_feature"]["feature_type"] == "address"
+    assert payload["address_feature"]["properties"]["address"] == "1-9-1 Marunouchi"
+
+
+@pytest.mark.phase3
+def test_missing_street_address_uses_venue_name(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+
+    response = test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+                "province": "JP-13",
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["address_feature"]["properties"]["address"] == "Tokyo Station"
+
+
+@pytest.mark.phase3
+def test_wizard_buildings_creates_building_specific_address(test_client, sample_dir: Path) -> None:
+    files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space") + _upload_payload(sample_dir, "JRTokyoSta_GF_Space")
+    import_response = test_client.post("/api/import", files=files)
+    session_id = import_response.json()["session_id"]
+
+    project_response = test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    )
+    assert project_response.status_code == 200
+
+    response = test_client.patch(
+        f"/api/session/{session_id}/wizard/buildings",
+        json={
+            "buildings": [
+                {
+                    "id": "building-1",
+                    "name": "Main",
+                    "category": "unspecified",
+                    "restriction": None,
+                    "file_stems": ["JRTokyoSta_B1_Space"],
+                    "address_mode": "same_as_venue",
+                    "address": None,
+                },
+                {
+                    "id": "building-2",
+                    "name": "Annex",
+                    "category": "transit",
+                    "restriction": None,
+                    "file_stems": ["JRTokyoSta_GF_Space"],
+                    "address_mode": "different_address",
+                    "address": {
+                        "address": "2-1-1 Annex Rd",
+                        "locality": "Chiyoda-ku",
+                        "country": "JP",
+                    },
+                },
+            ]
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["address_features"]) == 1
+    annex = next(item for item in payload["wizard"]["buildings"] if item["id"] == "building-2")
+    assert annex["address_feature_id"] is not None
+
+
+@pytest.mark.phase3
+def test_company_mappings_upload_refreshes_preview(test_client, sample_dir: Path) -> None:
+    files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space") + _upload_payload(sample_dir, "JRTokyoSta_GF_Space")
+    import_response = test_client.post("/api/import", files=files)
+    session_id = import_response.json()["session_id"]
+
+    mappings_response = test_client.patch(
+        f"/api/session/{session_id}/wizard/mappings",
+        json={
+            "unit": {
+                "code_column": "COMPANY_CO",
+                "name_column": "NAME",
+                "alt_name_column": None,
+                "restriction_column": None,
+                "accessibility_column": None,
+                "preview": [],
+            }
+        },
+    )
+    assert mappings_response.status_code == 200
+
+    upload_body = {
+        "default_category": "unspecified",
+        "mappings": {
+            "SHOP": "retail",
+            "OFFICE": "office",
+        },
+    }
+    response = test_client.post(
+        f"/api/session/{session_id}/config/company-mappings",
+        files={
+            "file": ("company_mappings.json", json.dumps(upload_body).encode("utf-8"), "application/json")
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mappings_count"] == 2
+    codes = {item["code"] for item in payload["preview"]}
+    assert "SHOP" in codes
+    assert "OFFICE" in codes
+
+
+@pytest.mark.phase3
+def test_generate_draft_adds_unlocated_address_and_building(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+
+    project_response = test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    )
+    assert project_response.status_code == 200
+
+    generate_response = test_client.post(f"/api/session/{session_id}/generate")
+    assert generate_response.status_code == 200
+    assert generate_response.json()["status"] == "draft"
+
+    features_response = test_client.get(f"/api/session/{session_id}/features")
+    payload = features_response.json()
+    feature_types = [item["feature_type"] for item in payload["features"]]
+    assert "address" in feature_types
+    assert "building" in feature_types

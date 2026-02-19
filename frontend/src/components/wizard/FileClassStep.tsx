@@ -43,9 +43,9 @@ export function FileClassStep({
   onHoverStem
 }: Props) {
   return (
-    <section className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
-      <div className="rounded border bg-white p-4">
-        <div className="mb-3 flex items-center justify-between">
+    <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(430px,1fr)]">
+      <div className="min-w-0 rounded border bg-white p-5">
+        <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Step 2: File Classification</h2>
           <button
             type="button"
@@ -56,22 +56,22 @@ export function FileClassStep({
             {loading ? "Detecting..." : "Detect All"}
           </button>
         </div>
-        <div className="max-h-[420px] overflow-auto rounded border">
-          <table className="w-full table-fixed border-collapse text-sm">
+        <div className="max-h-[440px] overflow-auto rounded border">
+          <table className="min-w-[900px] w-full table-fixed border-collapse text-sm">
             <colgroup>
-              <col style={{ width: "38%" }} />
-              <col style={{ width: "16%" }} />
+              <col style={{ width: "42%" }} />
+              <col style={{ width: "14%" }} />
               <col style={{ width: "10%" }} />
-              <col style={{ width: "20%" }} />
+              <col style={{ width: "18%" }} />
               <col style={{ width: "16%" }} />
             </colgroup>
             <thead className="sticky top-0 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
               <tr>
-                <th className="px-2 py-2">Filename</th>
-                <th className="px-2 py-2">Geometry</th>
-                <th className="px-2 py-2">Count</th>
-                <th className="px-2 py-2">IMDF Type</th>
-                <th className="px-2 py-2">Confidence</th>
+                <th className="px-3 py-2.5">Filename</th>
+                <th className="px-3 py-2.5">Geometry</th>
+                <th className="px-3 py-2.5">Count</th>
+                <th className="px-3 py-2.5">IMDF Type</th>
+                <th className="px-3 py-2.5">Confidence</th>
               </tr>
             </thead>
             <tbody>
@@ -86,12 +86,12 @@ export function FileClassStep({
                     onMouseLeave={() => onHoverStem(null)}
                     onClick={() => onSelectStem(isSelected ? null : file.stem)}
                   >
-                    <td className="truncate px-2 py-2 font-mono text-xs" title={file.stem}>
+                    <td className="truncate px-3 py-2.5 font-mono text-xs" title={file.stem}>
                       {file.stem}
                     </td>
-                    <td className="px-2 py-2">{file.geometry_type}</td>
-                    <td className="px-2 py-2">{file.feature_count}</td>
-                    <td className="px-2 py-2">
+                    <td className="whitespace-nowrap px-3 py-2.5">{file.geometry_type}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5">{file.feature_count}</td>
+                    <td className="px-3 py-2.5">
                       <select
                         value={file.detected_type ?? ""}
                         className="w-full min-w-[8.5rem] rounded border px-2 py-1 text-sm"
@@ -106,7 +106,7 @@ export function FileClassStep({
                         ))}
                       </select>
                     </td>
-                    <td className="px-2 py-2">
+                    <td className="whitespace-nowrap px-3 py-2.5">
                       <ConfidenceDot confidence={file.confidence} />
                     </td>
                   </tr>
@@ -117,7 +117,7 @@ export function FileClassStep({
         </div>
       </div>
 
-      <div className="rounded border bg-white p-4">
+      <div className="rounded border bg-white p-5">
         <h3 className="mb-2 text-sm font-semibold text-slate-700">Preview Map</h3>
         <p className="mb-3 text-xs text-slate-500">
           Hover a row to zoom/highlight. Click a row to isolate that file.

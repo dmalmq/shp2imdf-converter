@@ -14,7 +14,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.routers.features_router import router as features_router
+from backend.routers.generate_router import router as generate_router
 from backend.routers.import_router import router as import_router
+from backend.routers.wizard_router import router as wizard_router
 from backend.src.schemas import ErrorResponse
 from backend.src.session import SessionManager, build_session_backend
 
@@ -51,6 +53,8 @@ async def _session_cleanup_loop(manager: SessionManager, stop: asyncio.Event) ->
 async def lifespan(app: FastAPI):
     app.state.session_manager = _load_session_manager()
     app.state.filename_keywords_path = Path(__file__).parent / "config" / "filename_keywords.json"
+    app.state.unit_categories_path = Path(__file__).parent / "config" / "unit_categories.json"
+    app.state.company_mappings_path = Path(__file__).parent / "config" / "company_mappings.json"
     stop_event = asyncio.Event()
     cleanup_task = asyncio.create_task(_session_cleanup_loop(app.state.session_manager, stop_event))
     try:
@@ -73,6 +77,8 @@ app.add_middleware(
 
 app.include_router(import_router)
 app.include_router(features_router)
+app.include_router(wizard_router)
+app.include_router(generate_router)
 
 
 @app.get("/api/health")
@@ -114,4 +120,3 @@ async def unexpected_error_handler(_: Request, __: Exception) -> JSONResponse:
 frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
 if frontend_dist.exists():
     app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
-

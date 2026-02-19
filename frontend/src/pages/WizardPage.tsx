@@ -5,20 +5,106 @@ import {
   detectAllFiles,
   fetchSessionFeatures,
   fetchSessionFiles,
+  fetchWizardState,
+  generateSessionDraft,
+  patchWizardBuildings,
+  patchWizardFootprint,
+  patchWizardLevels,
+  patchWizardMappings,
+  patchWizardProject,
+  type BuildingWizardState,
+  type FixtureMappingState,
+  type FootprintWizardState,
+  type LevelWizardItem,
+  type OpeningMappingState,
+  type ProjectWizardState,
+  type UnitMappingState,
   type UpdateFileRequest,
-  updateSessionFile
+  updateSessionFile,
+  uploadCompanyMappings
 } from "../api/client";
+import { BuildingStep } from "../components/wizard/BuildingStep";
+import { DetailMapStep } from "../components/wizard/DetailMapStep";
 import { FileClassStep } from "../components/wizard/FileClassStep";
+import { FixtureMapStep } from "../components/wizard/FixtureMapStep";
+import { FootprintStep } from "../components/wizard/FootprintStep";
 import { LevelMapStep } from "../components/wizard/LevelMapStep";
+import { OpeningMapStep } from "../components/wizard/OpeningMapStep";
+import { ProjectInfoStep } from "../components/wizard/ProjectInfoStep";
 import { StepSidebar } from "../components/wizard/StepSidebar";
+import { SummaryStep } from "../components/wizard/SummaryStep";
+import { UnitMapStep } from "../components/wizard/UnitMapStep";
 import { useAppStore } from "../store/useAppStore";
+
+
+const STEP_ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+const EMPTY_UNIT_MAPPING: UnitMappingState = {
+  code_column: null,
+  name_column: null,
+  alt_name_column: null,
+  restriction_column: null,
+  accessibility_column: null,
+  preview: []
+};
+
+const EMPTY_OPENING_MAPPING: OpeningMappingState = {
+  category_column: null,
+  accessibility_column: null,
+  access_control_column: null,
+  door_automatic_column: null,
+  door_material_column: null,
+  door_type_column: null,
+  name_column: null
+};
+
+const EMPTY_FIXTURE_MAPPING: FixtureMappingState = {
+  name_column: null,
+  alt_name_column: null,
+  category_column: null
+};
+
+const EMPTY_FOOTPRINT: FootprintWizardState = {
+  method: "union_buffer",
+  footprint_buffer_m: 0.5,
+  venue_buffer_m: 5
+};
+
+
+function toLevelItemsFromFiles(
+  files: {
+    stem: string;
+    detected_type: string | null;
+    detected_level: number | null;
+    level_name: string | null;
+    short_name: string | null;
+    outdoor: boolean;
+    level_category: string;
+  }[]
+): LevelWizardItem[] {
+  return files
+    .filter((item) => ["unit", "opening", "fixture", "detail"].includes(item.detected_type ?? ""))
+    .map((item) => ({
+      stem: item.stem,
+      detected_type: item.detected_type,
+      ordinal: item.detected_level,
+      name: item.level_name,
+      short_name: item.short_name,
+      outdoor: item.outdoor,
+      category: item.level_category
+    }));
+}
 
 
 export function WizardPage() {
   const navigate = useNavigate();
   const sessionId = useAppStore((state) => state.sessionId);
+  const setCurrentScreen = useAppStore((state) => state.setCurrentScreen);
   const files = useAppStore((state) => state.files);
+  const cleanupSummary = useAppStore((state) => state.cleanupSummary);
+  const wizardState = useAppStore((state) => state.wizardState);
   const setFiles = useAppStore((state) => state.setFiles);
+  const setWizardState = useAppStore((state) => state.setWizardState);
   const selectedFileStem = useAppStore((state) => state.selectedFileStem);
   const setSelectedFileStem = useAppStore((state) => state.setSelectedFileStem);
   const hoveredFileStem = useAppStore((state) => state.hoveredFileStem);
@@ -28,7 +114,7 @@ export function WizardPage() {
   const setWizardSaveStatus = useAppStore((state) => state.setWizardSaveStatus);
   const learningSuggestion = useAppStore((state) => state.learningSuggestion);
   const setLearningSuggestion = useAppStore((state) => state.setLearningSuggestion);
-  const [step, setStep] = useState(2);
+  const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [features, setFeatures] = useState<
     {
@@ -39,15 +125,38 @@ export function WizardPage() {
     }[]
   >([]);
 
+  const openingCount = useMemo(() => files.filter((item) => item.detected_type === "opening").length, [files]);
+  const fixtureCount = useMemo(() => files.filter((item) => item.detected_type === "fixture").length, [files]);
+  const detailCount = useMemo(() => files.filter((item) => item.detected_type === "detail").length, [files]);
+
   const steps = useMemo(
     () => [
-      { id: 1, label: "Project Info", enabled: false },
+      { id: 1, label: "Project Info" },
       { id: 2, label: "File Classification" },
       { id: 3, label: "Level Mapping" },
-      { id: 10, label: "Summary (Phase 3)", enabled: false }
+      { id: 4, label: "Building Assignment" },
+      { id: 5, label: "Unit Mapping" },
+      { id: 6, label: openingCount ? "Opening Mapping" : "Opening Mapping (No files)" },
+      { id: 7, label: fixtureCount ? "Fixture Mapping" : "Fixture Mapping (No files)" },
+      { id: 8, label: detailCount ? "Detail Mapping" : "Detail Mapping (No files)" },
+      { id: 9, label: "Footprint Options" },
+      { id: 10, label: "Summary" }
     ],
-    []
+    [detailCount, fixtureCount, openingCount]
   );
+
+  const projectComplete = useMemo(() => {
+    const project = wizardState?.project;
+    if (!project) {
+      return false;
+    }
+    return Boolean(
+      project.venue_name.trim() &&
+        project.venue_category.trim() &&
+        project.address.locality.trim() &&
+        project.address.country.trim()
+    );
+  }, [wizardState]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -59,14 +168,16 @@ export function WizardPage() {
     const load = async () => {
       try {
         setLoading(true);
-        const [fileResponse, featureResponse] = await Promise.all([
+        const [fileResponse, featureResponse, wizardResponse] = await Promise.all([
           fetchSessionFiles(sessionId),
-          fetchSessionFeatures(sessionId)
+          fetchSessionFeatures(sessionId),
+          fetchWizardState(sessionId)
         ]);
         if (!active) {
           return;
         }
         setFiles(fileResponse.files);
+        setWizardState(wizardResponse.wizard);
         setFeatures(
           (featureResponse.features as Array<Record<string, unknown>>).map((item) => ({
             type: String(item.type || "Feature"),
@@ -94,7 +205,7 @@ export function WizardPage() {
     return () => {
       active = false;
     };
-  }, [navigate, sessionId, setFiles, setWizardSaveStatus]);
+  }, [navigate, sessionId, setFiles, setWizardSaveStatus, setWizardState]);
 
   const refreshFeatures = async () => {
     if (!sessionId) {
@@ -115,6 +226,22 @@ export function WizardPage() {
             : {}
       }))
     );
+  };
+
+  const refreshWizard = async () => {
+    if (!sessionId) {
+      return;
+    }
+    const response = await fetchWizardState(sessionId);
+    setWizardState(response.wizard);
+  };
+
+  const syncLevels = async () => {
+    if (!sessionId) {
+      return;
+    }
+    const response = await patchWizardLevels(sessionId, toLevelItemsFromFiles(files));
+    setWizardState(response.wizard);
   };
 
   const runDetectAll = async () => {
@@ -155,6 +282,71 @@ export function WizardPage() {
     }
   };
 
+  const saveProject = async (payload: ProjectWizardState) => {
+    if (!sessionId) {
+      return;
+    }
+    try {
+      setWizardSaveStatus("saving");
+      const response = await patchWizardProject(sessionId, payload);
+      setWizardState(response.wizard);
+      setWizardSaveStatus("saved");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save project info";
+      setWizardSaveStatus("error", message);
+    }
+  };
+
+  const saveBuildings = async (buildings: BuildingWizardState[]) => {
+    if (!sessionId) {
+      return;
+    }
+    try {
+      setWizardSaveStatus("saving");
+      const response = await patchWizardBuildings(sessionId, buildings);
+      setWizardState(response.wizard);
+      setWizardSaveStatus("saved");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save building assignments";
+      setWizardSaveStatus("error", message);
+    }
+  };
+
+  const saveMappings = async (payload: {
+    unit?: UnitMappingState;
+    opening?: OpeningMappingState;
+    fixture?: FixtureMappingState;
+    detail_confirmed?: boolean;
+  }) => {
+    if (!sessionId) {
+      return;
+    }
+    try {
+      setWizardSaveStatus("saving");
+      const response = await patchWizardMappings(sessionId, payload);
+      setWizardState(response.wizard);
+      setWizardSaveStatus("saved");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save mappings";
+      setWizardSaveStatus("error", message);
+    }
+  };
+
+  const saveFootprint = async (payload: FootprintWizardState) => {
+    if (!sessionId) {
+      return;
+    }
+    try {
+      setWizardSaveStatus("saving");
+      const response = await patchWizardFootprint(sessionId, payload);
+      setWizardState(response.wizard);
+      setWizardSaveStatus("saved");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save footprint options";
+      setWizardSaveStatus("error", message);
+    }
+  };
+
   const applyLearningSuggestion = async () => {
     if (!sessionId || !learningSuggestion) {
       return;
@@ -172,7 +364,50 @@ export function WizardPage() {
     setLearningSuggestion(null);
   };
 
+  const uploadMappingsFile = async (file: File) => {
+    if (!sessionId) {
+      return;
+    }
+    try {
+      setWizardSaveStatus("saving");
+      await uploadCompanyMappings(sessionId, file);
+      await refreshWizard();
+      setWizardSaveStatus("saved");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to upload company mappings";
+      setWizardSaveStatus("error", message);
+    }
+  };
+
+  const confirmSummary = async () => {
+    if (!sessionId) {
+      return;
+    }
+    try {
+      setWizardSaveStatus("saving");
+      await syncLevels();
+      await generateSessionDraft(sessionId);
+      await refreshFeatures();
+      setCurrentScreen("review");
+      setWizardSaveStatus("saved");
+      navigate("/review");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to generate draft features";
+      setWizardSaveStatus("error", message);
+    }
+  };
+
   const showStep = () => {
+    if (step === 1) {
+      return (
+        <ProjectInfoStep
+          project={wizardState?.project ?? null}
+          saving={wizardSaveStatus === "saving"}
+          onSave={(payload) => void saveProject(payload)}
+        />
+      );
+    }
+
     if (step === 2) {
       return (
         <FileClassStep
@@ -203,32 +438,102 @@ export function WizardPage() {
       );
     }
 
+    if (step === 4) {
+      return (
+        <BuildingStep
+          buildings={wizardState?.buildings ?? []}
+          allFileStems={files.map((item) => item.stem)}
+          venueAddress={wizardState?.project?.address ?? null}
+          saving={wizardSaveStatus === "saving"}
+          onSave={(buildings) => void saveBuildings(buildings)}
+        />
+      );
+    }
+
+    if (step === 5) {
+      return (
+        <UnitMapStep
+          files={files}
+          mapping={wizardState?.mappings.unit ?? EMPTY_UNIT_MAPPING}
+          saving={wizardSaveStatus === "saving"}
+          onSave={(mapping) => void saveMappings({ unit: mapping })}
+          onUploadCompanyMappings={(file) => void uploadMappingsFile(file)}
+        />
+      );
+    }
+
+    if (step === 6) {
+      return (
+        <OpeningMapStep
+          files={files}
+          mapping={wizardState?.mappings.opening ?? EMPTY_OPENING_MAPPING}
+          saving={wizardSaveStatus === "saving"}
+          onSave={(mapping) => void saveMappings({ opening: mapping })}
+        />
+      );
+    }
+
+    if (step === 7) {
+      return (
+        <FixtureMapStep
+          files={files}
+          mapping={wizardState?.mappings.fixture ?? EMPTY_FIXTURE_MAPPING}
+          saving={wizardSaveStatus === "saving"}
+          onSave={(mapping) => void saveMappings({ fixture: mapping })}
+        />
+      );
+    }
+
+    if (step === 8) {
+      return <DetailMapStep files={files} />;
+    }
+
+    if (step === 9) {
+      return (
+        <FootprintStep
+          footprint={wizardState?.footprint ?? EMPTY_FOOTPRINT}
+          saving={wizardSaveStatus === "saving"}
+          onSave={(payload) => void saveFootprint(payload)}
+        />
+      );
+    }
+
     return (
-      <section className="rounded border bg-white p-6">
-        <h2 className="text-lg font-semibold">Step not available in Phase 2</h2>
-        <p className="mt-2 text-sm text-slate-600">
-          Project Info and Summary become functional in Phase 3.
-        </p>
-      </section>
+      <SummaryStep
+        files={files}
+        cleanupSummary={cleanupSummary}
+        wizard={wizardState}
+        saving={wizardSaveStatus === "saving"}
+        onConfirm={() => void confirmSummary()}
+      />
     );
   };
 
   const nextStep = () => {
-    if (step === 2) {
-      setStep(3);
+    const currentIndex = STEP_ORDER.indexOf(step);
+    if (currentIndex === -1 || currentIndex >= STEP_ORDER.length - 1) {
       return;
     }
+    if (step === 3) {
+      void syncLevels();
+    }
+    const next = STEP_ORDER[currentIndex + 1];
+    setStep(next);
   };
 
   const prevStep = () => {
-    if (step === 3) {
-      setStep(2);
+    const currentIndex = STEP_ORDER.indexOf(step);
+    if (currentIndex <= 0) {
       return;
     }
+    const previous = STEP_ORDER[currentIndex - 1];
+    setStep(previous);
   };
 
+  const canGoNext = step < 10 && (step !== 1 || projectComplete);
+
   return (
-    <main className="mx-auto flex min-h-screen max-w-7xl flex-col gap-4 p-6">
+    <main className="mx-auto flex min-h-screen w-full max-w-[1500px] flex-col gap-6 px-6 py-7 xl:px-8">
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-semibold">Wizard</h1>
@@ -241,14 +546,17 @@ export function WizardPage() {
         </Link>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[18rem_1fr]">
+      <div className="grid gap-5 lg:grid-cols-[20rem_minmax(0,1fr)]">
         <StepSidebar
           steps={steps}
           currentStep={step}
           onSelectStep={setStep}
-          onSkipToSummary={() => setStep(10)}
+          onSkipToSummary={() => {
+            setStep(10);
+            void syncLevels();
+          }}
         />
-        <div className="space-y-4">
+        <div className="space-y-5">
           {loading ? (
             <div className="rounded border bg-white p-4 text-sm text-slate-600">Loading wizard data...</div>
           ) : (
@@ -277,7 +585,7 @@ export function WizardPage() {
             </div>
           )}
 
-          <div className="flex items-center justify-between rounded border bg-white px-4 py-3">
+          <div className="flex items-center justify-between rounded border bg-white px-5 py-3.5">
             <div className="text-sm">
               {wizardSaveStatus === "saving" && "Saving..."}
               {wizardSaveStatus === "saved" && "Saved ✓"}
@@ -290,7 +598,7 @@ export function WizardPage() {
               <button
                 type="button"
                 className="rounded border px-3 py-1.5 text-sm"
-                disabled={step <= 2}
+                disabled={step <= 1}
                 onClick={prevStep}
               >
                 ← Back
@@ -298,7 +606,7 @@ export function WizardPage() {
               <button
                 type="button"
                 className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-60"
-                disabled={step >= 3}
+                disabled={!canGoNext}
                 onClick={nextStep}
               >
                 Next →
