@@ -13,6 +13,10 @@ export type ImportedFile = {
   attribute_columns: string[];
   detected_type: string | null;
   detected_level: number | null;
+  level_name: string | null;
+  short_name: string | null;
+  outdoor: boolean;
+  level_category: string;
   confidence: string;
   crs_detected: string | null;
   warnings: string[];
@@ -23,6 +27,38 @@ export type ImportResponse = {
   files: ImportedFile[];
   cleanup_summary: CleanupSummary;
   warnings: string[];
+};
+
+export type DetectResponse = {
+  session_id: string;
+  files: ImportedFile[];
+};
+
+export type LearningSuggestion = {
+  source_stem: string;
+  keyword: string;
+  feature_type: string;
+  affected_stems: string[];
+  message: string;
+};
+
+export type UpdateFileRequest = {
+  detected_type?: string | null;
+  detected_level?: number | null;
+  level_name?: string | null;
+  short_name?: string | null;
+  outdoor?: boolean | null;
+  level_category?: string | null;
+  apply_learning?: boolean;
+  learning_keyword?: string | null;
+};
+
+export type UpdateFileResponse = {
+  session_id: string;
+  file: ImportedFile;
+  files: ImportedFile[];
+  save_status: "saved";
+  learning_suggestion: LearningSuggestion | null;
 };
 
 export async function importShapefiles(
@@ -57,3 +93,44 @@ export async function importShapefiles(
   });
 }
 
+async function handleJson<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `Request failed (${response.status})`);
+  }
+  return (await response.json()) as T;
+}
+
+export async function fetchSessionFiles(sessionId: string): Promise<{ session_id: string; files: ImportedFile[] }> {
+  const response = await fetch(`/api/session/${sessionId}/files`);
+  return handleJson<{ session_id: string; files: ImportedFile[] }>(response);
+}
+
+export async function detectAllFiles(sessionId: string): Promise<DetectResponse> {
+  const response = await fetch(`/api/session/${sessionId}/detect`, {
+    method: "POST"
+  });
+  return handleJson<DetectResponse>(response);
+}
+
+export async function updateSessionFile(
+  sessionId: string,
+  stem: string,
+  payload: UpdateFileRequest
+): Promise<UpdateFileResponse> {
+  const response = await fetch(`/api/session/${sessionId}/files/${encodeURIComponent(stem)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  return handleJson<UpdateFileResponse>(response);
+}
+
+export async function fetchSessionFeatures(
+  sessionId: string
+): Promise<{ type: "FeatureCollection"; features: Record<string, unknown>[] }> {
+  const response = await fetch(`/api/session/${sessionId}/features`);
+  return handleJson<{ type: "FeatureCollection"; features: Record<string, unknown>[] }>(response);
+}

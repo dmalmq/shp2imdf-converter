@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,6 +28,10 @@ class ImportedFile(BaseModel):
     attribute_columns: list[str]
     detected_type: str | None = None
     detected_level: int | None = None
+    level_name: str | None = None
+    short_name: str | None = None
+    outdoor: bool = False
+    level_category: str = "unspecified"
     confidence: str = "red"
     crs_detected: str | None = None
     warnings: list[str] = Field(default_factory=list)
@@ -58,6 +63,47 @@ class SessionRecord(BaseModel):
     cleanup_summary: CleanupSummary
     feature_collection: dict[str, Any]
     warnings: list[str] = Field(default_factory=list)
+    learned_keywords: dict[str, str] = Field(default_factory=dict)
+
+
+class DetectResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    files: list[ImportedFile]
+
+
+class UpdateFileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    detected_type: str | None = None
+    detected_level: int | None = None
+    level_name: str | None = None
+    short_name: str | None = None
+    outdoor: bool | None = None
+    level_category: str | None = None
+    apply_learning: bool = False
+    learning_keyword: str | None = None
+
+
+class LearningSuggestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_stem: str
+    keyword: str
+    feature_type: str
+    affected_stems: list[str]
+    message: str
+
+
+class UpdateFileResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    file: ImportedFile
+    files: list[ImportedFile]
+    save_status: Literal["saved"] = "saved"
+    learning_suggestion: LearningSuggestion | None = None
 
 
 class ErrorResponse(BaseModel):
@@ -65,4 +111,3 @@ class ErrorResponse(BaseModel):
 
     detail: str
     code: str
-

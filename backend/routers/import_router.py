@@ -9,6 +9,7 @@ import zipfile
 
 from fastapi import APIRouter, File, Request, UploadFile
 
+from backend.src.detector import sync_feature_types
 from backend.src.importer import import_file_blobs
 from backend.src.schemas import ImportResponse
 from backend.src.session import SessionManager
@@ -51,10 +52,11 @@ async def import_files(
         raw_blobs.extend(_expand_upload(upload, payload))
 
     artifacts = import_file_blobs(raw_blobs, filename_keywords_path=_keyword_config_path(request))
+    feature_collection = sync_feature_types(artifacts.feature_collection, artifacts.files)
     session = _session_manager(request).create_session(
         files=artifacts.files,
         cleanup_summary=artifacts.cleanup_summary,
-        feature_collection=artifacts.feature_collection,
+        feature_collection=feature_collection,
         warnings=artifacts.warnings,
     )
     return ImportResponse(
@@ -63,4 +65,3 @@ async def import_files(
         cleanup_summary=artifacts.cleanup_summary,
         warnings=artifacts.warnings,
     )
-

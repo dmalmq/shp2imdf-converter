@@ -73,3 +73,59 @@ def test_session_cleanup_prunes_expired_sessions() -> None:
     assert removed == 1
     assert manager.get_session(session.session_id) is None
 
+
+@pytest.mark.phase2
+def test_detect_endpoint_reruns_detection(test_client, sample_dir: Path) -> None:
+    files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space") + _upload_payload(sample_dir, "JRTokyoSta_GF_Space")
+    import_response = test_client.post("/api/import", files=files)
+    session_id = import_response.json()["session_id"]
+
+    response = test_client.post(f"/api/session/{session_id}/detect")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] == session_id
+    assert len(payload["files"]) >= 2
+    assert any(item["confidence"] in {"green", "yellow", "red"} for item in payload["files"])
+
+
+@pytest.mark.phase2
+def test_patch_file_updates_type_and_returns_learning_prompt(test_client, sample_dir: Path) -> None:
+    files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space") + _upload_payload(sample_dir, "JRTokyoSta_GF_Space")
+    import_response = test_client.post("/api/import", files=files)
+    session_id = import_response.json()["session_id"]
+
+    response = test_client.patch(
+        f"/api/session/{session_id}/files/JRTokyoSta_B1_Space",
+        json={"detected_type": "opening"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["file"]["detected_type"] == "opening"
+    assert payload["learning_suggestion"] is not None
+
+
+@pytest.mark.phase2
+def test_apply_learning_updates_other_files(test_client, sample_dir: Path) -> None:
+    files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space") + _upload_payload(sample_dir, "JRTokyoSta_GF_Space")
+    import_response = test_client.post("/api/import", files=files)
+    session_id = import_response.json()["session_id"]
+
+    first_patch = test_client.patch(
+        f"/api/session/{session_id}/files/JRTokyoSta_B1_Space",
+        json={"detected_type": "opening"},
+    )
+    suggestion = first_patch.json()["learning_suggestion"]
+    assert suggestion is not None
+
+    response = test_client.patch(
+        f"/api/session/{session_id}/files/JRTokyoSta_B1_Space",
+        json={
+            "detected_type": "opening",
+            "apply_learning": True,
+            "learning_keyword": suggestion["keyword"],
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    gf = next(item for item in payload["files"] if item["stem"] == "JRTokyoSta_GF_Space")
+    assert gf["detected_type"] == "opening"

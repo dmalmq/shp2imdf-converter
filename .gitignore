@@ -10,6 +10,7 @@ venv/
 # Frontend
 frontend/node_modules/
 frontend/dist/
+*.tsbuildinfo
 
 # Editors and OS
 .DS_Store

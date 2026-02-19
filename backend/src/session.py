@@ -122,6 +122,7 @@ class SessionManager:
         cleanup_summary: CleanupSummary,
         feature_collection: dict,
         warnings: list[str] | None = None,
+        learned_keywords: dict[str, str] | None = None,
     ) -> SessionRecord:
         self.prune_expired()
         self._evict_if_needed()
@@ -134,6 +135,7 @@ class SessionManager:
             cleanup_summary=cleanup_summary,
             feature_collection=feature_collection,
             warnings=warnings or [],
+            learned_keywords=learned_keywords or {},
         )
         self.backend.save(session)
         return session
@@ -156,6 +158,11 @@ class SessionManager:
                 removed += 1
         return removed
 
+    def save_session(self, session: SessionRecord) -> SessionRecord:
+        session.last_accessed = datetime.now(UTC)
+        self.backend.save(session)
+        return session
+
     def _evict_if_needed(self) -> None:
         sessions = self.backend.list_all()
         if len(sessions) < self.max_sessions:
@@ -176,4 +183,3 @@ def build_session_backend(
     if normalized == "redis":
         return RedisSessionBackend()
     return MemorySessionBackend()
-
