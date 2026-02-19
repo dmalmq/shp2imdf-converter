@@ -1,0 +1,12 @@
+{
+  "category_type": "opening",
+  "categories": [
+    "automobile",
+    "bicycle",
+    "emergencyexit",
+    "pedestrian",
+    "pedestrian.principal",
+    "pedestrian.transit",
+    "service"
+  ]
+}

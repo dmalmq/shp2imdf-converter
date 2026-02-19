@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { type ReviewFeature, featureName } from "./types";
+import { type ReviewFeature, type ReviewIssue, featureName } from "./types";
 
 
 const NON_EDITABLE_KEYS = new Set(["metadata", "issues", "status", "source_file", "display_point"]);
@@ -10,8 +10,11 @@ type Props = {
   language: string;
   levelOptions: Array<{ id: string; label: string }>;
   addressOptions: Array<{ id: string; label: string }>;
+  validationIssues: ReviewIssue[];
+  autoFixing: boolean;
   onSave: (featureId: string, properties: Record<string, unknown>) => void;
   onDelete: (featureId: string) => void;
+  onAutoFixSafe: () => void;
 };
 
 
@@ -50,13 +53,51 @@ function toStringValue(value: unknown): string {
 }
 
 
+function normalizeIssues(value: unknown): ReviewIssue[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized: ReviewIssue[] = [];
+  value.forEach((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return;
+    }
+    const candidate = item as Record<string, unknown>;
+    if (
+      typeof candidate.check !== "string" ||
+      typeof candidate.message !== "string" ||
+      (candidate.severity !== "error" && candidate.severity !== "warning")
+    ) {
+      return;
+    }
+    normalized.push({
+      feature_id: typeof candidate.feature_id === "string" ? candidate.feature_id : null,
+      related_feature_id: typeof candidate.related_feature_id === "string" ? candidate.related_feature_id : null,
+      check: candidate.check,
+      message: candidate.message,
+      severity: candidate.severity,
+      auto_fixable: candidate.auto_fixable === true,
+      fix_description: typeof candidate.fix_description === "string" ? candidate.fix_description : null,
+      overlap_geometry:
+        candidate.overlap_geometry && typeof candidate.overlap_geometry === "object" && !Array.isArray(candidate.overlap_geometry)
+          ? (candidate.overlap_geometry as Record<string, unknown>)
+          : null
+    });
+  });
+  return normalized;
+}
+
+
 export function PropertiesPanel({
   feature,
   language,
   levelOptions,
   addressOptions,
+  validationIssues,
+  autoFixing,
   onSave,
-  onDelete
+  onDelete,
+  onAutoFixSafe
 }: Props) {
   const [form, setForm] = useState<Record<string, unknown>>({});
 
@@ -66,11 +107,13 @@ export function PropertiesPanel({
 
   const issues = useMemo(() => {
     if (!feature) {
-      return [];
+      return [] as ReviewIssue[];
     }
-    const value = feature.properties.issues;
-    return Array.isArray(value) ? value : [];
-  }, [feature]);
+    if (validationIssues.length > 0) {
+      return validationIssues;
+    }
+    return normalizeIssues(feature.properties.issues);
+  }, [feature, validationIssues]);
 
   const editableKeys = useMemo(() => {
     if (!feature) {
@@ -99,9 +142,25 @@ export function PropertiesPanel({
       </div>
 
       {issues.length > 0 ? (
-        <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
+        <div className="space-y-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
           {issues.map((item, index) => (
-            <p key={`${index}-${String(item)}`}>{String(item)}</p>
+            <div key={`${item.check}-${index}`} className="rounded border border-amber-200 bg-white p-2">
+              <p className="font-medium">
+                [{item.severity}] {item.check}
+              </p>
+              <p>{item.message}</p>
+              {item.fix_description ? <p className="text-amber-700">{item.fix_description}</p> : null}
+              {item.auto_fixable ? (
+                <button
+                  type="button"
+                  className="mt-1 rounded border border-amber-300 px-2 py-0.5 text-[11px]"
+                  onClick={onAutoFixSafe}
+                  disabled={autoFixing}
+                >
+                  {autoFixing ? "Applying..." : "Auto-fix"}
+                </button>
+              ) : null}
+            </div>
           ))}
         </div>
       ) : (
@@ -281,4 +340,3 @@ export function PropertiesPanel({
     </div>
   );
 }
-

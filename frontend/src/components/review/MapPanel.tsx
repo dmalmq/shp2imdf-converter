@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef } from "react";
 import Map, { Layer, type LayerProps, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
 
-import { type ReviewFeature, isLocatedFeature } from "./types";
+import { type ReviewFeature, type ReviewIssue, isLocatedFeature } from "./types";
+import { STREET_MAP_STYLE } from "../shared/streetMapStyle";
 
 
 type Props = {
   features: ReviewFeature[];
   selectedFeatureIds: string[];
   layerVisibility: Record<string, boolean>;
+  validationIssues: ReviewIssue[];
+  overlayVisibility: Record<string, boolean>;
   levelFilter: string;
   onSelectFeature: (id: string, multi?: boolean) => void;
 };
@@ -99,6 +102,34 @@ const HIGHLIGHT_LINE_LAYER: LayerProps = {
   }
 };
 
+const ERROR_OUTLINE_LAYER: LayerProps = {
+  id: "review-error-outline",
+  type: "line",
+  paint: {
+    "line-color": "#dc2626",
+    "line-width": 3
+  }
+};
+
+const WARNING_OUTLINE_LAYER: LayerProps = {
+  id: "review-warning-outline",
+  type: "line",
+  paint: {
+    "line-color": "#ca8a04",
+    "line-width": 2,
+    "line-dasharray": [2, 1]
+  }
+};
+
+const OVERLAP_LAYER: LayerProps = {
+  id: "review-overlap-fill",
+  type: "fill",
+  paint: {
+    "fill-color": "#ef4444",
+    "fill-opacity": 0.28
+  }
+};
+
 
 function flattenCoordinates(value: unknown, points: [number, number][]): void {
   if (!Array.isArray(value)) {
@@ -157,7 +188,15 @@ function isVisibleByLevel(feature: ReviewFeature, levelFilter: string): boolean 
 }
 
 
-export function MapPanel({ features, selectedFeatureIds, layerVisibility, levelFilter, onSelectFeature }: Props) {
+export function MapPanel({
+  features,
+  selectedFeatureIds,
+  layerVisibility,
+  validationIssues,
+  overlayVisibility,
+  levelFilter,
+  onSelectFeature
+}: Props) {
   const mapRef = useRef<MapRef | null>(null);
 
   const toGeoJsonFeature = (feature: ReviewFeature) => ({
@@ -188,6 +227,39 @@ export function MapPanel({ features, selectedFeatureIds, layerVisibility, levelF
     return visibleFeatures.filter((feature) => selectedSet.has(feature.id));
   }, [selectedFeatureIds, visibleFeatures]);
 
+  const errorIds = useMemo(() => {
+    return new Set(validationIssues.filter((item) => item.severity === "error" && item.feature_id).map((item) => item.feature_id!));
+  }, [validationIssues]);
+
+  const warningIds = useMemo(() => {
+    return new Set(validationIssues.filter((item) => item.severity === "warning" && item.feature_id).map((item) => item.feature_id!));
+  }, [validationIssues]);
+
+  const errorFeatures = useMemo(() => visibleFeatures.filter((feature) => errorIds.has(feature.id)), [visibleFeatures, errorIds]);
+  const warningFeatures = useMemo(
+    () => visibleFeatures.filter((feature) => !errorIds.has(feature.id) && warningIds.has(feature.id)),
+    [visibleFeatures, errorIds, warningIds]
+  );
+
+  const overlapFeatures = useMemo(() => {
+    return validationIssues
+      .filter((item) => {
+        if (item.check !== "overlapping_units" || !item.overlap_geometry) {
+          return false;
+        }
+        const geometry = item.overlap_geometry;
+        return typeof geometry === "object" && !Array.isArray(geometry) && typeof geometry.type === "string";
+      })
+      .map((item, index) => ({
+        type: "Feature" as const,
+        id: `overlap-${index}`,
+        geometry: item.overlap_geometry,
+        properties: {
+          check: item.check
+        }
+      }));
+  }, [validationIssues]);
+
   const mapData = useMemo(
     () => ({
       type: "FeatureCollection",
@@ -202,6 +274,30 @@ export function MapPanel({ features, selectedFeatureIds, layerVisibility, levelF
       features: selectedFeatures.map(toGeoJsonFeature)
     }),
     [selectedFeatures]
+  );
+
+  const errorData = useMemo(
+    () => ({
+      type: "FeatureCollection",
+      features: errorFeatures.map(toGeoJsonFeature)
+    }),
+    [errorFeatures]
+  );
+
+  const warningData = useMemo(
+    () => ({
+      type: "FeatureCollection",
+      features: warningFeatures.map(toGeoJsonFeature)
+    }),
+    [warningFeatures]
+  );
+
+  const overlapData = useMemo(
+    () => ({
+      type: "FeatureCollection",
+      features: overlapFeatures
+    }),
+    [overlapFeatures]
   );
 
   useEffect(() => {
@@ -253,7 +349,7 @@ export function MapPanel({ features, selectedFeatureIds, layerVisibility, levelF
           "review-highlight-fill",
           "review-highlight-line"
         ]}
-        mapStyle="https://demotiles.maplibre.org/style.json"
+        mapStyle={STREET_MAP_STYLE}
         onClick={onMapClick}
       >
         <Source id="review-source" type="geojson" data={mapData}>
@@ -266,6 +362,21 @@ export function MapPanel({ features, selectedFeatureIds, layerVisibility, levelF
           <Layer {...HIGHLIGHT_FILL_LAYER} />
           <Layer {...HIGHLIGHT_LINE_LAYER} />
         </Source>
+        {overlayVisibility.errors !== false ? (
+          <Source id="review-errors-source" type="geojson" data={errorData}>
+            <Layer {...ERROR_OUTLINE_LAYER} />
+          </Source>
+        ) : null}
+        {overlayVisibility.warnings !== false ? (
+          <Source id="review-warnings-source" type="geojson" data={warningData}>
+            <Layer {...WARNING_OUTLINE_LAYER} />
+          </Source>
+        ) : null}
+        {overlayVisibility.overlaps !== false ? (
+          <Source id="review-overlap-source" type="geojson" data={overlapData}>
+            <Layer {...OVERLAP_LAYER} />
+          </Source>
+        ) : null}
       </Map>
     </div>
   );

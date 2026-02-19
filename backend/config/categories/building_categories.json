@@ -1,0 +1,10 @@
+{
+  "category_type": "building",
+  "categories": [
+    "parking",
+    "transit",
+    "transit.bus",
+    "transit.train",
+    "unspecified"
+  ]
+}

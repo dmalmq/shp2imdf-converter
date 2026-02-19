@@ -9,7 +9,32 @@ type Props = {
   onSave: (payload: ProjectWizardState) => void;
 };
 
-const VENUE_CATEGORIES = ["transitstation", "shoppingcenter", "airport", "conventioncenter", "unspecified"];
+const VENUE_CATEGORIES = [
+  "airport",
+  "airport.intl",
+  "aquarium",
+  "businesscampus",
+  "casino",
+  "communitycenter",
+  "conventioncenter",
+  "governmentfacility",
+  "healthcarefacility",
+  "hotel",
+  "museum",
+  "parkingfacility",
+  "resort",
+  "retailstore",
+  "shoppingcenter",
+  "stadium",
+  "stripmall",
+  "theater",
+  "themepark",
+  "trainstation",
+  "transitstation",
+  "university",
+  "universit",
+  "unspecified"
+];
 
 
 function createDefaultProject(): ProjectWizardState {

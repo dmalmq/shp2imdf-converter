@@ -8,11 +8,12 @@ import json
 import re
 import zipfile
 
+from backend.src.converter import build_session_imdf_geojson_files
 from backend.src.schemas import SessionRecord
 
 
 IMDF_VERSION = "1.0.0"
-GENERATED_BY = "shp2imdf-converter phase3"
+GENERATED_BY = "shp2imdf-converter phase5"
 
 
 def _utc_now_iso() -> str:
@@ -40,16 +41,14 @@ def _safe_export_name(value: str) -> str:
 def build_export_archive(session: SessionRecord) -> tuple[bytes, str]:
     output = BytesIO()
     manifest = build_manifest(session)
+    files = build_session_imdf_geojson_files(session)
 
     with zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
-        archive.writestr(
-            "features.geojson",
-            json.dumps(session.feature_collection, ensure_ascii=False, indent=2),
-        )
+        for filename, payload in files.items():
+            archive.writestr(filename, json.dumps(payload, ensure_ascii=False, indent=2))
 
     project_name = session.wizard.project.project_name if session.wizard.project else None
     fallback = project_name or session.wizard.project.venue_name if session.wizard.project else session.session_id
     filename = f"{_safe_export_name(fallback)}.imdf"
     return output.getvalue(), filename
-

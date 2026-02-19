@@ -1,5 +1,5 @@
 {
-  "default_category": "unspecified",
+  "category_type": "unit",
   "categories": [
     "auditorium",
     "brick",
@@ -57,14 +57,12 @@
     "structure",
     "terrace",
     "theater",
-    "transit",
     "unenclosedarea",
     "unspecified",
     "vegetation",
     "waitingroom",
     "walkway",
     "walkway.island",
-    "wood",
-    "retail"
+    "wood"
   ]
 }

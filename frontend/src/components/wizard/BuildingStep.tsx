@@ -11,7 +11,7 @@ type Props = {
   onSave: (buildings: BuildingWizardState[]) => void;
 };
 
-const BUILDING_CATEGORIES = ["unspecified", "parking", "transit"];
+const BUILDING_CATEGORIES = ["unspecified", "parking", "transit", "transit.bus", "transit.train"];
 
 
 function createDefaultBuilding(allFileStems: string[]): BuildingWizardState {

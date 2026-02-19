@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import Map, { Layer, MapRef, Source } from "react-map-gl/maplibre";
+import { STREET_MAP_STYLE } from "./streetMapStyle";
 
 
 type BasicFeature = {
@@ -181,7 +182,7 @@ export function PreviewMap({ features, selectedStem, hoveredStem }: Props) {
           latitude: 35.68,
           zoom: 14
         }}
-        mapStyle="https://demotiles.maplibre.org/style.json"
+        mapStyle={STREET_MAP_STYLE}
       >
         <Source id="preview-source" type="geojson" data={mapData}>
           <Layer {...FILL_LAYER} />

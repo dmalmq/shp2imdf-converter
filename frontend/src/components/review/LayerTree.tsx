@@ -5,8 +5,11 @@ type Props = {
   layerVisibility: Record<string, boolean>;
   levelFilter: string;
   levelOptions: Array<{ id: string; label: string }>;
+  validationLoaded: boolean;
+  overlayVisibility: Record<string, boolean>;
   onLayerVisibilityChange: (next: Record<string, boolean>) => void;
   onLevelFilterChange: (next: string) => void;
+  onOverlayVisibilityChange: (next: Record<string, boolean>) => void;
 };
 
 
@@ -14,8 +17,11 @@ export function LayerTree({
   layerVisibility,
   levelFilter,
   levelOptions,
+  validationLoaded,
+  overlayVisibility,
   onLayerVisibilityChange,
-  onLevelFilterChange
+  onLevelFilterChange,
+  onOverlayVisibilityChange
 }: Props) {
   return (
     <div className="rounded border bg-white p-3">
@@ -56,7 +62,33 @@ export function LayerTree({
           ))}
         </select>
       </label>
+
+      {validationLoaded ? (
+        <div className="mt-3 border-t pt-3">
+          <h4 className="mb-2 text-sm font-medium text-slate-700">Validation Overlays</h4>
+          <div className="grid gap-1">
+            {[
+              ["errors", "Error highlights"],
+              ["warnings", "Warning highlights"],
+              ["overlaps", "Overlap polygons"]
+            ].map(([key, label]) => (
+              <label key={key} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={overlayVisibility[key] ?? true}
+                  onChange={(event) =>
+                    onOverlayVisibilityChange({
+                      ...overlayVisibility,
+                      [key]: event.target.checked
+                    })
+                  }
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
-

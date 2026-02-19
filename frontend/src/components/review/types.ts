@@ -6,6 +6,17 @@ export type ReviewFeature = {
   properties: Record<string, unknown>;
 };
 
+export type ReviewIssue = {
+  feature_id: string | null;
+  related_feature_id?: string | null;
+  check: string;
+  message: string;
+  severity: "error" | "warning";
+  auto_fixable: boolean;
+  fix_description?: string | null;
+  overlap_geometry?: Record<string, unknown> | null;
+};
+
 export const LOCATED_FEATURE_TYPES = ["venue", "footprint", "level", "unit", "opening", "fixture", "detail"] as const;
 
 export function isLocatedFeature(feature: ReviewFeature): boolean {
@@ -25,4 +36,3 @@ export function featureName(feature: ReviewFeature): string {
   }
   return "";
 }
-

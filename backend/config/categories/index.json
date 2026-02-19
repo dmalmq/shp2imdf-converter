@@ -1,0 +1,22 @@
+{
+  "version": "1.0.0",
+  "description": "IMDF category catalogs used by the converter. Some feature domains are full enums; occupant categories are accepted by validation pattern.",
+  "files": {
+    "access_control": "access_control_categories.json",
+    "accessibility": "accessibility_categories.json",
+    "amenity": "amenity_categories.json",
+    "building": "building_categories.json",
+    "door": "door_categories.json",
+    "fixture": "fixture_categories.json",
+    "footprint": "footprint_categories.json",
+    "geofence": "geofence_categories.json",
+    "level": "level_categories.json",
+    "occupant": "occupant_categories.json",
+    "opening": "opening_categories.json",
+    "relationship": "relationship_categories.json",
+    "restriction": "restriction_categories.json",
+    "section": "section_categories.json",
+    "unit": "unit_categories.json",
+    "venue": "venue_categories.json"
+  }
+}

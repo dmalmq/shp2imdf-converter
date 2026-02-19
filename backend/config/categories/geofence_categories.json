@@ -1,0 +1,13 @@
+{
+  "category_type": "geofence",
+  "categories": [
+    "concourse",
+    "geofence",
+    "paidarea",
+    "platform",
+    "postsecurity",
+    "presecurity",
+    "terminal",
+    "underconstruction"
+  ]
+}

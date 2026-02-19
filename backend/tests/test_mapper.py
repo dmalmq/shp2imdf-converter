@@ -133,3 +133,34 @@ def test_build_unit_code_preview_and_labels() -> None:
     assert wrap_labels("Main Hall", language="en") == {"en": "Main Hall"}
     assert wrap_labels("", language="en") is None
 
+
+@pytest.mark.phase3
+def test_resolve_unit_category_accepts_dotted_taxonomy_values() -> None:
+    valid = {"unspecified", "retail", "office"}
+    category, unresolved = resolve_unit_category(
+        raw_code="restroom.unisex.wheelchair",
+        company_mappings={},
+        valid_categories=valid,
+        default_category="unspecified",
+    )
+    assert category == "restroom.unisex.wheelchair"
+    assert unresolved is False
+
+
+@pytest.mark.phase3
+def test_normalize_company_mapping_accepts_syntactically_valid_extended_categories() -> None:
+    valid = {"unspecified", "retail", "office"}
+    mappings, default = normalize_company_mappings_payload(
+        payload={
+            "default_category": "office",
+            "mappings": {
+                "RESTROOM": "restroom.unisex.wheelchair",
+                "BAD": "invalid-category",
+            },
+        },
+        valid_categories=valid,
+        fallback_default="unspecified",
+    )
+    assert default == "office"
+    assert mappings["RESTROOM"] == "restroom.unisex.wheelchair"
+    assert mappings["BAD"] == "office"

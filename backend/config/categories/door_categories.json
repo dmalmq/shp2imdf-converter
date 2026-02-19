@@ -1,0 +1,16 @@
+{
+  "category_type": "door",
+  "categories": [
+    "door",
+    "movablepartition",
+    "open",
+    "revolving",
+    "shutter",
+    "sliding",
+    "swinging",
+    "turnstile",
+    "turnstile.fullheight",
+    "turnstile.waistheight",
+    "unspecified"
+  ]
+}
