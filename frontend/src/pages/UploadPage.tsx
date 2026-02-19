@@ -11,6 +11,7 @@ export function UploadPage() {
   const setSessionId = useAppStore((state) => state.setSessionId);
   const setCurrentScreen = useAppStore((state) => state.setCurrentScreen);
   const setFiles = useAppStore((state) => state.setFiles);
+  const setCleanupSummary = useAppStore((state) => state.setCleanupSummary);
 
   const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
   const [progress, setProgress] = useState(0);
@@ -48,6 +49,7 @@ export function UploadPage() {
       setResult(payload);
       setSessionId(payload.session_id);
       setFiles(payload.files);
+      setCleanupSummary(payload.cleanup_summary);
       setCurrentScreen("upload");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Import failed";

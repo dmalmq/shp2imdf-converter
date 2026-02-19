@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { ImportedFile, LearningSuggestion } from "../api/client";
+import type { CleanupSummary, ImportedFile, LearningSuggestion, WizardState } from "../api/client";
 
 type Screen = "upload" | "wizard" | "review";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -30,6 +30,8 @@ type AppState = {
   validationResults: ValidationResults;
   editHistory: Array<Record<string, unknown>>;
   files: ImportedFile[];
+  cleanupSummary: CleanupSummary | null;
+  wizardState: WizardState | null;
   selectedFileStem: string | null;
   hoveredFileStem: string | null;
   wizardSaveStatus: SaveStatus;
@@ -41,6 +43,8 @@ type AppState = {
   mergeWizardData: (payload: Record<string, unknown>) => void;
   setGeojsonData: (payload: Record<string, unknown> | null) => void;
   setFiles: (files: ImportedFile[]) => void;
+  setCleanupSummary: (summary: CleanupSummary | null) => void;
+  setWizardState: (wizardState: WizardState | null) => void;
   upsertFile: (file: ImportedFile) => void;
   setSelectedFileStem: (stem: string | null) => void;
   setHoveredFileStem: (stem: string | null) => void;
@@ -60,6 +64,8 @@ export const useAppStore = create<AppState>((set) => ({
   validationResults: { errors: 0, warnings: 0 },
   editHistory: [],
   files: [],
+  cleanupSummary: null,
+  wizardState: null,
   selectedFileStem: null,
   hoveredFileStem: null,
   wizardSaveStatus: "idle",
@@ -72,6 +78,8 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({ wizardData: { ...state.wizardData, ...payload } })),
   setGeojsonData: (geojsonData) => set({ geojsonData }),
   setFiles: (files) => set({ files }),
+  setCleanupSummary: (cleanupSummary) => set({ cleanupSummary }),
+  setWizardState: (wizardState) => set({ wizardState }),
   upsertFile: (file) =>
     set((state) => ({
       files: state.files.map((item) => (item.stem === file.stem ? file : item))
