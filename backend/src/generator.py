@@ -34,7 +34,7 @@ def _stable_id(session_id: str, key: str) -> str:
 
 def _default_short_name(ordinal: int) -> str:
     if ordinal == 0:
-        return "GF"
+        return "GH"
     if ordinal > 0:
         return f"{ordinal}F"
     return f"B{abs(ordinal)}"
@@ -362,14 +362,14 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
             geometry = footprint.get("geometry")
             if not isinstance(geometry, dict):
                 continue
-            props = footprint.get("properties") or {}
-            if props.get("category") == "ground":
-                venue_geometries.append(shape(geometry))
+            venue_geometries.append(shape(geometry))
         if not venue_geometries:
-            for footprint in footprint_features:
-                geometry = footprint.get("geometry")
-                if isinstance(geometry, dict):
-                    venue_geometries.append(shape(geometry))
+            venue_geometries = [geom for geom in level_geom_by_ordinal.values() if geom is not None and not geom.is_empty]
+        if not venue_geometries:
+            for geoms in unit_geoms_by_stem.values():
+                for geom in geoms:
+                    if geom is not None and not geom.is_empty:
+                        venue_geometries.append(geom)
 
         if venue_geometries:
             merged_venue = unary_union(venue_geometries)
@@ -543,4 +543,3 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
     final_features.extend(level_features)
     final_features.extend(mapped_features)
     return {"type": "FeatureCollection", "features": final_features}
-

@@ -22,7 +22,7 @@ function makeDefaultShortName(ordinal: number | null): string {
     return "";
   }
   if (ordinal === 0) {
-    return "GF";
+    return "GH";
   }
   if (ordinal > 0) {
     return `${ordinal}F`;

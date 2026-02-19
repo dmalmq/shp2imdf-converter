@@ -187,6 +187,31 @@ def test_missing_street_address_uses_venue_name(test_client, sample_dir: Path) -
 
 
 @pytest.mark.phase3
+def test_wizard_auto_detects_unit_mapping_columns(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+
+    response = test_client.get(f"/api/session/{session_id}/wizard")
+    assert response.status_code == 200
+    payload = response.json()
+    unit_mapping = payload["wizard"]["mappings"]["unit"]
+    assert unit_mapping["code_column"] == "COMPANY_CO"
+    assert unit_mapping["name_column"] == "NAME"
+
+
+@pytest.mark.phase3
+def test_wizard_auto_detects_opening_mapping_columns(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Opening"))
+    session_id = import_response.json()["session_id"]
+
+    response = test_client.get(f"/api/session/{session_id}/wizard")
+    assert response.status_code == 200
+    payload = response.json()
+    opening_mapping = payload["wizard"]["mappings"]["opening"]
+    assert opening_mapping["category_column"] == "TYPE"
+
+
+@pytest.mark.phase3
 def test_wizard_buildings_creates_building_specific_address(test_client, sample_dir: Path) -> None:
     files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space") + _upload_payload(sample_dir, "JRTokyoSta_GF_Space")
     import_response = test_client.post("/api/import", files=files)

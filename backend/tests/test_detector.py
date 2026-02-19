@@ -28,7 +28,9 @@ def test_detect_level_patterns() -> None:
     assert detect_level_ordinal("Station_B1_Space") == -1
     assert detect_level_ordinal("Station_-2_Opening") == -2
     assert detect_level_ordinal("Station_GF_Space") == 0
-    assert detect_level_ordinal("Station_1_Space") == 1
+    assert detect_level_ordinal("Station_GH_Space") == 0
+    assert detect_level_ordinal("Station_1_Space") == 0
+    assert detect_level_ordinal("Station_3_Space") == 2
 
 
 @pytest.mark.phase2
@@ -81,4 +83,3 @@ def test_load_keyword_map(config_path="backend/config/filename_keywords.json") -
     loaded = load_keyword_map(config_path)
     assert "unit" in loaded
     assert "space" in loaded["unit"]
-
