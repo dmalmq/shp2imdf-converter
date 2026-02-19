@@ -16,11 +16,11 @@ type Props = {
 const POLYGON_FILL_LAYER: LayerProps = {
   id: "review-polygons-fill",
   type: "fill",
-  filter: ["in", ["get", "feature_type"], ["literal", ["venue", "footprint", "level", "unit", "fixture"]]],
+  filter: ["in", ["get", "_feature_type"], ["literal", ["venue", "footprint", "level", "unit", "fixture"]]],
   paint: {
     "fill-color": [
       "match",
-      ["get", "feature_type"],
+      ["get", "_feature_type"],
       "venue",
       "#334155",
       "footprint",
@@ -40,11 +40,11 @@ const POLYGON_FILL_LAYER: LayerProps = {
 const POLYGON_LINE_LAYER: LayerProps = {
   id: "review-polygons-line",
   type: "line",
-  filter: ["in", ["get", "feature_type"], ["literal", ["venue", "footprint", "level", "unit", "fixture"]]],
+  filter: ["in", ["get", "_feature_type"], ["literal", ["venue", "footprint", "level", "unit", "fixture"]]],
   paint: {
     "line-color": [
       "match",
-      ["get", "feature_type"],
+      ["get", "_feature_type"],
       "venue",
       "#1e293b",
       "footprint",
@@ -64,7 +64,7 @@ const POLYGON_LINE_LAYER: LayerProps = {
 const OPENING_LAYER: LayerProps = {
   id: "review-openings",
   type: "line",
-  filter: ["==", ["get", "feature_type"], "opening"],
+  filter: ["==", ["get", "_feature_type"], "opening"],
   paint: {
     "line-color": "#ea580c",
     "line-width": 2.5
@@ -74,7 +74,7 @@ const OPENING_LAYER: LayerProps = {
 const DETAIL_LAYER: LayerProps = {
   id: "review-details",
   type: "line",
-  filter: ["==", ["get", "feature_type"], "detail"],
+  filter: ["==", ["get", "_feature_type"], "detail"],
   paint: {
     "line-color": "#0f766e",
     "line-width": 1.2
@@ -160,6 +160,17 @@ function isVisibleByLevel(feature: ReviewFeature, levelFilter: string): boolean 
 export function MapPanel({ features, selectedFeatureIds, layerVisibility, levelFilter, onSelectFeature }: Props) {
   const mapRef = useRef<MapRef | null>(null);
 
+  const toGeoJsonFeature = (feature: ReviewFeature) => ({
+    type: "Feature" as const,
+    id: feature.id,
+    geometry: feature.geometry,
+    properties: {
+      ...feature.properties,
+      _feature_type: feature.feature_type,
+      _feature_id: feature.id
+    }
+  });
+
   const visibleFeatures = useMemo(() => {
     return features.filter((feature) => {
       if (!isLocatedFeature(feature)) {
@@ -180,7 +191,7 @@ export function MapPanel({ features, selectedFeatureIds, layerVisibility, levelF
   const mapData = useMemo(
     () => ({
       type: "FeatureCollection",
-      features: visibleFeatures
+      features: visibleFeatures.map(toGeoJsonFeature)
     }),
     [visibleFeatures]
   );
@@ -188,7 +199,7 @@ export function MapPanel({ features, selectedFeatureIds, layerVisibility, levelF
   const selectedData = useMemo(
     () => ({
       type: "FeatureCollection",
-      features: selectedFeatures
+      features: selectedFeatures.map(toGeoJsonFeature)
     }),
     [selectedFeatures]
   );
@@ -207,10 +218,21 @@ export function MapPanel({ features, selectedFeatureIds, layerVisibility, levelF
 
   const onMapClick = (event: MapLayerMouseEvent) => {
     const hit = event.features?.[0];
-    if (!hit || (typeof hit.id !== "string" && typeof hit.id !== "number")) {
+    if (!hit) {
       return;
     }
-    onSelectFeature(String(hit.id), event.originalEvent.shiftKey);
+    const propertyId =
+      hit.properties && typeof hit.properties === "object" ? (hit.properties as Record<string, unknown>)._feature_id : null;
+    const resolvedId =
+      typeof propertyId === "string"
+        ? propertyId
+        : typeof hit.id === "string" || typeof hit.id === "number"
+          ? String(hit.id)
+          : null;
+    if (!resolvedId) {
+      return;
+    }
+    onSelectFeature(resolvedId, event.originalEvent.shiftKey);
   };
 
   return (
@@ -248,4 +270,3 @@ export function MapPanel({ features, selectedFeatureIds, layerVisibility, levelF
     </div>
   );
 }
-
