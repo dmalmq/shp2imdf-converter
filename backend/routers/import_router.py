@@ -26,6 +26,11 @@ def _keyword_config_path(request: Request) -> Path:
     return request.app.state.filename_keywords_path
 
 
+def _max_upload_bytes(request: Request) -> int:
+    value = getattr(request.app.state, "max_upload_bytes", 1024 * 1024 * 1024)
+    return int(value)
+
+
 def _expand_upload(upload: UploadFile, payload: bytes) -> list[tuple[str, bytes]]:
     if upload.filename and upload.filename.lower().endswith(".zip"):
         blobs: list[tuple[str, bytes]] = []
@@ -46,10 +51,21 @@ async def import_files(
     if not files:
         raise ValueError("No files were uploaded.")
 
+    max_upload_bytes = _max_upload_bytes(request)
+    raw_total = 0
+    expanded_total = 0
     raw_blobs: list[tuple[str, bytes]] = []
     for upload in files:
         payload = await upload.read()
-        raw_blobs.extend(_expand_upload(upload, payload))
+        raw_total += len(payload)
+        if raw_total > max_upload_bytes:
+            raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
+
+        expanded = _expand_upload(upload, payload)
+        expanded_total += sum(len(content) for _, content in expanded)
+        if expanded_total > max_upload_bytes:
+            raise ValueError("Expanded upload exceeds configured limit (MAX_UPLOAD_MB).")
+        raw_blobs.extend(expanded)
 
     artifacts = import_file_blobs(raw_blobs, filename_keywords_path=_keyword_config_path(request))
     feature_collection = sync_feature_types(artifacts.feature_collection, artifacts.files)
