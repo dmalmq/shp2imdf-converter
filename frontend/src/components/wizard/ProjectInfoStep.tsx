@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 
-import type { ProjectWizardState } from "../../api/client";
+import type { GeocodeResultItem, ProjectWizardState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 
 
@@ -8,6 +8,8 @@ type Props = {
   project: ProjectWizardState | null;
   saving: boolean;
   onSave: (payload: ProjectWizardState) => void;
+  onSearchAddress: (query: string, language: string) => Promise<GeocodeResultItem[]>;
+  onAutofillFromGeometry: (language: string) => Promise<GeocodeResultItem | null>;
 };
 
 const VENUE_CATEGORIES = [
@@ -93,9 +95,38 @@ function normalizeForSave(payload: ProjectWizardState): ProjectWizardState {
 }
 
 
-export function ProjectInfoStep({ project, saving, onSave }: Props) {
+function applyGeocodeResult(project: ProjectWizardState, result: GeocodeResultItem): ProjectWizardState {
+  return {
+    ...project,
+    address: {
+      ...project.address,
+      address: result.address.address ?? project.address.address,
+      unit: result.address.unit ?? project.address.unit,
+      locality: result.address.locality ?? project.address.locality,
+      province: result.address.province ?? project.address.province,
+      country: result.address.country ?? project.address.country,
+      postal_code: result.address.postal_code ?? project.address.postal_code,
+      postal_code_ext: result.address.postal_code_ext ?? project.address.postal_code_ext,
+      postal_code_vanity: result.address.postal_code_vanity ?? project.address.postal_code_vanity
+    }
+  };
+}
+
+
+export function ProjectInfoStep({
+  project,
+  saving,
+  onSave,
+  onSearchAddress,
+  onAutofillFromGeometry
+}: Props) {
   const { t } = useUiLanguage();
   const [form, setForm] = useState<ProjectWizardState>(() => project ?? createDefaultProject());
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<GeocodeResultItem[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [autofillLoading, setAutofillLoading] = useState(false);
+  const [searchStatus, setSearchStatus] = useState<string | null>(null);
 
   useEffect(() => {
     setForm(project ?? createDefaultProject());
@@ -109,6 +140,48 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
       form.address.country.trim().length > 0,
     [form]
   );
+
+  const runAddressSearch = async () => {
+    const query = searchQuery.trim();
+    if (!query) {
+      setSearchResults([]);
+      setSearchStatus(null);
+      return;
+    }
+
+    setSearchLoading(true);
+    setSearchStatus(null);
+    try {
+      const results = await onSearchAddress(query, form.language.trim() || "en");
+      setSearchResults(results);
+      if (!results.length) {
+        setSearchStatus(t("No address matches found.", "一致する住所が見つかりません。"));
+      }
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const runGeometryAutofill = async () => {
+    setAutofillLoading(true);
+    setSearchStatus(null);
+    try {
+      const result = await onAutofillFromGeometry(form.language.trim() || "en");
+      if (!result) {
+        setSearchStatus(t("Could not infer an address from source geometry.", "図形データから住所を推定できませんでした。"));
+        return;
+      }
+      setForm((previous) => applyGeocodeResult(previous, result));
+      setSearchStatus(t("Address fields were filled from shape location.", "シェープ位置から住所項目を補完しました。"));
+    } finally {
+      setAutofillLoading(false);
+    }
+  };
+
+  const selectAddressResult = (result: GeocodeResultItem) => {
+    setForm((previous) => applyGeocodeResult(previous, result));
+    setSearchStatus(t("Address fields updated from selected result.", "選択した結果で住所項目を更新しました。"));
+  };
 
   return (
     <section className="rounded border bg-white p-5">
@@ -203,6 +276,65 @@ export function ProjectInfoStep({ project, saving, onSave }: Props) {
 
       <div className="mt-4 rounded border border-slate-200 p-3">
         <h3 className="mb-2 text-sm font-semibold">{t("Venue Address", "会場住所")}</h3>
+
+        <div className="mb-3 rounded border border-slate-200 bg-slate-50 p-3">
+          <label className="mb-2 block text-sm">
+            <span className="mb-1 block text-slate-600">{t("Address Search", "住所検索")}</span>
+            <input
+              className="w-full rounded border px-2 py-1.5"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void runAddressSearch();
+                }
+              }}
+              placeholder={t("Search by place or address", "地名または住所で検索")}
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded border px-3 py-1.5 text-xs"
+              disabled={searchLoading || autofillLoading}
+              onClick={() => void runAddressSearch()}
+            >
+              {searchLoading ? t("Searching...", "検索中...") : t("Search Address", "住所を検索")}
+            </button>
+            <button
+              type="button"
+              className="rounded border px-3 py-1.5 text-xs"
+              disabled={searchLoading || autofillLoading}
+              onClick={() => void runGeometryAutofill()}
+            >
+              {autofillLoading
+                ? t("Locating...", "位置を確認中...")
+                : t("Autofill from Shape Location", "シェープ位置から自動入力")}
+            </button>
+          </div>
+
+          {searchStatus ? <p className="mt-2 text-xs text-slate-600">{searchStatus}</p> : null}
+
+          {searchResults.length > 0 ? (
+            <div className="mt-2 max-h-40 overflow-auto rounded border bg-white">
+              {searchResults.map((result, index) => (
+                <button
+                  key={`${result.display_name}-${index}`}
+                  type="button"
+                  className="block w-full border-b px-3 py-2 text-left text-xs last:border-b-0 hover:bg-slate-50"
+                  onClick={() => selectAddressResult(result)}
+                >
+                  <div className="font-medium text-slate-800">{result.display_name}</div>
+                  <div className="mt-0.5 text-slate-500">
+                    {[result.address.locality, result.address.country, result.address.postal_code].filter(Boolean).join(" / ")}
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
         <div className="grid gap-3 md:grid-cols-2">
           <label className="text-sm">
             <span className="mb-1 block text-slate-600">{t("Street Address", "住所")}</span>

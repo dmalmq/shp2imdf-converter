@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from collections import Counter
 import json
+import math
 from typing import Annotated, Any
 
 from fastapi import APIRouter, File, Request, UploadFile
+from shapely.geometry import shape
 
+from backend.src.geocoding import GeocodeMatch, GeocoderClient
 from backend.src.mapper import (
     build_unit_code_preview,
     detect_candidate_columns,
@@ -16,12 +19,15 @@ from backend.src.mapper import (
     normalize_unit_category_overrides,
 )
 from backend.src.schemas import (
+    AddressAutofillResponse,
+    AddressSearchResponse,
     BuildingsWizardRequest,
     BuildingsWizardResponse,
     CompanyMappingsUploadResponse,
     FootprintWizardRequest,
     LevelsWizardRequest,
     MappingsWizardRequest,
+    GeocodeResultItem,
     ProjectWizardRequest,
     ProjectWizardResponse,
     SessionRecord,
@@ -40,6 +46,75 @@ def _session_manager(request: Request) -> SessionManager:
 
 def _unit_categories_path(request: Request) -> str:
     return str(request.app.state.unit_categories_path)
+
+
+def _geocoder(request: Request) -> GeocoderClient | None:
+    return getattr(request.app.state, "geocoder", None)
+
+
+def _match_to_schema(match: GeocodeMatch) -> GeocodeResultItem:
+    return GeocodeResultItem(
+        display_name=match.display_name,
+        latitude=match.latitude,
+        longitude=match.longitude,
+        source=match.source,
+        address={
+            "address": match.address.address,
+            "unit": match.address.unit,
+            "locality": match.address.locality,
+            "province": match.address.province,
+            "country": match.address.country,
+            "postal_code": match.address.postal_code,
+            "postal_code_ext": match.address.postal_code_ext,
+            "postal_code_vanity": match.address.postal_code_vanity,
+        },
+    )
+
+
+def _representative_point(session: SessionRecord) -> tuple[float, float] | None:
+    collection = session.source_feature_collection or session.feature_collection
+    features = collection.get("features", [])
+    if not isinstance(features, list):
+        return None
+
+    min_x = math.inf
+    min_y = math.inf
+    max_x = -math.inf
+    max_y = -math.inf
+    found = False
+
+    for feature in features:
+        if not isinstance(feature, dict):
+            continue
+        geometry = feature.get("geometry")
+        if not isinstance(geometry, dict):
+            continue
+        try:
+            geom = shape(geometry)
+        except Exception:
+            continue
+        if geom.is_empty:
+            continue
+        bounds = geom.bounds
+        if len(bounds) != 4:
+            continue
+        x1, y1, x2, y2 = bounds
+        if not all(math.isfinite(value) for value in [x1, y1, x2, y2]):
+            continue
+        min_x = min(min_x, x1)
+        min_y = min(min_y, y1)
+        max_x = max(max_x, x2)
+        max_y = max(max_y, y2)
+        found = True
+
+    if not found:
+        return None
+
+    longitude = (min_x + max_x) / 2.0
+    latitude = (min_y + max_y) / 2.0
+    if not (-180 <= longitude <= 180 and -90 <= latitude <= 90):
+        return None
+    return longitude, latitude
 
 
 def _pick_preferred_column(
@@ -343,6 +418,68 @@ def get_wizard_state(session_id: str, request: Request) -> WizardStateResponse:
     _refresh_unit_preview(session, request)
     manager.save_session(session)
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
+
+
+@router.get("/wizard/address/search", response_model=AddressSearchResponse)
+def search_wizard_address(
+    session_id: str,
+    request: Request,
+    query: str,
+    language: str = "en",
+    limit: int = 5,
+) -> AddressSearchResponse:
+    _get_session_or_raise(session_id, request)
+    geocoder = _geocoder(request)
+    if geocoder is None:
+        raise ValueError("Geocoding is disabled on this server.")
+
+    cleaned_query = query.strip()
+    if not cleaned_query:
+        raise ValueError("query is required")
+
+    results = geocoder.search(cleaned_query, language=language, limit=limit)
+    return AddressSearchResponse(
+        session_id=session_id,
+        query=cleaned_query,
+        language=language.strip() or "en",
+        results=[_match_to_schema(item) for item in results],
+    )
+
+
+@router.post("/wizard/address/autofill", response_model=AddressAutofillResponse)
+def autofill_wizard_address(
+    session_id: str,
+    request: Request,
+    language: str = "en",
+) -> AddressAutofillResponse:
+    session = _get_session_or_raise(session_id, request)
+    geocoder = _geocoder(request)
+    if geocoder is None:
+        raise ValueError("Geocoding is disabled on this server.")
+
+    source_point = _representative_point(session)
+    if source_point is None:
+        return AddressAutofillResponse(
+            session_id=session_id,
+            language=language.strip() or "en",
+            source_point=None,
+            result=None,
+            warnings=["Unable to derive a valid WGS84 coordinate from imported geometry."],
+        )
+
+    longitude, latitude = source_point
+    result = geocoder.reverse(latitude=latitude, longitude=longitude, language=language)
+    warnings: list[str] = []
+    if result is None:
+        warnings.append("No reverse-geocoding result was returned for the inferred location.")
+
+    return AddressAutofillResponse(
+        session_id=session_id,
+        language=language.strip() or "en",
+        source_point=[longitude, latitude],
+        result=_match_to_schema(result) if result is not None else None,
+        warnings=warnings,
+    )
 
 
 @router.patch("/wizard/project", response_model=ProjectWizardResponse)

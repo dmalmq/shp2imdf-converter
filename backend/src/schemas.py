@@ -334,6 +334,48 @@ class ProjectWizardResponse(BaseModel):
     address_feature: dict[str, Any]
 
 
+class GeocodeAddressInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    address: str | None = None
+    unit: str | None = None
+    locality: str | None = None
+    province: str | None = None
+    country: str | None = None
+    postal_code: str | None = None
+    postal_code_ext: str | None = None
+    postal_code_vanity: str | None = None
+
+
+class GeocodeResultItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str
+    latitude: float
+    longitude: float
+    source: str = "nominatim"
+    address: GeocodeAddressInput = Field(default_factory=GeocodeAddressInput)
+
+
+class AddressSearchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    query: str
+    language: str
+    results: list[GeocodeResultItem] = Field(default_factory=list)
+
+
+class AddressAutofillResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    language: str
+    source_point: list[float] | None = None
+    result: GeocodeResultItem | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
 class LevelsWizardRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
