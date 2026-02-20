@@ -1,0 +1,30 @@
+{
+  "default_category": "other",
+  "mappings": {
+    "A001": "transitstation",
+    "A002": "airport",
+    "A003": "stadium",
+    "A004": "shoppingcenter",
+    "A005": "conventioncenter",
+    "A006": "governmentfacility",
+    "A007": "medicalfacility",
+    "A008": "welfare",
+    "A009": "communitycenter",
+    "A010": "hotel",
+    "A011": "parkingfacility",
+    "A012": "university",
+    "A013": "theater",
+    "A014": "aquarium",
+    "A015": "museum",
+    "A016": "other",
+    "A017": "retailstore",
+    "A018": "shoppingcenter",
+    "A019": "resort",
+    "A020": "themepark",
+    "A021": "casino",
+    "A022": "other",
+    "A023": "businesscampus",
+    "A024": "publictoilet",
+    "A999": "other"
+  }
+}
