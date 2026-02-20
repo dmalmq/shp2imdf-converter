@@ -20,7 +20,15 @@ IMDF_TYPE_ORDER = [
     "detail",
 ]
 REQUIRED_IMDF_TYPES = {"address", "venue", "building", "footprint", "level", "unit"}
-REVIEW_ONLY_PROPERTY_KEYS = {"status", "issues", "metadata", "source_file"}
+REVIEW_ONLY_PROPERTY_KEYS = {
+    "status",
+    "issues",
+    "metadata",
+    "source_file",
+    "source_row_index",
+    "source_part_index",
+    "source_feature_ref",
+}
 
 
 def _clean_export_feature(feature: dict[str, Any]) -> dict[str, Any]:

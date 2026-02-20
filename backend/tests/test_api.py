@@ -6,8 +6,10 @@ from io import BytesIO
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
+import tempfile
 import zipfile
 
+import geopandas as gpd
 import pytest
 from shapely.geometry import Point, shape
 
@@ -31,6 +33,35 @@ def test_import_endpoint_creates_session(test_client, sample_dir: Path) -> None:
     assert payload["session_id"]
     assert payload["files"]
     assert "cleanup_summary" in payload
+
+
+@pytest.mark.phase1
+def test_import_persists_uploaded_artifacts_and_prune_removes_them(test_client, sample_dir: Path) -> None:
+    previous_upload_dir = test_client.app.state.session_uploads_dir
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_client.app.state.session_uploads_dir = Path(temp_dir)
+        try:
+            response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+            assert response.status_code == 201
+            session_id = response.json()["session_id"]
+
+            manager = test_client.app.state.session_manager
+            session = manager.get_session(session_id, touch=False)
+            assert session is not None
+            assert session.upload_artifact_dir is not None
+
+            artifact_dir = Path(session.upload_artifact_dir)
+            assert artifact_dir.exists()
+            assert any(artifact_dir.iterdir())
+
+            session.last_accessed = datetime.now(UTC) - timedelta(hours=48)
+            manager.backend.save(session)
+            removed = manager.prune_expired()
+
+            assert removed >= 1
+            assert not artifact_dir.exists()
+        finally:
+            test_client.app.state.session_uploads_dir = previous_upload_dir
 
 
 @pytest.mark.phase1
@@ -840,3 +871,91 @@ def test_export_blocked_when_validation_errors_exist(test_client, sample_dir: Pa
     export_response = test_client.get(f"/api/session/{session_id}/export")
     assert export_response.status_code == 400
     assert "Export blocked" in export_response.json()["detail"]
+
+
+@pytest.mark.phase5
+def test_shapefile_export_writes_updated_unit_categories(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    unit_ids = [item["id"] for item in features if item["feature_type"] == "unit"]
+    assert unit_ids
+    assert test_client.patch(
+        f"/api/session/{session_id}/features/bulk",
+        json={
+            "feature_ids": unit_ids,
+            "action": "patch",
+            "properties": {"category": "room"},
+        },
+    ).status_code == 200
+
+    export_response = test_client.post(f"/api/session/{session_id}/export/shapefiles", json={})
+    assert export_response.status_code == 200
+    assert export_response.headers["content-type"] == "application/zip"
+
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        names = set(archive.namelist())
+        assert "JRTokyoSta_B1_Space.shp" in names
+        assert "JRTokyoSta_B1_Space.shx" in names
+        assert "JRTokyoSta_B1_Space.dbf" in names
+        assert "export_report.json" in names
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            archive.extractall(tmpdir)
+            gdf = gpd.read_file(Path(tmpdir) / "JRTokyoSta_B1_Space.shp")
+            assert "IMDF_CAT" in gdf.columns
+            exported_categories = {str(value).lower() for value in gdf["IMDF_CAT"].dropna().tolist()}
+            assert exported_categories == {"room"}
+
+
+@pytest.mark.phase5
+def test_shapefile_export_reports_unapplied_unit_with_missing_source_linkage(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    unit = next(item for item in features if item["feature_type"] == "unit")
+    assert test_client.patch(
+        f"/api/session/{session_id}/features/{unit['id']}",
+        json={"properties": {"source_row_index": None, "source_feature_ref": None}},
+    ).status_code == 200
+
+    export_response = test_client.post(f"/api/session/{session_id}/export/shapefiles", json={})
+    assert export_response.status_code == 200
+
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        report = json.loads(archive.read("export_report.json").decode("utf-8"))
+        matches = [item for item in report.get("unapplied_features", []) if item.get("feature_id") == unit["id"]]
+        assert matches
+        assert matches[0]["reason"] == "missing_source_linkage"

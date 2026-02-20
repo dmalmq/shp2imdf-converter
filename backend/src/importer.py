@@ -29,6 +29,7 @@ SUPPORTED_SHAPEFILE_EXTENSIONS = {
     ".cpg",
     ".qix",
 }
+INTERNAL_SOURCE_COLUMNS = {"_source_row_index", "_source_part_index"}
 
 
 @dataclass(slots=True)
@@ -174,11 +175,13 @@ def _clean_geodataframe(gdf: gpd.GeoDataFrame, summary: CleanupSummary) -> gpd.G
     cleaned_rows: list[dict[str, Any]] = []
     non_geom_columns = [column for column in gdf.columns if column != geometry_column]
 
-    for _, row in gdf.iterrows():
+    for source_row_index, (_, row) in enumerate(gdf.iterrows()):
         metadata = {column: row[column] for column in non_geom_columns}
         cleaned_geometries = _clean_geometry(row[geometry_column], summary)
-        for geometry in cleaned_geometries:
+        for source_part_index, geometry in enumerate(cleaned_geometries):
             payload = dict(metadata)
+            payload["_source_row_index"] = source_row_index
+            payload["_source_part_index"] = source_part_index
             payload[geometry_column] = geometry
             cleaned_rows.append(payload)
 
@@ -191,12 +194,15 @@ def _clean_geodataframe(gdf: gpd.GeoDataFrame, summary: CleanupSummary) -> gpd.G
 def _extract_feature_rows(stem: str, gdf: gpd.GeoDataFrame) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     geometry_column = gdf.geometry.name
-    data_columns = [column for column in gdf.columns if column != geometry_column]
+    data_columns = [column for column in gdf.columns if column != geometry_column and column not in INTERNAL_SOURCE_COLUMNS]
     for _, row in gdf.iterrows():
         geometry = row[geometry_column]
         if geometry is None or geometry.is_empty:
             continue
         metadata = {column: _sanitize_value(row[column]) for column in data_columns}
+        source_row_index = int(row["_source_row_index"]) if "_source_row_index" in gdf.columns else 0
+        source_part_index = int(row["_source_part_index"]) if "_source_part_index" in gdf.columns else 0
+        source_feature_ref = f"{stem}:{source_row_index}:{source_part_index}"
         rows.append(
             {
                 "type": "Feature",
@@ -205,6 +211,9 @@ def _extract_feature_rows(stem: str, gdf: gpd.GeoDataFrame) -> list[dict[str, An
                 "geometry": mapping(geometry),
                 "properties": {
                     "source_file": stem,
+                    "source_row_index": source_row_index,
+                    "source_part_index": source_part_index,
+                    "source_feature_ref": source_feature_ref,
                     "status": "mapped",
                     "issues": [],
                     "metadata": metadata,
@@ -267,7 +276,9 @@ def import_file_blobs(
         warnings.extend(file_warnings)
         cleaned = _clean_geodataframe(gdf, summary)
         geometry_type = _infer_geometry_type(cleaned)
-        columns = [column for column in cleaned.columns if column != cleaned.geometry.name]
+        columns = [
+            column for column in cleaned.columns if column != cleaned.geometry.name and column not in INTERNAL_SOURCE_COLUMNS
+        ]
 
         imported_files.append(
             ImportedFile(

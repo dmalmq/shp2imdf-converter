@@ -62,6 +62,8 @@ async def _session_cleanup_loop(manager: SessionManager, stop: asyncio.Event) ->
 async def lifespan(app: FastAPI):
     app.state.session_manager = _load_session_manager()
     app.state.max_upload_bytes = _load_max_upload_bytes()
+    app.state.session_uploads_dir = Path(os.getenv("SESSION_UPLOADS_DIR", "./data/session_uploads"))
+    app.state.session_uploads_dir.mkdir(parents=True, exist_ok=True)
     app.state.filename_keywords_path = Path(__file__).parent / "config" / "filename_keywords.json"
     app.state.unit_categories_path = Path(__file__).parent / "config" / "unit_categories.json"
     app.state.company_mappings_path = Path(__file__).parent / "config" / "company_mappings.json"

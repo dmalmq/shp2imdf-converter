@@ -7,6 +7,7 @@ import copy
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
+import shutil
 from uuid import uuid4
 
 from backend.src.schemas import CleanupSummary, ImportedFile, SessionRecord
@@ -124,6 +125,7 @@ class SessionManager:
         feature_collection: dict,
         warnings: list[str] | None = None,
         learned_keywords: dict[str, str] | None = None,
+        upload_artifact_dir: str | None = None,
     ) -> SessionRecord:
         self.prune_expired()
         self._evict_if_needed()
@@ -138,6 +140,7 @@ class SessionManager:
             source_feature_collection=copy.deepcopy(feature_collection),
             warnings=warnings or [],
             learned_keywords=learned_keywords or {},
+            upload_artifact_dir=upload_artifact_dir,
         )
         self.backend.save(session)
         return session
@@ -156,7 +159,7 @@ class SessionManager:
         removed = 0
         for session in self.backend.list_all():
             if now - session.last_accessed >= self.ttl:
-                self.backend.delete(session.session_id)
+                self._delete_session_record(session)
                 removed += 1
         return removed
 
@@ -170,7 +173,19 @@ class SessionManager:
         if len(sessions) < self.max_sessions:
             return
         oldest = sorted(sessions, key=lambda item: item.last_accessed)[0]
-        self.backend.delete(oldest.session_id)
+        self._delete_session_record(oldest)
+
+    def _delete_session_record(self, session: SessionRecord) -> None:
+        self._remove_upload_artifacts(session.upload_artifact_dir)
+        self.backend.delete(session.session_id)
+
+    def _remove_upload_artifacts(self, artifact_dir: str | None) -> None:
+        if not artifact_dir:
+            return
+        path = Path(artifact_dir)
+        if not path.exists():
+            return
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def build_session_backend(
