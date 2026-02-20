@@ -137,6 +137,8 @@ def _build_export_report(request: ShapefileExportRequest) -> dict[str, Any]:
     return {
         "mode": request.mode,
         "encoding": request.encoding,
+        "legacy_code_map_source": "none",
+        "legacy_code_conflicts": [],
         "rows_requested": 0,
         "rows_updated": 0,
         "stems_processed": [],
@@ -144,6 +146,62 @@ def _build_export_report(request: ShapefileExportRequest) -> dict[str, Any]:
         "skipped": [],
         "unapplied_features": [],
     }
+
+
+def _normalize_legacy_code_map(raw_map: dict[str, str]) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for raw_category, raw_code in raw_map.items():
+        category = str(raw_category).strip().lower()
+        code = str(raw_code).strip()
+        if not category or not code:
+            continue
+        normalized[category] = code
+    return normalized
+
+
+def _derive_legacy_code_map_from_wizard(
+    company_mappings: dict[str, str],
+) -> tuple[dict[str, str], list[dict[str, str]]]:
+    derived: dict[str, str] = {}
+    conflicts: list[dict[str, str]] = []
+
+    for raw_code, raw_category in sorted(
+        company_mappings.items(),
+        key=lambda item: str(item[0]).upper(),
+    ):
+        code = str(raw_code).strip()
+        category = str(raw_category).strip().lower()
+        if not code or not category:
+            continue
+        existing = derived.get(category)
+        if existing is None:
+            derived[category] = code
+            continue
+        if existing == code:
+            continue
+        conflicts.append(
+            {
+                "category": category,
+                "selected_code": existing,
+                "ignored_code": code,
+                "reason": "duplicate_category_mapping",
+            }
+        )
+    return derived, conflicts
+
+
+def _resolve_legacy_code_map(
+    payload_map: dict[str, str],
+    wizard_company_mappings: dict[str, str],
+) -> tuple[dict[str, str], str, list[dict[str, str]]]:
+    normalized_payload = _normalize_legacy_code_map(payload_map)
+    if normalized_payload:
+        return normalized_payload, "payload", []
+
+    derived, conflicts = _derive_legacy_code_map_from_wizard(wizard_company_mappings)
+    if derived:
+        return derived, "wizard_company_mappings", conflicts
+    return {}, "none", conflicts
 
 
 def build_shapefile_export_archive(
@@ -175,11 +233,12 @@ def build_shapefile_export_archive(
         if unit_options.overwrite_legacy_code_field
         else None
     )
-    legacy_map = {
-        str(category).strip().lower(): str(code)
-        for category, code in unit_options.legacy_code_map.items()
-        if str(category).strip() and str(code).strip()
-    }
+    legacy_map, legacy_map_source, legacy_map_conflicts = _resolve_legacy_code_map(
+        unit_options.legacy_code_map,
+        session.wizard.company_mappings,
+    )
+    report["legacy_code_map_source"] = legacy_map_source
+    report["legacy_code_conflicts"] = legacy_map_conflicts
 
     handled_update_keys: set[tuple[str, int]] = set()
     write_encoding = _encoding_for_write(request.encoding)
