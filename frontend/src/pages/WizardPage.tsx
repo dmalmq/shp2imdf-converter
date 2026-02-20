@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import {
+  autofillWizardAddressFromGeometry,
   detectAllFiles,
   fetchSessionFeatures,
   fetchSessionFiles,
@@ -18,6 +19,8 @@ import {
   type LevelWizardItem,
   type OpeningMappingState,
   type ProjectWizardState,
+  searchWizardAddress,
+  type GeocodeResultItem,
   type UnitMappingState,
   type UpdateFileRequest,
   updateSessionFile,
@@ -472,6 +475,43 @@ export function WizardPage() {
     }
   };
 
+  const searchProjectAddress = async (query: string, language: string): Promise<GeocodeResultItem[]> => {
+    if (!sessionId) {
+      return [];
+    }
+    try {
+      const response = await searchWizardAddress(sessionId, query, language);
+      return response.results;
+    } catch (error) {
+      handleApiError(error, t("Address search failed", "住所検索に失敗しました"), {
+        title: t("Search failed", "検索失敗")
+      });
+      return [];
+    }
+  };
+
+  const autofillProjectAddressFromGeometry = async (language: string): Promise<GeocodeResultItem | null> => {
+    if (!sessionId) {
+      return null;
+    }
+    try {
+      const response = await autofillWizardAddressFromGeometry(sessionId, language);
+      if (response.warnings.length > 0) {
+        pushToast({
+          title: t("Autofill notice", "自動入力の通知"),
+          description: response.warnings[0],
+          variant: "info"
+        });
+      }
+      return response.result;
+    } catch (error) {
+      handleApiError(error, t("Location-based autofill failed", "位置ベースの自動入力に失敗しました"), {
+        title: t("Autofill failed", "自動入力失敗")
+      });
+      return null;
+    }
+  };
+
   const saveBuildings = async (buildings: BuildingWizardState[]) => {
     if (!sessionId) {
       return;
@@ -600,6 +640,8 @@ export function WizardPage() {
           project={wizardState?.project ?? null}
           saving={wizardSaveStatus === "saving"}
           onSave={(payload) => void saveProject(payload)}
+          onSearchAddress={(query, language) => searchProjectAddress(query, language)}
+          onAutofillFromGeometry={(language) => autofillProjectAddressFromGeometry(language)}
         />
       );
     }

@@ -10,6 +10,7 @@ import zipfile
 
 import pytest
 
+from backend.src.geocoding import GeocodeAddressParts, GeocodeMatch
 from backend.src.schemas import CleanupSummary, ImportedFile
 from backend.src.session import MemorySessionBackend, SessionManager
 
@@ -347,6 +348,78 @@ def test_unit_category_override_updates_preview_for_same_raw_code(test_client, s
     assert shop_row["resolved_category"] == "foodservice"
     assert shop_row["unresolved"] is False
     assert payload["wizard"]["company_mappings"]["SHOP"] == "foodservice"
+
+
+@pytest.mark.phase3
+def test_wizard_address_search_endpoint_returns_geocoder_results(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+
+    class FakeGeocoder:
+        def search(self, query: str, language: str, limit: int = 5) -> list[GeocodeMatch]:
+            assert query == "新宿駅"
+            assert language == "ja"
+            assert limit == 5
+            return [
+                GeocodeMatch(
+                    display_name="新宿駅, 新宿区, 東京都, JP",
+                    latitude=35.690921,
+                    longitude=139.700258,
+                    source="fake",
+                    address=GeocodeAddressParts(
+                        address="新宿3-38-1",
+                        locality="新宿区",
+                        province="JP-13",
+                        country="JP",
+                        postal_code="160-0022",
+                    ),
+                )
+            ]
+
+        def reverse(self, latitude: float, longitude: float, language: str) -> GeocodeMatch | None:
+            return None
+
+    test_client.app.state.geocoder = FakeGeocoder()
+    response = test_client.get(f"/api/session/{session_id}/wizard/address/search", params={"query": "新宿駅", "language": "ja"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] == session_id
+    assert payload["results"][0]["address"]["country"] == "JP"
+    assert payload["results"][0]["source"] == "fake"
+
+
+@pytest.mark.phase3
+def test_wizard_address_autofill_uses_geometry_reverse_geocoding(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+
+    class FakeGeocoder:
+        def search(self, query: str, language: str, limit: int = 5) -> list[GeocodeMatch]:
+            return []
+
+        def reverse(self, latitude: float, longitude: float, language: str) -> GeocodeMatch | None:
+            assert language == "ja"
+            return GeocodeMatch(
+                display_name="東京駅, 千代田区, 東京都, JP",
+                latitude=latitude,
+                longitude=longitude,
+                source="fake",
+                address=GeocodeAddressParts(
+                    address="丸の内1-9-1",
+                    locality="千代田区",
+                    province="JP-13",
+                    country="JP",
+                    postal_code="100-0005",
+                ),
+            )
+
+    test_client.app.state.geocoder = FakeGeocoder()
+    response = test_client.post(f"/api/session/{session_id}/wizard/address/autofill", params={"language": "ja"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["result"] is not None
+    assert payload["result"]["address"]["locality"] == "千代田区"
+    assert payload["source_point"] is not None
 
 
 @pytest.mark.phase4

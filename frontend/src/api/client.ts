@@ -180,6 +180,40 @@ export type ProjectWizardResponse = {
   address_feature: Record<string, unknown>;
 };
 
+export type GeocodeAddressParts = {
+  address: string | null;
+  unit: string | null;
+  locality: string | null;
+  province: string | null;
+  country: string | null;
+  postal_code: string | null;
+  postal_code_ext: string | null;
+  postal_code_vanity: string | null;
+};
+
+export type GeocodeResultItem = {
+  display_name: string;
+  latitude: number;
+  longitude: number;
+  source: string;
+  address: GeocodeAddressParts;
+};
+
+export type AddressSearchResponse = {
+  session_id: string;
+  query: string;
+  language: string;
+  results: GeocodeResultItem[];
+};
+
+export type AddressAutofillResponse = {
+  session_id: string;
+  language: string;
+  source_point: number[] | null;
+  result: GeocodeResultItem | null;
+  warnings: string[];
+};
+
 export type BuildingsWizardResponse = {
   session_id: string;
   wizard: WizardState;
@@ -435,6 +469,34 @@ export async function patchWizardProject(
     body: JSON.stringify(payload)
   });
   return handleJson<ProjectWizardResponse>(response);
+}
+
+export async function searchWizardAddress(
+  sessionId: string,
+  query: string,
+  language = "en",
+  limit = 5
+): Promise<AddressSearchResponse> {
+  const params = new URLSearchParams({
+    query,
+    language,
+    limit: String(limit)
+  });
+  const response = await fetch(`/api/session/${sessionId}/wizard/address/search?${params.toString()}`);
+  return handleJson<AddressSearchResponse>(response);
+}
+
+export async function autofillWizardAddressFromGeometry(
+  sessionId: string,
+  language = "en"
+): Promise<AddressAutofillResponse> {
+  const params = new URLSearchParams({
+    language
+  });
+  const response = await fetch(`/api/session/${sessionId}/wizard/address/autofill?${params.toString()}`, {
+    method: "POST"
+  });
+  return handleJson<AddressAutofillResponse>(response);
 }
 
 export async function patchWizardLevels(
