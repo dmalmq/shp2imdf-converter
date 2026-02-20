@@ -4,14 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import re
 from typing import Any
 
 from backend.src.schemas import ImportedFile, UnitCodePreviewRow
-
-
-CATEGORY_FORMAT_RE = re.compile(r"^[a-z0-9]+(?:[._][a-z0-9]+)*$")
-
 
 def load_unit_categories(config_path: str | Path) -> tuple[set[str], str]:
     payload = json.loads(Path(config_path).read_text(encoding="utf-8"))
@@ -24,11 +19,7 @@ def load_unit_categories(config_path: str | Path) -> tuple[set[str], str]:
 
 def is_valid_category_value(value: str, valid_categories: set[str]) -> bool:
     normalized = value.strip().lower()
-    if not normalized:
-        return False
-    if normalized in valid_categories:
-        return True
-    return bool(CATEGORY_FORMAT_RE.fullmatch(normalized))
+    return bool(normalized and normalized in valid_categories)
 
 
 def normalize_company_mappings_payload(

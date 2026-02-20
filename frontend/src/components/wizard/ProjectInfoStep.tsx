@@ -35,7 +35,6 @@ const VENUE_CATEGORIES = [
   "trainstation",
   "transitstation",
   "university",
-  "universit",
   "unspecified"
 ];
 

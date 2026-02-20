@@ -10,7 +10,7 @@ import zipfile
 
 import pytest
 
-from backend.src.geocoding import GeocodeAddressParts, GeocodeMatch
+from backend.src.geocoding import GeocodeAddressParts, GeocodeMatch, GeocodingError
 from backend.src.schemas import CleanupSummary, ImportedFile
 from backend.src.session import MemorySessionBackend, SessionManager
 
@@ -420,6 +420,47 @@ def test_wizard_address_autofill_uses_geometry_reverse_geocoding(test_client, sa
     assert payload["result"] is not None
     assert payload["result"]["address"]["locality"] == "千代田区"
     assert payload["source_point"] is not None
+
+
+@pytest.mark.phase3
+def test_wizard_address_search_returns_503_when_geocoder_disabled(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+
+    test_client.app.state.geocoder = None
+    response = test_client.get(
+        f"/api/session/{session_id}/wizard/address/search",
+        params={"query": "Tokyo Station", "language": "en"},
+    )
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["code"] == "GEOCODER_DISABLED"
+
+
+@pytest.mark.phase3
+def test_wizard_address_search_surfaces_geocoder_rate_limit_error(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+
+    class RateLimitedGeocoder:
+        def search(self, query: str, language: str, limit: int = 5) -> list[GeocodeMatch]:
+            raise GeocodingError(
+                "Geocoding provider rate limit reached.",
+                code="GEOCODER_RATE_LIMIT",
+                status_code=503,
+            )
+
+        def reverse(self, latitude: float, longitude: float, language: str) -> GeocodeMatch | None:
+            return None
+
+    test_client.app.state.geocoder = RateLimitedGeocoder()
+    response = test_client.get(
+        f"/api/session/{session_id}/wizard/address/search",
+        params={"query": "Tokyo Station", "language": "en"},
+    )
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["code"] == "GEOCODER_RATE_LIMIT"
 
 
 @pytest.mark.phase4

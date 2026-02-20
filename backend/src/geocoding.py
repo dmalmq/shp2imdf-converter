@@ -10,6 +10,16 @@ from typing import Any, Protocol
 import httpx
 
 
+class GeocodingError(Exception):
+    """Raised when a geocoding request fails in a user-facing way."""
+
+    def __init__(self, detail: str, *, code: str, status_code: int) -> None:
+        self.detail = detail
+        self.code = code
+        self.status_code = status_code
+        super().__init__(detail)
+
+
 @dataclass(slots=True)
 class GeocodeAddressParts:
     address: str | None = None
@@ -160,17 +170,50 @@ class NominatimGeocoder:
         if cached is not None:
             return cached
 
-        response = httpx.get(
-            f"{self.base_url}{path}",
-            params=params,
-            timeout=self.timeout_seconds,
-            headers={
-                "User-Agent": self.user_agent,
-                "Accept-Language": normalized_language,
-            },
-        )
-        response.raise_for_status()
-        payload = response.json()
+        try:
+            response = httpx.get(
+                f"{self.base_url}{path}",
+                params=params,
+                timeout=self.timeout_seconds,
+                headers={
+                    "User-Agent": self.user_agent,
+                    "Accept-Language": normalized_language,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.TimeoutException as exc:
+            raise GeocodingError(
+                "Geocoding request timed out.",
+                code="GEOCODER_TIMEOUT",
+                status_code=504,
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code if exc.response is not None else 0
+            if status_code == 429:
+                raise GeocodingError(
+                    "Geocoding provider rate limit reached.",
+                    code="GEOCODER_RATE_LIMIT",
+                    status_code=503,
+                ) from exc
+            raise GeocodingError(
+                f"Geocoding provider returned HTTP {status_code or 'error'}.",
+                code="GEOCODER_UPSTREAM_ERROR",
+                status_code=502,
+            ) from exc
+        except httpx.RequestError as exc:
+            raise GeocodingError(
+                "Geocoding service is unavailable.",
+                code="GEOCODER_UNAVAILABLE",
+                status_code=503,
+            ) from exc
+        except ValueError as exc:
+            raise GeocodingError(
+                "Geocoding provider returned invalid JSON.",
+                code="GEOCODER_INVALID_RESPONSE",
+                status_code=502,
+            ) from exc
+
         self._cache_set(cache_key, payload)
         return payload
 
@@ -240,4 +283,3 @@ def build_geocoder(
             cache_seconds=cache_seconds,
         )
     raise ValueError(f"Unsupported geocoder provider: {provider}")
-
