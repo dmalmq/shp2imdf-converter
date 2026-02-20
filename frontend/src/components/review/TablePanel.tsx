@@ -1,10 +1,11 @@
-import {
+﻿import {
   flexRender,
   getCoreRowModel,
   useReactTable,
   type ColumnDef
 } from "@tanstack/react-table";
 
+import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { featureName, type ReviewFeature } from "./types";
 
 
@@ -37,6 +38,7 @@ function statusValue(feature: ReviewFeature): string {
 
 
 export function TablePanel({ features, selectedFeatureIds, onSelectFeature }: Props) {
+  const { t } = useUiLanguage();
   const selectedSet = new Set(selectedFeatureIds);
 
   const columns: ColumnDef<ReviewFeature>[] = [
@@ -57,7 +59,7 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature }: Pr
     },
     {
       accessorKey: "id",
-      header: "ID",
+      header: t("ID", "ID"),
       cell: ({ getValue }) => {
         const value = String(getValue());
         return <span className="font-mono text-xs">{value.slice(0, 8)}</span>;
@@ -65,30 +67,30 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature }: Pr
     },
     {
       id: "name",
-      header: "Name",
-      cell: ({ row }) => featureName(row.original) || "—"
+      header: t("Name", "名称"),
+      cell: ({ row }) => featureName(row.original) || "-"
     },
     {
       accessorKey: "feature_type",
-      header: "Feature Type",
+      header: t("Feature Type", "フィーチャー種別"),
       cell: ({ getValue }) => <span className="capitalize">{String(getValue())}</span>
     },
     {
       id: "category",
-      header: "Category",
-      cell: ({ row }) => categoryValue(row.original) || "—"
+      header: t("Category", "カテゴリ"),
+      cell: ({ row }) => categoryValue(row.original) || "-"
     },
     {
       id: "level",
-      header: "Level",
+      header: t("Level", "レベル"),
       cell: ({ row }) => {
         const value = levelValue(row.original);
-        return value ? <span className="font-mono text-xs">{value.slice(0, 8)}</span> : "—";
+        return value ? <span className="font-mono text-xs">{value.slice(0, 8)}</span> : "-";
       }
     },
     {
       id: "status",
-      header: "Status",
+      header: t("Status", "ステータス"),
       cell: ({ row }) => {
         const status = statusValue(row.original);
         const className =
