@@ -13,6 +13,7 @@ from backend.src.mapper import (
     detect_candidate_columns,
     load_unit_categories,
     normalize_company_mappings_payload,
+    normalize_unit_category_overrides,
 )
 from backend.src.schemas import (
     BuildingsWizardRequest,
@@ -312,6 +313,7 @@ def _refresh_unit_preview(session: SessionRecord, request: Request) -> tuple[int
     if default_category not in valid_categories:
         default_category = config_default
 
+    session.wizard.mappings.unit.available_categories = sorted(valid_categories)
     preview = build_unit_code_preview(
         feature_collection=session.feature_collection,
         files=session.files,
@@ -470,6 +472,10 @@ def patch_wizard_mappings(
         session.wizard.mappings.fixture = payload.fixture
     if payload.detail_confirmed is not None:
         session.wizard.mappings.detail_confirmed = payload.detail_confirmed
+    if payload.unit_category_overrides:
+        valid_categories, _ = load_unit_categories(_unit_categories_path(request))
+        overrides = normalize_unit_category_overrides(payload.unit_category_overrides, valid_categories)
+        session.wizard.company_mappings.update(overrides)
 
     _refresh_unit_preview(session, request)
     session.wizard.generation_status = "not_started"

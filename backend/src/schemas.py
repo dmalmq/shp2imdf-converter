@@ -128,6 +128,7 @@ class UnitMappingState(BaseModel):
     alt_name_column: str | None = None
     restriction_column: str | None = None
     accessibility_column: str | None = None
+    available_categories: list[str] = Field(default_factory=list)
     preview: list[UnitCodePreviewRow] = Field(default_factory=list)
 
 
@@ -360,6 +361,7 @@ class MappingsWizardRequest(BaseModel):
     opening: OpeningMappingState | None = None
     fixture: FixtureMappingState | None = None
     detail_confirmed: bool | None = None
+    unit_category_overrides: dict[str, str] | None = None
 
 
 class FootprintWizardRequest(FootprintWizardState):

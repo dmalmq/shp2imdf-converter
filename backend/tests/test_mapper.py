@@ -8,6 +8,7 @@ from backend.src.mapper import (
     build_unit_code_preview,
     detect_candidate_columns,
     normalize_company_mappings_payload,
+    normalize_unit_category_overrides,
     resolve_unit_category,
     wrap_labels,
 )
@@ -164,3 +165,17 @@ def test_normalize_company_mapping_accepts_syntactically_valid_extended_categori
     assert default == "office"
     assert mappings["RESTROOM"] == "restroom.unisex.wheelchair"
     assert mappings["BAD"] == "office"
+
+
+@pytest.mark.phase3
+def test_normalize_unit_category_overrides_filters_invalid_values() -> None:
+    normalized = normalize_unit_category_overrides(
+        {
+            "shop": "retail",
+            "  ": "office",
+            "(empty)": "office",
+            "bad": "not-a-real-category",
+        },
+        {"unspecified", "retail", "office"},
+    )
+    assert normalized == {"SHOP": "retail"}
