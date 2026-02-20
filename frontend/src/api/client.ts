@@ -330,6 +330,22 @@ export type ExportArchiveResponse = {
   filename: string;
 };
 
+export type ShapefileExportEncoding = "preserve_source" | "utf-8" | "cp932";
+
+export type ShapefileExportUnitOptions = {
+  write_imdf_category: boolean;
+  imdf_category_field: string;
+  overwrite_legacy_code_field: string | null;
+  legacy_code_map: Record<string, string>;
+};
+
+export type ShapefileExportRequest = {
+  mode: "source_update";
+  encoding: ShapefileExportEncoding;
+  unit: ShapefileExportUnitOptions;
+  include_report: boolean;
+};
+
 export async function importShapefiles(
   files: File[],
   onProgress?: (percent: number) => void
@@ -604,5 +620,28 @@ export async function exportSessionArchive(sessionId: string): Promise<ExportArc
   return {
     blob: await response.blob(),
     filename: filenameMatch?.[1] ?? "output.imdf"
+  };
+}
+
+export async function exportSessionShapefiles(
+  sessionId: string,
+  payload: ShapefileExportRequest
+): Promise<ExportArchiveResponse> {
+  const response = await fetch(`/api/session/${sessionId}/export/shapefiles`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw buildApiClientError(response.status, body || "");
+  }
+  const contentDisposition = response.headers.get("content-disposition") ?? "";
+  const filenameMatch = contentDisposition.match(/filename=\"?([^\";]+)\"?/i);
+  return {
+    blob: await response.blob(),
+    filename: filenameMatch?.[1] ?? "output_shapefiles.zip"
   };
 }
