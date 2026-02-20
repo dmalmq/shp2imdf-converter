@@ -12,6 +12,7 @@ import {
   patchSessionFeaturesBulk,
   type ShapefileExportEncoding,
   type ShapefileExportRequest,
+  type WizardState,
   validateSession,
   type ValidationIssue,
   type ValidationResponse
@@ -156,6 +157,35 @@ function parseLegacyCodeMappings(raw: string): { mapping: Record<string, string>
   });
 
   return { mapping, invalidLines };
+}
+
+function buildShapefileDefaultsFromWizard(wizardState: WizardState | null): {
+  legacyCodeField: string;
+  legacyMapText: string;
+} {
+  const codeByCategory: Record<string, string> = {};
+  if (wizardState?.company_mappings) {
+    Object.entries(wizardState.company_mappings)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .forEach(([rawCode, rawCategory]) => {
+        const code = rawCode.trim();
+        const category = rawCategory.trim().toLowerCase();
+        if (!code || !category || codeByCategory[category]) {
+          return;
+        }
+        codeByCategory[category] = code;
+      });
+  }
+
+  const legacyMapText = Object.entries(codeByCategory)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([category, code]) => `${category}=${code}`)
+    .join("\n");
+
+  return {
+    legacyCodeField: wizardState?.mappings.unit.code_column?.trim() ?? "",
+    legacyMapText
+  };
 }
 
 function MapLoadingSkeleton() {
@@ -576,7 +606,12 @@ export function ReviewPage() {
     if (!validationResult) {
       return;
     }
+    const defaults = buildShapefileDefaultsFromWizard(wizardState);
     setExportFormat("imdf");
+    setShapefileEncoding("preserve_source");
+    setShapefileCategoryField("IMDF_CAT");
+    setShapefileLegacyCodeField(defaults.legacyCodeField);
+    setShapefileLegacyMapText(defaults.legacyMapText);
     setExportOptionsError(null);
     setExportDialogOpen(true);
   };

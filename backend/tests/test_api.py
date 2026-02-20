@@ -959,3 +959,120 @@ def test_shapefile_export_reports_unapplied_unit_with_missing_source_linkage(tes
         matches = [item for item in report.get("unapplied_features", []) if item.get("feature_id") == unit["id"]]
         assert matches
         assert matches[0]["reason"] == "missing_source_linkage"
+
+
+@pytest.mark.phase5
+def test_shapefile_export_uses_wizard_company_mappings_for_legacy_codes(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/mappings",
+        json={"unit_category_overrides": {"B0001": "room"}},
+    ).status_code == 200
+
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    unit_ids = [item["id"] for item in features if item["feature_type"] == "unit"]
+    assert unit_ids
+    assert test_client.patch(
+        f"/api/session/{session_id}/features/bulk",
+        json={
+            "feature_ids": unit_ids,
+            "action": "patch",
+            "properties": {"category": "room"},
+        },
+    ).status_code == 200
+
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"unit": {"overwrite_legacy_code_field": "COMP_CODE"}},
+    )
+    assert export_response.status_code == 200
+
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        report = json.loads(archive.read("export_report.json").decode("utf-8"))
+        assert report["legacy_code_map_source"] == "wizard_company_mappings"
+        assert report["legacy_code_conflicts"] == []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            archive.extractall(tmpdir)
+            gdf = gpd.read_file(Path(tmpdir) / "JRTokyoSta_B1_Space.shp")
+            assert "COMP_CODE" in gdf.columns
+            exported_codes = {str(value) for value in gdf["COMP_CODE"].dropna().tolist()}
+            assert exported_codes == {"B0001"}
+
+
+@pytest.mark.phase5
+def test_shapefile_export_prefers_explicit_legacy_map_over_wizard_defaults(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/mappings",
+        json={"unit_category_overrides": {"B0001": "room"}},
+    ).status_code == 200
+
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    unit_ids = [item["id"] for item in features if item["feature_type"] == "unit"]
+    assert unit_ids
+    assert test_client.patch(
+        f"/api/session/{session_id}/features/bulk",
+        json={
+            "feature_ids": unit_ids,
+            "action": "patch",
+            "properties": {"category": "room"},
+        },
+    ).status_code == 200
+
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={
+            "unit": {
+                "overwrite_legacy_code_field": "COMP_CODE",
+                "legacy_code_map": {"room": "R1234"},
+            }
+        },
+    )
+    assert export_response.status_code == 200
+
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        report = json.loads(archive.read("export_report.json").decode("utf-8"))
+        assert report["legacy_code_map_source"] == "payload"
+        assert report["legacy_code_conflicts"] == []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            archive.extractall(tmpdir)
+            gdf = gpd.read_file(Path(tmpdir) / "JRTokyoSta_B1_Space.shp")
+            assert "COMP_CODE" in gdf.columns
+            exported_codes = {str(value) for value in gdf["COMP_CODE"].dropna().tolist()}
+            assert exported_codes == {"R1234"}
