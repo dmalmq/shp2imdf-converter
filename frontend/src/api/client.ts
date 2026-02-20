@@ -120,6 +120,7 @@ export type UnitMappingState = {
   alt_name_column: string | null;
   restriction_column: string | null;
   accessibility_column: string | null;
+  available_categories: string[];
   preview: UnitCodePreviewRow[];
 };
 
@@ -190,6 +191,7 @@ export type MappingsWizardRequest = {
   opening?: OpeningMappingState;
   fixture?: FixtureMappingState;
   detail_confirmed?: boolean;
+  unit_category_overrides?: Record<string, string>;
 };
 
 export type CompanyMappingsUploadResponse = {

@@ -311,6 +311,44 @@ def test_company_mappings_upload_refreshes_preview(test_client, sample_dir: Path
     assert "OFFICE" in codes
 
 
+@pytest.mark.phase3
+def test_unit_category_override_updates_preview_for_same_raw_code(test_client, sample_dir: Path) -> None:
+    files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space") + _upload_payload(sample_dir, "JRTokyoSta_GF_Space")
+    import_response = test_client.post("/api/import", files=files)
+    session_id = import_response.json()["session_id"]
+
+    mappings_response = test_client.patch(
+        f"/api/session/{session_id}/wizard/mappings",
+        json={
+            "unit": {
+                "code_column": "COMPANY_CO",
+                "name_column": "NAME",
+                "alt_name_column": None,
+                "restriction_column": None,
+                "accessibility_column": None,
+                "available_categories": [],
+                "preview": [],
+            }
+        },
+    )
+    assert mappings_response.status_code == 200
+
+    response = test_client.patch(
+        f"/api/session/{session_id}/wizard/mappings",
+        json={
+            "unit_category_overrides": {
+                "SHOP": "foodservice",
+            }
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    shop_row = next(item for item in payload["wizard"]["mappings"]["unit"]["preview"] if item["code"] == "SHOP")
+    assert shop_row["resolved_category"] == "foodservice"
+    assert shop_row["unresolved"] is False
+    assert payload["wizard"]["company_mappings"]["SHOP"] == "foodservice"
+
+
 @pytest.mark.phase4
 def test_generate_creates_review_ready_feature_set(test_client, sample_dir: Path) -> None:
     import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
