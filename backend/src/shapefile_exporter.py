@@ -29,6 +29,43 @@ UNIT_EXPORT_COLUMNS = (
     "source",
     "display_po",
 )
+OPENING_EXPORT_COLUMNS = (
+    "id",
+    "name",
+    "source",
+    "category",
+    "access_con",
+    "door",
+    "alt_name",
+    "level_id",
+    "display_po",
+)
+FIXTURE_EXPORT_COLUMNS = (
+    "id",
+    "category",
+    "source",
+    "name",
+    "alt_name",
+    "level_id",
+    "display_po",
+)
+DETAIL_EXPORT_COLUMNS = (
+    "id",
+    "level_id",
+    "category",
+    "source",
+)
+LEVEL_EXPORT_COLUMNS = (
+    "id",
+    "name",
+    "source",
+    "restrict",
+    "display_po",
+    "short_name",
+    "outdoor",
+    "ordinal",
+    "address_id",
+)
 
 
 @dataclass(slots=True)
@@ -144,18 +181,56 @@ def _group_artifact_files(upload_artifact_dir: Path) -> dict[str, dict[str, Path
     return grouped
 
 
-def _unit_stems(session: SessionRecord) -> set[str]:
+def _detected_type_by_stem(session: SessionRecord) -> dict[str, str]:
     return {
-        item.stem
+        item.stem: (item.detected_type or "").strip().lower()
         for item in session.files
-        if (item.detected_type or "").strip().lower() == "unit"
+        if item.stem
     }
 
 
-def _replace_space_suffix_with_unit(stem: str) -> str:
-    if re.search(r"space$", stem, flags=re.IGNORECASE):
-        return re.sub(r"space$", "unit", stem, flags=re.IGNORECASE)
+def _replace_suffix(stem: str, pattern: str, replacement: str) -> str:
+    if re.search(pattern, stem, flags=re.IGNORECASE):
+        return re.sub(pattern, replacement, stem, flags=re.IGNORECASE)
     return stem
+
+
+def _normalized_output_stem(stem: str, detected_type: str) -> str:
+    if re.search(r"(drawing|detail)$", stem, flags=re.IGNORECASE):
+        return re.sub(r"(drawing|detail)$", "detail", stem, flags=re.IGNORECASE)
+    if re.search(r"(floor|level)$", stem, flags=re.IGNORECASE):
+        return re.sub(r"(floor|level)$", "level", stem, flags=re.IGNORECASE)
+    if re.search(r"opening$", stem, flags=re.IGNORECASE):
+        return re.sub(r"opening$", "opening", stem, flags=re.IGNORECASE)
+    if re.search(r"fixture$", stem, flags=re.IGNORECASE):
+        return re.sub(r"fixture$", "fixture", stem, flags=re.IGNORECASE)
+    if detected_type == "unit":
+        return _replace_suffix(stem, r"space$", "unit")
+    return stem
+
+
+def _inferred_type_from_stem_suffix(stem: str) -> str:
+    lower = stem.lower()
+    if lower.endswith("space"):
+        return "unit"
+    if lower.endswith("opening"):
+        return "opening"
+    if lower.endswith("fixture"):
+        return "fixture"
+    if lower.endswith("drawing") or lower.endswith("detail"):
+        return "detail"
+    if lower.endswith("floor") or lower.endswith("level"):
+        return "level"
+    return ""
+
+
+def _resolved_export_feature_type(stem: str, detected_type: str) -> str:
+    suffix_type = _inferred_type_from_stem_suffix(stem)
+    if suffix_type in {"opening", "fixture", "detail", "level"}:
+        return suffix_type
+    if detected_type:
+        return detected_type
+    return suffix_type
 
 
 def _make_unique_stem(stem: str, used_lower: set[str]) -> str:
@@ -191,42 +266,180 @@ def _series_or_empty(gdf: gpd.GeoDataFrame, column_name: str | None) -> pd.Serie
     return gdf[column_name].astype("object")
 
 
+def _constant_series(gdf: gpd.GeoDataFrame, value: Any) -> pd.Series:
+    return pd.Series([value] * len(gdf), index=gdf.index, dtype="object")
+
+
+def _coerce_to_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if pd.isna(value):
+            return None
+        return bool(int(value))
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if not lowered:
+            return None
+        if lowered in {"1", "true", "t", "yes", "y"}:
+            return True
+        if lowered in {"0", "false", "f", "no", "n"}:
+            return False
+    return None
+
+
+def _bool_series_or_default(gdf: gpd.GeoDataFrame, column_name: str | None, default_value: bool = False) -> pd.Series:
+    if column_name is None:
+        return _constant_series(gdf, default_value)
+    values = [_coerce_to_bool(item) for item in gdf[column_name].tolist()]
+    normalized = [default_value if item is None else item for item in values]
+    return pd.Series(normalized, index=gdf.index, dtype="object")
+
+
+def _normalize_columns(
+    gdf: gpd.GeoDataFrame,
+    export_columns: tuple[str, ...],
+    aliases: dict[str, list[str]],
+    defaults: dict[str, Any] | None = None,
+    bool_columns: set[str] | None = None,
+) -> gpd.GeoDataFrame:
+    geometry_column = gdf.geometry.name
+    non_geometry_columns = [column for column in gdf.columns if column != geometry_column]
+    lookup = _build_column_lookup(non_geometry_columns)
+    defaults = defaults or {}
+    bool_columns = bool_columns or set()
+
+    normalized: dict[str, pd.Series] = {}
+    for column in export_columns:
+        candidates = aliases.get(column, [column])
+        source_column = _find_column_name(lookup, candidates)
+        if column in bool_columns:
+            default_bool = bool(defaults.get(column, False))
+            normalized[column] = _bool_series_or_default(gdf, source_column, default_value=default_bool)
+            continue
+        if source_column is None and column in defaults:
+            normalized[column] = _constant_series(gdf, defaults[column])
+            continue
+        normalized[column] = _series_or_empty(gdf, source_column)
+
+    payload = {column: normalized[column] for column in export_columns}
+    payload[geometry_column] = gdf[geometry_column]
+    return gpd.GeoDataFrame(payload, geometry=geometry_column, crs=gdf.crs)
+
+
 def _normalize_unit_columns_for_export(
     gdf: gpd.GeoDataFrame,
     imdf_field: str,
     legacy_field: str | None,
 ) -> gpd.GeoDataFrame:
-    geometry_column = gdf.geometry.name
-    non_geometry_columns = [column for column in gdf.columns if column != geometry_column]
-    lookup = _build_column_lookup(non_geometry_columns)
-
-    id_column = _find_column_name(lookup, ["id"])
-    category_column = _find_column_name(lookup, [imdf_field, "category"])
-    restrict_column = _find_column_name(lookup, ["restrict", "restriction", "restricted"])
-    name_column = _find_column_name(lookup, ["name"])
-    alt_name_column = _find_column_name(lookup, ["alt_name", "altname"])
-    level_column = _find_column_name(lookup, ["level_id", "floor_id", "levelid", "floorid"])
-    source_column = _find_column_name(lookup, ["source"])
-    display_column = _find_column_name(lookup, ["display_po", "display_pt", "displaypoint", "display_point"])
-
-    normalized: dict[str, pd.Series] = {
-        "id": _series_or_empty(gdf, id_column),
-        "category": _series_or_empty(gdf, category_column),
-        "restrict": _series_or_empty(gdf, restrict_column),
-        "name": _series_or_empty(gdf, name_column),
-        "alt_name": _series_or_empty(gdf, alt_name_column),
-        "level_id": _series_or_empty(gdf, level_column),
-        "source": _series_or_empty(gdf, source_column),
-        "display_po": _series_or_empty(gdf, display_column),
-    }
+    normalized = _normalize_columns(
+        gdf,
+        export_columns=UNIT_EXPORT_COLUMNS,
+        aliases={
+            "id": ["id"],
+            "category": [imdf_field, "category"],
+            "restrict": ["restrict", "restriction", "restricted"],
+            "name": ["name"],
+            "alt_name": ["alt_name", "altname"],
+            "level_id": ["level_id", "floor_id", "levelid", "floorid"],
+            "source": ["source"],
+            "display_po": ["display_po", "display_pt", "displaypoint", "display_point"],
+        },
+        defaults={"source": 1},
+    )
 
     if legacy_field and legacy_field not in UNIT_EXPORT_COLUMNS:
-        legacy_column = _find_column_name(lookup, [legacy_field])
-        normalized[legacy_field] = _series_or_empty(gdf, legacy_column)
+        legacy_aliases = {legacy_field: [legacy_field]}
+        normalized = _normalize_columns(
+            normalized,
+            export_columns=(*UNIT_EXPORT_COLUMNS, legacy_field),
+            aliases={
+                "id": ["id"],
+                "category": ["category"],
+                "restrict": ["restrict"],
+                "name": ["name"],
+                "alt_name": ["alt_name"],
+                "level_id": ["level_id"],
+                "source": ["source"],
+                "display_po": ["display_po"],
+                **legacy_aliases,
+            },
+            defaults={"source": 1},
+        )
 
-    payload = {column: normalized[column] for column in normalized}
-    payload[geometry_column] = gdf[geometry_column]
-    return gpd.GeoDataFrame(payload, geometry=geometry_column, crs=gdf.crs)
+    return normalized
+
+
+def _normalize_opening_columns_for_export(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    return _normalize_columns(
+        gdf,
+        export_columns=OPENING_EXPORT_COLUMNS,
+        aliases={
+            "id": ["id"],
+            "name": ["name"],
+            "source": ["source"],
+            "category": ["category", "type"],
+            "access_con": ["access_con", "access_control", "accessctrl", "access_ctrl"],
+            "door": ["door"],
+            "alt_name": ["alt_name", "altname"],
+            "level_id": ["level_id", "floor_id", "levelid", "floorid"],
+            "display_po": ["display_po", "display_pt", "displaypoint", "display_point"],
+        },
+        defaults={"source": 1},
+    )
+
+
+def _normalize_fixture_columns_for_export(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    return _normalize_columns(
+        gdf,
+        export_columns=FIXTURE_EXPORT_COLUMNS,
+        aliases={
+            "id": ["id"],
+            "category": ["category"],
+            "source": ["source"],
+            "name": ["name"],
+            "alt_name": ["alt_name", "altname"],
+            "level_id": ["level_id", "floor_id", "levelid", "floorid"],
+            "display_po": ["display_po", "display_pt", "displaypoint", "display_point"],
+        },
+        defaults={"source": 1},
+    )
+
+
+def _normalize_detail_columns_for_export(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    return _normalize_columns(
+        gdf,
+        export_columns=DETAIL_EXPORT_COLUMNS,
+        aliases={
+            "id": ["id"],
+            "level_id": ["level_id", "floor_id", "levelid", "floorid"],
+            "category": ["category", "type"],
+            "source": ["source"],
+        },
+        defaults={"source": 1},
+    )
+
+
+def _normalize_level_columns_for_export(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    return _normalize_columns(
+        gdf,
+        export_columns=LEVEL_EXPORT_COLUMNS,
+        aliases={
+            "id": ["id"],
+            "name": ["name"],
+            "source": ["source"],
+            "restrict": ["restrict", "restriction", "restricted"],
+            "display_po": ["display_po", "display_pt", "displaypoint", "display_point"],
+            "short_name": ["short_name", "shortname"],
+            "outdoor": ["outdoor"],
+            "ordinal": ["ordinal"],
+            "address_id": ["address_id", "addr_id"],
+        },
+        defaults={"source": 1, "outdoor": False},
+        bool_columns={"outdoor"},
+    )
 
 
 def _should_normalize_unit_schema(
@@ -250,7 +463,12 @@ def _build_export_report(request: ShapefileExportRequest) -> dict[str, Any]:
         "legacy_code_map_source": "none",
         "legacy_code_conflicts": [],
         "unit_schema_normalized_stems": [],
+        "opening_schema_normalized_stems": [],
+        "fixture_schema_normalized_stems": [],
+        "detail_schema_normalized_stems": [],
+        "level_schema_normalized_stems": [],
         "unit_stem_renames": [],
+        "stem_renames": [],
         "rows_requested": 0,
         "rows_updated": 0,
         "stems_processed": [],
@@ -354,7 +572,7 @@ def build_shapefile_export_archive(
 
     handled_update_keys: set[tuple[str, int]] = set()
     write_encoding = _encoding_for_write(request.encoding)
-    unit_stems = _unit_stems(session)
+    detected_type_by_stem = _detected_type_by_stem(session)
     normalize_unit_schema = _should_normalize_unit_schema(session, imdf_field)
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -364,7 +582,11 @@ def build_shapefile_export_archive(
         for stem, components in sorted(shapefile_groups.items()):
             shapefile_path = components[".shp"]
             gdf = gpd.read_file(shapefile_path)
-            is_unit_stem = stem in unit_stems
+            detected_type = _resolved_export_feature_type(
+                stem,
+                detected_type_by_stem.get(stem, ""),
+            )
+            is_unit_stem = detected_type == "unit"
             stem_update_count = 0
 
             stem_updates = {
@@ -433,25 +655,42 @@ def build_shapefile_export_archive(
 
                 handled_update_keys.add(key)
 
-            if is_unit_stem and normalize_unit_schema:
+            if detected_type == "unit" and normalize_unit_schema:
                 gdf = _normalize_unit_columns_for_export(
                     gdf,
                     imdf_field=imdf_field,
                     legacy_field=legacy_field,
                 )
                 report["unit_schema_normalized_stems"].append(stem)
+            elif detected_type == "opening":
+                gdf = _normalize_opening_columns_for_export(gdf)
+                report["opening_schema_normalized_stems"].append(stem)
+            elif detected_type == "fixture":
+                gdf = _normalize_fixture_columns_for_export(gdf)
+                report["fixture_schema_normalized_stems"].append(stem)
+            elif detected_type == "detail":
+                gdf = _normalize_detail_columns_for_export(gdf)
+                report["detail_schema_normalized_stems"].append(stem)
+            elif detected_type == "level":
+                gdf = _normalize_level_columns_for_export(gdf)
+                report["level_schema_normalized_stems"].append(stem)
 
-            output_stem = stem
-            if is_unit_stem:
-                renamed_stem = _replace_space_suffix_with_unit(stem)
-                if renamed_stem != stem:
+            output_stem = _normalized_output_stem(stem, detected_type)
+            if output_stem != stem:
+                report["stem_renames"].append(
+                    {
+                        "from": stem,
+                        "to": output_stem,
+                        "feature_type": detected_type or "unknown",
+                    }
+                )
+                if detected_type == "unit":
                     report["unit_stem_renames"].append(
                         {
                             "from": stem,
-                            "to": renamed_stem,
+                            "to": output_stem,
                         }
                     )
-                output_stem = renamed_stem
 
             output_stem = _make_unique_stem(output_stem, used_output_stems)
             destination = output_dir / f"{output_stem}.shp"

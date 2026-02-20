@@ -12,7 +12,7 @@ import zipfile
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import Point, shape
+from shapely.geometry import Point, Polygon, shape
 
 from backend.src.geocoding import GeocodeAddressParts, GeocodeMatch, GeocodingError
 from backend.src.schemas import CleanupSummary, ImportedFile
@@ -1161,3 +1161,226 @@ def test_shapefile_export_normalizes_unit_columns_and_renames_space_stem(test_cl
             assert "color" not in exported.columns
             exported_categories = {str(value).lower() for value in exported["category"].dropna().tolist()}
             assert exported_categories == {"room"}
+
+
+@pytest.mark.phase5
+def test_shapefile_export_normalizes_other_feature_schemas_and_renames_suffixes(test_client) -> None:
+    stems = {
+        "unit": "DemoSta_2_Space",
+        "opening": "DemoSta_2_Opening",
+        "fixture": "DemoSta_2_Fixture",
+        "detail": "DemoSta_2_Drawing",
+        "level": "DemoSta_2_Floor",
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        working_dir = Path(tmpdir)
+
+        unit_gdf = gpd.GeoDataFrame(
+            {
+                "NAME": ["Unit A"],
+                "COMPANY_CO": ["SHOP"],
+            },
+            geometry=[
+                Polygon(
+                    [
+                        (139.7000, 35.6900),
+                        (139.7001, 35.6900),
+                        (139.7001, 35.6901),
+                        (139.7000, 35.6901),
+                        (139.7000, 35.6900),
+                    ]
+                )
+            ],
+            crs="EPSG:4326",
+        )
+        unit_gdf.to_file(working_dir / f"{stems['unit']}.shp", driver="ESRI Shapefile", index=False)
+
+        opening_gdf = gpd.GeoDataFrame(
+            {
+                "id": ["opening-old-1"],
+                "floor_id": ["legacy-floor-id"],
+                "name": ["Gate A"],
+                "source": [1],
+            },
+            geometry=[
+                Polygon(
+                    [
+                        (139.7002, 35.6900),
+                        (139.7003, 35.6900),
+                        (139.7003, 35.6901),
+                        (139.7002, 35.6901),
+                        (139.7002, 35.6900),
+                    ]
+                )
+            ],
+            crs="EPSG:4326",
+        )
+        opening_gdf.to_file(working_dir / f"{stems['opening']}.shp", driver="ESRI Shapefile", index=False)
+
+        fixture_gdf = gpd.GeoDataFrame(
+            {
+                "id": ["fixture-old-1"],
+                "category": ["C104"],
+                "floor_id": ["legacy-floor-id"],
+                "source": [1],
+            },
+            geometry=[
+                Polygon(
+                    [
+                        (139.7004, 35.6900),
+                        (139.7005, 35.6900),
+                        (139.7005, 35.6901),
+                        (139.7004, 35.6901),
+                        (139.7004, 35.6900),
+                    ]
+                )
+            ],
+            crs="EPSG:4326",
+        )
+        fixture_gdf.to_file(working_dir / f"{stems['fixture']}.shp", driver="ESRI Shapefile", index=False)
+
+        detail_gdf = gpd.GeoDataFrame(
+            {
+                "id": ["detail-old-1"],
+                "floor_id": ["legacy-floor-id"],
+                "source": [1],
+            },
+            geometry=[
+                Polygon(
+                    [
+                        (139.7006, 35.6900),
+                        (139.7007, 35.6900),
+                        (139.7007, 35.6901),
+                        (139.7006, 35.6901),
+                        (139.7006, 35.6900),
+                    ]
+                )
+            ],
+            crs="EPSG:4326",
+        )
+        detail_gdf.to_file(working_dir / f"{stems['detail']}.shp", driver="ESRI Shapefile", index=False)
+
+        level_gdf = gpd.GeoDataFrame(
+            {
+                "id": ["level-old-1"],
+                "category": [1],
+                "name": ["2F"],
+                "ordinal": [2.0],
+                "short_name": ["2F"],
+                "source": [1],
+            },
+            geometry=[
+                Polygon(
+                    [
+                        (139.7008, 35.6900),
+                        (139.7009, 35.6900),
+                        (139.7009, 35.6901),
+                        (139.7008, 35.6901),
+                        (139.7008, 35.6900),
+                    ]
+                )
+            ],
+            crs="EPSG:4326",
+        )
+        level_gdf.to_file(working_dir / f"{stems['level']}.shp", driver="ESRI Shapefile", index=False)
+
+        payload: list[tuple[str, tuple[str, bytes, str]]] = []
+        for stem in stems.values():
+            payload.extend(_upload_payload(working_dir, stem))
+
+        import_response = test_client.post("/api/import", files=payload)
+        assert import_response.status_code == 201
+        session_id = import_response.json()["session_id"]
+
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Demo Station",
+            "venue_name": "Demo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-1 Demo",
+                "locality": "Shinjuku",
+                "country": "JP",
+            },
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"unit": {"imdf_category_field": "category"}},
+    )
+    assert export_response.status_code == 200
+
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        names = set(archive.namelist())
+        assert "DemoSta_2_unit.shp" in names
+        assert "DemoSta_2_opening.shp" in names
+        assert "DemoSta_2_fixture.shp" in names
+        assert "DemoSta_2_detail.shp" in names
+        assert "DemoSta_2_level.shp" in names
+
+        report = json.loads(archive.read("export_report.json").decode("utf-8"))
+        assert {"from": "DemoSta_2_Opening", "to": "DemoSta_2_opening", "feature_type": "opening"} in report["stem_renames"]
+        assert {"from": "DemoSta_2_Fixture", "to": "DemoSta_2_fixture", "feature_type": "fixture"} in report["stem_renames"]
+        assert {"from": "DemoSta_2_Drawing", "to": "DemoSta_2_detail", "feature_type": "detail"} in report["stem_renames"]
+        assert {"from": "DemoSta_2_Floor", "to": "DemoSta_2_level", "feature_type": "level"} in report["stem_renames"]
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            archive.extractall(output_dir)
+
+            opening = gpd.read_file(Path(output_dir) / "DemoSta_2_opening.shp")
+            assert set(opening.columns) == {
+                "id",
+                "name",
+                "source",
+                "category",
+                "access_con",
+                "door",
+                "alt_name",
+                "level_id",
+                "display_po",
+                "geometry",
+            }
+            assert "floor_id" not in opening.columns
+
+            fixture = gpd.read_file(Path(output_dir) / "DemoSta_2_fixture.shp")
+            assert set(fixture.columns) == {
+                "id",
+                "category",
+                "source",
+                "name",
+                "alt_name",
+                "level_id",
+                "display_po",
+                "geometry",
+            }
+            assert "floor_id" not in fixture.columns
+
+            detail = gpd.read_file(Path(output_dir) / "DemoSta_2_detail.shp")
+            assert set(detail.columns) == {
+                "id",
+                "level_id",
+                "category",
+                "source",
+                "geometry",
+            }
+            assert "floor_id" not in detail.columns
+
+            level = gpd.read_file(Path(output_dir) / "DemoSta_2_level.shp")
+            assert set(level.columns) == {
+                "id",
+                "name",
+                "source",
+                "restrict",
+                "display_po",
+                "short_name",
+                "outdoor",
+                "ordinal",
+                "address_id",
+                "geometry",
+            }
+            assert "category" not in level.columns
