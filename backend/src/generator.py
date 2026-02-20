@@ -428,6 +428,9 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
         metadata = row_properties.get("metadata") or {}
         common = {
             "source_file": stem,
+            "source_row_index": row_properties.get("source_row_index"),
+            "source_part_index": row_properties.get("source_part_index"),
+            "source_feature_ref": row_properties.get("source_feature_ref"),
             "status": "mapped",
             "issues": [],
             "metadata": metadata,

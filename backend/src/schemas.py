@@ -271,6 +271,7 @@ class SessionRecord(BaseModel):
     source_feature_collection: dict[str, Any] | None = None
     warnings: list[str] = Field(default_factory=list)
     learned_keywords: dict[str, str] = Field(default_factory=dict)
+    upload_artifact_dir: str | None = None
     wizard: WizardState = Field(default_factory=WizardState)
     validation: ValidationResponse | None = None
 
@@ -427,6 +428,24 @@ class GenerateResponse(BaseModel):
     status: Literal["draft", "generated"]
     generated_feature_count: int
     message: str
+
+
+class ShapefileExportUnitOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    write_imdf_category: bool = True
+    imdf_category_field: str = "IMDF_CAT"
+    overwrite_legacy_code_field: str | None = None
+    legacy_code_map: dict[str, str] = Field(default_factory=dict)
+
+
+class ShapefileExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["source_update"] = "source_update"
+    encoding: Literal["preserve_source", "utf-8", "cp932"] = "preserve_source"
+    unit: ShapefileExportUnitOptions = Field(default_factory=ShapefileExportUnitOptions)
+    include_report: bool = True
 
 
 class FeatureResponse(BaseModel):

@@ -7,8 +7,9 @@ from fastapi.responses import Response
 
 from backend.src.autofix import apply_autofix
 from backend.src.exporter import build_export_archive
-from backend.src.schemas import AutofixRequest, AutofixResponse, ValidationResponse
+from backend.src.schemas import AutofixRequest, AutofixResponse, ShapefileExportRequest, ValidationResponse
 from backend.src.session import SessionManager
+from backend.src.shapefile_exporter import build_shapefile_export_archive
 from backend.src.validator import annotate_feature_collection_with_validation, validate_feature_collection
 
 
@@ -84,6 +85,26 @@ def export_imdf(session_id: str, request: Request) -> Response:
     manager.save_session(session)
     return Response(
         content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/export/shapefiles")
+def export_shapefiles(
+    session_id: str,
+    payload: ShapefileExportRequest,
+    request: Request,
+) -> Response:
+    manager = _session_manager(request)
+    session = manager.get_session(session_id=session_id)
+    if session is None:
+        raise KeyError("Session not found")
+
+    archive, filename = build_shapefile_export_archive(session=session, request=payload)
+    manager.save_session(session)
+    return Response(
+        content=archive,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

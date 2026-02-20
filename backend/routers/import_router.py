@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
+import shutil
 from typing import Annotated
 import zipfile
 
@@ -29,6 +30,36 @@ def _keyword_config_path(request: Request) -> Path:
 def _max_upload_bytes(request: Request) -> int:
     value = getattr(request.app.state, "max_upload_bytes", 1024 * 1024 * 1024)
     return int(value)
+
+
+def _session_uploads_dir(request: Request) -> Path:
+    path = getattr(request.app.state, "session_uploads_dir", Path("./data/session_uploads"))
+    directory = Path(path)
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _persist_session_upload_artifacts(
+    session_id: str,
+    file_blobs: list[tuple[str, bytes]],
+    uploads_root: Path,
+) -> Path:
+    target = uploads_root / session_id
+    if target.exists():
+        shutil.rmtree(target, ignore_errors=True)
+    target.mkdir(parents=True, exist_ok=True)
+
+    for filename, payload in file_blobs:
+        source_name = Path(filename).name
+        candidate = source_name
+        collision_index = 1
+        while (target / candidate).exists():
+            stem = Path(source_name).stem
+            suffix = Path(source_name).suffix
+            candidate = f"{stem}_{collision_index}{suffix}"
+            collision_index += 1
+        (target / candidate).write_bytes(payload)
+    return target
 
 
 def _expand_upload(upload: UploadFile, payload: bytes) -> list[tuple[str, bytes]]:
@@ -67,14 +98,22 @@ async def import_files(
             raise ValueError("Expanded upload exceeds configured limit (MAX_UPLOAD_MB).")
         raw_blobs.extend(expanded)
 
+    manager = _session_manager(request)
     artifacts = import_file_blobs(raw_blobs, filename_keywords_path=_keyword_config_path(request))
     feature_collection = sync_feature_types(artifacts.feature_collection, artifacts.files)
-    session = _session_manager(request).create_session(
+    session = manager.create_session(
         files=artifacts.files,
         cleanup_summary=artifacts.cleanup_summary,
         feature_collection=feature_collection,
         warnings=artifacts.warnings,
     )
+    artifact_directory = _persist_session_upload_artifacts(
+        session_id=session.session_id,
+        file_blobs=raw_blobs,
+        uploads_root=_session_uploads_dir(request),
+    )
+    session.upload_artifact_dir = str(artifact_directory)
+    manager.save_session(session)
     return ImportResponse(
         session_id=session.session_id,
         files=artifacts.files,
