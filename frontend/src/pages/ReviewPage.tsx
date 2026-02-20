@@ -160,7 +160,7 @@ function parseLegacyCodeMappings(raw: string): { mapping: Record<string, string>
 }
 
 function buildShapefileDefaultsFromWizard(wizardState: WizardState | null): {
-  legacyCodeField: string;
+  sourceCategoryField: string;
   legacyMapText: string;
 } {
   const codeByCategory: Record<string, string> = {};
@@ -183,7 +183,7 @@ function buildShapefileDefaultsFromWizard(wizardState: WizardState | null): {
     .join("\n");
 
   return {
-    legacyCodeField: wizardState?.mappings.unit.code_column?.trim() ?? "",
+    sourceCategoryField: wizardState?.mappings.unit.code_column?.trim() ?? "",
     legacyMapText
   };
 }
@@ -250,6 +250,8 @@ export function ReviewPage() {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState<"imdf" | "shapefiles">("imdf");
   const [shapefileEncoding, setShapefileEncoding] = useState<ShapefileExportEncoding>("preserve_source");
+  const [shapefileSourceCategoryField, setShapefileSourceCategoryField] = useState("");
+  const [shapefileWriteCategoryToNewField, setShapefileWriteCategoryToNewField] = useState(false);
   const [shapefileCategoryField, setShapefileCategoryField] = useState("IMDF_CAT");
   const [shapefileLegacyCodeField, setShapefileLegacyCodeField] = useState("");
   const [shapefileLegacyMapText, setShapefileLegacyMapText] = useState("");
@@ -607,10 +609,13 @@ export function ReviewPage() {
       return;
     }
     const defaults = buildShapefileDefaultsFromWizard(wizardState);
+    const sourceCategoryField = defaults.sourceCategoryField.trim();
     setExportFormat("imdf");
     setShapefileEncoding("preserve_source");
-    setShapefileCategoryField("IMDF_CAT");
-    setShapefileLegacyCodeField(defaults.legacyCodeField);
+    setShapefileSourceCategoryField(sourceCategoryField);
+    setShapefileWriteCategoryToNewField(false);
+    setShapefileCategoryField(sourceCategoryField || "IMDF_CAT");
+    setShapefileLegacyCodeField("");
     setShapefileLegacyMapText(defaults.legacyMapText);
     setExportOptionsError(null);
     setExportDialogOpen(true);
@@ -632,16 +637,39 @@ export function ReviewPage() {
 
     let shapefilePayload: ShapefileExportRequest | null = null;
     if (exportFormat === "shapefiles") {
-      const parsed = parseLegacyCodeMappings(shapefileLegacyMapText);
-      if (parsed.invalidLines.length > 0) {
+      const sourceField = shapefileSourceCategoryField.trim();
+      const fallbackCategoryField =
+        shapefileWriteCategoryToNewField || !sourceField
+          ? "IMDF_CAT"
+          : sourceField;
+      const imdfCategoryField = shapefileCategoryField.trim() || fallbackCategoryField;
+      const legacyCodeField = shapefileLegacyCodeField.trim();
+      let legacyCodeMap: Record<string, string> = {};
+
+      if (legacyCodeField) {
+        const parsed = parseLegacyCodeMappings(shapefileLegacyMapText);
+        if (parsed.invalidLines.length > 0) {
+          const message = t(
+            `Legacy mapping format is invalid (${parsed.invalidLines.join(", ")}). Use category=CODE.`,
+            `Legacy mapping format is invalid (${parsed.invalidLines.join(", ")}). Use category=CODE.`
+          );
+          setExportOptionsError(message);
+          setError(message);
+          return;
+        }
+        legacyCodeMap = parsed.mapping;
+      }
+
+      if (legacyCodeField && legacyCodeField.toLowerCase() === imdfCategoryField.toLowerCase()) {
         const message = t(
-          `Legacy mapping format is invalid (${parsed.invalidLines.join(", ")}). Use category=CODE.`,
-          `Legacy mapping format is invalid (${parsed.invalidLines.join(", ")}). Use category=CODE.`
+          "Legacy code field must differ from the IMDF category field.",
+          "Legacy code field must differ from the IMDF category field."
         );
         setExportOptionsError(message);
         setError(message);
         return;
       }
+
       setExportOptionsError(null);
       shapefilePayload = {
         mode: "source_update",
@@ -649,9 +677,9 @@ export function ReviewPage() {
         include_report: true,
         unit: {
           write_imdf_category: true,
-          imdf_category_field: shapefileCategoryField.trim() || "IMDF_CAT",
-          overwrite_legacy_code_field: shapefileLegacyCodeField.trim() || null,
-          legacy_code_map: parsed.mapping
+          imdf_category_field: imdfCategoryField,
+          overwrite_legacy_code_field: legacyCodeField || null,
+          legacy_code_map: legacyCodeMap
         }
       };
     }
@@ -973,15 +1001,57 @@ export function ReviewPage() {
                   </select>
                 </label>
 
+                <label className="flex items-start gap-2 rounded border bg-white px-2 py-2 text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4"
+                    checked={shapefileWriteCategoryToNewField}
+                    onChange={(event) => {
+                      const checked = event.target.checked;
+                      setShapefileWriteCategoryToNewField(checked);
+                      if (checked) {
+                        const sourceField = shapefileSourceCategoryField.trim().toLowerCase();
+                        const currentField = shapefileCategoryField.trim().toLowerCase();
+                        if (!currentField || (sourceField && currentField === sourceField)) {
+                          setShapefileCategoryField("IMDF_CAT");
+                        }
+                        return;
+                      }
+                      const sourceField = shapefileSourceCategoryField.trim();
+                      if (sourceField) {
+                        setShapefileCategoryField(sourceField);
+                      }
+                    }}
+                  />
+                  <span>
+                    {t(
+                      "Write IMDF categories to a new field instead of overwriting the existing code/category field.",
+                      "Write IMDF categories to a new field instead of overwriting the existing code/category field."
+                    )}
+                  </span>
+                </label>
+
                 <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-500">{t("IMDF category field", "IMDF category field")}</span>
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-500">
+                    {shapefileWriteCategoryToNewField
+                      ? t("New IMDF category field", "New IMDF category field")
+                      : t("Existing category/code field to overwrite", "Existing category/code field to overwrite")}
+                  </span>
                   <input
                     className="w-full rounded border px-2 py-1.5"
                     value={shapefileCategoryField}
                     onChange={(event) => setShapefileCategoryField(event.target.value)}
-                    placeholder="IMDF_CAT"
+                    placeholder={shapefileWriteCategoryToNewField ? "IMDF_CAT" : (shapefileSourceCategoryField || "CATEGORY")}
                   />
                 </label>
+                {!shapefileWriteCategoryToNewField ? (
+                  <p className="text-xs text-slate-600">
+                    {t(
+                      "Default is your mapped source code/category column, so exports replace old codes with IMDF categories.",
+                      "Default is your mapped source code/category column, so exports replace old codes with IMDF categories."
+                    )}
+                  </p>
+                ) : null}
 
                 <label className="block">
                   <span className="mb-1 block text-xs uppercase tracking-wide text-slate-500">
@@ -1009,8 +1079,8 @@ export function ReviewPage() {
                 </label>
                 <p className="text-xs text-slate-600">
                   {t(
-                    "Use one mapping per line as category=CODE (also accepts category,CODE or category:CODE).",
-                    "Use one mapping per line as category=CODE (also accepts category,CODE or category:CODE)."
+                    "Use one mapping per line as category=CODE (also accepts category,CODE or category:CODE). Applied only when Legacy code field is set.",
+                    "Use one mapping per line as category=CODE (also accepts category,CODE or category:CODE). Applied only when Legacy code field is set."
                   )}
                 </p>
               </div>
