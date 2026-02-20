@@ -6,6 +6,7 @@ from io import BytesIO
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import zipfile
 
@@ -911,14 +912,14 @@ def test_shapefile_export_writes_updated_unit_categories(test_client, sample_dir
 
     with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
         names = set(archive.namelist())
-        assert "JRTokyoSta_B1_Space.shp" in names
-        assert "JRTokyoSta_B1_Space.shx" in names
-        assert "JRTokyoSta_B1_Space.dbf" in names
+        assert "JRTokyoSta_B1_unit.shp" in names
+        assert "JRTokyoSta_B1_unit.shx" in names
+        assert "JRTokyoSta_B1_unit.dbf" in names
         assert "export_report.json" in names
 
         with tempfile.TemporaryDirectory() as tmpdir:
             archive.extractall(tmpdir)
-            gdf = gpd.read_file(Path(tmpdir) / "JRTokyoSta_B1_Space.shp")
+            gdf = gpd.read_file(Path(tmpdir) / "JRTokyoSta_B1_unit.shp")
             assert "IMDF_CAT" in gdf.columns
             exported_categories = {str(value).lower() for value in gdf["IMDF_CAT"].dropna().tolist()}
             assert exported_categories == {"room"}
@@ -1011,7 +1012,7 @@ def test_shapefile_export_uses_wizard_company_mappings_for_legacy_codes(test_cli
 
         with tempfile.TemporaryDirectory() as tmpdir:
             archive.extractall(tmpdir)
-            gdf = gpd.read_file(Path(tmpdir) / "JRTokyoSta_B1_Space.shp")
+            gdf = gpd.read_file(Path(tmpdir) / "JRTokyoSta_B1_unit.shp")
             assert "COMP_CODE" in gdf.columns
             exported_codes = {str(value) for value in gdf["COMP_CODE"].dropna().tolist()}
             assert exported_codes == {"B0001"}
@@ -1072,7 +1073,91 @@ def test_shapefile_export_prefers_explicit_legacy_map_over_wizard_defaults(test_
 
         with tempfile.TemporaryDirectory() as tmpdir:
             archive.extractall(tmpdir)
-            gdf = gpd.read_file(Path(tmpdir) / "JRTokyoSta_B1_Space.shp")
+            gdf = gpd.read_file(Path(tmpdir) / "JRTokyoSta_B1_unit.shp")
             assert "COMP_CODE" in gdf.columns
             exported_codes = {str(value) for value in gdf["COMP_CODE"].dropna().tolist()}
             assert exported_codes == {"R1234"}
+
+
+@pytest.mark.phase5
+def test_shapefile_export_normalizes_unit_columns_and_renames_space_stem(test_client, sample_dir: Path) -> None:
+    stem = "JRTokyoSta_B1_Space"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        working_dir = Path(tmpdir)
+        for extension in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
+            source = sample_dir / f"{stem}{extension}"
+            if source.exists():
+                shutil.copy2(source, working_dir / source.name)
+
+        gdf = gpd.read_file(working_dir / f"{stem}.shp")
+        gdf["id"] = [f"legacy-{index}" for index in range(len(gdf))]
+        gdf["category"] = gdf["COMPANY_CO"]
+        gdf["floor_id"] = [f"floor-{index}" for index in range(len(gdf))]
+        gdf["restricted"] = 2
+        gdf["suite"] = "S1"
+        gdf["nonpublic"] = 1
+        gdf["toll"] = 2
+        gdf["source"] = 1
+        gdf["color"] = "blue"
+        gdf.to_file(working_dir / f"{stem}.shp", driver="ESRI Shapefile", index=False)
+
+        import_response = test_client.post("/api/import", files=_upload_payload(working_dir, stem))
+        session_id = import_response.json()["session_id"]
+
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    unit_ids = [item["id"] for item in features if item["feature_type"] == "unit"]
+    assert unit_ids
+    assert test_client.patch(
+        f"/api/session/{session_id}/features/bulk",
+        json={
+            "feature_ids": unit_ids,
+            "action": "patch",
+            "properties": {"category": "room"},
+        },
+    ).status_code == 200
+
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"unit": {"imdf_category_field": "category"}},
+    )
+    assert export_response.status_code == 200
+
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        names = set(archive.namelist())
+        assert "JRTokyoSta_B1_unit.shp" in names
+        assert "JRTokyoSta_B1_unit.shx" in names
+        assert "JRTokyoSta_B1_unit.dbf" in names
+
+        report = json.loads(archive.read("export_report.json").decode("utf-8"))
+        assert "JRTokyoSta_B1_Space" in report["unit_schema_normalized_stems"]
+        assert {"from": "JRTokyoSta_B1_Space", "to": "JRTokyoSta_B1_unit"} in report["unit_stem_renames"]
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            archive.extractall(output_dir)
+            exported = gpd.read_file(Path(output_dir) / "JRTokyoSta_B1_unit.shp")
+            expected = {"id", "category", "restrict", "name", "alt_name", "level_id", "source", "display_po", "geometry"}
+            assert set(exported.columns) == expected
+            assert "restricted" not in exported.columns
+            assert "floor_id" not in exported.columns
+            assert "suite" not in exported.columns
+            assert "nonpublic" not in exported.columns
+            assert "toll" not in exported.columns
+            assert "color" not in exported.columns
+            exported_categories = {str(value).lower() for value in exported["category"].dropna().tolist()}
+            assert exported_categories == {"room"}
