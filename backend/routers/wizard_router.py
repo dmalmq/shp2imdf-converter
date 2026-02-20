@@ -10,7 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, File, Request, UploadFile
 from shapely.geometry import shape
 
-from backend.src.geocoding import GeocodeMatch, GeocoderClient
+from backend.src.geocoding import GeocodeMatch, GeocoderClient, GeocodingError
 from backend.src.mapper import (
     build_unit_code_preview,
     detect_candidate_columns,
@@ -431,7 +431,11 @@ def search_wizard_address(
     _get_session_or_raise(session_id, request)
     geocoder = _geocoder(request)
     if geocoder is None:
-        raise ValueError("Geocoding is disabled on this server.")
+        raise GeocodingError(
+            "Geocoding is disabled on this server.",
+            code="GEOCODER_DISABLED",
+            status_code=503,
+        )
 
     cleaned_query = query.strip()
     if not cleaned_query:
@@ -455,7 +459,11 @@ def autofill_wizard_address(
     session = _get_session_or_raise(session_id, request)
     geocoder = _geocoder(request)
     if geocoder is None:
-        raise ValueError("Geocoding is disabled on this server.")
+        raise GeocodingError(
+            "Geocoding is disabled on this server.",
+            code="GEOCODER_DISABLED",
+            status_code=503,
+        )
 
     source_point = _representative_point(session)
     if source_point is None:

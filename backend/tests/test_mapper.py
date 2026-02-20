@@ -136,7 +136,7 @@ def test_build_unit_code_preview_and_labels() -> None:
 
 
 @pytest.mark.phase3
-def test_resolve_unit_category_accepts_dotted_taxonomy_values() -> None:
+def test_resolve_unit_category_requires_category_to_exist_in_config() -> None:
     valid = {"unspecified", "retail", "office"}
     category, unresolved = resolve_unit_category(
         raw_code="restroom.unisex.wheelchair",
@@ -144,12 +144,12 @@ def test_resolve_unit_category_accepts_dotted_taxonomy_values() -> None:
         valid_categories=valid,
         default_category="unspecified",
     )
-    assert category == "restroom.unisex.wheelchair"
-    assert unresolved is False
+    assert category == "unspecified"
+    assert unresolved is True
 
 
 @pytest.mark.phase3
-def test_normalize_company_mapping_accepts_syntactically_valid_extended_categories() -> None:
+def test_normalize_company_mapping_rejects_unknown_categories() -> None:
     valid = {"unspecified", "retail", "office"}
     mappings, default = normalize_company_mappings_payload(
         payload={
@@ -163,8 +163,21 @@ def test_normalize_company_mapping_accepts_syntactically_valid_extended_categori
         fallback_default="unspecified",
     )
     assert default == "office"
-    assert mappings["RESTROOM"] == "restroom.unisex.wheelchair"
+    assert mappings["RESTROOM"] == "office"
     assert mappings["BAD"] == "office"
+
+
+@pytest.mark.phase3
+def test_resolve_unit_category_accepts_configured_dotted_category() -> None:
+    valid = {"unspecified", "retail", "restroom.unisex.wheelchair"}
+    category, unresolved = resolve_unit_category(
+        raw_code="restroom.unisex.wheelchair",
+        company_mappings={},
+        valid_categories=valid,
+        default_category="unspecified",
+    )
+    assert category == "restroom.unisex.wheelchair"
+    assert unresolved is False
 
 
 @pytest.mark.phase3

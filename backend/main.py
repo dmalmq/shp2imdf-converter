@@ -18,7 +18,7 @@ from backend.routers.features_router import router as features_router
 from backend.routers.generate_router import router as generate_router
 from backend.routers.import_router import router as import_router
 from backend.routers.wizard_router import router as wizard_router
-from backend.src.geocoding import build_geocoder
+from backend.src.geocoding import GeocodingError, build_geocoder
 from backend.src.schemas import ErrorResponse
 from backend.src.session import SessionManager, build_session_backend
 
@@ -113,6 +113,12 @@ async def key_error_handler(_: Request, exc: KeyError) -> JSONResponse:
 async def value_error_handler(_: Request, exc: ValueError) -> JSONResponse:
     payload = ErrorResponse(detail=str(exc), code="BAD_REQUEST")
     return JSONResponse(status_code=400, content=payload.model_dump())
+
+
+@app.exception_handler(GeocodingError)
+async def geocoding_error_handler(_: Request, exc: GeocodingError) -> JSONResponse:
+    payload = ErrorResponse(detail=exc.detail, code=exc.code)
+    return JSONResponse(status_code=exc.status_code, content=payload.model_dump())
 
 
 @app.exception_handler(RequestValidationError)
