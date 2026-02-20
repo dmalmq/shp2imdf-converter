@@ -111,11 +111,13 @@ class NominatimGeocoder:
         user_agent: str = "shp2imdf-converter/1.0",
         timeout_seconds: float = 8.0,
         cache_seconds: int = 900,
+        max_cache_entries: int = 512,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.user_agent = user_agent.strip() or "shp2imdf-converter/1.0"
         self.timeout_seconds = max(timeout_seconds, 1.0)
         self.cache_seconds = max(cache_seconds, 0)
+        self.max_cache_entries = max(max_cache_entries, 0)
         self._cache: dict[str, tuple[float, Any]] = {}
 
     def search(self, query: str, language: str, limit: int = 5) -> list[GeocodeMatch]:
@@ -259,8 +261,22 @@ class NominatimGeocoder:
         return payload
 
     def _cache_set(self, key: str, payload: Any) -> None:
-        if self.cache_seconds <= 0:
+        if self.cache_seconds <= 0 or self.max_cache_entries <= 0:
             return
+        if key in self._cache:
+            self._cache[key] = (time.time() + self.cache_seconds, payload)
+            return
+
+        if len(self._cache) >= self.max_cache_entries:
+            now = time.time()
+            expired = [cached_key for cached_key, (expires_at, _) in self._cache.items() if now > expires_at]
+            for expired_key in expired:
+                self._cache.pop(expired_key, None)
+
+        if len(self._cache) >= self.max_cache_entries and self._cache:
+            oldest_key = min(self._cache.items(), key=lambda item: item[1][0])[0]
+            self._cache.pop(oldest_key, None)
+
         self._cache[key] = (time.time() + self.cache_seconds, payload)
 
 
@@ -271,6 +287,7 @@ def build_geocoder(
     user_agent: str,
     timeout_seconds: float,
     cache_seconds: int,
+    max_cache_entries: int,
 ) -> GeocoderClient | None:
     normalized = provider.strip().lower()
     if normalized in {"", "none", "disabled", "off"}:
@@ -281,5 +298,6 @@ def build_geocoder(
             user_agent=user_agent,
             timeout_seconds=timeout_seconds,
             cache_seconds=cache_seconds,
+            max_cache_entries=max_cache_entries,
         )
     raise ValueError(f"Unsupported geocoder provider: {provider}")

@@ -42,6 +42,13 @@ def _load_session_manager() -> SessionManager:
     return SessionManager(backend=backend, ttl_hours=ttl_hours, max_sessions=max_sessions)
 
 
+def _load_max_upload_bytes() -> int:
+    max_upload_mb = float(os.getenv("MAX_UPLOAD_MB", "1024"))
+    if max_upload_mb <= 0:
+        raise ValueError("MAX_UPLOAD_MB must be greater than 0")
+    return int(max_upload_mb * 1024 * 1024)
+
+
 async def _session_cleanup_loop(manager: SessionManager, stop: asyncio.Event) -> None:
     while True:
         try:
@@ -54,6 +61,7 @@ async def _session_cleanup_loop(manager: SessionManager, stop: asyncio.Event) ->
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.session_manager = _load_session_manager()
+    app.state.max_upload_bytes = _load_max_upload_bytes()
     app.state.filename_keywords_path = Path(__file__).parent / "config" / "filename_keywords.json"
     app.state.unit_categories_path = Path(__file__).parent / "config" / "unit_categories.json"
     app.state.company_mappings_path = Path(__file__).parent / "config" / "company_mappings.json"
@@ -63,6 +71,7 @@ async def lifespan(app: FastAPI):
         user_agent=os.getenv("GEOCODER_USER_AGENT", "shp2imdf-converter/1.0"),
         timeout_seconds=float(os.getenv("GEOCODER_TIMEOUT_SECONDS", "8")),
         cache_seconds=int(os.getenv("GEOCODER_CACHE_SECONDS", "900")),
+        max_cache_entries=int(os.getenv("GEOCODER_CACHE_MAX_ENTRIES", "512")),
     )
     stop_event = asyncio.Event()
     cleanup_task = asyncio.create_task(_session_cleanup_loop(app.state.session_manager, stop_event))

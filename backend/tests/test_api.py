@@ -9,6 +9,7 @@ from pathlib import Path
 import zipfile
 
 import pytest
+from shapely.geometry import Point, shape
 
 from backend.src.geocoding import GeocodeAddressParts, GeocodeMatch, GeocodingError
 from backend.src.schemas import CleanupSummary, ImportedFile
@@ -30,6 +31,24 @@ def test_import_endpoint_creates_session(test_client, sample_dir: Path) -> None:
     assert payload["session_id"]
     assert payload["files"]
     assert "cleanup_summary" in payload
+
+
+@pytest.mark.phase1
+def test_import_rejects_upload_over_configured_max_size(test_client) -> None:
+    previous_limit = test_client.app.state.max_upload_bytes
+    test_client.app.state.max_upload_bytes = 16
+    try:
+        response = test_client.post(
+            "/api/import",
+            files=[("files", ("oversized.shp", b"x" * 20, "application/octet-stream"))],
+        )
+    finally:
+        test_client.app.state.max_upload_bytes = previous_limit
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["code"] == "BAD_REQUEST"
+    assert "configured limit" in payload["detail"]
 
 
 @pytest.mark.phase1
@@ -271,6 +290,43 @@ def test_wizard_buildings_creates_building_specific_address(test_client, sample_
 
 
 @pytest.mark.phase3
+def test_wizard_buildings_rejects_duplicate_file_stem_assignments(test_client, sample_dir: Path) -> None:
+    files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space") + _upload_payload(sample_dir, "JRTokyoSta_GF_Space")
+    import_response = test_client.post("/api/import", files=files)
+    session_id = import_response.json()["session_id"]
+
+    response = test_client.patch(
+        f"/api/session/{session_id}/wizard/buildings",
+        json={
+            "buildings": [
+                {
+                    "id": "building-1",
+                    "name": "Main",
+                    "category": "unspecified",
+                    "restriction": None,
+                    "file_stems": ["JRTokyoSta_B1_Space"],
+                    "address_mode": "same_as_venue",
+                    "address": None,
+                },
+                {
+                    "id": "building-2",
+                    "name": "Annex",
+                    "category": "unspecified",
+                    "restriction": None,
+                    "file_stems": ["JRTokyoSta_B1_Space", "JRTokyoSta_GF_Space"],
+                    "address_mode": "same_as_venue",
+                    "address": None,
+                },
+            ]
+        },
+    )
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["code"] == "BAD_REQUEST"
+    assert "only be assigned to one building" in payload["detail"]
+
+
+@pytest.mark.phase3
 def test_company_mappings_upload_refreshes_preview(test_client, sample_dir: Path) -> None:
     files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space") + _upload_payload(sample_dir, "JRTokyoSta_GF_Space")
     import_response = test_client.post("/api/import", files=files)
@@ -420,6 +476,68 @@ def test_wizard_address_autofill_uses_geometry_reverse_geocoding(test_client, sa
     assert payload["result"] is not None
     assert payload["result"]["address"]["locality"] == "千代田区"
     assert payload["source_point"] is not None
+
+
+@pytest.mark.phase3
+def test_wizard_address_autofill_prefers_representative_point_inside_geometry(test_client) -> None:
+    polygon_geometry = {
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [0, 2], [0.8, 2], [0.8, 0.8], [2, 0.8], [2, 0], [0, 0]]],
+    }
+    polygon = shape(polygon_geometry)
+    manager = test_client.app.state.session_manager
+    session = manager.create_session(
+        files=[
+            ImportedFile(
+                stem="L_SHAPE",
+                geometry_type="Polygon",
+                feature_count=1,
+                attribute_columns=[],
+                detected_type="unit",
+                detected_level=0,
+                confidence="green",
+            )
+        ],
+        cleanup_summary=CleanupSummary(),
+        feature_collection={
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "id": "feature-1",
+                    "feature_type": "source",
+                    "geometry": polygon_geometry,
+                    "properties": {
+                        "source_file": "L_SHAPE",
+                        "status": "mapped",
+                        "issues": [],
+                        "metadata": {},
+                    },
+                }
+            ],
+        },
+    )
+
+    class FakeGeocoder:
+        def __init__(self) -> None:
+            self.called_with: tuple[float, float] | None = None
+
+        def search(self, query: str, language: str, limit: int = 5) -> list[GeocodeMatch]:
+            return []
+
+        def reverse(self, latitude: float, longitude: float, language: str) -> GeocodeMatch | None:
+            self.called_with = (longitude, latitude)
+            return None
+
+    fake_geocoder = FakeGeocoder()
+    test_client.app.state.geocoder = fake_geocoder
+    response = test_client.post(f"/api/session/{session.session_id}/wizard/address/autofill", params={"language": "en"})
+    assert response.status_code == 200
+    assert fake_geocoder.called_with is not None
+    longitude, latitude = fake_geocoder.called_with
+    point = Point(longitude, latitude)
+    assert point.within(polygon) or point.touches(polygon)
+    assert [longitude, latitude] != [1.0, 1.0]
 
 
 @pytest.mark.phase3

@@ -9,6 +9,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, File, Request, UploadFile
 from shapely.geometry import shape
+from shapely.ops import unary_union
 
 from backend.src.geocoding import GeocodeMatch, GeocoderClient, GeocodingError
 from backend.src.mapper import (
@@ -77,6 +78,7 @@ def _representative_point(session: SessionRecord) -> tuple[float, float] | None:
     if not isinstance(features, list):
         return None
 
+    geometries = []
     min_x = math.inf
     min_y = math.inf
     max_x = -math.inf
@@ -95,6 +97,7 @@ def _representative_point(session: SessionRecord) -> tuple[float, float] | None:
             continue
         if geom.is_empty:
             continue
+        geometries.append(geom)
         bounds = geom.bounds
         if len(bounds) != 4:
             continue
@@ -110,11 +113,40 @@ def _representative_point(session: SessionRecord) -> tuple[float, float] | None:
     if not found:
         return None
 
-    longitude = (min_x + max_x) / 2.0
-    latitude = (min_y + max_y) / 2.0
-    if not (-180 <= longitude <= 180 and -90 <= latitude <= 90):
-        return None
-    return longitude, latitude
+    candidates: list[tuple[float, float]] = []
+    if geometries:
+        try:
+            merged = unary_union(geometries)
+        except Exception:
+            merged = None
+        if merged is not None and not merged.is_empty:
+            try:
+                point = merged.representative_point()
+                candidates.append((float(point.x), float(point.y)))
+            except Exception:
+                pass
+
+    # Fall back to bounds-center when representative point cannot be calculated.
+    candidates.append(((min_x + max_x) / 2.0, (min_y + max_y) / 2.0))
+
+    for longitude, latitude in candidates:
+        if -180 <= longitude <= 180 and -90 <= latitude <= 90:
+            return longitude, latitude
+    return None
+
+
+def _validate_building_file_assignments(session: SessionRecord, payload: BuildingsWizardRequest) -> None:
+    known_stems = {item.stem for item in session.files}
+    stem_counts = Counter(stem for item in payload.buildings for stem in item.file_stems)
+    duplicate_stems = sorted(stem for stem, count in stem_counts.items() if count > 1)
+    if duplicate_stems:
+        raise ValueError(
+            f"Each source file can only be assigned to one building: {', '.join(duplicate_stems)}"
+        )
+
+    unknown_stems = sorted({stem for stem in stem_counts if stem not in known_stems})
+    if unknown_stems:
+        raise ValueError(f"Unknown source file stems in building assignments: {', '.join(unknown_stems)}")
 
 
 def _pick_preferred_column(
@@ -569,6 +601,7 @@ def patch_wizard_buildings(
     duplicate_ids = [identifier for identifier, count in Counter(ids).items() if count > 1]
     if duplicate_ids:
         raise ValueError(f"Duplicate building ids are not allowed: {', '.join(sorted(duplicate_ids))}")
+    _validate_building_file_assignments(session, payload)
 
     project = session.wizard.project
     venue_name = project.venue_name if project else None
