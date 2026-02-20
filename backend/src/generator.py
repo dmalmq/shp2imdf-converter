@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import re
 from typing import Any
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import uuid4
 
 from shapely.geometry import mapping, shape
 from shapely.ops import unary_union
@@ -25,11 +25,6 @@ OPENING_CATEGORIES = {
     "pedestrian.transit",
     "service",
 }
-GENERATOR_NAMESPACE = uuid5(NAMESPACE_URL, "shp2imdf-converter/generator")
-
-
-def _stable_id(session_id: str, key: str) -> str:
-    return str(uuid5(GENERATOR_NAMESPACE, f"{session_id}:{key}"))
 
 
 def _default_short_name(ordinal: int) -> str:
@@ -212,7 +207,7 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
 
     building_uuid_by_id: dict[str, str] = {}
     for building in building_rows:
-        building_uuid_by_id[building.id] = _stable_id(session.session_id, f"building:{building.id}")
+        building_uuid_by_id[building.id] = str(uuid4())
 
     level_features: list[dict[str, Any]] = []
     level_id_by_ordinal: dict[int, str] = {}
@@ -245,7 +240,7 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
         if merged.is_empty:
             continue
 
-        level_id = _stable_id(session.session_id, f"level:{ordinal}")
+        level_id = str(uuid4())
         level_id_by_ordinal[ordinal] = level_id
         level_geom_by_ordinal[ordinal] = merged
 
@@ -309,7 +304,7 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
                 continue
 
             category = "ground" if ordinal == 0 else ("aerial" if ordinal > 0 else "subterranean")
-            footprint_id = _stable_id(session.session_id, f"footprint:{building.id}:{ordinal}")
+            footprint_id = str(uuid4())
             footprint_features.append(
                 {
                     "type": "Feature",
@@ -378,7 +373,7 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
                 merged_venue = merged_venue.buffer(venue_buffer)
             venue_feature = {
                 "type": "Feature",
-                "id": _stable_id(session.session_id, "venue"),
+                "id": str(uuid4()),
                 "feature_type": "venue",
                 "geometry": mapping(merged_venue),
                 "properties": {
