@@ -187,6 +187,31 @@ def test_missing_street_address_uses_venue_name(test_client, sample_dir: Path) -
 
 
 @pytest.mark.phase3
+def test_wizard_auto_detects_unit_mapping_columns(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+
+    response = test_client.get(f"/api/session/{session_id}/wizard")
+    assert response.status_code == 200
+    payload = response.json()
+    unit_mapping = payload["wizard"]["mappings"]["unit"]
+    assert unit_mapping["code_column"] == "COMPANY_CO"
+    assert unit_mapping["name_column"] == "NAME"
+
+
+@pytest.mark.phase3
+def test_wizard_auto_detects_opening_mapping_columns(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Opening"))
+    session_id = import_response.json()["session_id"]
+
+    response = test_client.get(f"/api/session/{session_id}/wizard")
+    assert response.status_code == 200
+    payload = response.json()
+    opening_mapping = payload["wizard"]["mappings"]["opening"]
+    assert opening_mapping["category_column"] == "TYPE"
+
+
+@pytest.mark.phase3
 def test_wizard_buildings_creates_building_specific_address(test_client, sample_dir: Path) -> None:
     files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space") + _upload_payload(sample_dir, "JRTokyoSta_GF_Space")
     import_response = test_client.post("/api/import", files=files)
@@ -284,6 +309,44 @@ def test_company_mappings_upload_refreshes_preview(test_client, sample_dir: Path
     codes = {item["code"] for item in payload["preview"]}
     assert "SHOP" in codes
     assert "OFFICE" in codes
+
+
+@pytest.mark.phase3
+def test_unit_category_override_updates_preview_for_same_raw_code(test_client, sample_dir: Path) -> None:
+    files = _upload_payload(sample_dir, "JRTokyoSta_B1_Space") + _upload_payload(sample_dir, "JRTokyoSta_GF_Space")
+    import_response = test_client.post("/api/import", files=files)
+    session_id = import_response.json()["session_id"]
+
+    mappings_response = test_client.patch(
+        f"/api/session/{session_id}/wizard/mappings",
+        json={
+            "unit": {
+                "code_column": "COMPANY_CO",
+                "name_column": "NAME",
+                "alt_name_column": None,
+                "restriction_column": None,
+                "accessibility_column": None,
+                "available_categories": [],
+                "preview": [],
+            }
+        },
+    )
+    assert mappings_response.status_code == 200
+
+    response = test_client.patch(
+        f"/api/session/{session_id}/wizard/mappings",
+        json={
+            "unit_category_overrides": {
+                "SHOP": "foodservice",
+            }
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    shop_row = next(item for item in payload["wizard"]["mappings"]["unit"]["preview"] if item["code"] == "SHOP")
+    assert shop_row["resolved_category"] == "foodservice"
+    assert shop_row["unresolved"] is False
+    assert payload["wizard"]["company_mappings"]["SHOP"] == "foodservice"
 
 
 @pytest.mark.phase4

@@ -13,6 +13,7 @@ from backend.src.mapper import (
     detect_candidate_columns,
     load_unit_categories,
     normalize_company_mappings_payload,
+    normalize_unit_category_overrides,
 )
 from backend.src.schemas import (
     BuildingsWizardRequest,
@@ -41,21 +42,269 @@ def _unit_categories_path(request: Request) -> str:
     return str(request.app.state.unit_categories_path)
 
 
-def _set_default_unit_mapping_column(session: SessionRecord) -> None:
-    if session.wizard.mappings.unit.code_column:
+def _pick_preferred_column(
+    candidates: list[str],
+    used: set[str],
+    exact_keys: list[str],
+    contains_keys: list[str],
+) -> str | None:
+    lookup = {item.upper(): item for item in candidates}
+    for key in exact_keys:
+        value = lookup.get(key.upper())
+        if value and value not in used:
+            return value
+
+    scored: list[tuple[int, str]] = []
+    for column in candidates:
+        if column in used:
+            continue
+        upper = column.upper()
+        score = 0
+        for key in contains_keys:
+            if key.upper() in upper:
+                score += 1
+        if score:
+            scored.append((score, column))
+    if not scored:
+        return None
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return scored[0][1]
+
+
+def _set_default_unit_mapping_columns(session: SessionRecord) -> None:
+    mapping = session.wizard.mappings.unit
+    if (
+        mapping.code_column
+        and mapping.name_column
+        and mapping.alt_name_column
+        and mapping.restriction_column
+        and mapping.accessibility_column
+    ):
         return
 
     candidates = detect_candidate_columns(session.files, feature_type="unit")
     if not candidates:
         return
 
-    preferred = ["CATEGORY", "COMPANY_CO", "COMPANY_CODE", "TYPE"]
-    candidate_lookup = {item.upper(): item for item in candidates}
-    for key in preferred:
-        if key in candidate_lookup:
-            session.wizard.mappings.unit.code_column = candidate_lookup[key]
-            return
-    session.wizard.mappings.unit.code_column = candidates[0]
+    used: set[str] = {
+        value
+        for value in [
+            mapping.code_column,
+            mapping.name_column,
+            mapping.alt_name_column,
+            mapping.restriction_column,
+            mapping.accessibility_column,
+        ]
+        if value
+    }
+
+    if not mapping.code_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["CATEGORY", "COMPANY_CO", "COMPANY_CODE", "TYPE", "CAT"],
+            contains_keys=["CATEGORY", "COMPANY", "TYPE", "CAT"],
+        ) or candidates[0]
+        mapping.code_column = selected
+        used.add(selected)
+
+    if not mapping.name_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["NAME", "UNIT_NAME", "SHOP_NAME", "TENANT_NAM", "TENANT_NAME", "LABEL", "TITLE"],
+            contains_keys=["NAME", "TITLE", "LABEL"],
+        )
+        if selected:
+            mapping.name_column = selected
+            used.add(selected)
+
+    if not mapping.alt_name_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["ALT_NAME", "ALTNAME", "NAME_EN", "EN_NAME", "NAME_KANA"],
+            contains_keys=["ALT", "EN_NAME", "KANA"],
+        )
+        if selected:
+            mapping.alt_name_column = selected
+            used.add(selected)
+
+    if not mapping.restriction_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["RESTRICTION", "ACCESS_CTRL", "ACCESS_CON", "PRIVATE", "SECURITY"],
+            contains_keys=["RESTRICT", "ACCESS_CTRL", "PRIVATE", "SECURITY"],
+        )
+        if selected:
+            mapping.restriction_column = selected
+            used.add(selected)
+
+    if not mapping.accessibility_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["ACCESSIBILITY", "ACCESSIBLE", "BARRIER_FR", "BARRIER", "WHEELCHAI", "WHEELCHAIR", "ADA"],
+            contains_keys=["ACCESS", "BARRIER", "WHEEL", "ADA"],
+        )
+        if selected:
+            mapping.accessibility_column = selected
+            used.add(selected)
+
+
+def _set_default_opening_mapping_columns(session: SessionRecord) -> None:
+    mapping = session.wizard.mappings.opening
+    candidates = detect_candidate_columns(session.files, feature_type="opening")
+    if not candidates:
+        return
+
+    used: set[str] = {
+        value
+        for value in [
+            mapping.category_column,
+            mapping.accessibility_column,
+            mapping.access_control_column,
+            mapping.door_automatic_column,
+            mapping.door_material_column,
+            mapping.door_type_column,
+            mapping.name_column,
+        ]
+        if value
+    }
+
+    if not mapping.category_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["CATEGORY", "TYPE", "OPENING_TYPE", "CLASS"],
+            contains_keys=["CATEGORY", "OPENING", "TYPE", "CLASS"],
+        )
+        if selected:
+            mapping.category_column = selected
+            used.add(selected)
+
+    if not mapping.name_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["NAME", "OPENING_NAME", "LABEL", "TITLE"],
+            contains_keys=["NAME", "LABEL", "TITLE"],
+        )
+        if selected:
+            mapping.name_column = selected
+            used.add(selected)
+
+    if not mapping.accessibility_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["ACCESSIBILITY", "ACCESSIBLE", "BARRIER_FR", "BARRIER", "WHEELCHAIR", "ADA"],
+            contains_keys=["ACCESS", "BARRIER", "WHEEL", "ADA"],
+        )
+        if selected:
+            mapping.accessibility_column = selected
+            used.add(selected)
+
+    if not mapping.access_control_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["ACCESS_CONTROL", "ACCESS_CTRL", "SECURITY", "RESTRICTION"],
+            contains_keys=["ACCESS_CTRL", "SECURITY", "RESTRICT", "CONTROL"],
+        )
+        if selected:
+            mapping.access_control_column = selected
+            used.add(selected)
+
+    if not mapping.door_automatic_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["DOOR_AUTO", "AUTOMATIC", "AUTO_DOOR", "DOOR_AUTOM"],
+            contains_keys=["AUTOMATIC", "AUTO"],
+        )
+        if selected:
+            mapping.door_automatic_column = selected
+            used.add(selected)
+
+    if not mapping.door_material_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["DOOR_MATER", "DOOR_MTRL", "MATERIAL"],
+            contains_keys=["MATERIAL", "MTRL"],
+        )
+        if selected:
+            mapping.door_material_column = selected
+            used.add(selected)
+
+    if not mapping.door_type_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["DOOR_TYPE", "OPENING_TYPE"],
+            contains_keys=["DOOR_TYPE", "OPENING_TYPE"],
+        )
+        if selected:
+            mapping.door_type_column = selected
+            used.add(selected)
+
+
+def _set_default_fixture_mapping_columns(session: SessionRecord) -> None:
+    mapping = session.wizard.mappings.fixture
+    candidates = detect_candidate_columns(session.files, feature_type="fixture")
+    if not candidates:
+        return
+
+    used: set[str] = {
+        value
+        for value in [
+            mapping.name_column,
+            mapping.alt_name_column,
+            mapping.category_column,
+        ]
+        if value
+    }
+
+    if not mapping.category_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["CATEGORY", "TYPE", "FIXTURE_CA", "CLASS"],
+            contains_keys=["CATEGORY", "FIXTURE", "TYPE", "CLASS"],
+        )
+        if selected:
+            mapping.category_column = selected
+            used.add(selected)
+
+    if not mapping.name_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["NAME", "FIXTURE_NAME", "LABEL", "TITLE"],
+            contains_keys=["NAME", "LABEL", "TITLE"],
+        )
+        if selected:
+            mapping.name_column = selected
+            used.add(selected)
+
+    if not mapping.alt_name_column:
+        selected = _pick_preferred_column(
+            candidates,
+            used,
+            exact_keys=["ALT_NAME", "ALTNAME", "NAME_EN", "EN_NAME", "NAME_KANA"],
+            contains_keys=["ALT", "EN_NAME", "KANA"],
+        )
+        if selected:
+            mapping.alt_name_column = selected
+            used.add(selected)
+
+
+def _set_default_mapping_columns(session: SessionRecord) -> None:
+    _set_default_unit_mapping_columns(session)
+    _set_default_opening_mapping_columns(session)
+    _set_default_fixture_mapping_columns(session)
 
 
 def _refresh_unit_preview(session: SessionRecord, request: Request) -> tuple[int, int]:
@@ -64,6 +313,7 @@ def _refresh_unit_preview(session: SessionRecord, request: Request) -> tuple[int
     if default_category not in valid_categories:
         default_category = config_default
 
+    session.wizard.mappings.unit.available_categories = sorted(valid_categories)
     preview = build_unit_code_preview(
         feature_collection=session.feature_collection,
         files=session.files,
@@ -89,7 +339,7 @@ def get_wizard_state(session_id: str, request: Request) -> WizardStateResponse:
     manager = _session_manager(request)
     session = _get_session_or_raise(session_id, request)
     seed_wizard_state(session)
-    _set_default_unit_mapping_column(session)
+    _set_default_mapping_columns(session)
     _refresh_unit_preview(session, request)
     manager.save_session(session)
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
@@ -222,8 +472,11 @@ def patch_wizard_mappings(
         session.wizard.mappings.fixture = payload.fixture
     if payload.detail_confirmed is not None:
         session.wizard.mappings.detail_confirmed = payload.detail_confirmed
+    if payload.unit_category_overrides:
+        valid_categories, _ = load_unit_categories(_unit_categories_path(request))
+        overrides = normalize_unit_category_overrides(payload.unit_category_overrides, valid_categories)
+        session.wizard.company_mappings.update(overrides)
 
-    _set_default_unit_mapping_column(session)
     _refresh_unit_preview(session, request)
     session.wizard.generation_status = "not_started"
     manager.save_session(session)

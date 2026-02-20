@@ -22,7 +22,7 @@ def _default_short_name(ordinal: int | None) -> str | None:
     if ordinal is None:
         return None
     if ordinal == 0:
-        return "GF"
+        return "GH"
     if ordinal > 0:
         return f"{ordinal}F"
     return f"B{abs(ordinal)}"
@@ -105,4 +105,3 @@ def build_building_feature(
             "_wizard_building_id": building.id,
         },
     }
-

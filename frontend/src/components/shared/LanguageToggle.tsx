@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+ï»¿import { useEffect } from "react";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 
@@ -14,11 +14,13 @@ export function LanguageToggle() {
   return (
     <button
       type="button"
-      className="fixed right-4 top-4 z-[55] rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+      className={`fixed right-4 top-4 z-[55] rounded border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 ${
+        uiLanguage === "ja" ? "lang-ja" : ""
+      }`}
       onClick={() => setUiLanguage(nextLanguage)}
-      title={t("Switch UI language", "•\Ž¦Œ¾Œê‚ðØ‚è‘Ö‚¦")}
+      title={t("Switch UI language", "è¡¨ç¤ºè¨€èªžã‚’åˆ‡ã‚Šæ›¿ãˆ")}
     >
-      {uiLanguage === "en" ? "“ú–{Œê" : "English"}
+      {uiLanguage === "en" ? "æ—¥æœ¬èªž" : "English"}
     </button>
   );
 }

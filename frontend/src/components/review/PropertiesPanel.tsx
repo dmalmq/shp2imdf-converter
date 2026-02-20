@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 
+import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { type ReviewFeature, type ReviewIssue, featureName } from "./types";
 
 
@@ -99,6 +100,7 @@ export function PropertiesPanel({
   onDelete,
   onAutoFixSafe
 }: Props) {
+  const { t } = useUiLanguage();
   const [form, setForm] = useState<Record<string, unknown>>({});
 
   useEffect(() => {
@@ -127,7 +129,7 @@ export function PropertiesPanel({
   if (!feature) {
     return (
       <div className="rounded border bg-white p-3 text-sm text-slate-600">
-        Select a feature to inspect/edit its properties.
+        {t("Select a feature to inspect/edit its properties.", "フィーチャーを選択してプロパティを確認・編集してください。")}
       </div>
     );
   }
@@ -135,7 +137,7 @@ export function PropertiesPanel({
   return (
     <div className="space-y-3 rounded border bg-white p-3">
       <div>
-        <h3 className="text-sm font-semibold">Properties</h3>
+        <h3 className="text-sm font-semibold">{t("Properties", "プロパティ")}</h3>
         <p className="text-xs text-slate-600">
           {feature.feature_type} <span className="font-mono">{feature.id.slice(0, 8)}</span>
         </p>
@@ -157,7 +159,7 @@ export function PropertiesPanel({
                   onClick={onAutoFixSafe}
                   disabled={autoFixing}
                 >
-                  {autoFixing ? "Applying..." : "Auto-fix"}
+                  {autoFixing ? t("Applying...", "適用中...") : t("Auto-fix", "自動修正")}
                 </button>
               ) : null}
             </div>
@@ -165,7 +167,7 @@ export function PropertiesPanel({
         </div>
       ) : (
         <div className="rounded border border-slate-200 bg-slate-50 p-2 text-xs text-slate-600">
-          No validation issues loaded yet (Phase 5 integration).
+          {t("No validation issues loaded yet (Phase 5 integration).", "検証結果はまだ読み込まれていません（Phase 5 連携）。")}
         </div>
       )}
 
@@ -205,7 +207,7 @@ export function PropertiesPanel({
                     }))
                   }
                 >
-                  <option value="">(none)</option>
+                  <option value="">{t("(none)", "（なし）")}</option>
                   {levelOptions.map((option) => (
                     <option key={option.id} value={option.id}>
                       {option.label}
@@ -230,7 +232,7 @@ export function PropertiesPanel({
                     }))
                   }
                 >
-                  <option value="">(none)</option>
+                  <option value="">{t("(none)", "（なし）")}</option>
                   {addressOptions.map((option) => (
                     <option key={option.id} value={option.id}>
                       {option.label}
@@ -318,7 +320,7 @@ export function PropertiesPanel({
       </div>
 
       <div className="text-xs text-slate-600">
-        Name preview: <span className="font-medium">{featureName({ ...feature, properties: form }) || "—"}</span>
+        {t("Name preview", "名称プレビュー")}: <span className="font-medium">{featureName({ ...feature, properties: form }) || "-"}</span>
       </div>
 
       <div className="flex gap-2">
@@ -327,14 +329,14 @@ export function PropertiesPanel({
           className="rounded bg-blue-600 px-3 py-1.5 text-xs text-white"
           onClick={() => onSave(feature.id, form)}
         >
-          Save Changes
+          {t("Save Changes", "変更を保存")}
         </button>
         <button
           type="button"
           className="rounded border border-red-300 px-3 py-1.5 text-xs text-red-700"
           onClick={() => onDelete(feature.id)}
         >
-          Delete Feature
+          {t("Delete Feature", "フィーチャーを削除")}
         </button>
       </div>
     </div>

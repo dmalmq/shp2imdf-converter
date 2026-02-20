@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import type { ImportedFile, UnitMappingState, UnitCodePreviewRow } from "../../api/client";
+import type { ImportedFile, UnitCodePreviewRow, UnitMappingState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 
 
@@ -9,8 +9,16 @@ type Props = {
   mapping: UnitMappingState;
   saving: boolean;
   onSave: (mapping: UnitMappingState) => void;
+  onAssignCategory: (rawCode: string, category: string) => void;
   onUploadCompanyMappings: (file: File) => void;
 };
+
+type UnitColumnKey =
+  | "code_column"
+  | "name_column"
+  | "alt_name_column"
+  | "restriction_column"
+  | "accessibility_column";
 
 
 function uniqueColumns(files: ImportedFile[]): string[] {
@@ -27,17 +35,29 @@ function unresolvedCount(preview: UnitCodePreviewRow[]): number {
 }
 
 
-export function UnitMapStep({ files, mapping, saving, onSave, onUploadCompanyMappings }: Props) {
+export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, onUploadCompanyMappings }: Props) {
   const { t } = useUiLanguage();
   const unitFiles = useMemo(() => files.filter((item) => item.detected_type === "unit"), [files]);
   const columns = useMemo(() => uniqueColumns(unitFiles), [unitFiles]);
   const unresolved = useMemo(() => unresolvedCount(mapping.preview), [mapping.preview]);
+  const categoryOptions = useMemo(() => {
+    const values = new Set<string>(mapping.available_categories);
+    mapping.preview.forEach((row) => values.add(row.resolved_category));
+    return [...values].sort((a, b) => a.localeCompare(b));
+  }, [mapping.available_categories, mapping.preview]);
 
-  const updateField = (key: keyof UnitMappingState, value: string | null) => {
+  const updateField = (key: UnitColumnKey, value: string | null) => {
     onSave({
       ...mapping,
       [key]: value
     });
+  };
+
+  const updateCodeCategory = (rawCode: string, category: string) => {
+    if (!rawCode || rawCode === "(empty)" || !category) {
+      return;
+    }
+    onAssignCategory(rawCode, category);
   };
 
   return (
@@ -45,7 +65,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onUploadCompanyMap
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">{t("Step 5: Unit Mapping", "Step 5: Unit 対応付け")}</h2>
         <label className="rounded border px-3 py-1.5 text-sm">
-          {t("Upload company mappings", "会社コード対応をアップロード")}
+          {t("Upload company mappings", "会社マッピングをアップロード")}
           <input
             type="file"
             className="hidden"
@@ -145,7 +165,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onUploadCompanyMap
           <span className={unresolved ? "text-amber-700" : "text-emerald-700"}>
             {t(
               `${mapping.preview.length} codes, ${unresolved} unresolved`,
-              `${mapping.preview.length} 件中 ${unresolved} 件が未解決`
+              `${mapping.preview.length} 件、未解決 ${unresolved} 件`
             )}
           </span>
         </div>
@@ -155,7 +175,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onUploadCompanyMap
               <tr>
                 <th className="px-2 py-2">{t("Raw Code", "元コード")}</th>
                 <th className="px-2 py-2">{t("Count", "件数")}</th>
-                <th className="px-2 py-2">{t("Resolved Category", "解決カテゴリ")}</th>
+                <th className="px-2 py-2">{t("Assigned Category", "割り当てカテゴリ")}</th>
               </tr>
             </thead>
             <tbody>
@@ -163,19 +183,41 @@ export function UnitMapStep({ files, mapping, saving, onSave, onUploadCompanyMap
                 <tr key={row.code} className={`border-t ${row.unresolved ? "bg-amber-50" : "bg-white"}`}>
                   <td className="px-2 py-2 font-mono text-xs">{row.code}</td>
                   <td className="px-2 py-2">{row.count}</td>
-                  <td className="px-2 py-2">{row.resolved_category}</td>
+                  <td className="px-2 py-2">
+                    <select
+                      className="w-full rounded border px-2 py-1"
+                      value={row.resolved_category}
+                      disabled={saving || row.code === "(empty)"}
+                      onChange={(event) => updateCodeCategory(row.code, event.target.value)}
+                    >
+                      {categoryOptions.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
                 </tr>
               ))}
               {mapping.preview.length === 0 && (
                 <tr>
                   <td className="px-2 py-3 text-sm text-slate-500" colSpan={3}>
-                    {t("Select a code column to generate coverage preview.", "コード列を選ぶとカバレッジを表示します。")}
+                    {t(
+                      "Select a code column to generate coverage preview.",
+                      "コード列を選択するとカバレッジプレビューが表示されます。"
+                    )}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+        <p className="border-t bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          {t(
+            "A category selection applies to all units with the same raw code value.",
+            "カテゴリを選択すると、同じ元コードを持つすべてのユニットに適用されます。"
+          )}
+        </p>
       </div>
 
       {saving && <p className="mt-2 text-xs text-slate-500">{t("Saving mappings...", "マッピングを保存中...")}</p>}

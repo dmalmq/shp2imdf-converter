@@ -23,6 +23,7 @@ import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
 import { type ReviewFeature, featureName } from "../components/review/types";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
+import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
 
 function normalizeFeature(item: Record<string, unknown>): ReviewFeature | null {
@@ -168,6 +169,7 @@ export function ReviewPage() {
   const popEditHistory = useAppStore((state) => state.popEditHistory);
 
   const handleApiError = useApiErrorHandler();
+  const { t } = useUiLanguage();
   const pushToast = useToast();
 
   const [features, setFeatures] = useState<ReviewFeature[]>([]);
@@ -232,7 +234,7 @@ export function ReviewPage() {
       }
       setFeatures(rows);
     } catch (caught) {
-      captureError(caught, "Failed to load review data", "Review load failed");
+      captureError(caught, t("Failed to load review data", "レビュー データの読み込みに失敗しました"), t("Review load failed", "レビュー読み込み失敗"));
     } finally {
       setLoading(false);
     }
@@ -317,16 +319,16 @@ export function ReviewPage() {
     if (!sessionId) {
       return;
     }
-    if (!window.confirm("Delete this feature?")) {
+    if (!window.confirm(t("Delete this feature?", "このフィーチャーを削除しますか？"))) {
       return;
     }
     try {
       await deleteSessionFeature(sessionId, featureId);
       setFeatures((prev) => prev.filter((item) => item.id !== featureId));
       setSelectedFeatureIds(selectedFeatureIds.filter((id) => id !== featureId));
-      pushToast({ title: "Feature deleted", variant: "success" });
+      pushToast({ title: t("Feature deleted", "フィーチャーを削除しました"), variant: "success" });
     } catch (caught) {
-      captureError(caught, "Failed to delete feature", "Delete failed");
+      captureError(caught, t("Failed to delete feature", "フィーチャーの削除に失敗しました"), t("Delete failed", "削除失敗"));
     }
   };
 
@@ -343,9 +345,13 @@ export function ReviewPage() {
         }
       });
       await loadFeatures();
-      pushToast({ title: "Bulk update applied", description: "Level reassignment completed.", variant: "success" });
+      pushToast({
+        title: t("Bulk update applied", "一括更新を適用しました"),
+        description: t("Level reassignment completed.", "レベル再割り当てが完了しました。"),
+        variant: "success"
+      });
     } catch (caught) {
-      captureError(caught, "Bulk level update failed", "Bulk edit failed");
+      captureError(caught, t("Bulk level update failed", "レベルの一括更新に失敗しました"), t("Bulk edit failed", "一括編集失敗"));
     }
   };
 
@@ -362,9 +368,13 @@ export function ReviewPage() {
         }
       });
       await loadFeatures();
-      pushToast({ title: "Bulk update applied", description: "Category reassignment completed.", variant: "success" });
+      pushToast({
+        title: t("Bulk update applied", "一括更新を適用しました"),
+        description: t("Category reassignment completed.", "カテゴリ再割り当てが完了しました。"),
+        variant: "success"
+      });
     } catch (caught) {
-      captureError(caught, "Bulk category update failed", "Bulk edit failed");
+      captureError(caught, t("Bulk category update failed", "カテゴリの一括更新に失敗しました"), t("Bulk edit failed", "一括編集失敗"));
     }
   };
 
@@ -380,9 +390,9 @@ export function ReviewPage() {
       });
       clearSelectedFeatureIds();
       await loadFeatures();
-      pushToast({ title: "Units merged", variant: "success" });
+      pushToast({ title: t("Units merged", "ユニットを結合しました"), variant: "success" });
     } catch (caught) {
-      captureError(caught, "Failed to merge selected units", "Merge failed");
+      captureError(caught, t("Failed to merge selected units", "選択したユニットの結合に失敗しました"), t("Merge failed", "結合失敗"));
     }
   };
 
@@ -390,7 +400,7 @@ export function ReviewPage() {
     if (!sessionId || selectedFeatureIds.length === 0) {
       return;
     }
-    if (!window.confirm(`Delete ${selectedFeatureIds.length} selected features?`)) {
+    if (!window.confirm(t(`Delete ${selectedFeatureIds.length} selected features?`, `選択中の ${selectedFeatureIds.length} 件を削除しますか？`))) {
       return;
     }
     try {
@@ -400,14 +410,21 @@ export function ReviewPage() {
       });
       clearSelectedFeatureIds();
       await loadFeatures();
-      pushToast({ title: "Selection deleted", variant: "success" });
+      pushToast({ title: t("Selection deleted", "選択項目を削除しました"), variant: "success" });
     } catch (caught) {
-      captureError(caught, "Failed to delete selected features", "Delete failed");
+      captureError(caught, t("Failed to delete selected features", "選択したフィーチャーの削除に失敗しました"), t("Delete failed", "削除失敗"));
     }
   };
 
   const backToWizard = () => {
-    if (!window.confirm("Return to wizard? Manual review edits may be replaced when you regenerate.")) {
+    if (
+      !window.confirm(
+        t(
+          "Return to wizard? Manual review edits may be replaced when you regenerate.",
+          "ウィザードに戻りますか？再生成するとレビューでの手動編集が置き換わる場合があります。"
+        )
+      )
+    ) {
       return;
     }
     navigate("/wizard");
@@ -464,13 +481,16 @@ export function ReviewPage() {
       applyPostValidationState(response);
       await loadFeatures();
       pushToast({
-        title: "Validation complete",
-        description: `${response.summary.error_count} errors, ${response.summary.warning_count} warnings.`,
+        title: t("Validation complete", "検証が完了しました"),
+        description: t(
+          `${response.summary.error_count} errors, ${response.summary.warning_count} warnings.`,
+          `エラー ${response.summary.error_count} 件、警告 ${response.summary.warning_count} 件。`
+        ),
         variant: response.summary.error_count > 0 ? "info" : "success"
       });
       return response;
     } catch (caught) {
-      captureError(caught, "Validation failed", "Validation failed");
+      captureError(caught, t("Validation failed", "検証に失敗しました"), t("Validation failed", "検証失敗"));
       return null;
     } finally {
       setValidating(false);
@@ -487,7 +507,10 @@ export function ReviewPage() {
       const response = await autofixSession(sessionId, applyPrompted);
       if (!applyPrompted && response.total_requiring_confirmation > 0) {
         const confirmed = window.confirm(
-          `${response.total_requiring_confirmation} destructive fixes require confirmation. Apply them now?`
+          t(
+            `${response.total_requiring_confirmation} destructive fixes require confirmation. Apply them now?`,
+            `${response.total_requiring_confirmation} 件の破壊的修正には確認が必要です。今すぐ適用しますか？`
+          )
         );
         if (confirmed) {
           const confirmedResponse = await autofixSession(sessionId, true);
@@ -500,12 +523,12 @@ export function ReviewPage() {
       }
       await loadFeatures();
       pushToast({
-        title: "Auto-fix completed",
-        description: `${response.total_fixed} issue(s) fixed automatically.`,
+        title: t("Auto-fix completed", "自動修正が完了しました"),
+        description: t(`${response.total_fixed} issue(s) fixed automatically.`, `${response.total_fixed} 件を自動修正しました。`),
         variant: "success"
       });
     } catch (caught) {
-      captureError(caught, "Auto-fix failed", "Auto-fix failed");
+      captureError(caught, t("Auto-fix failed", "自動修正に失敗しました"), t("Auto-fix failed", "自動修正失敗"));
     } finally {
       setAutofixing(false);
     }
@@ -517,9 +540,9 @@ export function ReviewPage() {
       return;
     }
     if (validationResult.summary.error_count > 0) {
-      const message = "Export is blocked until all validation errors are resolved.";
+      const message = t("Export is blocked until all validation errors are resolved.", "すべての検証エラーを解消するまでエクスポートできません。");
       setError(message);
-      pushToast({ title: "Export blocked", description: message, variant: "error" });
+      pushToast({ title: t("Export blocked", "エクスポート不可"), description: message, variant: "error" });
       return;
     }
     setExportDialogOpen(true);
@@ -542,9 +565,13 @@ export function ReviewPage() {
       link.remove();
       window.URL.revokeObjectURL(url);
       setExportDialogOpen(false);
-      pushToast({ title: "Export ready", description: `${response.filename} downloaded.`, variant: "success" });
+      pushToast({
+        title: t("Export ready", "エクスポート準備完了"),
+        description: t(`${response.filename} downloaded.`, `${response.filename} をダウンロードしました。`),
+        variant: "success"
+      });
     } catch (caught) {
-      captureError(caught, "Export failed", "Export failed");
+      captureError(caught, t("Export failed", "エクスポートに失敗しました"), t("Export failed", "エクスポート失敗"));
     } finally {
       setExporting(false);
     }
@@ -634,12 +661,14 @@ export function ReviewPage() {
     <main className="mx-auto flex min-h-screen w-full max-w-[1700px] flex-col gap-4 px-6 py-5">
       <div className="flex items-center justify-between rounded border bg-white px-4 py-3">
         <div>
-          <h1 className="text-2xl font-semibold">Review</h1>
-          <p className="text-sm text-slate-600">Session: {sessionId ?? "None"}</p>
+          <h1 className="text-2xl font-semibold">{t("Review", "レビュー")}</h1>
+          <p className="text-sm text-slate-600">
+            {t("Session", "セッション")}: {sessionId ?? t("None", "なし")}
+          </p>
         </div>
         <div className="flex gap-2">
           <button type="button" className="rounded border px-3 py-1.5 text-sm" onClick={backToWizard}>
-            Back to Wizard
+            {t("Back to Wizard", "ウィザードに戻る")}
           </button>
           <button
             type="button"
@@ -647,7 +676,7 @@ export function ReviewPage() {
             onClick={() => void runValidation()}
             disabled={validating || loading}
           >
-            {validating ? "Validating..." : "Validate"}
+            {validating ? t("Validating...", "検証中...") : t("Validate", "検証")}
           </button>
           <button
             type="button"
@@ -655,7 +684,7 @@ export function ReviewPage() {
             onClick={() => void openExportDialog()}
             disabled={exporting || validating || loading}
           >
-            {exporting ? "Exporting..." : "Export"}
+            {exporting ? t("Exporting...", "エクスポート中...") : t("Export", "エクスポート")}
           </button>
         </div>
       </div>
@@ -702,9 +731,9 @@ export function ReviewPage() {
 
           <div className="rounded border bg-white p-3">
             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
-              <span>Selected: {selectedFeatureIds.length}</span>
+              <span>{t("Selected", "選択中")}: {selectedFeatureIds.length}</span>
               <select className="rounded border px-2 py-1" value={bulkLevel} onChange={(event) => setBulkLevel(event.target.value)}>
-                <option value="">Reassign level...</option>
+                <option value="">{t("Reassign level...", "レベルを再割り当て...")}</option>
                 {levelOptions.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
@@ -712,32 +741,32 @@ export function ReviewPage() {
                 ))}
               </select>
               <button type="button" className="rounded border px-2 py-1" onClick={() => void applyBulkLevel()}>
-                Apply Level
+                {t("Apply Level", "レベル適用")}
               </button>
               <input
                 className="rounded border px-2 py-1"
-                placeholder="Category..."
+                placeholder={t("Category...", "カテゴリ...")}
                 value={bulkCategory}
                 onChange={(event) => setBulkCategory(event.target.value)}
               />
               <button type="button" className="rounded border px-2 py-1" onClick={() => void applyBulkCategory()}>
-                Apply Category
+                {t("Apply Category", "カテゴリ適用")}
               </button>
               <input
                 className="rounded border px-2 py-1"
-                placeholder="Merge name"
+                placeholder={t("Merge name", "結合名")}
                 value={mergeName}
                 onChange={(event) => setMergeName(event.target.value)}
               />
               <button type="button" className="rounded border px-2 py-1" onClick={() => void mergeSelectedUnits()}>
-                Merge Units
+                {t("Merge Units", "ユニット結合")}
               </button>
               <button
                 type="button"
                 className="rounded border border-red-300 px-2 py-1 text-red-700"
                 onClick={() => void deleteSelected()}
               >
-                Delete Selected
+                {t("Delete Selected", "選択項目を削除")}
               </button>
             </div>
           </div>
@@ -769,8 +798,9 @@ export function ReviewPage() {
       {validation ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded border bg-white px-4 py-3 text-sm">
           <div>
-            Validation: {validation.summary.error_count} errors - {validation.summary.warning_count} warnings -{" "}
-            {validation.summary.auto_fixable_count} auto-fixable
+            {t("Validation", "検証")}: {t(`${validation.summary.error_count} errors`, `${validation.summary.error_count} 件のエラー`)} -{" "}
+            {t(`${validation.summary.warning_count} warnings`, `${validation.summary.warning_count} 件の警告`)} -{" "}
+            {t(`${validation.summary.auto_fixable_count} auto-fixable`, `${validation.summary.auto_fixable_count} 件が自動修正可能`)}
           </div>
           <button
             type="button"
@@ -778,7 +808,7 @@ export function ReviewPage() {
             onClick={() => void runAutofix(false)}
             disabled={autofixing}
           >
-            {autofixing ? "Applying Auto-fix..." : "Run Auto-fix"}
+            {autofixing ? t("Applying Auto-fix...", "自動修正を適用中...") : t("Run Auto-fix", "自動修正を実行")}
           </button>
         </div>
       ) : null}
@@ -786,10 +816,13 @@ export function ReviewPage() {
       {exportDialogOpen && validation ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/35 p-4">
           <div className="w-full max-w-xl rounded border bg-white p-4 shadow-lg">
-            <h3 className="text-lg font-semibold">Export IMDF</h3>
-            <p className="mt-1 text-sm text-slate-600">{validation.summary.total_features} features will be exported.</p>
+            <h3 className="text-lg font-semibold">{t("Export IMDF", "IMDF をエクスポート")}</h3>
             <p className="mt-1 text-sm text-slate-600">
-              Validation: {validation.summary.error_count} errors - {validation.summary.warning_count} warnings
+              {t(`${validation.summary.total_features} features will be exported.`, `${validation.summary.total_features} 件のフィーチャーをエクスポートします。`)}
+            </p>
+            <p className="mt-1 text-sm text-slate-600">
+              {t("Validation", "検証")}: {t(`${validation.summary.error_count} errors`, `${validation.summary.error_count} 件のエラー`)} -{" "}
+              {t(`${validation.summary.warning_count} warnings`, `${validation.summary.warning_count} 件の警告`)}
             </p>
             {validation.warnings.length > 0 ? (
               <div className="mt-3 max-h-36 overflow-auto rounded border bg-amber-50 p-2 text-xs text-amber-800">
@@ -800,7 +833,7 @@ export function ReviewPage() {
             ) : null}
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" className="rounded border px-3 py-1.5 text-sm" onClick={() => setExportDialogOpen(false)}>
-                Cancel
+                {t("Cancel", "キャンセル")}
               </button>
               <button
                 type="button"
@@ -808,7 +841,7 @@ export function ReviewPage() {
                 onClick={() => void downloadExport()}
                 disabled={validation.summary.error_count > 0 || exporting}
               >
-                {exporting ? "Downloading..." : "Download .imdf"}
+                {exporting ? t("Downloading...", "ダウンロード中...") : t("Download .imdf", ".imdf をダウンロード")}
               </button>
             </div>
           </div>

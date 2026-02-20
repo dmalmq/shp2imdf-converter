@@ -53,6 +53,25 @@ def normalize_company_mappings_payload(
     return mappings, default_category
 
 
+def normalize_unit_category_overrides(
+    overrides: dict[str, Any] | None,
+    valid_categories: set[str],
+) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    if not isinstance(overrides, dict):
+        return normalized
+
+    for raw_code, raw_category in overrides.items():
+        code = str(raw_code).strip()
+        if not code or code == "(empty)":
+            continue
+        category = str(raw_category).strip().lower()
+        if category not in valid_categories:
+            continue
+        normalized[code.upper()] = category
+    return normalized
+
+
 def wrap_labels(value: Any, language: str = "en") -> dict[str, str] | None:
     if value is None:
         return None

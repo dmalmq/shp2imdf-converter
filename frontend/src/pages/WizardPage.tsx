@@ -49,6 +49,7 @@ const EMPTY_UNIT_MAPPING: UnitMappingState = {
   alt_name_column: null,
   restriction_column: null,
   accessibility_column: null,
+  available_categories: [],
   preview: []
 };
 
@@ -493,6 +494,7 @@ export function WizardPage() {
     opening?: OpeningMappingState;
     fixture?: FixtureMappingState;
     detail_confirmed?: boolean;
+    unit_category_overrides?: Record<string, string>;
   }) => {
     if (!sessionId) {
       return;
@@ -651,6 +653,9 @@ export function WizardPage() {
           mapping={wizardState?.mappings.unit ?? EMPTY_UNIT_MAPPING}
           saving={wizardSaveStatus === "saving"}
           onSave={(mapping) => void saveMappings({ unit: mapping })}
+          onAssignCategory={(rawCode, category) =>
+            void saveMappings({ unit_category_overrides: { [rawCode]: category } })
+          }
           onUploadCompanyMappings={(file) => void uploadMappingsFile(file)}
         />
       );

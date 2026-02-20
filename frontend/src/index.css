@@ -4,12 +4,16 @@
 
 body {
   margin: 0;
-  font-family: "Segoe UI", sans-serif;
+  font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", Meiryo, sans-serif;
   background: #f5f7fb;
   color: #1f2937;
+}
+
+:root:lang(ja) body,
+.lang-ja {
+  font-family: "Yu Gothic UI", "Hiragino Kaku Gothic ProN", Meiryo, "Segoe UI", sans-serif;
 }
 
 a {
   color: inherit;
 }
-

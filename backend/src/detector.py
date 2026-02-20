@@ -72,7 +72,7 @@ def detect_level_ordinal(stem: str) -> int | None:
     if negative:
         return -int(negative.group(2))
 
-    if re.search(r"(^|[^A-Z0-9])(GF|G)([^A-Z0-9]|$)", normalized):
+    if re.search(r"(^|[^A-Z0-9])(GF|GH|G)([^A-Z0-9]|$)", normalized):
         return 0
 
     zero = re.search(r"(^|[^A-Z0-9])0([^A-Z0-9]|$)", normalized)
@@ -81,7 +81,9 @@ def detect_level_ordinal(stem: str) -> int | None:
 
     floor = re.search(r"(^|[^A-Z0-9])(\d+)(F)?([^A-Z0-9]|$)", normalized)
     if floor:
-        return int(floor.group(2))
+        # Many source datasets encode human floor labels (1F=ground, 2F=ordinal 1).
+        # Convert positive floor labels to IMDF ordinal by subtracting 1.
+        return int(floor.group(2)) - 1
     return None
 
 
