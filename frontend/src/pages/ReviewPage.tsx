@@ -5,10 +5,13 @@ import {
   autofixSession,
   deleteSessionFeature,
   exportSessionArchive,
+  exportSessionShapefiles,
   fetchSessionFeatures,
   generateSessionDraft,
   patchSessionFeature,
   patchSessionFeaturesBulk,
+  type ShapefileExportEncoding,
+  type ShapefileExportRequest,
   validateSession,
   type ValidationIssue,
   type ValidationResponse
@@ -129,6 +132,32 @@ function isFormTarget(target: EventTarget | null): boolean {
   return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
 }
 
+function parseLegacyCodeMappings(raw: string): { mapping: Record<string, string>; invalidLines: string[] } {
+  const mapping: Record<string, string> = {};
+  const invalidLines: string[] = [];
+
+  raw.split(/\r?\n/).forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+    const match = trimmed.match(/^([^=,:]+)\s*[=,:]\s*(.+)$/);
+    if (!match) {
+      invalidLines.push(`line ${index + 1}`);
+      return;
+    }
+    const category = match[1].trim().toLowerCase();
+    const code = match[2].trim();
+    if (!category || !code) {
+      invalidLines.push(`line ${index + 1}`);
+      return;
+    }
+    mapping[category] = code;
+  });
+
+  return { mapping, invalidLines };
+}
+
 function MapLoadingSkeleton() {
   return (
     <div className="rounded border bg-white p-3">
@@ -189,6 +218,12 @@ export function ReviewPage() {
   const [autofixing, setAutofixing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<"imdf" | "shapefiles">("imdf");
+  const [shapefileEncoding, setShapefileEncoding] = useState<ShapefileExportEncoding>("preserve_source");
+  const [shapefileCategoryField, setShapefileCategoryField] = useState("IMDF_CAT");
+  const [shapefileLegacyCodeField, setShapefileLegacyCodeField] = useState("");
+  const [shapefileLegacyMapText, setShapefileLegacyMapText] = useState("");
+  const [exportOptionsError, setExportOptionsError] = useState<string | null>(null);
 
   const captureError = (caught: unknown, fallbackMessage: string, title: string) => {
     const message = handleApiError(caught, fallbackMessage, { title });
@@ -534,17 +569,15 @@ export function ReviewPage() {
     }
   };
 
+  const exportBlockedByErrors = exportFormat === "imdf" && Boolean(validation && validation.summary.error_count > 0);
+
   const openExportDialog = async () => {
     const validationResult = await runValidation();
     if (!validationResult) {
       return;
     }
-    if (validationResult.summary.error_count > 0) {
-      const message = t("Export is blocked until all validation errors are resolved.", "すべての検証エラーを解消するまでエクスポートできません。");
-      setError(message);
-      pushToast({ title: t("Export blocked", "エクスポート不可"), description: message, variant: "error" });
-      return;
-    }
+    setExportFormat("imdf");
+    setExportOptionsError(null);
     setExportDialogOpen(true);
   };
 
@@ -552,10 +585,49 @@ export function ReviewPage() {
     if (!sessionId) {
       return;
     }
+    if (exportBlockedByErrors) {
+      const message = t(
+        "Export is blocked until all validation errors are resolved.",
+        "Export is blocked until all validation errors are resolved."
+      );
+      setError(message);
+      pushToast({ title: t("Export blocked", "Export blocked"), description: message, variant: "error" });
+      return;
+    }
+
+    let shapefilePayload: ShapefileExportRequest | null = null;
+    if (exportFormat === "shapefiles") {
+      const parsed = parseLegacyCodeMappings(shapefileLegacyMapText);
+      if (parsed.invalidLines.length > 0) {
+        const message = t(
+          `Legacy mapping format is invalid (${parsed.invalidLines.join(", ")}). Use category=CODE.`,
+          `Legacy mapping format is invalid (${parsed.invalidLines.join(", ")}). Use category=CODE.`
+        );
+        setExportOptionsError(message);
+        setError(message);
+        return;
+      }
+      setExportOptionsError(null);
+      shapefilePayload = {
+        mode: "source_update",
+        encoding: shapefileEncoding,
+        include_report: true,
+        unit: {
+          write_imdf_category: true,
+          imdf_category_field: shapefileCategoryField.trim() || "IMDF_CAT",
+          overwrite_legacy_code_field: shapefileLegacyCodeField.trim() || null,
+          legacy_code_map: parsed.mapping
+        }
+      };
+    }
+
     setExporting(true);
     setError(null);
     try {
-      const response = await exportSessionArchive(sessionId);
+      const response =
+        exportFormat === "imdf"
+          ? await exportSessionArchive(sessionId)
+          : await exportSessionShapefiles(sessionId, shapefilePayload as ShapefileExportRequest);
       const url = window.URL.createObjectURL(response.blob);
       const link = document.createElement("a");
       link.href = url;
@@ -566,12 +638,16 @@ export function ReviewPage() {
       window.URL.revokeObjectURL(url);
       setExportDialogOpen(false);
       pushToast({
-        title: t("Export ready", "エクスポート準備完了"),
-        description: t(`${response.filename} downloaded.`, `${response.filename} をダウンロードしました。`),
+        title: t("Export ready", "Export ready"),
+        description: t(`${response.filename} downloaded.`, `${response.filename} downloaded.`),
         variant: "success"
       });
     } catch (caught) {
-      captureError(caught, t("Export failed", "エクスポートに失敗しました"), t("Export failed", "エクスポート失敗"));
+      captureError(
+        caught,
+        t("Export failed", "Export failed"),
+        exportFormat === "imdf" ? t("Export failed", "Export failed") : t("Shapefile export failed", "Shapefile export failed")
+      );
     } finally {
       setExporting(false);
     }
@@ -636,8 +712,7 @@ export function ReviewPage() {
         !isFormTarget(event.target) &&
         !exporting &&
         !validating &&
-        validation &&
-        validation.summary.error_count === 0
+        !exportBlockedByErrors
       ) {
         event.preventDefault();
         void downloadExport();
@@ -653,6 +728,7 @@ export function ReviewPage() {
     exporting,
     popEditHistory,
     sessionId,
+    exportBlockedByErrors,
     validating,
     validation
   ]);
@@ -816,14 +892,97 @@ export function ReviewPage() {
       {exportDialogOpen && validation ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/35 p-4">
           <div className="w-full max-w-xl rounded border bg-white p-4 shadow-lg">
-            <h3 className="text-lg font-semibold">{t("Export IMDF", "IMDF をエクスポート")}</h3>
-            <p className="mt-1 text-sm text-slate-600">
-              {t(`${validation.summary.total_features} features will be exported.`, `${validation.summary.total_features} 件のフィーチャーをエクスポートします。`)}
+            <h3 className="text-lg font-semibold">{t("Export", "Export")}</h3>
+
+            <label className="mt-3 block text-sm">
+              <span className="mb-1 block text-slate-600">{t("Format", "Format")}</span>
+              <select
+                className="w-full rounded border px-2 py-1.5"
+                value={exportFormat}
+                onChange={(event) => setExportFormat(event.target.value as "imdf" | "shapefiles")}
+              >
+                <option value="imdf">{t("IMDF (.imdf)", "IMDF (.imdf)")}</option>
+                <option value="shapefiles">{t("Shapefiles (.zip)", "Shapefiles (.zip)")}</option>
+              </select>
+            </label>
+
+            <p className="mt-3 text-sm text-slate-600">
+              {t(`${validation.summary.total_features} features will be exported.`, `${validation.summary.total_features} features will be exported.`)}
             </p>
             <p className="mt-1 text-sm text-slate-600">
-              {t("Validation", "検証")}: {t(`${validation.summary.error_count} errors`, `${validation.summary.error_count} 件のエラー`)} -{" "}
-              {t(`${validation.summary.warning_count} warnings`, `${validation.summary.warning_count} 件の警告`)}
+              {t("Validation", "Validation")}: {t(`${validation.summary.error_count} errors`, `${validation.summary.error_count} errors`)} -{" "}
+              {t(`${validation.summary.warning_count} warnings`, `${validation.summary.warning_count} warnings`)}
             </p>
+
+            {exportBlockedByErrors ? (
+              <p className="mt-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
+                {t(
+                  "IMDF export is blocked until all validation errors are resolved.",
+                  "IMDF export is blocked until all validation errors are resolved."
+                )}
+              </p>
+            ) : null}
+
+            {exportFormat === "shapefiles" ? (
+              <div className="mt-3 space-y-2 rounded border bg-slate-50 p-3 text-sm">
+                <label className="block">
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-500">{t("Encoding", "Encoding")}</span>
+                  <select
+                    className="w-full rounded border px-2 py-1.5"
+                    value={shapefileEncoding}
+                    onChange={(event) => setShapefileEncoding(event.target.value as ShapefileExportEncoding)}
+                  >
+                    <option value="preserve_source">{t("Preserve source encoding", "Preserve source encoding")}</option>
+                    <option value="utf-8">UTF-8</option>
+                    <option value="cp932">CP932 (Shift-JIS)</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-500">{t("IMDF category field", "IMDF category field")}</span>
+                  <input
+                    className="w-full rounded border px-2 py-1.5"
+                    value={shapefileCategoryField}
+                    onChange={(event) => setShapefileCategoryField(event.target.value)}
+                    placeholder="IMDF_CAT"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-500">
+                    {t("Legacy code field (optional)", "Legacy code field (optional)")}
+                  </span>
+                  <input
+                    className="w-full rounded border px-2 py-1.5"
+                    value={shapefileLegacyCodeField}
+                    onChange={(event) => setShapefileLegacyCodeField(event.target.value)}
+                    placeholder="COMPANY_CODE"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-500">
+                    {t("Legacy mappings (optional)", "Legacy mappings (optional)")}
+                  </span>
+                  <textarea
+                    className="min-h-20 w-full rounded border px-2 py-1.5 font-mono text-xs"
+                    value={shapefileLegacyMapText}
+                    onChange={(event) => setShapefileLegacyMapText(event.target.value)}
+                    placeholder={"room=B0001\noffice=B0002"}
+                    rows={4}
+                  />
+                </label>
+                <p className="text-xs text-slate-600">
+                  {t(
+                    "Use one mapping per line as category=CODE (also accepts category,CODE or category:CODE).",
+                    "Use one mapping per line as category=CODE (also accepts category,CODE or category:CODE)."
+                  )}
+                </p>
+              </div>
+            ) : null}
+
+            {exportOptionsError ? <p className="mt-2 text-xs text-red-700">{exportOptionsError}</p> : null}
+
             {validation.warnings.length > 0 ? (
               <div className="mt-3 max-h-36 overflow-auto rounded border bg-amber-50 p-2 text-xs text-amber-800">
                 {validation.warnings.slice(0, 10).map((warning, index) => (
@@ -831,17 +990,22 @@ export function ReviewPage() {
                 ))}
               </div>
             ) : null}
+
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" className="rounded border px-3 py-1.5 text-sm" onClick={() => setExportDialogOpen(false)}>
-                {t("Cancel", "キャンセル")}
+                {t("Cancel", "Cancel")}
               </button>
               <button
                 type="button"
                 className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:bg-slate-400"
                 onClick={() => void downloadExport()}
-                disabled={validation.summary.error_count > 0 || exporting}
+                disabled={exporting || exportBlockedByErrors}
               >
-                {exporting ? t("Downloading...", "ダウンロード中...") : t("Download .imdf", ".imdf をダウンロード")}
+                {exporting
+                  ? t("Downloading...", "Downloading...")
+                  : exportFormat === "imdf"
+                    ? t("Download .imdf", "Download .imdf")
+                    : t("Download shapefiles .zip", "Download shapefiles .zip")}
               </button>
             </div>
           </div>
