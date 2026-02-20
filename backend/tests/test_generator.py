@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from shapely.geometry import shape
@@ -78,6 +79,17 @@ def test_generated_unlocated_features_have_null_geometry(test_client, sample_dir
     assert buildings
     assert all(item["geometry"] is None for item in addresses)
     assert all(item["geometry"] is None for item in buildings)
+
+
+@pytest.mark.phase4
+def test_generated_core_feature_ids_use_uuid4(test_client, sample_dir: Path) -> None:
+    _, features = _prepare_generated(test_client, sample_dir)
+    core_types = {"venue", "building", "level", "footprint"}
+    target_rows = [item for item in features if item["feature_type"] in core_types]
+    assert target_rows
+    for row in target_rows:
+        parsed = UUID(row["id"])
+        assert parsed.version == 4
 
 
 @pytest.mark.phase4

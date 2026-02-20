@@ -42,6 +42,19 @@ def test_resolve_unit_category_supports_direct_imdf_value() -> None:
 
 
 @pytest.mark.phase3
+def test_resolve_unit_category_maps_retail_store_alias() -> None:
+    valid = {"unspecified", "retail", "office"}
+    category, unresolved = resolve_unit_category(
+        raw_code="retail store",
+        company_mappings={},
+        valid_categories=valid,
+        default_category="unspecified",
+    )
+    assert category == "retail"
+    assert unresolved is False
+
+
+@pytest.mark.phase3
 def test_detect_candidate_columns_filters_by_feature_type() -> None:
     files = [
         ImportedFile(
@@ -79,6 +92,23 @@ def test_normalize_company_mapping_payload_applies_defaults() -> None:
     assert default == "office"
     assert mappings["SHOP"] == "retail"
     assert mappings["UNK"] == "office"
+
+
+@pytest.mark.phase3
+def test_normalize_company_mapping_payload_maps_retail_store_alias() -> None:
+    valid = {"unspecified", "retail", "office"}
+    mappings, default = normalize_company_mappings_payload(
+        payload={
+            "default_category": "unspecified",
+            "mappings": {
+                "SHOP": "retail-store",
+            },
+        },
+        valid_categories=valid,
+        fallback_default="unspecified",
+    )
+    assert default == "unspecified"
+    assert mappings["SHOP"] == "retail"
 
 
 @pytest.mark.phase3

@@ -8,6 +8,22 @@ from typing import Any
 
 from backend.src.schemas import ImportedFile, UnitCodePreviewRow
 
+
+CATEGORY_ALIASES = {
+    "retailstore": "retail",
+}
+
+
+def _normalize_category_alias(value: str) -> str:
+    normalized = value.strip().lower()
+    if not normalized:
+        return normalized
+
+    compact = normalized.replace(" ", "").replace("-", "").replace("_", "")
+    aliased = CATEGORY_ALIASES.get(compact)
+    return aliased if aliased else normalized
+
+
 def load_unit_categories(config_path: str | Path) -> tuple[set[str], str]:
     payload = json.loads(Path(config_path).read_text(encoding="utf-8"))
     categories = {str(item).strip().lower() for item in payload.get("categories", []) if str(item).strip()}
@@ -37,7 +53,7 @@ def normalize_company_mappings_payload(
             code = str(raw_code).strip().upper()
             if not code:
                 continue
-            category = str(raw_category).strip().lower()
+            category = _normalize_category_alias(str(raw_category))
             if not is_valid_category_value(category, valid_categories):
                 category = default_category
             mappings[code] = category
@@ -56,7 +72,7 @@ def normalize_unit_category_overrides(
         code = str(raw_code).strip()
         if not code or code == "(empty)":
             continue
-        category = str(raw_category).strip().lower()
+        category = _normalize_category_alias(str(raw_category))
         if category not in valid_categories:
             continue
         normalized[code.upper()] = category
@@ -102,7 +118,7 @@ def resolve_unit_category(
     if mapped:
         return mapped, False
 
-    normalized = code_text.lower()
+    normalized = _normalize_category_alias(code_text)
     if is_valid_category_value(normalized, valid_categories):
         return normalized, False
 
