@@ -12,12 +12,23 @@ from typing import Any
 import zipfile
 
 import geopandas as gpd
+import pandas as pd
 
 from backend.src.schemas import SessionRecord, ShapefileExportRequest
 
 
 SUPPORTED_SHAPEFILE_EXTENSIONS = {".shp", ".shx", ".dbf", ".prj", ".cpg", ".qix"}
 REQUIRED_SHAPEFILE_EXTENSIONS = {".shp", ".shx", ".dbf"}
+UNIT_EXPORT_COLUMNS = (
+    "id",
+    "category",
+    "restrict",
+    "name",
+    "alt_name",
+    "level_id",
+    "source",
+    "display_po",
+)
 
 
 @dataclass(slots=True)
@@ -133,12 +144,113 @@ def _group_artifact_files(upload_artifact_dir: Path) -> dict[str, dict[str, Path
     return grouped
 
 
+def _unit_stems(session: SessionRecord) -> set[str]:
+    return {
+        item.stem
+        for item in session.files
+        if (item.detected_type or "").strip().lower() == "unit"
+    }
+
+
+def _replace_space_suffix_with_unit(stem: str) -> str:
+    if re.search(r"space$", stem, flags=re.IGNORECASE):
+        return re.sub(r"space$", "unit", stem, flags=re.IGNORECASE)
+    return stem
+
+
+def _make_unique_stem(stem: str, used_lower: set[str]) -> str:
+    candidate = stem
+    suffix = 2
+    while candidate.lower() in used_lower:
+        candidate = f"{stem}_{suffix}"
+        suffix += 1
+    used_lower.add(candidate.lower())
+    return candidate
+
+
+def _build_column_lookup(columns: list[str]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for column in columns:
+        key = column.strip().lower()
+        if key and key not in lookup:
+            lookup[key] = column
+    return lookup
+
+
+def _find_column_name(lookup: dict[str, str], candidates: list[str]) -> str | None:
+    for candidate in candidates:
+        name = lookup.get(candidate.strip().lower())
+        if name:
+            return name
+    return None
+
+
+def _series_or_empty(gdf: gpd.GeoDataFrame, column_name: str | None) -> pd.Series:
+    if column_name is None:
+        return pd.Series([None] * len(gdf), index=gdf.index, dtype="object")
+    return gdf[column_name].astype("object")
+
+
+def _normalize_unit_columns_for_export(
+    gdf: gpd.GeoDataFrame,
+    imdf_field: str,
+    legacy_field: str | None,
+) -> gpd.GeoDataFrame:
+    geometry_column = gdf.geometry.name
+    non_geometry_columns = [column for column in gdf.columns if column != geometry_column]
+    lookup = _build_column_lookup(non_geometry_columns)
+
+    id_column = _find_column_name(lookup, ["id"])
+    category_column = _find_column_name(lookup, [imdf_field, "category"])
+    restrict_column = _find_column_name(lookup, ["restrict", "restriction", "restricted"])
+    name_column = _find_column_name(lookup, ["name"])
+    alt_name_column = _find_column_name(lookup, ["alt_name", "altname"])
+    level_column = _find_column_name(lookup, ["level_id", "floor_id", "levelid", "floorid"])
+    source_column = _find_column_name(lookup, ["source"])
+    display_column = _find_column_name(lookup, ["display_po", "display_pt", "displaypoint", "display_point"])
+
+    normalized: dict[str, pd.Series] = {
+        "id": _series_or_empty(gdf, id_column),
+        "category": _series_or_empty(gdf, category_column),
+        "restrict": _series_or_empty(gdf, restrict_column),
+        "name": _series_or_empty(gdf, name_column),
+        "alt_name": _series_or_empty(gdf, alt_name_column),
+        "level_id": _series_or_empty(gdf, level_column),
+        "source": _series_or_empty(gdf, source_column),
+        "display_po": _series_or_empty(gdf, display_column),
+    }
+
+    if legacy_field and legacy_field not in UNIT_EXPORT_COLUMNS:
+        legacy_column = _find_column_name(lookup, [legacy_field])
+        normalized[legacy_field] = _series_or_empty(gdf, legacy_column)
+
+    payload = {column: normalized[column] for column in normalized}
+    payload[geometry_column] = gdf[geometry_column]
+    return gpd.GeoDataFrame(payload, geometry=geometry_column, crs=gdf.crs)
+
+
+def _should_normalize_unit_schema(
+    session: SessionRecord,
+    imdf_field: str,
+) -> bool:
+    target = imdf_field.strip().lower()
+    if target == "category":
+        return True
+    code_column = (session.wizard.mappings.unit.code_column or "").strip()
+    if not code_column:
+        return False
+    normalized_code = _normalize_shapefile_field_name(code_column, code_column)
+    return target in {code_column.lower(), normalized_code.lower()}
+
+
 def _build_export_report(request: ShapefileExportRequest) -> dict[str, Any]:
     return {
         "mode": request.mode,
         "encoding": request.encoding,
         "legacy_code_map_source": "none",
         "legacy_code_conflicts": [],
+        "unit_schema_normalized_stems": [],
+        "unit_stem_renames": [],
         "rows_requested": 0,
         "rows_updated": 0,
         "stems_processed": [],
@@ -242,13 +354,17 @@ def build_shapefile_export_archive(
 
     handled_update_keys: set[tuple[str, int]] = set()
     write_encoding = _encoding_for_write(request.encoding)
+    unit_stems = _unit_stems(session)
+    normalize_unit_schema = _should_normalize_unit_schema(session, imdf_field)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
+        used_output_stems: set[str] = set()
 
         for stem, components in sorted(shapefile_groups.items()):
             shapefile_path = components[".shp"]
             gdf = gpd.read_file(shapefile_path)
+            is_unit_stem = stem in unit_stems
             stem_update_count = 0
 
             stem_updates = {
@@ -317,7 +433,28 @@ def build_shapefile_export_archive(
 
                 handled_update_keys.add(key)
 
-            destination = output_dir / f"{stem}.shp"
+            if is_unit_stem and normalize_unit_schema:
+                gdf = _normalize_unit_columns_for_export(
+                    gdf,
+                    imdf_field=imdf_field,
+                    legacy_field=legacy_field,
+                )
+                report["unit_schema_normalized_stems"].append(stem)
+
+            output_stem = stem
+            if is_unit_stem:
+                renamed_stem = _replace_space_suffix_with_unit(stem)
+                if renamed_stem != stem:
+                    report["unit_stem_renames"].append(
+                        {
+                            "from": stem,
+                            "to": renamed_stem,
+                        }
+                    )
+                output_stem = renamed_stem
+
+            output_stem = _make_unique_stem(output_stem, used_output_stems)
+            destination = output_dir / f"{output_stem}.shp"
             write_kwargs: dict[str, Any] = {"driver": "ESRI Shapefile", "index": False}
             if write_encoding is not None:
                 write_kwargs["encoding"] = write_encoding
@@ -325,6 +462,7 @@ def build_shapefile_export_archive(
             report["stems_processed"].append(
                 {
                     "stem": stem,
+                    "output_stem": output_stem,
                     "rows_total": int(len(gdf)),
                     "rows_updated": stem_update_count,
                 }
