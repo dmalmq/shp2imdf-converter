@@ -14,7 +14,7 @@ import geopandas as gpd
 import pandas as pd
 from pyproj import CRS
 from shapely import make_valid
-from shapely.geometry import MultiPolygon, Polygon, mapping, shape
+from shapely.geometry import MultiLineString, MultiPolygon, Polygon, mapping, shape
 from shapely.geometry.polygon import orient
 
 from backend.src.detector import detect_files, load_keyword_map
@@ -126,6 +126,8 @@ def _clean_geometry(geom: Any, summary: CleanupSummary, precision: int = 7) -> l
     if isinstance(normalized, MultiPolygon):
         candidates = list(normalized.geoms)
         summary.multipolygons_exploded += max(0, len(candidates) - 1)
+    elif isinstance(normalized, MultiLineString):
+        candidates = list(normalized.geoms)
     else:
         candidates = [normalized]
 
