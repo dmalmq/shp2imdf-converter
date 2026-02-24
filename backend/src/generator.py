@@ -323,6 +323,104 @@ def _unit_geometries_by_stem(source_rows: list[dict[str, Any]], file_map: dict[s
     return geoms_by_stem
 
 
+def _collect_provided_core_features(
+    source_rows: list[dict[str, Any]],
+    file_map: dict[str, Any],
+    language: str,
+    project: Any,
+    venue_address_id: str | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    provided_buildings: list[dict[str, Any]] = []
+    provided_venues: list[dict[str, Any]] = []
+
+    for row in source_rows:
+        row_properties = row.get("properties") or {}
+        stem = row_properties.get("source_file")
+        if not stem:
+            continue
+        file_info = file_map.get(stem)
+        if not file_info:
+            continue
+
+        detected_type = (file_info.detected_type or "").lower()
+        if detected_type not in {"building", "venue"}:
+            continue
+
+        geometry = row.get("geometry")
+        if not isinstance(geometry, dict):
+            continue
+        geom = shape(geometry)
+        if geom.is_empty:
+            continue
+
+        metadata_payload = row_properties.get("metadata")
+        metadata = metadata_payload if isinstance(metadata_payload, dict) else {}
+        metadata_lookup = _metadata_lookup(metadata)
+        common = {
+            "source_file": stem,
+            "source_row_index": row_properties.get("source_row_index"),
+            "source_part_index": row_properties.get("source_part_index"),
+            "source_feature_ref": row_properties.get("source_feature_ref"),
+            "status": "mapped",
+            "issues": [],
+            "metadata": metadata,
+        }
+
+        source_id = str(row.get("id") or uuid4())
+        if detected_type == "building":
+            fallback_name = project.venue_name if project else None
+            building_name = _metadata_get(metadata, metadata_lookup, ["name", "building_name", "label"]) or fallback_name
+            provided_buildings.append(
+                {
+                    "type": "Feature",
+                    "id": source_id,
+                    "feature_type": "building",
+                    "geometry": None,
+                    "properties": {
+                        "name": wrap_labels(building_name, language=language),
+                        "alt_name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["alt_name", "altname"]), language=language),
+                        "category": _normalize_text(_metadata_get(metadata, metadata_lookup, ["category", "building_category", "type"]))
+                        or "unspecified",
+                        "restriction": _normalize_text(_metadata_get(metadata, metadata_lookup, ["restriction", "restrict"])),
+                        "display_point": _display_point(geom),
+                        "address_id": _normalize_text(_metadata_get(metadata, metadata_lookup, ["address_id", "addr_id"])),
+                        **common,
+                    },
+                }
+            )
+            continue
+
+        venue_name = _metadata_get(metadata, metadata_lookup, ["name", "venue_name", "label"]) or (
+            project.venue_name if project else None
+        )
+        venue_category = _normalize_text(_metadata_get(metadata, metadata_lookup, ["category", "venue_category", "type"]))
+        if not venue_category and project:
+            venue_category = project.venue_category
+        provided_venues.append(
+            {
+                "type": "Feature",
+                "id": source_id,
+                "feature_type": "venue",
+                "geometry": geometry,
+                "properties": {
+                    "category": venue_category or "unspecified",
+                    "restriction": _normalize_text(_metadata_get(metadata, metadata_lookup, ["restriction", "restrict"])),
+                    "name": wrap_labels(venue_name, language=language),
+                    "alt_name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["alt_name", "altname"]), language=language),
+                    "hours": _normalize_text(_metadata_get(metadata, metadata_lookup, ["hours", "opening_hours"])),
+                    "phone": _normalize_text(_metadata_get(metadata, metadata_lookup, ["phone", "telephone"])),
+                    "website": _normalize_text(_metadata_get(metadata, metadata_lookup, ["website", "url"])),
+                    "display_point": _display_point(geom),
+                    "address_id": _normalize_text(_metadata_get(metadata, metadata_lookup, ["address_id", "addr_id"]))
+                    or venue_address_id,
+                    **common,
+                },
+            }
+        )
+
+    return provided_buildings, provided_venues
+
+
 def generate_feature_collection(session: SessionRecord, unit_categories_path: str) -> dict[str, Any]:
     seed_wizard_state(session)
     source_rows = _source_feature_rows(session)
@@ -338,6 +436,14 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
     unit_geoms_by_stem = _unit_geometries_by_stem(source_rows, file_map)
 
     addresses, venue_address_id = _collect_address_features(session)
+    provided_building_features, provided_venue_features = _collect_provided_core_features(
+        source_rows=source_rows,
+        file_map=file_map,
+        language=language,
+        project=project,
+        venue_address_id=venue_address_id,
+    )
+    provided_primary_building_id = str(provided_building_features[0]["id"]) if provided_building_features else None
 
     building_uuid_by_id: dict[str, str] = {}
     for building in building_rows:
@@ -378,13 +484,17 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
         level_id_by_ordinal[ordinal] = level_id
         level_geom_by_ordinal[ordinal] = merged
 
-        linked_buildings = []
-        for building in building_rows:
-            if stems.intersection(set(building.file_stems)):
-                linked_buildings.append(building_uuid_by_id[building.id])
-        linked_buildings = sorted(set(linked_buildings))
-        if not linked_buildings and building_rows:
-            linked_buildings = [building_uuid_by_id[building_rows[0].id]]
+        linked_buildings: list[str]
+        if provided_primary_building_id:
+            linked_buildings = [provided_primary_building_id]
+        else:
+            linked_buildings = []
+            for building in building_rows:
+                if stems.intersection(set(building.file_stems)):
+                    linked_buildings.append(building_uuid_by_id[building.id])
+            linked_buildings = sorted(set(linked_buildings))
+            if not linked_buildings and building_rows:
+                linked_buildings = [building_uuid_by_id[building_rows[0].id]]
         level_building_ids[ordinal] = linked_buildings
 
         level_name = group["name"] or f"Level {ordinal}"
@@ -415,9 +525,16 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
     footprint_features: list[dict[str, Any]] = []
     ground_geom_by_building: dict[str, Any] = {}
     first_geom_by_building: dict[str, Any] = {}
-    for building in building_rows:
-        building_uuid = building_uuid_by_id[building.id]
-        building_stems = set(building.file_stems)
+    level_stems = {item.stem for item in session.files if (item.detected_type or "").lower() in LEVEL_LINKED_SOURCE_TYPES}
+
+    footprint_targets: list[tuple[str, str, set[str]]] = []
+    if provided_primary_building_id:
+        footprint_targets.append(("provided-primary", provided_primary_building_id, level_stems))
+    else:
+        for building in building_rows:
+            footprint_targets.append((building.id, building_uuid_by_id[building.id], set(building.file_stems)))
+
+    for building_key, building_uuid, building_stems in footprint_targets:
         for ordinal, level_geom in sorted(level_geom_by_ordinal.items(), key=lambda item: item[0]):
             geometries = []
             for stem in building_stems:
@@ -455,37 +572,41 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
                     },
                 }
             )
-            first_geom_by_building.setdefault(building.id, merged)
+            first_geom_by_building.setdefault(building_key, merged)
             if ordinal == 0:
-                ground_geom_by_building[building.id] = merged
+                ground_geom_by_building[building_key] = merged
 
-    building_features: list[dict[str, Any]] = []
-    for building in building_rows:
-        building_uuid = building_uuid_by_id[building.id]
-        anchor_geom = ground_geom_by_building.get(building.id) or first_geom_by_building.get(building.id)
-        fallback_name = project.venue_name if project else None
-        resolved_name = building.name or fallback_name
-        building_features.append(
-            {
-                "type": "Feature",
-                "id": building_uuid,
-                "feature_type": "building",
-                "geometry": None,
-                "properties": {
-                    "name": wrap_labels(resolved_name, language=language),
-                    "alt_name": None,
-                    "category": building.category or "unspecified",
-                    "restriction": building.restriction,
-                    "display_point": _display_point(anchor_geom) if anchor_geom is not None else None,
-                    "address_id": building.address_feature_id,
-                    "status": "mapped",
-                    "issues": [],
-                },
-            }
-        )
+    building_features: list[dict[str, Any]]
+    if provided_building_features:
+        building_features = provided_building_features
+    else:
+        building_features = []
+        for building in building_rows:
+            building_uuid = building_uuid_by_id[building.id]
+            anchor_geom = ground_geom_by_building.get(building.id) or first_geom_by_building.get(building.id)
+            fallback_name = project.venue_name if project else None
+            resolved_name = building.name or fallback_name
+            building_features.append(
+                {
+                    "type": "Feature",
+                    "id": building_uuid,
+                    "feature_type": "building",
+                    "geometry": None,
+                    "properties": {
+                        "name": wrap_labels(resolved_name, language=language),
+                        "alt_name": None,
+                        "category": building.category or "unspecified",
+                        "restriction": building.restriction,
+                        "display_point": _display_point(anchor_geom) if anchor_geom is not None else None,
+                        "address_id": building.address_feature_id,
+                        "status": "mapped",
+                        "issues": [],
+                    },
+                }
+            )
 
-    venue_feature: dict[str, Any] | None = None
-    if project:
+    venue_features: list[dict[str, Any]] = [item for item in provided_venue_features]
+    if project and not venue_features:
         venue_geometries = []
         for footprint in footprint_features:
             geometry = footprint.get("geometry")
@@ -505,25 +626,27 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
             venue_buffer = max(float(session.wizard.footprint.venue_buffer_m), 0.0) * DEGREES_PER_METER
             if venue_buffer > 0:
                 merged_venue = merged_venue.buffer(venue_buffer)
-            venue_feature = {
-                "type": "Feature",
-                "id": str(uuid4()),
-                "feature_type": "venue",
-                "geometry": mapping(merged_venue),
-                "properties": {
-                    "category": project.venue_category,
-                    "restriction": project.venue_restriction,
-                    "name": wrap_labels(project.venue_name, language=language),
-                    "alt_name": None,
-                    "hours": project.venue_hours,
-                    "phone": project.venue_phone,
-                    "website": project.venue_website,
-                    "display_point": _display_point(merged_venue),
-                    "address_id": venue_address_id,
-                    "status": "mapped",
-                    "issues": [],
-                },
-            }
+            venue_features.append(
+                {
+                    "type": "Feature",
+                    "id": str(uuid4()),
+                    "feature_type": "venue",
+                    "geometry": mapping(merged_venue),
+                    "properties": {
+                        "category": project.venue_category,
+                        "restriction": project.venue_restriction,
+                        "name": wrap_labels(project.venue_name, language=language),
+                        "alt_name": None,
+                        "hours": project.venue_hours,
+                        "phone": project.venue_phone,
+                        "website": project.venue_website,
+                        "display_point": _display_point(merged_venue),
+                        "address_id": venue_address_id,
+                        "status": "mapped",
+                        "issues": [],
+                    },
+                }
+            )
 
     company_mappings = session.wizard.company_mappings
     default_unit_category = session.wizard.company_default_category or fallback_unit_category
@@ -788,8 +911,7 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
 
     final_features: list[dict[str, Any]] = []
     final_features.extend(addresses)
-    if venue_feature:
-        final_features.append(venue_feature)
+    final_features.extend(venue_features)
     final_features.extend(building_features)
     final_features.extend(footprint_features)
     final_features.extend(level_features)
