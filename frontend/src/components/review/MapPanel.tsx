@@ -19,7 +19,7 @@ type Props = {
 const POLYGON_FILL_LAYER: LayerProps = {
   id: "review-polygons-fill",
   type: "fill",
-  filter: ["in", ["get", "_feature_type"], ["literal", ["venue", "footprint", "level", "unit", "fixture"]]],
+  filter: ["==", ["geometry-type"], "Polygon"],
   paint: {
     "fill-color": [
       "match",
@@ -34,6 +34,14 @@ const POLYGON_FILL_LAYER: LayerProps = {
       "#0ea5e9",
       "fixture",
       "#14b8a6",
+      "section",
+      "#0f766e",
+      "geofence",
+      "#16a34a",
+      "kiosk",
+      "#f97316",
+      "facility",
+      "#a855f7",
       "#64748b"
     ],
     "fill-opacity": 0.35
@@ -43,7 +51,7 @@ const POLYGON_FILL_LAYER: LayerProps = {
 const POLYGON_LINE_LAYER: LayerProps = {
   id: "review-polygons-line",
   type: "line",
-  filter: ["in", ["get", "_feature_type"], ["literal", ["venue", "footprint", "level", "unit", "fixture"]]],
+  filter: ["==", ["geometry-type"], "Polygon"],
   paint: {
     "line-color": [
       "match",
@@ -58,35 +66,68 @@ const POLYGON_LINE_LAYER: LayerProps = {
       "#0284c7",
       "fixture",
       "#0f766e",
+      "section",
+      "#0f766e",
+      "geofence",
+      "#15803d",
+      "kiosk",
+      "#ea580c",
+      "facility",
+      "#7e22ce",
       "#475569"
     ],
     "line-width": 1.5
   }
 };
 
-const OPENING_LAYER: LayerProps = {
-  id: "review-openings",
+const LINE_LAYER: LayerProps = {
+  id: "review-lines",
   type: "line",
-  filter: ["==", ["get", "_feature_type"], "opening"],
+  filter: ["==", ["geometry-type"], "LineString"],
   paint: {
-    "line-color": "#ea580c",
+    "line-color": [
+      "match",
+      ["get", "_feature_type"],
+      "opening",
+      "#ea580c",
+      "detail",
+      "#0f766e",
+      "relationship",
+      "#7c3aed",
+      "#2563eb"
+    ],
     "line-width": 2.5
   }
 };
 
-const DETAIL_LAYER: LayerProps = {
-  id: "review-details",
-  type: "line",
-  filter: ["==", ["get", "_feature_type"], "detail"],
+const POINT_LAYER: LayerProps = {
+  id: "review-points",
+  type: "circle",
+  filter: ["==", ["geometry-type"], "Point"],
   paint: {
-    "line-color": "#0f766e",
-    "line-width": 1.2
+    "circle-color": [
+      "match",
+      ["get", "_feature_type"],
+      "amenity",
+      "#16a34a",
+      "anchor",
+      "#2563eb",
+      "kiosk",
+      "#f97316",
+      "facility",
+      "#a855f7",
+      "#0ea5e9"
+    ],
+    "circle-radius": 5,
+    "circle-stroke-color": "#ffffff",
+    "circle-stroke-width": 1.2
   }
 };
 
 const HIGHLIGHT_FILL_LAYER: LayerProps = {
   id: "review-highlight-fill",
   type: "fill",
+  filter: ["==", ["geometry-type"], "Polygon"],
   paint: {
     "fill-color": "#ef4444",
     "fill-opacity": 0.2
@@ -99,6 +140,18 @@ const HIGHLIGHT_LINE_LAYER: LayerProps = {
   paint: {
     "line-color": "#dc2626",
     "line-width": 4
+  }
+};
+
+const HIGHLIGHT_POINT_LAYER: LayerProps = {
+  id: "review-highlight-point",
+  type: "circle",
+  filter: ["==", ["geometry-type"], "Point"],
+  paint: {
+    "circle-color": "#dc2626",
+    "circle-radius": 7,
+    "circle-stroke-color": "#ffffff",
+    "circle-stroke-width": 2
   }
 };
 
@@ -118,6 +171,30 @@ const WARNING_OUTLINE_LAYER: LayerProps = {
     "line-color": "#ca8a04",
     "line-width": 2,
     "line-dasharray": [2, 1]
+  }
+};
+
+const ERROR_POINT_LAYER: LayerProps = {
+  id: "review-error-point",
+  type: "circle",
+  filter: ["==", ["geometry-type"], "Point"],
+  paint: {
+    "circle-color": "#dc2626",
+    "circle-radius": 6,
+    "circle-stroke-color": "#ffffff",
+    "circle-stroke-width": 1.5
+  }
+};
+
+const WARNING_POINT_LAYER: LayerProps = {
+  id: "review-warning-point",
+  type: "circle",
+  filter: ["==", ["geometry-type"], "Point"],
+  paint: {
+    "circle-color": "#ca8a04",
+    "circle-radius": 6,
+    "circle-stroke-color": "#ffffff",
+    "circle-stroke-width": 1.5
   }
 };
 
@@ -344,10 +421,11 @@ export function MapPanel({
         interactiveLayerIds={[
           "review-polygons-fill",
           "review-polygons-line",
-          "review-openings",
-          "review-details",
+          "review-lines",
+          "review-points",
           "review-highlight-fill",
-          "review-highlight-line"
+          "review-highlight-line",
+          "review-highlight-point"
         ]}
         mapStyle={STREET_MAP_STYLE}
         onClick={onMapClick}
@@ -355,21 +433,24 @@ export function MapPanel({
         <Source id="review-source" type="geojson" data={mapData}>
           <Layer {...POLYGON_FILL_LAYER} />
           <Layer {...POLYGON_LINE_LAYER} />
-          <Layer {...OPENING_LAYER} />
-          <Layer {...DETAIL_LAYER} />
+          <Layer {...LINE_LAYER} />
+          <Layer {...POINT_LAYER} />
         </Source>
         <Source id="review-selected-source" type="geojson" data={selectedData}>
           <Layer {...HIGHLIGHT_FILL_LAYER} />
           <Layer {...HIGHLIGHT_LINE_LAYER} />
+          <Layer {...HIGHLIGHT_POINT_LAYER} />
         </Source>
         {overlayVisibility.errors !== false ? (
           <Source id="review-errors-source" type="geojson" data={errorData}>
             <Layer {...ERROR_OUTLINE_LAYER} />
+            <Layer {...ERROR_POINT_LAYER} />
           </Source>
         ) : null}
         {overlayVisibility.warnings !== false ? (
           <Source id="review-warnings-source" type="geojson" data={warningData}>
             <Layer {...WARNING_OUTLINE_LAYER} />
+            <Layer {...WARNING_POINT_LAYER} />
           </Source>
         ) : null}
         {overlayVisibility.overlaps !== false ? (

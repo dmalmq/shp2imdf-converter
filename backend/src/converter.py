@@ -17,7 +17,15 @@ IMDF_TYPE_ORDER = [
     "unit",
     "opening",
     "fixture",
+    "section",
+    "anchor",
+    "kiosk",
+    "amenity",
+    "occupant",
+    "geofence",
+    "relationship",
     "detail",
+    "facility",
 ]
 REQUIRED_IMDF_TYPES = {"address", "venue", "building", "footprint", "level", "unit"}
 REVIEW_ONLY_PROPERTY_KEYS = {

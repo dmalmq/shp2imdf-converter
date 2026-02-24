@@ -11,7 +11,23 @@ import re
 from backend.src.schemas import ImportedFile, LearningSuggestion
 
 
-FEATURE_TYPE_VALUES = {"unit", "opening", "fixture", "detail", "level", "building", "venue"}
+FEATURE_TYPE_VALUES = {
+    "unit",
+    "opening",
+    "fixture",
+    "detail",
+    "level",
+    "building",
+    "venue",
+    "amenity",
+    "anchor",
+    "geofence",
+    "kiosk",
+    "occupant",
+    "relationship",
+    "section",
+    "facility",
+}
 STOPWORD_TOKENS = {"jr", "sta", "station", "drawing", "shape", "shp"}
 
 

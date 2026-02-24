@@ -15,7 +15,7 @@ from backend.src.schemas import (
 )
 
 
-LEVEL_FILE_TYPES = {"unit", "opening", "fixture", "detail"}
+LEVEL_FILE_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section"}
 
 
 def _default_short_name(ordinal: int | None) -> str | None:

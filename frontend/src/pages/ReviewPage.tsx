@@ -25,7 +25,7 @@ import { TablePanel } from "../components/review/TablePanel";
 import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
-import { type ReviewFeature, featureName } from "../components/review/types";
+import { type ReviewFeature, featureName, orderedLocatedFeatureTypes } from "../components/review/types";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
@@ -268,18 +268,7 @@ export function ReviewPage() {
       navigate("/");
       return;
     }
-    if (Object.keys(layerVisibility).length === 0) {
-      setLayerVisibility({
-        venue: true,
-        footprint: true,
-        level: true,
-        unit: true,
-        opening: true,
-        fixture: true,
-        detail: true
-      });
-    }
-  }, [layerVisibility, navigate, sessionId, setLayerVisibility]);
+  }, [navigate, sessionId]);
 
   const loadFeatures = async () => {
     if (!sessionId) {
@@ -328,6 +317,23 @@ export function ReviewPage() {
     () => [...new Set(features.map((item) => item.feature_type))].sort((a, b) => a.localeCompare(b)),
     [features]
   );
+  const locatedFeatureTypes = useMemo(() => orderedLocatedFeatureTypes(features), [features]);
+
+  useEffect(() => {
+    if (locatedFeatureTypes.length === 0) {
+      return;
+    }
+    const missingTypes = locatedFeatureTypes.filter((featureType) => !(featureType in layerVisibility));
+    if (missingTypes.length === 0) {
+      return;
+    }
+
+    const nextVisibility: Record<string, boolean> = {};
+    missingTypes.forEach((featureType) => {
+      nextVisibility[featureType] = true;
+    });
+    setLayerVisibility({ ...layerVisibility, ...nextVisibility });
+  }, [layerVisibility, locatedFeatureTypes, setLayerVisibility]);
 
   const categories = useMemo(() => {
     const collected = new Set<string>();
@@ -833,6 +839,7 @@ export function ReviewPage() {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
         <section className="space-y-3">
           <LayerTree
+            featureTypes={locatedFeatureTypes}
             layerVisibility={layerVisibility}
             levelFilter={mapLevelFilter}
             levelOptions={levelOptions}

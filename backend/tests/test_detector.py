@@ -83,3 +83,5 @@ def test_load_keyword_map(config_path="backend/config/filename_keywords.json") -
     loaded = load_keyword_map(config_path)
     assert "unit" in loaded
     assert "space" in loaded["unit"]
+    assert "amenity" in loaded
+    assert "amenity" in loaded["amenity"]

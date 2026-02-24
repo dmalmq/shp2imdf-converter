@@ -16,10 +16,12 @@ from shapely.strtree import STRtree
 from backend.src.schemas import ValidationIssue, ValidationResponse, ValidationSummary
 
 
-POLYGON_TYPES = {"venue", "footprint", "level", "unit", "fixture"}
+POLYGON_TYPES = {"venue", "footprint", "level", "unit", "fixture", "geofence", "kiosk", "section"}
 LINE_TYPES = {"opening", "detail"}
-NULL_GEOM_TYPES = {"address", "building"}
-LEVEL_LINKED_TYPES = {"unit", "opening", "fixture", "detail"}
+POINT_TYPES = {"amenity", "anchor"}
+NULL_GEOM_TYPES = {"address", "building", "occupant"}
+OPTIONAL_GEOM_TYPES = {"relationship"}
+LEVEL_LINKED_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section"}
 LABEL_RE = re.compile(r"^[A-Za-z]{2,3}([_-][A-Za-z0-9]{2,8})*$")
 
 
@@ -212,6 +214,8 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
     level_ids = {fid for fid, row in by_id.items() if _feature_type(row) == "level"}
     building_ids = {fid for fid, row in by_id.items() if _feature_type(row) == "building"}
     address_ids = {fid for fid, row in by_id.items() if _feature_type(row) == "address"}
+    unit_ids = {fid for fid, row in by_id.items() if _feature_type(row) == "unit"}
+    anchor_ids = {fid for fid, row in by_id.items() if _feature_type(row) == "anchor"}
     geoms_by_id: dict[str, BaseGeometry] = {}
 
     for row in rows:
@@ -225,6 +229,8 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 add_issue("error", f"{ftype}_must_be_null", f"{ftype.title()} geometry must be null.", feature_id=fid)
             continue
         if payload is None:
+            if ftype in OPTIONAL_GEOM_TYPES:
+                continue
             add_issue("error", "empty_geometry", "Geometry is missing.", feature_id=fid)
             continue
         if ftype in POLYGON_TYPES and payload.get("type") not in {"Polygon", "MultiPolygon"}:
@@ -236,6 +242,8 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 f"{ftype.title()} geometry must be LineString.",
                 feature_id=fid,
             )
+        if ftype in POINT_TYPES and payload.get("type") != "Point":
+            add_issue("error", f"{ftype}_must_be_point", f"{ftype.title()} geometry must be Point.", feature_id=fid)
         if geom is None:
             add_issue(
                 "error",
@@ -312,6 +320,63 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
             add_issue("error", "opening_missing_category_error", "Opening has no category.", feature_id=fid)
         if ftype == "fixture" and (not isinstance(props.get("category"), str) or not props.get("category")):
             add_issue("error", "fixture_missing_category_error", "Fixture has no category.", feature_id=fid)
+        if ftype == "amenity":
+            if not isinstance(props.get("category"), str) or not props.get("category"):
+                add_issue("error", "amenity_missing_category_error", "Amenity has no category.", feature_id=fid)
+            unit_refs = props.get("unit_ids")
+            if unit_refs is not None:
+                if not isinstance(unit_refs, list):
+                    add_issue("error", "amenity_unit_ids_invalid", "Amenity unit_ids must be an array.", feature_id=fid)
+                elif any(not isinstance(unit_id, str) or unit_id not in unit_ids for unit_id in unit_refs):
+                    add_issue("error", "orphaned_reference_error", "Amenity unit_ids include missing unit.", feature_id=fid)
+        if ftype == "anchor":
+            unit_ref = props.get("unit_id")
+            if unit_ref is not None and (not isinstance(unit_ref, str) or unit_ref not in unit_ids):
+                add_issue("error", "orphaned_reference_error", "Anchor unit_id does not match a unit feature.", feature_id=fid)
+            address_ref = props.get("address_id")
+            if address_ref is not None and (not isinstance(address_ref, str) or address_ref not in address_ids):
+                add_issue("error", "orphaned_reference_error", "Anchor address_id does not match an address feature.", feature_id=fid)
+        if ftype == "geofence":
+            if not isinstance(props.get("category"), str) or not props.get("category"):
+                add_issue("error", "geofence_missing_category_error", "Geofence has no category.", feature_id=fid)
+            feature_refs = props.get("feature_ids")
+            if not isinstance(feature_refs, list):
+                add_issue("error", "geofence_feature_ids_invalid", "Geofence feature_ids must be an array.", feature_id=fid)
+            elif any(not isinstance(feature_ref, str) or feature_ref not in by_id for feature_ref in feature_refs):
+                add_issue("error", "orphaned_reference_error", "Geofence feature_ids include missing feature.", feature_id=fid)
+        if ftype == "kiosk":
+            anchor_ref = props.get("anchor_id")
+            if anchor_ref is not None and (not isinstance(anchor_ref, str) or anchor_ref not in anchor_ids):
+                add_issue("error", "orphaned_reference_error", "Kiosk anchor_id does not match an anchor feature.", feature_id=fid)
+        if ftype == "occupant":
+            if not isinstance(props.get("category"), str) or not props.get("category"):
+                add_issue("error", "occupant_missing_category_error", "Occupant has no category.", feature_id=fid)
+            anchor_ref = props.get("anchor_id")
+            if anchor_ref is not None and (not isinstance(anchor_ref, str) or anchor_ref not in anchor_ids):
+                add_issue("error", "orphaned_reference_error", "Occupant anchor_id does not match an anchor feature.", feature_id=fid)
+        if ftype == "relationship":
+            if not isinstance(props.get("category"), str) or not props.get("category"):
+                add_issue("error", "relationship_missing_category_error", "Relationship has no category.", feature_id=fid)
+            direction = props.get("direction")
+            if direction is not None and direction not in {"directed", "undirected"}:
+                add_issue("error", "relationship_direction_invalid", "Relationship direction must be directed/undirected.", feature_id=fid)
+            for key in ("origin", "destination"):
+                ref = props.get(key)
+                if ref is None:
+                    continue
+                if not isinstance(ref, dict):
+                    add_issue("error", "relationship_reference_invalid", f"Relationship {key} must be object.", feature_id=fid)
+                    continue
+                reference_id = ref.get("id")
+                reference_type = ref.get("feature_type")
+                if not isinstance(reference_id, str) or not isinstance(reference_type, str):
+                    add_issue("error", "relationship_reference_invalid", f"Relationship {key} missing id/feature_type.", feature_id=fid)
+                    continue
+                target_row = by_id.get(reference_id)
+                if target_row is None or _feature_type(target_row) != reference_type:
+                    add_issue("error", "orphaned_reference_error", f"Relationship {key} points to missing feature.", feature_id=fid)
+        if ftype == "section" and (not isinstance(props.get("category"), str) or not props.get("category")):
+            add_issue("error", "section_missing_category_error", "Section has no category.", feature_id=fid)
         if ftype == "detail" and geom and geom.length == 0:
             add_issue("warning", "detail_degenerate_line", "Detail line has zero length.", feature_id=fid)
 
@@ -371,7 +436,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
         if fid is None or fid not in geoms_by_id:
             continue
         ftype = _feature_type(row)
-        if ftype not in {"unit", "opening", "fixture", "detail"}:
+        if ftype not in {"unit", "opening", "fixture", "detail", "amenity", "anchor", "geofence", "kiosk", "section"}:
             continue
         level_id = _props(row).get("level_id")
         key = (ftype, level_id if isinstance(level_id, str) else None, geoms_by_id[fid].wkb_hex)

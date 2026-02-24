@@ -6,6 +6,14 @@
     "detail": ["detail", "edge", "line", "curb"],
     "level": ["floor", "level", "storey"],
     "building": ["building", "bldg", "structure"],
-    "venue": ["venue", "site", "campus", "property"]
+    "venue": ["venue", "site", "campus", "property"],
+    "amenity": ["amenity"],
+    "anchor": ["anchor"],
+    "geofence": ["geofence", "zone", "fence"],
+    "kiosk": ["kiosk"],
+    "occupant": ["occupant", "tenant"],
+    "relationship": ["relationship", "relation", "traversal"],
+    "section": ["section"],
+    "facility": ["facility"]
   }
 }

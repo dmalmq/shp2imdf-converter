@@ -1,8 +1,8 @@
-import { LOCATED_FEATURE_TYPES } from "./types";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 
 
 type Props = {
+  featureTypes: string[];
   layerVisibility: Record<string, boolean>;
   levelFilter: string;
   levelOptions: Array<{ id: string; label: string }>;
@@ -15,6 +15,7 @@ type Props = {
 
 
 export function LayerTree({
+  featureTypes,
   layerVisibility,
   levelFilter,
   levelOptions,
@@ -30,7 +31,7 @@ export function LayerTree({
     <div className="rounded border bg-white p-3">
       <h3 className="mb-2 text-sm font-semibold text-slate-700">{t("Layers", "レイヤー")}</h3>
       <div className="grid gap-1">
-        {LOCATED_FEATURE_TYPES.map((featureType) => {
+        {featureTypes.map((featureType) => {
           const checked = layerVisibility[featureType] ?? true;
           return (
             <label key={featureType} className="flex items-center gap-2 text-sm">

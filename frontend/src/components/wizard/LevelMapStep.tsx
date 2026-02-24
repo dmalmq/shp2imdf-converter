@@ -16,6 +16,8 @@ type LevelBucket = {
   names: string[];
 };
 
+const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail", "kiosk", "section"]);
+
 
 function makeDefaultShortName(ordinal: number | null): string {
   if (ordinal === null) {
@@ -34,7 +36,7 @@ function makeDefaultShortName(ordinal: number | null): string {
 export function LevelMapStep({ files, saving, onPatchFile }: Props) {
   const { t } = useUiLanguage();
   const levelFiles = useMemo(
-    () => files.filter((item) => item.detected_type === "unit" || item.detected_type === "opening" || item.detected_type === "fixture" || item.detected_type === "detail"),
+    () => files.filter((item) => LEVEL_REQUIRED_TYPES.has(item.detected_type ?? "")),
     [files]
   );
 
