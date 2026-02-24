@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import tempfile
 from typing import Any
+from uuid import UUID
 import zipfile
 
 import geopandas as gpd
@@ -296,6 +297,41 @@ def _bool_series_or_default(gdf: gpd.GeoDataFrame, column_name: str | None, defa
     values = [_coerce_to_bool(item) for item in gdf[column_name].tolist()]
     normalized = [default_value if item is None else item for item in values]
     return pd.Series(normalized, index=gdf.index, dtype="object")
+
+
+def _canonicalize_uuid_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        try:
+            if pd.isna(value):
+                return None
+        except Exception:
+            pass
+        return value
+
+    candidate = value.strip()
+    if not candidate:
+        return None
+    try:
+        return str(UUID(candidate))
+    except ValueError:
+        return value
+
+
+def _canonicalize_uuid_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    geometry_column = gdf.geometry.name
+    uuid_fields = {"id", "level_id", "floor_id", "address_id", "anchor_id"}
+    renamed: dict[str, pd.Series] = {}
+    for column in gdf.columns:
+        if column == geometry_column:
+            continue
+        if column.strip().lower() not in uuid_fields:
+            continue
+        renamed[column] = gdf[column].astype("object").map(_canonicalize_uuid_value)
+    if not renamed:
+        return gdf
+    return gdf.assign(**renamed)
 
 
 def _normalize_columns(
@@ -674,6 +710,9 @@ def build_shapefile_export_archive(
             elif detected_type == "level":
                 gdf = _normalize_level_columns_for_export(gdf)
                 report["level_schema_normalized_stems"].append(stem)
+
+            # Canonicalize legacy 32-char UUID strings to hyphenated UUID format.
+            gdf = _canonicalize_uuid_columns(gdf)
 
             output_stem = _normalized_output_stem(stem, detected_type)
             if output_stem != stem:

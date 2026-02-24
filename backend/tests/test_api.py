@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import shutil
 import tempfile
+from uuid import UUID
 import zipfile
 
 import geopandas as gpd
@@ -1161,6 +1162,47 @@ def test_shapefile_export_normalizes_unit_columns_and_renames_space_stem(test_cl
             assert "color" not in exported.columns
             exported_categories = {str(value).lower() for value in exported["category"].dropna().tolist()}
             assert exported_categories == {"room"}
+
+
+@pytest.mark.phase5
+def test_shapefile_export_canonicalizes_compact_uuid_ids(test_client, sample_dir: Path) -> None:
+    stem = "JRTokyoSta_B1_Space"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        working_dir = Path(tmpdir)
+        for extension in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
+            source = sample_dir / f"{stem}{extension}"
+            if source.exists():
+                shutil.copy2(source, working_dir / source.name)
+
+        gdf = gpd.read_file(working_dir / f"{stem}.shp")
+        compact_ids = [f"{index + 1:032x}" for index in range(len(gdf))]
+        compact_floor_ids = [f"{index + 101:032x}" for index in range(len(gdf))]
+        gdf["id"] = compact_ids
+        gdf["floor_id"] = compact_floor_ids
+        gdf["category"] = gdf["COMPANY_CO"]
+        gdf.to_file(working_dir / f"{stem}.shp", driver="ESRI Shapefile", index=False)
+
+        import_response = test_client.post("/api/import", files=_upload_payload(working_dir, stem))
+        assert import_response.status_code == 201
+        session_id = import_response.json()["session_id"]
+
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"unit": {"imdf_category_field": "category"}},
+    )
+    assert export_response.status_code == 200
+
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        with tempfile.TemporaryDirectory() as output_dir:
+            archive.extractall(output_dir)
+            exported = gpd.read_file(Path(output_dir) / "JRTokyoSta_B1_unit.shp")
+            exported_ids = {str(value) for value in exported["id"].dropna().tolist()}
+            exported_level_ids = {str(value) for value in exported["level_id"].dropna().tolist()}
+
+    expected_ids = {str(UUID(value)) for value in compact_ids}
+    expected_level_ids = {str(UUID(value)) for value in compact_floor_ids}
+    assert exported_ids == expected_ids
+    assert exported_level_ids == expected_level_ids
 
 
 @pytest.mark.phase5
