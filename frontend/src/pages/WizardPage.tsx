@@ -850,7 +850,7 @@ export function WizardPage() {
   }, [loading, step, wizardSaveStatus, nextStep, confirmSummary]);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[1500px] flex-col gap-6 px-6 py-7 xl:px-8">
+    <main className="mx-auto flex min-h-screen w-full max-w-[1850px] flex-col gap-6 px-4 py-5 md:px-6 xl:px-8">
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-semibold">{t("Wizard", "ウィザード")}</h1>
@@ -863,7 +863,7 @@ export function WizardPage() {
         </Link>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[20rem_minmax(0,1fr)]">
+      <div className="grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]">
         <StepSidebar steps={steps} currentStep={step} onSelectStep={selectStep} onSkipToSummary={skipToSummary} />
         <div className="space-y-5">
           <div className="rounded border bg-white px-4 py-3 text-sm">

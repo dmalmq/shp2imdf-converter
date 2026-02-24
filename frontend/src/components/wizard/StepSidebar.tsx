@@ -18,7 +18,7 @@ export function StepSidebar({ steps, currentStep, onSelectStep, onSkipToSummary 
   const { t } = useUiLanguage();
 
   return (
-    <aside className="w-full rounded border bg-white p-5 lg:w-80">
+    <aside className="w-full rounded border bg-white p-5">
       <div className="mb-5 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-700">{t("Wizard Steps", "ウィザード手順")}</h2>
         <button

@@ -62,7 +62,7 @@ export function FileClassStep({
   const { t } = useUiLanguage();
 
   return (
-    <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(430px,1fr)]">
+    <section className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(400px,1fr)] 2xl:grid-cols-[minmax(0,1.7fr)_minmax(440px,1fr)]">
       <div className="min-w-0 rounded border bg-white p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{t("Step 2: File Classification", "Step 2: ファイル分類")}</h2>
@@ -75,8 +75,8 @@ export function FileClassStep({
             {loading ? t("Detecting...", "検出中...") : t("Detect All", "一括検出")}
           </button>
         </div>
-        <div className="max-h-[440px] overflow-auto rounded border">
-          <table className="min-w-[900px] w-full table-fixed border-collapse text-sm">
+        <div className="max-h-[58vh] min-h-[430px] overflow-auto rounded border">
+          <table className="min-w-[820px] w-full table-fixed border-collapse text-sm">
             <colgroup>
               <col style={{ width: "42%" }} />
               <col style={{ width: "14%" }} />
@@ -113,7 +113,7 @@ export function FileClassStep({
                     <td className="px-3 py-2.5">
                       <select
                         value={file.detected_type ?? ""}
-                        className="w-full min-w-[8.5rem] rounded border px-2 py-1 text-sm"
+                        className="w-full min-w-[7.5rem] rounded border px-2 py-1 text-sm"
                         onChange={(event) => onChangeType(file.stem, event.target.value)}
                         onClick={(event) => event.stopPropagation()}
                       >

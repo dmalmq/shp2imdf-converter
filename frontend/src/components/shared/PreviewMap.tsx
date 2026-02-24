@@ -210,7 +210,7 @@ export function PreviewMap({ features, selectedStem, hoveredStem }: Props) {
   }, [filtered, highlighted, hoveredStem]);
 
   return (
-    <div className="h-[440px] overflow-hidden rounded border">
+    <div className="h-[58vh] min-h-[430px] max-h-[760px] overflow-hidden rounded border">
       <Map
         ref={mapRef}
         mapLib={import("maplibre-gl")}

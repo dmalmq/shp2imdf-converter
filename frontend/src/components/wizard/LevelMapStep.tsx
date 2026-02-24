@@ -89,15 +89,24 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
   }, [buckets]);
 
   return (
-    <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,1fr)]">
+    <section className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,1fr)] 2xl:grid-cols-[minmax(0,1.7fr)_minmax(400px,1fr)]">
       <div className="min-w-0 rounded border bg-white p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{t("Step 3: Level Mapping", "Step 3: レベル対応付け")}</h2>
           {saving && <span className="text-xs text-slate-500">{t("Saving...", "保存中...")}</span>}
         </div>
 
-        <div className="max-h-[440px] overflow-auto rounded border">
-          <table className="min-w-[980px] w-full border-collapse text-sm">
+        <div className="max-h-[58vh] min-h-[430px] overflow-auto rounded border">
+          <table className="min-w-[860px] w-full table-fixed border-collapse text-sm">
+            <colgroup>
+              <col style={{ width: "30%" }} />
+              <col style={{ width: "10%" }} />
+              <col style={{ width: "13%" }} />
+              <col style={{ width: "15%" }} />
+              <col style={{ width: "10%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "14%" }} />
+            </colgroup>
             <thead className="sticky top-0 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
               <tr>
                 <th className="px-3 py-2.5">{t("Filename", "ファイル名")}</th>
@@ -112,11 +121,13 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
             <tbody>
               {levelFiles.map((file) => (
                 <tr key={file.stem} className="border-t">
-                  <td className="px-3 py-2.5 font-mono text-xs">{file.stem}</td>
+                  <td className="truncate px-3 py-2.5 font-mono text-xs" title={file.stem}>
+                    {file.stem}
+                  </td>
                   <td className="px-3 py-2.5">{file.detected_type}</td>
                   <td className="px-3 py-2.5">
                     <input
-                      className="w-16 rounded border px-2 py-1"
+                      className="w-full max-w-[5rem] rounded border px-2 py-1"
                       type="number"
                       value={file.detected_level ?? ""}
                       onChange={(event) =>
@@ -128,14 +139,14 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
                   </td>
                   <td className="px-3 py-2.5">
                     <input
-                      className="w-32 rounded border px-2 py-1"
+                      className="w-full rounded border px-2 py-1"
                       value={file.level_name ?? ""}
                       onChange={(event) => onPatchFile(file.stem, { level_name: event.target.value })}
                     />
                   </td>
                   <td className="px-3 py-2.5">
                     <input
-                      className="w-20 rounded border px-2 py-1"
+                      className="w-full max-w-[6rem] rounded border px-2 py-1"
                       value={file.short_name ?? makeDefaultShortName(file.detected_level)}
                       onChange={(event) => onPatchFile(file.stem, { short_name: event.target.value })}
                     />
