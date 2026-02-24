@@ -312,3 +312,86 @@ def test_converter_exports_extended_feature_files() -> None:
     ):
         assert expected in files
         assert files[expected]["features"]
+
+
+@pytest.mark.phase4
+def test_generator_reuses_uploaded_venue_and_building_when_present() -> None:
+    session = _sample_session()
+    source_building_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    source_venue_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+    session.files.append(
+        ImportedFile(
+            stem="demo_building",
+            geometry_type="Polygon",
+            feature_count=1,
+            attribute_columns=["name", "category"],
+            detected_type="building",
+            confidence="green",
+        )
+    )
+    session.files.append(
+        ImportedFile(
+            stem="demo_venue",
+            geometry_type="Polygon",
+            feature_count=1,
+            attribute_columns=["name", "category"],
+            detected_type="venue",
+            confidence="green",
+        )
+    )
+
+    source_rows = list(session.source_feature_collection["features"])
+    source_rows.append(
+        _source_row(
+            "demo_building",
+            source_building_id,
+            mapping(
+                Polygon(
+                    [
+                        (139.7000, 35.6900),
+                        (139.7004, 35.6900),
+                        (139.7004, 35.6904),
+                        (139.7000, 35.6904),
+                        (139.7000, 35.6900),
+                    ]
+                )
+            ),
+            {"name": "Uploaded Building", "category": "transit"},
+        )
+    )
+    source_rows.append(
+        _source_row(
+            "demo_venue",
+            source_venue_id,
+            mapping(
+                Polygon(
+                    [
+                        (139.6998, 35.6898),
+                        (139.7006, 35.6898),
+                        (139.7006, 35.6906),
+                        (139.6998, 35.6906),
+                        (139.6998, 35.6898),
+                    ]
+                )
+            ),
+            {"name": "Uploaded Venue", "category": "transitstation"},
+        )
+    )
+    session.source_feature_collection = {"type": "FeatureCollection", "features": source_rows}
+    session.feature_collection = {"type": "FeatureCollection", "features": source_rows}
+
+    generated = generate_feature_collection(session, unit_categories_path=str(Path("backend/config/unit_categories.json")))
+    features = generated["features"]
+    buildings = [item for item in features if item["feature_type"] == "building"]
+    venues = [item for item in features if item["feature_type"] == "venue"]
+    levels = [item for item in features if item["feature_type"] == "level"]
+
+    assert len(buildings) == 1
+    assert len(venues) == 1
+    assert buildings[0]["id"] == source_building_id
+    assert venues[0]["id"] == source_venue_id
+    assert buildings[0]["properties"]["name"]["en"] == "Uploaded Building"
+    assert venues[0]["properties"]["name"]["en"] == "Uploaded Venue"
+    assert levels
+    assert all(source_building_id in level["properties"]["building_ids"] for level in levels)
