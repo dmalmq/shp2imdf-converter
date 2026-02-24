@@ -40,6 +40,14 @@ const FILL_LAYER: any = {
       "#0f766e",
       "level",
       "#475569",
+      "section",
+      "#0f766e",
+      "geofence",
+      "#16a34a",
+      "kiosk",
+      "#f97316",
+      "facility",
+      "#a855f7",
       "#64748b"
     ],
     "fill-opacity": 0.3
@@ -63,9 +71,38 @@ const LINE_LAYER: any = {
       "#0f766e",
       "level",
       "#475569",
+      "relationship",
+      "#6d28d9",
+      "section",
+      "#0f766e",
+      "geofence",
+      "#15803d",
+      "facility",
+      "#7e22ce",
       "#64748b"
     ],
     "line-width": 2
+  }
+};
+
+const POINT_LAYER: any = {
+  id: "preview-point",
+  type: "circle" as const,
+  paint: {
+    "circle-color": [
+      "match",
+      ["get", "feature_type"],
+      "amenity",
+      "#16a34a",
+      "anchor",
+      "#2563eb",
+      "kiosk",
+      "#f97316",
+      "#0ea5e9"
+    ],
+    "circle-radius": 4.5,
+    "circle-stroke-color": "#ffffff",
+    "circle-stroke-width": 1
   }
 };
 
@@ -187,6 +224,7 @@ export function PreviewMap({ features, selectedStem, hoveredStem }: Props) {
         <Source id="preview-source" type="geojson" data={mapData}>
           <Layer {...FILL_LAYER} />
           <Layer {...LINE_LAYER} />
+          <Layer {...POINT_LAYER} />
         </Source>
         <Source id="preview-highlight-source" type="geojson" data={highlightData}>
           <Layer {...HIGHLIGHT_FILL_LAYER} />

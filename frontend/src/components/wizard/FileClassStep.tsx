@@ -4,7 +4,23 @@ import { ConfidenceDot } from "../shared/ConfidenceDot";
 import { PreviewMap } from "../shared/PreviewMap";
 
 
-const TYPE_OPTIONS = ["unit", "opening", "fixture", "detail", "level", "building", "venue"];
+const TYPE_OPTIONS = [
+  "unit",
+  "opening",
+  "fixture",
+  "detail",
+  "level",
+  "building",
+  "venue",
+  "amenity",
+  "anchor",
+  "geofence",
+  "kiosk",
+  "occupant",
+  "relationship",
+  "section",
+  "facility"
+];
 
 type BasicFeature = {
   type: string;

@@ -17,10 +17,51 @@ export type ReviewIssue = {
   overlap_geometry?: Record<string, unknown> | null;
 };
 
-export const LOCATED_FEATURE_TYPES = ["venue", "footprint", "level", "unit", "opening", "fixture", "detail"] as const;
+export const DEFAULT_LOCATED_FEATURE_ORDER = [
+  "venue",
+  "footprint",
+  "level",
+  "unit",
+  "opening",
+  "fixture",
+  "detail",
+  "section",
+  "geofence",
+  "kiosk",
+  "amenity",
+  "anchor",
+  "relationship",
+  "facility"
+] as const;
 
 export function isLocatedFeature(feature: ReviewFeature): boolean {
-  return Boolean(feature.geometry) && LOCATED_FEATURE_TYPES.includes(feature.feature_type as (typeof LOCATED_FEATURE_TYPES)[number]);
+  return Boolean(feature.geometry);
+}
+
+export function orderedLocatedFeatureTypes(features: ReviewFeature[]): string[] {
+  const discovered = new Set<string>();
+  features.forEach((feature) => {
+    if (!isLocatedFeature(feature)) {
+      return;
+    }
+    discovered.add(feature.feature_type);
+  });
+
+  const order = new Map<string, number>(DEFAULT_LOCATED_FEATURE_ORDER.map((featureType, index) => [featureType, index]));
+  return [...discovered].sort((left, right) => {
+    const leftOrder = order.get(left);
+    const rightOrder = order.get(right);
+    if (leftOrder !== undefined && rightOrder !== undefined) {
+      return leftOrder - rightOrder;
+    }
+    if (leftOrder !== undefined) {
+      return -1;
+    }
+    if (rightOrder !== undefined) {
+      return 1;
+    }
+    return left.localeCompare(right);
+  });
 }
 
 export function featureName(feature: ReviewFeature): string {

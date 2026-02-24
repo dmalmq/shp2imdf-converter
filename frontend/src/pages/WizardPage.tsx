@@ -44,7 +44,7 @@ import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
 
 const STEP_ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail"]);
+const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail", "kiosk", "section"]);
 
 const EMPTY_UNIT_MAPPING: UnitMappingState = {
   code_column: null,
@@ -89,8 +89,8 @@ const STEP_HELP_TEXT: Record<number, { en: string; ja: string }> = {
     ja: "会場名・カテゴリ・住所などの基本情報を設定します。ここでの入力が IMDF の venue/address に使われます。"
   },
   2: {
-    en: "Confirm each source file type (unit/opening/fixture/detail). Correct classification keeps later mapping accurate.",
-    ja: "各ファイルの種別（unit/opening/fixture/detail）を確認します。ここが正しいと後続の変換が安定します。"
+    en: "Confirm each source file type (unit/opening/fixture/detail plus optional IMDF types). Correct classification keeps later mapping accurate.",
+    ja: "各ファイルの種別（unit/opening/fixture/detail と追加 IMDF 種別）を確認します。ここが正しいと後続の変換が安定します。"
   },
   3: {
     en: "Set floor levels and names so every feature is assigned to the correct level in IMDF.",
@@ -267,8 +267,8 @@ export function WizardPage() {
         reason: levelsComplete
           ? null
           : t(
-              "Set a detected level for each unit, opening, fixture, and detail file.",
-              "unit/opening/fixture/detail の各ファイルにレベルを設定してください。"
+              "Set a detected level for each unit, opening, fixture, detail, kiosk, and section file.",
+              "unit/opening/fixture/detail/kiosk/section の各ファイルにレベルを設定してください。"
             )
       },
       4: {

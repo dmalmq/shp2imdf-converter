@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
 import re
 from typing import Any
 from uuid import uuid4
@@ -25,6 +27,65 @@ OPENING_CATEGORIES = {
     "pedestrian.transit",
     "service",
 }
+LEVEL_LINKED_SOURCE_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section"}
+SUPPORTED_SOURCE_FEATURE_TYPES = {
+    "unit",
+    "opening",
+    "fixture",
+    "detail",
+    "amenity",
+    "anchor",
+    "geofence",
+    "kiosk",
+    "occupant",
+    "relationship",
+    "section",
+    "facility",  # Compatibility alias for non-standard datasets.
+}
+CATEGORY_CONFIG_DIR = Path(__file__).resolve().parent.parent / "config" / "categories"
+DEFAULT_AMENITY_CATEGORY = "unspecified"
+DEFAULT_GEOFENCE_CATEGORY = "geofence"
+DEFAULT_SECTION_CATEGORY = "walkway"
+DEFAULT_RELATIONSHIP_CATEGORY = "traversal"
+DEFAULT_OCCUPANT_CATEGORY = "occupant"
+RELATIONSHIP_DIRECTIONS = {"directed", "undirected"}
+POINT_MAPPED_TYPES = {"amenity", "anchor"}
+NULL_GEOMETRY_MAPPED_TYPES = {"occupant"}
+
+
+def _load_category_set(filename: str) -> set[str]:
+    path = CATEGORY_CONFIG_DIR / filename
+    if not path.exists():
+        return set()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    categories = payload.get("categories", [])
+    if not isinstance(categories, list):
+        return set()
+    return {str(item).strip().lower() for item in categories if str(item).strip()}
+
+
+def _load_occupant_category_pattern() -> re.Pattern[str]:
+    path = CATEGORY_CONFIG_DIR / "occupant_categories.json"
+    if not path.exists():
+        return re.compile(r"^[a-z0-9]+(?:[._][a-z0-9]+)*$")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return re.compile(r"^[a-z0-9]+(?:[._][a-z0-9]+)*$")
+    raw_pattern = payload.get("validation_pattern")
+    if not isinstance(raw_pattern, str) or not raw_pattern.strip():
+        return re.compile(r"^[a-z0-9]+(?:[._][a-z0-9]+)*$")
+    return re.compile(raw_pattern)
+
+
+AMENITY_CATEGORIES = _load_category_set("amenity_categories.json")
+GEOFENCE_CATEGORIES = _load_category_set("geofence_categories.json")
+SECTION_CATEGORIES = _load_category_set("section_categories.json")
+RELATIONSHIP_CATEGORIES = _load_category_set("relationship_categories.json")
+OCCUPANT_CATEGORY_PATTERN = _load_occupant_category_pattern()
 
 
 def _default_short_name(ordinal: int) -> str:
@@ -77,6 +138,79 @@ def _normalize_text(value: Any) -> str | None:
     return text or None
 
 
+def _metadata_lookup(metadata: dict[str, Any]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for key in metadata.keys():
+        if not isinstance(key, str):
+            continue
+        normalized = key.strip().lower()
+        if normalized and normalized not in lookup:
+            lookup[normalized] = key
+    return lookup
+
+
+def _metadata_get(metadata: dict[str, Any], lookup: dict[str, str], candidates: list[str]) -> Any:
+    for candidate in candidates:
+        key = lookup.get(candidate.strip().lower())
+        if key is None:
+            continue
+        return metadata.get(key)
+    return None
+
+
+def _resolve_category(value: Any, valid_categories: set[str], fallback: str) -> str:
+    normalized = (_normalize_text(value) or fallback).lower()
+    if valid_categories and normalized not in valid_categories:
+        return fallback
+    return normalized
+
+
+def _resolve_occupant_category(value: Any) -> str:
+    normalized = (_normalize_text(value) or DEFAULT_OCCUPANT_CATEGORY).lower()
+    if OCCUPANT_CATEGORY_PATTERN.match(normalized):
+        return normalized
+    return DEFAULT_OCCUPANT_CATEGORY
+
+
+def _parse_feature_reference(value: Any) -> dict[str, str] | None:
+    if isinstance(value, dict):
+        identifier = _normalize_text(value.get("id"))
+        feature_type = _normalize_text(value.get("feature_type"))
+        if identifier and feature_type:
+            return {"id": identifier, "feature_type": feature_type.lower()}
+        return None
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            decoded = json.loads(text)
+        except Exception:
+            return None
+        if isinstance(decoded, dict):
+            return _parse_feature_reference(decoded)
+    return None
+
+
+def _reference_from_metadata(
+    metadata: dict[str, Any],
+    lookup: dict[str, str],
+    object_candidates: list[str],
+    id_candidates: list[str],
+    type_candidates: list[str],
+) -> dict[str, str] | None:
+    parsed = _parse_feature_reference(_metadata_get(metadata, lookup, object_candidates))
+    if parsed:
+        return parsed
+
+    identifier = _normalize_text(_metadata_get(metadata, lookup, id_candidates))
+    feature_type = _normalize_text(_metadata_get(metadata, lookup, type_candidates))
+    if not identifier or not feature_type:
+        return None
+    return {"id": identifier, "feature_type": feature_type.lower()}
+
+
 def _clean_feature(feature: dict[str, Any]) -> dict[str, Any]:
     copied = copy.deepcopy(feature)
     properties = copied.get("properties")
@@ -97,7 +231,7 @@ def _level_items_from_files(session: SessionRecord) -> list[LevelWizardItem]:
     items: list[LevelWizardItem] = []
     for file in session.files:
         detected_type = (file.detected_type or "").lower()
-        if detected_type not in {"unit", "opening", "fixture", "detail"}:
+        if detected_type not in LEVEL_LINKED_SOURCE_TYPES:
             continue
         items.append(
             LevelWizardItem(
@@ -408,7 +542,7 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
             continue
 
         feature_type = (file_info.detected_type or "").lower()
-        if feature_type not in {"unit", "opening", "fixture", "detail"}:
+        if feature_type not in SUPPORTED_SOURCE_FEATURE_TYPES:
             continue
 
         geometry = row.get("geometry")
@@ -419,13 +553,13 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
             continue
 
         ordinal = file_info.detected_level
-        if ordinal is None:
-            continue
-        level_id = level_id_by_ordinal.get(ordinal)
-        if not level_id:
+        level_id = level_id_by_ordinal.get(ordinal) if ordinal is not None else None
+        if feature_type in LEVEL_LINKED_SOURCE_TYPES and not level_id:
             continue
 
-        metadata = row_properties.get("metadata") or {}
+        metadata_payload = row_properties.get("metadata")
+        metadata = metadata_payload if isinstance(metadata_payload, dict) else {}
+        metadata_lookup = _metadata_lookup(metadata)
         common = {
             "source_file": stem,
             "source_row_index": row_properties.get("source_row_index"),
@@ -435,6 +569,13 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
             "issues": [],
             "metadata": metadata,
         }
+
+        output_geometry: dict[str, Any] | None = geometry
+        if feature_type in POINT_MAPPED_TYPES:
+            point_geom = geom if geom.geom_type == "Point" else geom.representative_point()
+            output_geometry = mapping(point_geom)
+        elif feature_type in NULL_GEOMETRY_MAPPED_TYPES:
+            output_geometry = None
 
         if feature_type == "unit":
             code_column = mapping_config.unit.code_column
@@ -516,8 +657,121 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
                 "display_point": _display_point(geom),
                 **common,
             }
+        elif feature_type == "detail":
+            new_properties = {
+                "level_id": level_id,
+                **common,
+            }
+        elif feature_type == "amenity":
+            new_properties = {
+                "category": _resolve_category(
+                    _metadata_get(metadata, metadata_lookup, ["category", "amenity_category", "type"]),
+                    AMENITY_CATEGORIES,
+                    DEFAULT_AMENITY_CATEGORY,
+                ),
+                "unit_ids": _parse_list(_metadata_get(metadata, metadata_lookup, ["unit_ids", "unit_id", "unitids"])) or [],
+                "accessibility": _parse_list(_metadata_get(metadata, metadata_lookup, ["accessibility", "accessible"])),
+                "name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["name", "amenity_name", "label"]), language=language),
+                "alt_name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["alt_name", "altname"]), language=language),
+                "hours": _normalize_text(_metadata_get(metadata, metadata_lookup, ["hours", "opening_hours"])),
+                "phone": _normalize_text(_metadata_get(metadata, metadata_lookup, ["phone", "telephone"])),
+                "website": _normalize_text(_metadata_get(metadata, metadata_lookup, ["website", "url"])),
+                "address_id": _normalize_text(_metadata_get(metadata, metadata_lookup, ["address_id", "addr_id"])),
+                **common,
+            }
+        elif feature_type == "anchor":
+            new_properties = {
+                "unit_id": _normalize_text(_metadata_get(metadata, metadata_lookup, ["unit_id", "unitid"])),
+                "address_id": _normalize_text(_metadata_get(metadata, metadata_lookup, ["address_id", "addr_id"])),
+                **common,
+            }
+        elif feature_type == "geofence":
+            feature_ids = _parse_list(_metadata_get(metadata, metadata_lookup, ["feature_ids", "feature_id", "features"])) or []
+            level_ids = _parse_list(_metadata_get(metadata, metadata_lookup, ["level_ids", "level_id", "levels"]))
+            building_ids = _parse_list(_metadata_get(metadata, metadata_lookup, ["building_ids", "building_id", "buildings"]))
+            new_properties = {
+                "category": _resolve_category(
+                    _metadata_get(metadata, metadata_lookup, ["category", "geofence_category", "type"]),
+                    GEOFENCE_CATEGORIES,
+                    DEFAULT_GEOFENCE_CATEGORY,
+                ),
+                "feature_ids": feature_ids,
+                **common,
+            }
+            if level_ids:
+                new_properties["level_ids"] = level_ids
+            if building_ids:
+                new_properties["building_ids"] = building_ids
+        elif feature_type == "kiosk":
+            new_properties = {
+                "name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["name", "kiosk_name", "label"]), language=language),
+                "alt_name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["alt_name", "altname"]), language=language),
+                "hours": _normalize_text(_metadata_get(metadata, metadata_lookup, ["hours", "opening_hours"])),
+                "phone": _normalize_text(_metadata_get(metadata, metadata_lookup, ["phone", "telephone"])),
+                "website": _normalize_text(_metadata_get(metadata, metadata_lookup, ["website", "url"])),
+                "anchor_id": _normalize_text(_metadata_get(metadata, metadata_lookup, ["anchor_id", "anchorid"])),
+                "level_id": level_id,
+                **common,
+            }
+        elif feature_type == "occupant":
+            new_properties = {
+                "category": _resolve_occupant_category(
+                    _metadata_get(metadata, metadata_lookup, ["category", "occupant_category", "type"])
+                ),
+                "name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["name", "occupant_name", "label"]), language=language),
+                "hours": _normalize_text(_metadata_get(metadata, metadata_lookup, ["hours", "opening_hours"])),
+                "phone": _normalize_text(_metadata_get(metadata, metadata_lookup, ["phone", "telephone"])),
+                "website": _normalize_text(_metadata_get(metadata, metadata_lookup, ["website", "url"])),
+                "anchor_id": _normalize_text(_metadata_get(metadata, metadata_lookup, ["anchor_id", "anchorid"])),
+                **common,
+            }
+        elif feature_type == "relationship":
+            new_properties = {
+                "category": _resolve_category(
+                    _metadata_get(metadata, metadata_lookup, ["category", "relationship_category", "type"]),
+                    RELATIONSHIP_CATEGORIES,
+                    DEFAULT_RELATIONSHIP_CATEGORY,
+                ),
+                "direction": (
+                    direction
+                    if (direction := (_normalize_text(_metadata_get(metadata, metadata_lookup, ["direction"])) or "undirected").lower())
+                    in RELATIONSHIP_DIRECTIONS
+                    else "undirected"
+                ),
+                "origin": _reference_from_metadata(
+                    metadata,
+                    metadata_lookup,
+                    object_candidates=["origin", "source", "from"],
+                    id_candidates=["origin_id", "source_id", "from_id"],
+                    type_candidates=["origin_type", "source_type", "from_type"],
+                ),
+                "destination": _reference_from_metadata(
+                    metadata,
+                    metadata_lookup,
+                    object_candidates=["destination", "target", "to"],
+                    id_candidates=["destination_id", "target_id", "to_id"],
+                    type_candidates=["destination_type", "target_type", "to_type"],
+                ),
+                **common,
+            }
+        elif feature_type == "section":
+            new_properties = {
+                "category": _resolve_category(
+                    _metadata_get(metadata, metadata_lookup, ["category", "section_category", "type"]),
+                    SECTION_CATEGORIES,
+                    DEFAULT_SECTION_CATEGORY,
+                ),
+                "name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["name", "section_name", "label"]), language=language),
+                "alt_name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["alt_name", "altname"]), language=language),
+                "restriction": _normalize_text(_metadata_get(metadata, metadata_lookup, ["restriction", "restrict"])),
+                "level_id": level_id,
+                **common,
+            }
         else:
             new_properties = {
+                "category": _normalize_text(_metadata_get(metadata, metadata_lookup, ["category", "type"])) or "unspecified",
+                "name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["name", "label"]), language=language),
+                "alt_name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["alt_name", "altname"]), language=language),
                 "level_id": level_id,
                 **common,
             }
@@ -527,7 +781,7 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
                 "type": "Feature",
                 "id": str(row.get("id") or uuid4()),
                 "feature_type": feature_type,
-                "geometry": geometry,
+                "geometry": output_geometry,
                 "properties": new_properties,
             }
         )
