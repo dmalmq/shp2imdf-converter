@@ -482,6 +482,24 @@ class BulkPatchFeaturesResponse(BaseModel):
     merged_feature_id: str | None = None
 
 
+class ResolveUnitOverlapRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    keep_feature_id: str
+    clip_feature_id: str
+
+
+class ResolveUnitOverlapsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    resolved_pairs: int = 0
+    updated_count: int = 0
+    deleted_count: int = 0
+    skipped_count: int = 0
+    validation: ValidationResponse
+
+
 class ErrorResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Request
+from shapely import make_valid
 from shapely.geometry import mapping, shape
 from shapely.ops import unary_union
 
@@ -25,10 +26,14 @@ from backend.src.schemas import (
     FeatureCollectionResponse,
     ImportedFile,
     PatchFeatureRequest,
+    ValidationResponse,
+    ResolveUnitOverlapRequest,
+    ResolveUnitOverlapsResponse,
     UpdateFileRequest,
     UpdateFileResponse,
 )
 from backend.src.session import SessionManager
+from backend.src.validator import annotate_feature_collection_with_validation, validate_feature_collection
 
 
 router = APIRouter(prefix="/api/session/{session_id}", tags=["features"])
@@ -62,6 +67,161 @@ def _merge_properties(current: dict[str, Any], updates: dict[str, Any]) -> dict[
     for key, value in updates.items():
         merged[key] = value
     return merged
+
+
+def _feature_by_id(features: list[dict[str, Any]], feature_id: str) -> tuple[int, dict[str, Any]] | None:
+    for index, item in enumerate(features):
+        if str(item.get("id")) == feature_id:
+            return index, item
+    return None
+
+
+def _label_present(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, dict):
+        return any(isinstance(item, str) and item.strip() for item in value.values())
+    return False
+
+
+def _unit_keep_priority(feature: dict[str, Any], area: float) -> tuple[int, int, float]:
+    props = feature.get("properties")
+    if not isinstance(props, dict):
+        props = {}
+    category = props.get("category")
+    has_specific_category = isinstance(category, str) and bool(category.strip()) and category.strip().lower() != "unspecified"
+    has_name = _label_present(props.get("name"))
+    return (1 if has_specific_category else 0, 1 if has_name else 0, area)
+
+
+def _clip_unit_overlap(
+    features: list[dict[str, Any]],
+    keep_feature_id: str,
+    clip_feature_id: str,
+) -> tuple[int, int]:
+    if keep_feature_id == clip_feature_id:
+        raise ValueError("keep_feature_id and clip_feature_id must differ")
+
+    keep_pair = _feature_by_id(features, keep_feature_id)
+    clip_pair = _feature_by_id(features, clip_feature_id)
+    if keep_pair is None or clip_pair is None:
+        raise ValueError("One or both overlap features were not found")
+
+    _, keep_feature = keep_pair
+    clip_index, clip_feature = clip_pair
+
+    if keep_feature.get("feature_type") != "unit" or clip_feature.get("feature_type") != "unit":
+        raise ValueError("Overlap resolution only supports unit features")
+
+    keep_props = keep_feature.get("properties")
+    clip_props = clip_feature.get("properties")
+    keep_level = keep_props.get("level_id") if isinstance(keep_props, dict) else None
+    clip_level = clip_props.get("level_id") if isinstance(clip_props, dict) else None
+    if isinstance(keep_level, str) and isinstance(clip_level, str) and keep_level != clip_level:
+        raise ValueError("Units must belong to the same level for overlap resolution")
+
+    keep_geometry = keep_feature.get("geometry")
+    clip_geometry = clip_feature.get("geometry")
+    if not isinstance(keep_geometry, dict) or not isinstance(clip_geometry, dict):
+        raise ValueError("Both units must have valid geometry payloads")
+
+    try:
+        keep_geom = shape(keep_geometry)
+        clip_geom = shape(clip_geometry)
+    except Exception as exc:
+        raise ValueError("Failed to parse unit geometry for overlap resolution") from exc
+
+    overlap = keep_geom.intersection(clip_geom)
+    if overlap.is_empty or overlap.area <= 0:
+        return 0, 0
+
+    clipped = clip_geom.difference(keep_geom)
+    if clipped.is_empty or clipped.area <= 0:
+        features.pop(clip_index)
+        return 0, 1
+
+    clipped = make_valid(clipped)
+    if clipped.is_empty or clipped.area <= 0:
+        features.pop(clip_index)
+        return 0, 1
+
+    updated_clip = copy.deepcopy(clip_feature)
+    updated_clip["geometry"] = mapping(clipped)
+    features[clip_index] = updated_clip
+    return 1, 0
+
+
+def _choose_safe_overlap_resolution(
+    left_feature: dict[str, Any],
+    right_feature: dict[str, Any],
+) -> tuple[str, str] | None:
+    left_id = left_feature.get("id")
+    right_id = right_feature.get("id")
+    if not isinstance(left_id, str) or not isinstance(right_id, str):
+        return None
+    if left_feature.get("feature_type") != "unit" or right_feature.get("feature_type") != "unit":
+        return None
+
+    left_geometry = left_feature.get("geometry")
+    right_geometry = right_feature.get("geometry")
+    if not isinstance(left_geometry, dict) or not isinstance(right_geometry, dict):
+        return None
+
+    left_props = left_feature.get("properties")
+    right_props = right_feature.get("properties")
+    left_level = left_props.get("level_id") if isinstance(left_props, dict) else None
+    right_level = right_props.get("level_id") if isinstance(right_props, dict) else None
+    if isinstance(left_level, str) and isinstance(right_level, str) and left_level != right_level:
+        return None
+
+    try:
+        left_geom = shape(left_geometry)
+        right_geom = shape(right_geometry)
+    except Exception:
+        return None
+    if left_geom.is_empty or right_geom.is_empty or left_geom.area <= 0 or right_geom.area <= 0:
+        return None
+
+    overlap = left_geom.intersection(right_geom)
+    if overlap.is_empty or overlap.area <= 0:
+        return None
+
+    left_ratio = overlap.area / left_geom.area
+    right_ratio = overlap.area / right_geom.area
+    near_match_threshold = 0.98
+    containment_ratio = 0.98
+    tiny_overlap_ratio = 0.01
+
+    # Near-duplicate units: keep the unit with stronger metadata and clip/delete the other.
+    if left_ratio >= near_match_threshold and right_ratio >= near_match_threshold:
+        left_rank = _unit_keep_priority(left_feature, left_geom.area)
+        right_rank = _unit_keep_priority(right_feature, right_geom.area)
+        if left_rank > right_rank:
+            return left_id, right_id
+        if right_rank > left_rank:
+            return right_id, left_id
+        return (left_id, right_id) if left_id < right_id else (right_id, left_id)
+
+    # Clear containment: preserve the larger unit and clip/delete the mostly-contained unit.
+    if left_ratio >= containment_ratio and right_ratio < 0.5:
+        return right_id, left_id
+    if right_ratio >= containment_ratio and left_ratio < 0.5:
+        return left_id, right_id
+
+    # Tiny sliver overlap: preserve larger area unit and clip smaller.
+    if left_ratio <= tiny_overlap_ratio and right_ratio <= tiny_overlap_ratio:
+        if left_geom.area >= right_geom.area:
+            return left_id, right_id
+        return right_id, left_id
+
+    return None
+
+
+def _revalidate_session(session: Any) -> ValidationResponse:
+    validation = validate_feature_collection(session.feature_collection)
+    session.feature_collection = annotate_feature_collection_with_validation(session.feature_collection, validation)
+    session.validation = validation
+    return validation
 
 
 @router.get("/features", response_model=FeatureCollectionResponse)
@@ -231,6 +391,101 @@ def patch_features_bulk(
     session.feature_collection["features"] = next_features
     manager.save_session(session)
     return BulkPatchFeaturesResponse(updated_count=updated, deleted_count=0)
+
+
+@router.post("/overlaps/resolve", response_model=ResolveUnitOverlapsResponse)
+def resolve_unit_overlap(
+    session_id: str,
+    payload: ResolveUnitOverlapRequest,
+    request: Request,
+) -> ResolveUnitOverlapsResponse:
+    manager = _session_manager(request)
+    session = _get_session_or_raise(session_id, request)
+    features = session.feature_collection.get("features", [])
+    if not isinstance(features, list):
+        raise ValueError("Session feature collection is malformed")
+
+    updated_count, deleted_count = _clip_unit_overlap(
+        features=features,
+        keep_feature_id=payload.keep_feature_id,
+        clip_feature_id=payload.clip_feature_id,
+    )
+    session.feature_collection["features"] = features
+    validation = _revalidate_session(session)
+    manager.save_session(session)
+    return ResolveUnitOverlapsResponse(
+        session_id=session_id,
+        resolved_pairs=1 if (updated_count or deleted_count) else 0,
+        updated_count=updated_count,
+        deleted_count=deleted_count,
+        skipped_count=0 if (updated_count or deleted_count) else 1,
+        validation=validation,
+    )
+
+
+@router.post("/overlaps/fix-safe", response_model=ResolveUnitOverlapsResponse)
+def resolve_unit_overlaps_safe(session_id: str, request: Request) -> ResolveUnitOverlapsResponse:
+    manager = _session_manager(request)
+    session = _get_session_or_raise(session_id, request)
+    features = session.feature_collection.get("features", [])
+    if not isinstance(features, list):
+        raise ValueError("Session feature collection is malformed")
+
+    validation = session.validation or validate_feature_collection(session.feature_collection)
+    seen_pairs: set[tuple[str, str]] = set()
+    overlap_pairs: list[tuple[str, str]] = []
+    for issue in validation.warnings:
+        if issue.check != "overlapping_units" or not issue.feature_id or not issue.related_feature_id:
+            continue
+        pair = tuple(sorted([issue.feature_id, issue.related_feature_id]))
+        if pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+        overlap_pairs.append(pair)
+
+    resolved_pairs = 0
+    updated_count = 0
+    deleted_count = 0
+    skipped_count = 0
+
+    for left_id, right_id in overlap_pairs:
+        left_pair = _feature_by_id(features, left_id)
+        right_pair = _feature_by_id(features, right_id)
+        if left_pair is None or right_pair is None:
+            skipped_count += 1
+            continue
+
+        _, left_feature = left_pair
+        _, right_feature = right_pair
+        choice = _choose_safe_overlap_resolution(left_feature, right_feature)
+        if choice is None:
+            skipped_count += 1
+            continue
+        keep_id, clip_id = choice
+        try:
+            updated_delta, deleted_delta = _clip_unit_overlap(features, keep_id, clip_id)
+        except ValueError:
+            skipped_count += 1
+            continue
+        if updated_delta == 0 and deleted_delta == 0:
+            skipped_count += 1
+            continue
+
+        resolved_pairs += 1
+        updated_count += updated_delta
+        deleted_count += deleted_delta
+
+    session.feature_collection["features"] = features
+    revalidation = _revalidate_session(session)
+    manager.save_session(session)
+    return ResolveUnitOverlapsResponse(
+        session_id=session_id,
+        resolved_pairs=resolved_pairs,
+        updated_count=updated_count,
+        deleted_count=deleted_count,
+        skipped_count=skipped_count,
+        validation=revalidation,
+    )
 
 
 @router.get("/features/{feature_id}", response_model=FeatureResponse)

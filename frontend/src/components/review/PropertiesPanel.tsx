@@ -13,9 +13,11 @@ type Props = {
   addressOptions: Array<{ id: string; label: string }>;
   validationIssues: ReviewIssue[];
   autoFixing: boolean;
+  overlapResolving: boolean;
   onSave: (featureId: string, properties: Record<string, unknown>) => void;
   onDelete: (featureId: string) => void;
   onAutoFixSafe: () => void;
+  onResolveUnitOverlap: (keepFeatureId: string, clipFeatureId: string) => void;
 };
 
 
@@ -96,9 +98,11 @@ export function PropertiesPanel({
   addressOptions,
   validationIssues,
   autoFixing,
+  overlapResolving,
   onSave,
   onDelete,
-  onAutoFixSafe
+  onAutoFixSafe,
+  onResolveUnitOverlap
 }: Props) {
   const { t } = useUiLanguage();
   const [form, setForm] = useState<Record<string, unknown>>({});
@@ -161,6 +165,26 @@ export function PropertiesPanel({
                 >
                   {autoFixing ? t("Applying...", "適用中...") : t("Auto-fix", "自動修正")}
                 </button>
+              ) : null}
+              {item.check === "overlapping_units" && item.related_feature_id ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    className="rounded border border-amber-300 px-2 py-0.5 text-[11px]"
+                    onClick={() => onResolveUnitOverlap(feature.id, item.related_feature_id!)}
+                    disabled={overlapResolving}
+                  >
+                    {overlapResolving ? t("Applying...", "適用中...") : t("Keep This Unit", "このユニットを残す")}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-amber-300 px-2 py-0.5 text-[11px]"
+                    onClick={() => onResolveUnitOverlap(item.related_feature_id!, feature.id)}
+                    disabled={overlapResolving}
+                  >
+                    {overlapResolving ? t("Applying...", "適用中...") : t("Keep Other Unit", "相手ユニットを残す")}
+                  </button>
+                </div>
               ) : null}
             </div>
           ))}

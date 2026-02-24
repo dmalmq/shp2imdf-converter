@@ -325,6 +325,15 @@ export type AutofixResponse = {
   revalidation: ValidationResponse;
 };
 
+export type ResolveUnitOverlapsResponse = {
+  session_id: string;
+  resolved_pairs: number;
+  updated_count: number;
+  deleted_count: number;
+  skipped_count: number;
+  validation: ValidationResponse;
+};
+
 export type ExportArchiveResponse = {
   blob: Blob;
   filename: string;
@@ -607,6 +616,31 @@ export async function autofixSession(sessionId: string, applyPrompted = false): 
     body: JSON.stringify({ apply_prompted: applyPrompted })
   });
   return handleJson<AutofixResponse>(response);
+}
+
+export async function resolveSessionUnitOverlap(
+  sessionId: string,
+  keepFeatureId: string,
+  clipFeatureId: string
+): Promise<ResolveUnitOverlapsResponse> {
+  const response = await fetch(`/api/session/${sessionId}/overlaps/resolve`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      keep_feature_id: keepFeatureId,
+      clip_feature_id: clipFeatureId
+    })
+  });
+  return handleJson<ResolveUnitOverlapsResponse>(response);
+}
+
+export async function resolveSessionUnitOverlapsSafe(sessionId: string): Promise<ResolveUnitOverlapsResponse> {
+  const response = await fetch(`/api/session/${sessionId}/overlaps/fix-safe`, {
+    method: "POST"
+  });
+  return handleJson<ResolveUnitOverlapsResponse>(response);
 }
 
 export async function exportSessionArchive(sessionId: string): Promise<ExportArchiveResponse> {
