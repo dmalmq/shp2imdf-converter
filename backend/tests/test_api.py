@@ -845,6 +845,97 @@ def test_autofix_endpoint_returns_revalidation_payload(test_client, sample_dir: 
 
 
 @pytest.mark.phase5
+def test_resolve_unit_overlap_pair_clips_or_deletes_loser(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    units = [item for item in features if item["feature_type"] == "unit"]
+    assert len(units) >= 2
+    keep = units[0]
+    clip = units[1]
+
+    assert test_client.patch(
+        f"/api/session/{session_id}/features/{clip['id']}",
+        json={"geometry": keep["geometry"]},
+    ).status_code == 200
+
+    before_validation = test_client.post(f"/api/session/{session_id}/validate").json()
+    before_overlap_count = before_validation["summary"]["overlap_count"]
+    assert before_overlap_count > 0
+
+    resolve_response = test_client.post(
+        f"/api/session/{session_id}/overlaps/resolve",
+        json={"keep_feature_id": keep["id"], "clip_feature_id": clip["id"]},
+    )
+    assert resolve_response.status_code == 200
+    payload = resolve_response.json()
+    assert payload["resolved_pairs"] == 1
+    assert payload["deleted_count"] == 1
+    assert payload["validation"]["summary"]["overlap_count"] < before_overlap_count
+
+    after_features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    assert all(item["id"] != clip["id"] for item in after_features)
+
+
+@pytest.mark.phase5
+def test_resolve_unit_overlaps_safe_fixes_detected_safe_pairs(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {
+                "address": "1-9-1 Marunouchi",
+                "locality": "Chiyoda-ku",
+                "country": "JP",
+            },
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    units = [item for item in features if item["feature_type"] == "unit"]
+    assert len(units) >= 2
+    keep = units[0]
+    clip = units[1]
+
+    assert test_client.patch(
+        f"/api/session/{session_id}/features/{clip['id']}",
+        json={"geometry": keep["geometry"]},
+    ).status_code == 200
+
+    before_validation = test_client.post(f"/api/session/{session_id}/validate").json()
+    before_overlap_count = before_validation["summary"]["overlap_count"]
+    assert before_overlap_count > 0
+
+    safe_response = test_client.post(f"/api/session/{session_id}/overlaps/fix-safe")
+    assert safe_response.status_code == 200
+    payload = safe_response.json()
+    assert payload["resolved_pairs"] >= 1
+    assert payload["validation"]["summary"]["overlap_count"] < before_overlap_count
+
+
+@pytest.mark.phase5
 def test_export_blocked_when_validation_errors_exist(test_client, sample_dir: Path) -> None:
     import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
     session_id = import_response.json()["session_id"]

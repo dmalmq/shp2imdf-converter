@@ -10,6 +10,8 @@ import {
   generateSessionDraft,
   patchSessionFeature,
   patchSessionFeaturesBulk,
+  resolveSessionUnitOverlap,
+  resolveSessionUnitOverlapsSafe,
   type ShapefileExportEncoding,
   type ShapefileExportRequest,
   type WizardState,
@@ -246,6 +248,7 @@ export function ReviewPage() {
   });
   const [validating, setValidating] = useState(false);
   const [autofixing, setAutofixing] = useState(false);
+  const [overlapResolving, setOverlapResolving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState<"imdf" | "shapefiles">("imdf");
@@ -607,6 +610,63 @@ export function ReviewPage() {
     }
   };
 
+  const resolveOverlapPair = async (keepFeatureId: string, clipFeatureId: string) => {
+    if (!sessionId) {
+      return;
+    }
+    setOverlapResolving(true);
+    setError(null);
+    try {
+      const response = await resolveSessionUnitOverlap(sessionId, keepFeatureId, clipFeatureId);
+      applyPostValidationState(response.validation);
+      await loadFeatures();
+      if (response.deleted_count > 0) {
+        setSelectedFeatureIds(selectedFeatureIds.filter((item) => item !== clipFeatureId));
+      }
+      pushToast({
+        title: t("Overlap resolved", "重なりを解消しました"),
+        description: t(
+          `${response.resolved_pairs} overlap pair resolved.`,
+          `${response.resolved_pairs} 件の重なりを解消しました。`
+        ),
+        variant: "success"
+      });
+    } catch (caught) {
+      captureError(caught, t("Failed to resolve overlap", "重なりの解消に失敗しました"), t("Overlap fix failed", "重なり修正失敗"));
+    } finally {
+      setOverlapResolving(false);
+    }
+  };
+
+  const resolveSafeOverlaps = async () => {
+    if (!sessionId) {
+      return;
+    }
+    setOverlapResolving(true);
+    setError(null);
+    try {
+      const response = await resolveSessionUnitOverlapsSafe(sessionId);
+      applyPostValidationState(response.validation);
+      await loadFeatures();
+      pushToast({
+        title: t("Safe overlap fix complete", "安全な重なり修正が完了しました"),
+        description: t(
+          `${response.resolved_pairs} resolved, ${response.skipped_count} need review.`,
+          `${response.resolved_pairs} 件解消、${response.skipped_count} 件は確認が必要です。`
+        ),
+        variant: response.skipped_count > 0 ? "info" : "success"
+      });
+    } catch (caught) {
+      captureError(
+        caught,
+        t("Failed to apply safe overlap fix", "安全な重なり修正の適用に失敗しました"),
+        t("Overlap fix failed", "重なり修正失敗")
+      );
+    } finally {
+      setOverlapResolving(false);
+    }
+  };
+
   const exportBlockedByErrors = exportFormat === "imdf" && Boolean(validation && validation.summary.error_count > 0);
 
   const openExportDialog = async () => {
@@ -934,9 +994,11 @@ export function ReviewPage() {
             addressOptions={addressOptions}
             validationIssues={selectedFeatureIssues}
             autoFixing={autofixing}
+            overlapResolving={overlapResolving}
             onSave={(featureId, properties) => void saveFeatureProperties(featureId, properties)}
             onDelete={(featureId) => void deleteFeature(featureId)}
             onAutoFixSafe={() => void runAutofix(false)}
+            onResolveUnitOverlap={(keepFeatureId, clipFeatureId) => void resolveOverlapPair(keepFeatureId, clipFeatureId)}
           />
         </section>
       </div>
@@ -948,14 +1010,26 @@ export function ReviewPage() {
             {t(`${validation.summary.warning_count} warnings`, `${validation.summary.warning_count} 件の警告`)} -{" "}
             {t(`${validation.summary.auto_fixable_count} auto-fixable`, `${validation.summary.auto_fixable_count} 件が自動修正可能`)}
           </div>
-          <button
-            type="button"
-            className="rounded border px-3 py-1.5 text-xs"
-            onClick={() => void runAutofix(false)}
-            disabled={autofixing}
-          >
-            {autofixing ? t("Applying Auto-fix...", "自動修正を適用中...") : t("Run Auto-fix", "自動修正を実行")}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {validation.summary.overlap_count > 0 ? (
+              <button
+                type="button"
+                className="rounded border px-3 py-1.5 text-xs"
+                onClick={() => void resolveSafeOverlaps()}
+                disabled={overlapResolving}
+              >
+                {overlapResolving ? t("Resolving overlaps...", "重なりを解消中...") : t("Fix Safe Overlaps", "安全な重なりを修正")}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="rounded border px-3 py-1.5 text-xs"
+              onClick={() => void runAutofix(false)}
+              disabled={autofixing}
+            >
+              {autofixing ? t("Applying Auto-fix...", "自動修正を適用中...") : t("Run Auto-fix", "自動修正を実行")}
+            </button>
+          </div>
         </div>
       ) : null}
 
