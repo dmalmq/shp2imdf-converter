@@ -130,7 +130,8 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
             raise ValueError("learning_keyword is required when apply_learning=true")
         if not feature_type:
             raise ValueError("detected_type is required when apply_learning=true")
-        session.learned_keywords[keyword] = feature_type
+        learned_key = keyword if keyword.startswith("suffix:") else f"suffix:{keyword}"
+        session.learned_keywords[learned_key] = feature_type
         merged = _merged_keyword_map(request, session.learned_keywords)
         session.files = detect_files(session.files, merged, preserve_manual_levels=True)
     else:

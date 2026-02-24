@@ -28,7 +28,26 @@ FEATURE_TYPE_VALUES = {
     "section",
     "facility",
 }
-STOPWORD_TOKENS = {"jr", "sta", "station", "drawing", "shape", "shp"}
+
+
+def _is_level_token(token: str) -> bool:
+    lowered = token.lower()
+    if lowered.isdigit():
+        return True
+    if re.fullmatch(r"b\d+", lowered):
+        return True
+    if lowered in {"g", "gf", "gh"}:
+        return True
+    return False
+
+
+def stem_suffix_token(stem: str) -> str | None:
+    tokens = stem_tokens(stem)
+    for token in reversed(tokens):
+        if _is_level_token(token):
+            continue
+        return token
+    return None
 
 
 def load_keyword_map(config_path: str | Path) -> dict[str, set[str]]:
@@ -58,11 +77,30 @@ def stem_tokens(stem: str) -> list[str]:
 
 def detect_feature_type(stem: str, geometry_type: str, keywords: dict[str, set[str]]) -> tuple[str | None, str]:
     lowered = stem.lower()
+    suffix_token = stem_suffix_token(stem)
+
+    # Legacy datasets often use "*_Drawing" stems for detail linework.
+    if re.search(r"(^|[^a-z0-9])drawing$", lowered):
+        return "detail", "green"
+
     best_match: tuple[str, int] | None = None
     for feature_type, values in keywords.items():
         for keyword in values:
-            if keyword in lowered:
-                keyword_len = len(keyword)
+            candidate = keyword.lower().strip()
+            if not candidate:
+                continue
+
+            if candidate.startswith("suffix:"):
+                expected_suffix = candidate[len("suffix:") :]
+                if suffix_token == expected_suffix:
+                    # Prefer explicit suffix rules over substring matches.
+                    keyword_len = len(expected_suffix) + 1000
+                    if best_match is None or keyword_len > best_match[1]:
+                        best_match = (feature_type, keyword_len)
+                continue
+
+            if candidate in lowered:
+                keyword_len = len(candidate)
                 if best_match is None or keyword_len > best_match[1]:
                     best_match = (feature_type, keyword_len)
 
@@ -141,13 +179,6 @@ def sync_feature_types(feature_collection: dict, files: list[ImportedFile]) -> d
     return copied
 
 
-def _all_keywords(keywords: dict[str, set[str]]) -> set[str]:
-    known: set[str] = set()
-    for values in keywords.values():
-        known.update(values)
-    return known
-
-
 def infer_learning_suggestion(
     files: list[ImportedFile],
     changed_stem: str,
@@ -158,36 +189,27 @@ def infer_learning_suggestion(
     if target is None:
         return None
 
-    known_keywords = _all_keywords(keywords)
-    candidates: list[tuple[str, list[str]]] = []
-    for token in stem_tokens(changed_stem):
-        if token in known_keywords:
-            continue
-        if token in STOPWORD_TOKENS:
-            continue
-        if token.isdigit():
-            continue
-        if len(token) < 3:
-            continue
-        affected = [
-            item.stem
-            for item in files
-            if item.stem != changed_stem and token in item.stem.lower() and (item.detected_type or "") != new_type
-        ]
-        if affected:
-            candidates.append((token, affected))
-
-    if not candidates:
+    suffix_token = stem_suffix_token(changed_stem)
+    if not suffix_token:
         return None
 
-    # Prefer keywords that impact the most files, then favor shorter/specific tokens.
-    candidates.sort(key=lambda item: (-len(item[1]), len(item[0]), item[0]))
-    candidate, affected = candidates[0]
+    affected_stems = [
+        item.stem
+        for item in files
+        if item.stem != changed_stem
+        and stem_suffix_token(item.stem) == suffix_token
+        and (item.detected_type or "") != new_type
+    ]
+    if not affected_stems:
+        return None
 
     return LearningSuggestion(
         source_stem=changed_stem,
-        keyword=candidate,
+        keyword=suffix_token,
         feature_type=new_type,
-        affected_stems=affected,
-        message=f"Apply '{candidate}' as {new_type} keyword to {len(affected)} other files?",
+        affected_stems=affected_stems,
+        message=(
+            f"Apply suffix '{suffix_token}' as {new_type} keyword to "
+            f"{len(affected_stems)} other files?"
+        ),
     )

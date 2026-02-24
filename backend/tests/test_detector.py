@@ -24,6 +24,14 @@ def test_detect_feature_type_keyword_match() -> None:
 
 
 @pytest.mark.phase2
+def test_detect_feature_type_drawing_suffix_maps_to_detail() -> None:
+    keyword_map = {"unit": {"space"}, "opening": {"opening"}}
+    detected_type, confidence = detect_feature_type("JRShinjukuSta_1_Drawing", "LineString", keyword_map)
+    assert detected_type == "detail"
+    assert confidence == "green"
+
+
+@pytest.mark.phase2
 def test_detect_level_patterns() -> None:
     assert detect_level_ordinal("Station_B1_Space") == -1
     assert detect_level_ordinal("Station_-2_Opening") == -2
@@ -36,18 +44,26 @@ def test_detect_level_patterns() -> None:
 @pytest.mark.phase2
 def test_detect_files_applies_learning_keywords() -> None:
     base = {"unit": {"space"}, "opening": {"opening"}}
-    merged = merge_learned_keywords(base, {"tila": "unit"})
+    merged = merge_learned_keywords(base, {"suffix:tila": "unit"})
     files = [
         ImportedFile(
             stem="Shinjuku_Tila_B1",
-            geometry_type="Polygon",
+            geometry_type="LineString",
             feature_count=1,
             attribute_columns=[],
-        )
+        ),
+        ImportedFile(
+            stem="Shinjuku_TilaWing_B1",
+            geometry_type="LineString",
+            feature_count=1,
+            attribute_columns=[],
+        ),
     ]
     detected = detect_files(files, merged, preserve_manual_levels=False)
     assert detected[0].detected_type == "unit"
     assert detected[0].confidence == "green"
+    assert detected[1].detected_type == "opening"
+    assert detected[1].confidence == "yellow"
 
 
 @pytest.mark.phase2
@@ -76,6 +92,42 @@ def test_infer_learning_suggestion_from_relabel() -> None:
     assert suggestion.keyword == "tila"
     assert suggestion.feature_type == "unit"
     assert suggestion.affected_stems == ["Shinjuku_Tila_GF"]
+
+
+@pytest.mark.phase2
+def test_infer_learning_suggestion_uses_suffix_token() -> None:
+    keyword_map = {"unit": {"unit"}, "detail": {"detail"}}
+    files = [
+        ImportedFile(
+            stem="JRShinjukuSta_1_Space",
+            geometry_type="Polygon",
+            feature_count=1,
+            attribute_columns=[],
+            detected_type="detail",
+            confidence="yellow",
+        ),
+        ImportedFile(
+            stem="JRShinjukuSta_2_Space",
+            geometry_type="Polygon",
+            feature_count=1,
+            attribute_columns=[],
+            detected_type="detail",
+            confidence="yellow",
+        ),
+        ImportedFile(
+            stem="JRShinjukuSta_1_Drawing",
+            geometry_type="LineString",
+            feature_count=1,
+            attribute_columns=[],
+            detected_type="detail",
+            confidence="green",
+        ),
+    ]
+    suggestion = infer_learning_suggestion(files, "JRShinjukuSta_1_Space", "unit", keyword_map)
+    assert suggestion is not None
+    assert suggestion.keyword == "space"
+    assert suggestion.feature_type == "unit"
+    assert suggestion.affected_stems == ["JRShinjukuSta_2_Space"]
 
 
 @pytest.mark.phase2
