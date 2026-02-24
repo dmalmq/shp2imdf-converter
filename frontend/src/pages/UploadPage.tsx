@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { useNavigate } from "react-router-dom";
 
@@ -13,13 +13,62 @@ type QueuedUploadFile = {
   id: string;
   file: File;
   selected: boolean;
+  extension: string;
+  stem: string | null;
+  kind: "shapefile" | "archive";
 };
 
-function toQueuedUploadFile(file: File): QueuedUploadFile {
+type StemRow = {
+  key: string;
+  stem: string;
+  suffixGroup: string;
+  selected: boolean;
+  fileCount: number;
+  extensions: string[];
+};
+
+const SHAPEFILE_EXTENSIONS = new Set([".shp", ".dbf", ".shx", ".prj", ".cpg", ".qix"]);
+const ARCHIVE_EXTENSIONS = new Set([".zip"]);
+const SUPPORTED_UPLOAD_EXTENSIONS = new Set([...SHAPEFILE_EXTENSIONS, ...ARCHIVE_EXTENSIONS]);
+
+function fileExtension(name: string): string {
+  const index = name.lastIndexOf(".");
+  if (index < 0) {
+    return "";
+  }
+  return name.slice(index).toLowerCase();
+}
+
+function fileStem(name: string, extension: string): string {
+  if (!extension || !name.toLowerCase().endsWith(extension)) {
+    return name;
+  }
+  return name.slice(0, name.length - extension.length);
+}
+
+function inferStemSuffixGroup(stem: string): string {
+  const tokens = stem.split(/[_\-\s]+/).filter(Boolean);
+  if (tokens.length === 0) {
+    return "Other";
+  }
+  return tokens[tokens.length - 1];
+}
+
+function toQueuedUploadFile(file: File): QueuedUploadFile | null {
+  const extension = fileExtension(file.name);
+  if (!SUPPORTED_UPLOAD_EXTENSIONS.has(extension)) {
+    return null;
+  }
+
+  const stem = ARCHIVE_EXTENSIONS.has(extension) ? null : fileStem(file.name, extension);
+
   return {
     id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(16).slice(2, 10)}`,
     file,
-    selected: true
+    selected: true,
+    extension,
+    stem,
+    kind: ARCHIVE_EXTENSIONS.has(extension) ? "archive" : "shapefile"
   };
 }
 
@@ -41,8 +90,25 @@ export function UploadPage() {
   const [result, setResult] = useState<ImportResponse | null>(null);
 
   const onDrop = (acceptedFiles: File[]) => {
-    setQueuedFiles((previous) => [...previous, ...acceptedFiles.map(toQueuedUploadFile)]);
-    setError(null);
+    const parsed = acceptedFiles.map(toQueuedUploadFile);
+    const valid = parsed.filter((item): item is QueuedUploadFile => item !== null);
+    const skippedCount = acceptedFiles.length - valid.length;
+
+    if (valid.length > 0) {
+      setQueuedFiles((previous) => [...previous, ...valid]);
+      setError(null);
+    }
+
+    if (skippedCount > 0) {
+      pushToast({
+        title: t("Unsupported files skipped", "Unsupported files skipped"),
+        description: t(
+          `${skippedCount} file(s) were ignored because they are not shapefile components or zip archives.`,
+          `${skippedCount} file(s) were ignored because they are not shapefile components or zip archives.`
+        ),
+        variant: "info"
+      });
+    }
   };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -50,26 +116,128 @@ export function UploadPage() {
     multiple: true
   });
 
+  const stemRows = useMemo(() => {
+    const byStem = new Map<string, { stem: string; files: QueuedUploadFile[] }>();
+    queuedFiles
+      .filter((item) => item.kind === "shapefile" && item.stem)
+      .forEach((item) => {
+        const key = item.stem!.toLowerCase();
+        const current = byStem.get(key);
+        if (current) {
+          current.files.push(item);
+          return;
+        }
+        byStem.set(key, { stem: item.stem!, files: [item] });
+      });
+
+    return [...byStem.entries()]
+      .map(([key, value]) => {
+        const extensions = [...new Set(value.files.map((item) => item.extension.replace(".", "")))].sort((a, b) => a.localeCompare(b));
+        return {
+          key,
+          stem: value.stem,
+          suffixGroup: inferStemSuffixGroup(value.stem),
+          selected: value.files.every((item) => item.selected),
+          fileCount: value.files.length,
+          extensions
+        };
+      })
+      .sort((left, right) => {
+        const groupOrder = left.suffixGroup.localeCompare(right.suffixGroup);
+        if (groupOrder !== 0) {
+          return groupOrder;
+        }
+        return left.stem.localeCompare(right.stem);
+      });
+  }, [queuedFiles]);
+
+  const groupedStemRows = useMemo(() => {
+    const grouped = new Map<string, StemRow[]>();
+    stemRows.forEach((row) => {
+      const rows = grouped.get(row.suffixGroup);
+      if (rows) {
+        rows.push(row);
+      } else {
+        grouped.set(row.suffixGroup, [row]);
+      }
+    });
+
+    return [...grouped.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([suffixGroup, rows]) => ({
+        suffixGroup,
+        rows: rows.sort((left, right) => left.stem.localeCompare(right.stem))
+      }));
+  }, [stemRows]);
+
+  const archiveRows = useMemo(
+    () => queuedFiles.filter((item) => item.kind === "archive"),
+    [queuedFiles]
+  );
+
   const selectedFiles = useMemo(
     () => queuedFiles.filter((item) => item.selected).map((item) => item.file),
     [queuedFiles]
   );
   const selectedFileCount = selectedFiles.length;
 
-  const fileCountLabel = useMemo(() => {
-    if (queuedFiles.length === 0) {
-      return t("No files selected", "ファイルが選択されていません");
-    }
-    if (selectedFileCount === queuedFiles.length) {
-      return t(`${queuedFiles.length} file(s) selected`, `${queuedFiles.length} 件のファイルを選択`);
-    }
-    return t(
-      `${selectedFileCount} of ${queuedFiles.length} file(s) selected`,
-      `${queuedFiles.length} 件中 ${selectedFileCount} 件を選択`
-    );
-  }, [queuedFiles.length, selectedFileCount, t]);
+  const selectedStemCount = useMemo(
+    () => stemRows.filter((row) => row.selected).length,
+    [stemRows]
+  );
+  const selectedArchiveCount = useMemo(
+    () => archiveRows.filter((row) => row.selected).length,
+    [archiveRows]
+  );
 
-  const toggleQueuedFile = (id: string) => {
+  const fileCountLabel = useMemo(() => {
+    if (stemRows.length === 0 && archiveRows.length === 0) {
+      return t("No files selected", "No files selected");
+    }
+
+    const parts: string[] = [];
+    if (stemRows.length > 0) {
+      parts.push(`${selectedStemCount} of ${stemRows.length} shapefile group(s) selected`);
+    }
+    if (archiveRows.length > 0) {
+      parts.push(`${selectedArchiveCount} of ${archiveRows.length} archive(s) selected`);
+    }
+
+    const label = parts.join(" - ");
+    return t(label, label);
+  }, [archiveRows.length, selectedArchiveCount, selectedStemCount, stemRows.length, t]);
+
+  const componentCountLabel = useMemo(() => {
+    const componentCount = queuedFiles.filter((item) => item.kind === "shapefile").length;
+    const selectedComponentCount = queuedFiles.filter((item) => item.kind === "shapefile" && item.selected).length;
+    if (componentCount === 0) {
+      return null;
+    }
+
+    const label = `${selectedComponentCount} of ${componentCount} component file(s) selected`;
+    return t(label, label);
+  }, [queuedFiles, t]);
+
+  const toggleStemGroup = (stemKey: string) => {
+    const row = stemRows.find((item) => item.key === stemKey);
+    if (!row) {
+      return;
+    }
+    const nextSelected = !row.selected;
+    setQueuedFiles((previous) =>
+      previous.map((item) => {
+        if (item.kind !== "shapefile" || !item.stem) {
+          return item;
+        }
+        if (item.stem.toLowerCase() !== stemKey) {
+          return item;
+        }
+        return { ...item, selected: nextSelected };
+      })
+    );
+  };
+
+  const toggleArchive = (id: string) => {
     setQueuedFiles((previous) =>
       previous.map((item) => (item.id === id ? { ...item, selected: !item.selected } : item))
     );
@@ -82,12 +250,12 @@ export function UploadPage() {
   const runImport = async () => {
     if (selectedFiles.length === 0) {
       const message = t(
-        "Select at least one shapefile component or zip before importing.",
-        "インポート前に少なくとも1つのシェープファイル構成要素またはZIPを選択してください。"
+        "Select at least one shapefile group or zip archive before importing.",
+        "Select at least one shapefile group or zip archive before importing."
       );
       setError(message);
       pushToast({
-        title: t("No files selected", "ファイル未選択"),
+        title: t("No files selected", "No files selected"),
         description: message,
         variant: "error"
       });
@@ -106,23 +274,23 @@ export function UploadPage() {
       setCleanupSummary(payload.cleanup_summary);
       setCurrentScreen("upload");
       pushToast({
-        title: t("Import complete", "インポート完了"),
-        description: t(`${payload.files.length} shapefile groups imported.`, `${payload.files.length} 件のグループをインポートしました。`),
+        title: t("Import complete", "Import complete"),
+        description: t(`${payload.files.length} shapefile groups imported.`, `${payload.files.length} shapefile groups imported.`),
         variant: "success"
       });
       if (payload.warnings.length > 0) {
         pushToast({
-          title: t("Import warnings", "インポート警告"),
+          title: t("Import warnings", "Import warnings"),
           description: t(
             `${payload.warnings.length} warning(s) reported during import.`,
-            `${payload.warnings.length} 件の警告が報告されました。`
+            `${payload.warnings.length} warning(s) reported during import.`
           ),
           variant: "info"
         });
       }
     } catch (caught) {
-      const message = handleApiError(caught, t("Import failed", "インポートに失敗しました"), {
-        title: t("Import failed", "インポート失敗")
+      const message = handleApiError(caught, t("Import failed", "Import failed"), {
+        title: t("Import failed", "Import failed")
       });
       setError(message);
     } finally {
@@ -141,7 +309,7 @@ export function UploadPage() {
       <p className="text-sm text-slate-600">
         {t(
           "Upload shapefile component files (.shp/.dbf/.shx/.prj) or a zip archive.",
-          "シェープファイル構成要素(.shp/.dbf/.shx/.prj)またはZIPをアップロードしてください。"
+          "Upload shapefile component files (.shp/.dbf/.shx/.prj) or a zip archive."
         )}
       </p>
 
@@ -153,15 +321,18 @@ export function UploadPage() {
       >
         <input {...getInputProps()} />
         {isDragActive ? (
-          <p>{t("Drop files here...", "ここにファイルをドロップしてください...")}</p>
+          <p>{t("Drop files here...", "Drop files here...")}</p>
         ) : (
-          <p>{t("Drag files/folders here, or click to browse.", "ここにファイル/フォルダをドラッグ、またはクリックで選択してください。")}</p>
+          <p>{t("Drag files/folders here, or click to browse.", "Drag files/folders here, or click to browse.")}</p>
         )}
       </section>
 
       <div className="rounded border bg-white p-4 text-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="font-medium">{fileCountLabel}</p>
+          <div>
+            <p className="font-medium">{fileCountLabel}</p>
+            {componentCountLabel ? <p className="text-xs text-slate-500">{componentCountLabel}</p> : null}
+          </div>
           {queuedFiles.length > 0 && !loading ? (
             <div className="flex items-center gap-2 text-xs">
               <button
@@ -169,14 +340,14 @@ export function UploadPage() {
                 onClick={() => setAllQueuedFilesSelected(true)}
                 className="rounded border border-slate-300 px-2 py-1 text-slate-700 hover:bg-slate-50"
               >
-                {t("Select all", "すべて選択")}
+                {t("Select all", "Select all")}
               </button>
               <button
                 type="button"
                 onClick={() => setAllQueuedFilesSelected(false)}
                 className="rounded border border-slate-300 px-2 py-1 text-slate-700 hover:bg-slate-50"
               >
-                {t("Select none", "選択解除")}
+                {t("Select none", "Select none")}
               </button>
             </div>
           ) : null}
@@ -188,22 +359,53 @@ export function UploadPage() {
             <SkeletonBlock className="h-3 w-11/12" />
             <SkeletonBlock className="h-3 w-4/5" />
           </div>
-        ) : queuedFiles.length > 0 ? (
-          <ul className="mt-2 max-h-48 overflow-auto">
-            {queuedFiles.map((item) => (
-              <li key={item.id} className="py-0.5">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={item.selected}
-                    onChange={() => toggleQueuedFile(item.id)}
-                    className="h-4 w-4"
-                  />
-                  <span className={item.selected ? "text-slate-900" : "text-slate-500 line-through"}>{item.file.name}</span>
-                </label>
-              </li>
+        ) : stemRows.length > 0 || archiveRows.length > 0 ? (
+          <div className="mt-3 max-h-[560px] overflow-auto pr-1">
+            {groupedStemRows.map((group) => (
+              <section key={group.suffixGroup} className="mb-4 last:mb-0">
+                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{group.suffixGroup}</h3>
+                <ul className="space-y-1">
+                  {group.rows.map((row) => (
+                    <li key={row.key}>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={row.selected}
+                          onChange={() => toggleStemGroup(row.key)}
+                          className="h-4 w-4"
+                        />
+                        <span className={row.selected ? "text-slate-900" : "text-slate-500 line-through"}>{row.stem}</span>
+                        <span className="text-xs text-slate-500">
+                          ({row.fileCount} file(s): {row.extensions.map((extension) => `.${extension}`).join(", ")})
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             ))}
-          </ul>
+
+            {archiveRows.length > 0 ? (
+              <section>
+                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">ZIP</h3>
+                <ul className="space-y-1">
+                  {archiveRows.map((item) => (
+                    <li key={item.id}>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={item.selected}
+                          onChange={() => toggleArchive(item.id)}
+                          className="h-4 w-4"
+                        />
+                        <span className={item.selected ? "text-slate-900" : "text-slate-500 line-through"}>{item.file.name}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+          </div>
         ) : null}
       </div>
 
@@ -214,9 +416,9 @@ export function UploadPage() {
           disabled={loading || selectedFileCount === 0}
           className="rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-60"
         >
-          {loading ? t("Importing...", "インポート中...") : t("Import Files", "ファイルをインポート")}
+          {loading ? t("Importing...", "Importing...") : t("Import Files", "Import Files")}
         </button>
-        {loading && <span className="text-sm text-slate-700">{t(`Upload progress: ${progress}%`, `アップロード進捗: ${progress}%`)}</span>}
+        {loading && <span className="text-sm text-slate-700">{t(`Upload progress: ${progress}%`, `Upload progress: ${progress}%`)}</span>}
       </div>
 
       {error && (
@@ -225,20 +427,20 @@ export function UploadPage() {
 
       {result && (
         <section className="rounded border bg-white p-4">
-          <h2 className="text-lg font-semibold">{t("Cleanup Summary", "クリーンアップ概要")}</h2>
+          <h2 className="text-lg font-semibold">{t("Cleanup Summary", "Cleanup Summary")}</h2>
           <ul className="mt-2 text-sm">
-            <li>{t("Multipolygons exploded", "マルチポリゴン分解数")}: {result.cleanup_summary.multipolygons_exploded}</li>
-            <li>{t("Rings closed", "リング閉合数")}: {result.cleanup_summary.rings_closed}</li>
-            <li>{t("Features reoriented", "向き補正数")}: {result.cleanup_summary.features_reoriented}</li>
-            <li>{t("Empty features dropped", "空フィーチャ除外数")}: {result.cleanup_summary.empty_features_dropped}</li>
-            <li>{t("Coordinates rounded", "座標丸め数")}: {result.cleanup_summary.coordinates_rounded}</li>
+            <li>{t("Multipolygons exploded", "Multipolygons exploded")}: {result.cleanup_summary.multipolygons_exploded}</li>
+            <li>{t("Rings closed", "Rings closed")}: {result.cleanup_summary.rings_closed}</li>
+            <li>{t("Features reoriented", "Features reoriented")}: {result.cleanup_summary.features_reoriented}</li>
+            <li>{t("Empty features dropped", "Empty features dropped")}: {result.cleanup_summary.empty_features_dropped}</li>
+            <li>{t("Coordinates rounded", "Coordinates rounded")}: {result.cleanup_summary.coordinates_rounded}</li>
           </ul>
           <button
             type="button"
             onClick={continueToWizard}
             className="mt-4 rounded bg-emerald-600 px-4 py-2 text-white"
           >
-            {t("Continue to Wizard", "ウィザードへ進む")}
+            {t("Continue to Wizard", "Continue to Wizard")}
           </button>
         </section>
       )}
