@@ -6,6 +6,7 @@ import {
   deleteSessionFeature,
   exportSessionArchive,
   exportSessionShapefiles,
+  fetchSessionFiles,
   fetchSessionFeatures,
   generateSessionDraft,
   patchSessionFeature,
@@ -216,6 +217,8 @@ function TableLoadingSkeleton() {
 export function ReviewPage() {
   const navigate = useNavigate();
   const sessionId = useAppStore((state) => state.sessionId);
+  const files = useAppStore((state) => state.files);
+  const setFiles = useAppStore((state) => state.setFiles);
   const wizardState = useAppStore((state) => state.wizardState);
   const selectedFeatureIds = useAppStore((state) => state.selectedFeatureIds);
   const setSelectedFeatureIds = useAppStore((state) => state.setSelectedFeatureIds);
@@ -280,7 +283,13 @@ export function ReviewPage() {
     setLoading(true);
     setError(null);
     try {
-      let response = await fetchSessionFeatures(sessionId);
+      const [fileResponse, initialFeatureResponse] = await Promise.all([
+        fetchSessionFiles(sessionId),
+        fetchSessionFeatures(sessionId)
+      ]);
+      setFiles(fileResponse.files);
+
+      let response = initialFeatureResponse;
       let rows = (response.features as Record<string, unknown>[])
         .map((item) => normalizeFeature(item))
         .filter((item): item is ReviewFeature => item !== null);
@@ -667,7 +676,18 @@ export function ReviewPage() {
     }
   };
 
+  const hasGeoPackageSources = useMemo(
+    () => files.some((item) => item.source_format === "gpkg"),
+    [files]
+  );
   const exportBlockedByErrors = exportFormat === "imdf" && Boolean(validation && validation.summary.error_count > 0);
+  const exportBlocked = exportBlockedByErrors || (exportFormat === "shapefiles" && hasGeoPackageSources);
+
+  useEffect(() => {
+    if (hasGeoPackageSources && exportFormat === "shapefiles") {
+      setExportFormat("imdf");
+    }
+  }, [exportFormat, hasGeoPackageSources]);
 
   const openExportDialog = async () => {
     const validationResult = await runValidation();
@@ -698,6 +718,16 @@ export function ReviewPage() {
       );
       setError(message);
       pushToast({ title: t("Export blocked", "Export blocked"), description: message, variant: "error" });
+      return;
+    }
+    if (exportFormat === "shapefiles" && hasGeoPackageSources) {
+      const message = t(
+        "Shapefile export is unavailable for sessions imported from GeoPackages. Use IMDF export instead.",
+        "Shapefile export is unavailable for sessions imported from GeoPackages. Use IMDF export instead."
+      );
+      setExportOptionsError(message);
+      setError(message);
+      pushToast({ title: t("Export unavailable", "Export unavailable"), description: message, variant: "error" });
       return;
     }
 
@@ -841,7 +871,7 @@ export function ReviewPage() {
         !isFormTarget(event.target) &&
         !exporting &&
         !validating &&
-        !exportBlockedByErrors
+        !exportBlocked
       ) {
         event.preventDefault();
         void downloadExport();
@@ -857,7 +887,7 @@ export function ReviewPage() {
     exporting,
     popEditHistory,
     sessionId,
-    exportBlockedByErrors,
+    exportBlocked,
     validating,
     validation
   ]);
@@ -1046,9 +1076,19 @@ export function ReviewPage() {
                 onChange={(event) => setExportFormat(event.target.value as "imdf" | "shapefiles")}
               >
                 <option value="imdf">{t("IMDF (.imdf)", "IMDF (.imdf)")}</option>
-                <option value="shapefiles">{t("Shapefiles (.zip)", "Shapefiles (.zip)")}</option>
+                {!hasGeoPackageSources ? (
+                  <option value="shapefiles">{t("Shapefiles (.zip)", "Shapefiles (.zip)")}</option>
+                ) : null}
               </select>
             </label>
+            {hasGeoPackageSources ? (
+              <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                {t(
+                  "Shapefile (.zip) export is only available for shapefile-backed sessions. This session includes GeoPackage sources, so only IMDF export is available.",
+                  "Shapefile (.zip) export is only available for shapefile-backed sessions. This session includes GeoPackage sources, so only IMDF export is available."
+                )}
+              </p>
+            ) : null}
 
             <p className="mt-3 text-sm text-slate-600">
               {t(`${validation.summary.total_features} features will be exported.`, `${validation.summary.total_features} features will be exported.`)}
@@ -1067,7 +1107,7 @@ export function ReviewPage() {
               </p>
             ) : null}
 
-            {exportFormat === "shapefiles" ? (
+            {exportFormat === "shapefiles" && !hasGeoPackageSources ? (
               <div className="mt-3 space-y-2 rounded border bg-slate-50 p-3 text-sm">
                 <label className="block">
                   <span className="mb-1 block text-xs uppercase tracking-wide text-slate-500">{t("Encoding", "Encoding")}</span>
@@ -1185,7 +1225,7 @@ export function ReviewPage() {
                 type="button"
                 className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:bg-slate-400"
                 onClick={() => void downloadExport()}
-                disabled={exporting || exportBlockedByErrors}
+                disabled={exporting || exportBlocked}
               >
                 {exporting
                   ? t("Downloading...", "Downloading...")

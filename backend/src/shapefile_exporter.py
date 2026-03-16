@@ -574,6 +574,12 @@ def build_shapefile_export_archive(
     session: SessionRecord,
     request: ShapefileExportRequest,
 ) -> tuple[bytes, str]:
+    if any(item.source_format != "shapefile" for item in session.files):
+        raise ValueError(
+            "Shapefile export unavailable: this session includes GeoPackage sources. "
+            "Use IMDF export instead."
+        )
+
     upload_artifact_dir = Path(session.upload_artifact_dir or "")
     if not session.upload_artifact_dir or not upload_artifact_dir.exists():
         raise ValueError("Shapefile export unavailable: uploaded source files are not available for this session.")

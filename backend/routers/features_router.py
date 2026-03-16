@@ -18,6 +18,7 @@ from backend.src.detector import (
     merge_learned_keywords,
     sync_feature_types,
 )
+from backend.src.importer import rebuild_normalized_feature_collection
 from backend.src.schemas import (
     BulkPatchFeaturesRequest,
     BulkPatchFeaturesResponse,
@@ -224,6 +225,17 @@ def _revalidate_session(session: Any) -> ValidationResponse:
     return validation
 
 
+def _refresh_source_views(session: Any) -> None:
+    source_collection = session.source_feature_collection or session.feature_collection
+    session.source_feature_collection = sync_feature_types(source_collection, session.files)
+    normalized_collection, session.files, _ = rebuild_normalized_feature_collection(
+        session.source_feature_collection,
+        session.files,
+    )
+    if session.wizard.generation_status != "generated":
+        session.feature_collection = normalized_collection
+
+
 @router.get("/features", response_model=FeatureCollectionResponse)
 def get_features(session_id: str, request: Request) -> FeatureCollectionResponse:
     session = _get_session_or_raise(session_id, request)
@@ -243,10 +255,7 @@ def detect_all(session_id: str, request: Request) -> DetectResponse:
 
     keyword_map = _merged_keyword_map(request, session.learned_keywords)
     session.files = detect_files(session.files, keyword_map, preserve_manual_levels=True)
-    source_collection = session.source_feature_collection or session.feature_collection
-    session.source_feature_collection = sync_feature_types(source_collection, session.files)
-    if session.wizard.generation_status != "generated":
-        session.feature_collection = sync_feature_types(session.feature_collection, session.files)
+    _refresh_source_views(session)
     manager.save_session(session)
 
     return DetectResponse(session_id=session_id, files=session.files)
@@ -304,10 +313,7 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
                 keywords=merged,
             )
 
-    source_collection = session.source_feature_collection or session.feature_collection
-    session.source_feature_collection = sync_feature_types(source_collection, session.files)
-    if session.wizard.generation_status != "generated":
-        session.feature_collection = sync_feature_types(session.feature_collection, session.files)
+    _refresh_source_views(session)
     manager.save_session(session)
 
     final_file = next((item for item in session.files if item.stem == stem), updated)

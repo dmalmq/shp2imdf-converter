@@ -15,7 +15,7 @@ type QueuedUploadFile = {
   selected: boolean;
   extension: string;
   stem: string | null;
-  kind: "shapefile" | "archive";
+  kind: "shapefile" | "gpkg" | "archive";
 };
 
 type StemRow = {
@@ -28,8 +28,15 @@ type StemRow = {
 };
 
 const SHAPEFILE_EXTENSIONS = new Set([".shp", ".dbf", ".shx", ".prj", ".cpg", ".qix"]);
+const GEOPACKAGE_EXTENSIONS = new Set([".gpkg"]);
 const ARCHIVE_EXTENSIONS = new Set([".zip"]);
-const SUPPORTED_UPLOAD_EXTENSIONS = new Set([...SHAPEFILE_EXTENSIONS, ...ARCHIVE_EXTENSIONS]);
+const SUPPORTED_UPLOAD_EXTENSIONS = new Set([...SHAPEFILE_EXTENSIONS, ...GEOPACKAGE_EXTENSIONS, ...ARCHIVE_EXTENSIONS]);
+const DROPZONE_ACCEPT = {
+  "application/octet-stream": [".shp", ".dbf", ".shx", ".prj", ".cpg", ".qix"],
+  "application/geopackage+sqlite3": [".gpkg"],
+  "application/x-sqlite3": [".gpkg"],
+  "application/zip": [".zip"]
+} as const;
 
 function fileExtension(name: string): string {
   const index = name.lastIndexOf(".");
@@ -61,6 +68,11 @@ function toQueuedUploadFile(file: File): QueuedUploadFile | null {
   }
 
   const stem = ARCHIVE_EXTENSIONS.has(extension) ? null : fileStem(file.name, extension);
+  const kind = ARCHIVE_EXTENSIONS.has(extension)
+    ? "archive"
+    : GEOPACKAGE_EXTENSIONS.has(extension)
+      ? "gpkg"
+      : "shapefile";
 
   return {
     id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(16).slice(2, 10)}`,
@@ -68,7 +80,7 @@ function toQueuedUploadFile(file: File): QueuedUploadFile | null {
     selected: true,
     extension,
     stem,
-    kind: ARCHIVE_EXTENSIONS.has(extension) ? "archive" : "shapefile"
+    kind
   };
 }
 
@@ -103,8 +115,8 @@ export function UploadPage() {
       pushToast({
         title: t("Unsupported files skipped", "Unsupported files skipped"),
         description: t(
-          `${skippedCount} file(s) were ignored because they are not shapefile components or zip archives.`,
-          `${skippedCount} file(s) were ignored because they are not shapefile components or zip archives.`
+          `${skippedCount} file(s) were ignored because they are not shapefile components, GeoPackages, or zip archives.`,
+          `${skippedCount} file(s) were ignored because they are not shapefile components, GeoPackages, or zip archives.`
         ),
         variant: "info"
       });
@@ -113,7 +125,8 @@ export function UploadPage() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    multiple: true
+    multiple: true,
+    accept: DROPZONE_ACCEPT
   });
 
   const stemRows = useMemo(() => {
@@ -174,6 +187,10 @@ export function UploadPage() {
     () => queuedFiles.filter((item) => item.kind === "archive"),
     [queuedFiles]
   );
+  const geoPackageRows = useMemo(
+    () => queuedFiles.filter((item) => item.kind === "gpkg"),
+    [queuedFiles]
+  );
 
   const selectedFiles = useMemo(
     () => queuedFiles.filter((item) => item.selected).map((item) => item.file),
@@ -189,9 +206,13 @@ export function UploadPage() {
     () => archiveRows.filter((row) => row.selected).length,
     [archiveRows]
   );
+  const selectedGeoPackageCount = useMemo(
+    () => geoPackageRows.filter((row) => row.selected).length,
+    [geoPackageRows]
+  );
 
   const fileCountLabel = useMemo(() => {
-    if (stemRows.length === 0 && archiveRows.length === 0) {
+    if (stemRows.length === 0 && geoPackageRows.length === 0 && archiveRows.length === 0) {
       return t("No files selected", "No files selected");
     }
 
@@ -199,13 +220,24 @@ export function UploadPage() {
     if (stemRows.length > 0) {
       parts.push(`${selectedStemCount} of ${stemRows.length} shapefile group(s) selected`);
     }
+    if (geoPackageRows.length > 0) {
+      parts.push(`${selectedGeoPackageCount} of ${geoPackageRows.length} GeoPackage(s) selected`);
+    }
     if (archiveRows.length > 0) {
       parts.push(`${selectedArchiveCount} of ${archiveRows.length} archive(s) selected`);
     }
 
     const label = parts.join(" - ");
     return t(label, label);
-  }, [archiveRows.length, selectedArchiveCount, selectedStemCount, stemRows.length, t]);
+  }, [
+    archiveRows.length,
+    geoPackageRows.length,
+    selectedArchiveCount,
+    selectedGeoPackageCount,
+    selectedStemCount,
+    stemRows.length,
+    t
+  ]);
 
   const componentCountLabel = useMemo(() => {
     const componentCount = queuedFiles.filter((item) => item.kind === "shapefile").length;
@@ -243,6 +275,12 @@ export function UploadPage() {
     );
   };
 
+  const toggleGeoPackage = (id: string) => {
+    setQueuedFiles((previous) =>
+      previous.map((item) => (item.id === id ? { ...item, selected: !item.selected } : item))
+    );
+  };
+
   const setAllQueuedFilesSelected = (selected: boolean) => {
     setQueuedFiles((previous) => previous.map((item) => (item.selected === selected ? item : { ...item, selected })));
   };
@@ -250,8 +288,8 @@ export function UploadPage() {
   const runImport = async () => {
     if (selectedFiles.length === 0) {
       const message = t(
-        "Select at least one shapefile group or zip archive before importing.",
-        "Select at least one shapefile group or zip archive before importing."
+        "Select at least one shapefile group, GeoPackage, or zip archive before importing.",
+        "Select at least one shapefile group, GeoPackage, or zip archive before importing."
       );
       setError(message);
       pushToast({
@@ -275,7 +313,7 @@ export function UploadPage() {
       setCurrentScreen("upload");
       pushToast({
         title: t("Import complete", "Import complete"),
-        description: t(`${payload.files.length} shapefile groups imported.`, `${payload.files.length} shapefile groups imported.`),
+        description: t(`${payload.files.length} dataset(s) imported.`, `${payload.files.length} dataset(s) imported.`),
         variant: "success"
       });
       if (payload.warnings.length > 0) {
@@ -305,11 +343,11 @@ export function UploadPage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-6 p-6">
-      <h1 className="text-3xl font-semibold">SHP to IMDF Converter</h1>
+      <h1 className="text-3xl font-semibold">SHP/GPKG to IMDF Converter</h1>
       <p className="text-sm text-slate-600">
         {t(
-          "Upload shapefile component files (.shp/.dbf/.shx/.prj) or a zip archive.",
-          "Upload shapefile component files (.shp/.dbf/.shx/.prj) or a zip archive."
+          "Upload shapefile component files (.shp/.dbf/.shx/.prj), GeoPackages (.gpkg), or a zip archive.",
+          "Upload shapefile component files (.shp/.dbf/.shx/.prj), GeoPackages (.gpkg), or a zip archive."
         )}
       </p>
 
@@ -359,7 +397,7 @@ export function UploadPage() {
             <SkeletonBlock className="h-3 w-11/12" />
             <SkeletonBlock className="h-3 w-4/5" />
           </div>
-        ) : stemRows.length > 0 || archiveRows.length > 0 ? (
+        ) : stemRows.length > 0 || geoPackageRows.length > 0 || archiveRows.length > 0 ? (
           <div className="mt-3 max-h-[560px] overflow-auto pr-1">
             {groupedStemRows.map((group) => (
               <section key={group.suffixGroup} className="mb-4 last:mb-0">
@@ -384,6 +422,29 @@ export function UploadPage() {
                 </ul>
               </section>
             ))}
+
+            {geoPackageRows.length > 0 ? (
+              <section className="mb-4">
+                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">GeoPackage</h3>
+                <ul className="space-y-1">
+                  {geoPackageRows.map((item) => (
+                    <li key={item.id}>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={item.selected}
+                          onChange={() => toggleGeoPackage(item.id)}
+                          className="h-4 w-4"
+                        />
+                        <span className={item.selected ? "text-slate-900" : "text-slate-500 line-through"}>
+                          {item.file.name}
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
 
             {archiveRows.length > 0 ? (
               <section>

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
+from shapely.geometry import MultiPolygon, Point, Polygon, mapping
 
 from backend.src.validator import validate_feature_collection
 
@@ -80,3 +82,34 @@ def test_opening_must_be_linestring(test_client, sample_dir: Path) -> None:
     }
     result = validate_feature_collection(mutated)
     assert any(issue.check == "opening_must_be_linestring" for issue in result.errors)
+
+
+@pytest.mark.phase5
+def test_invalid_geometry_with_display_point_does_not_crash_validation() -> None:
+    invalid_unit = MultiPolygon(
+        [
+            Polygon([(0, 0), (4, 0), (4, 4), (0, 4), (0, 0)]),
+            Polygon([(2, -1), (6, -1), (6, 3), (2, 3), (2, -1)]),
+        ]
+    )
+    collection = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "id": str(uuid4()),
+                "feature_type": "unit",
+                "geometry": mapping(invalid_unit),
+                "properties": {
+                    "category": "room",
+                    "level_id": str(uuid4()),
+                    "display_point": mapping(Point(2, 2)),
+                    "name": {"en": "Broken Unit"},
+                },
+            }
+        ],
+    }
+
+    result = validate_feature_collection(collection)
+
+    assert any(issue.check == "invalid_geometry" for issue in result.errors)

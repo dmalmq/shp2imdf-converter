@@ -13,6 +13,8 @@ export type ImportedFile = {
   geometry_type: string;
   feature_count: number;
   attribute_columns: string[];
+  source_format: "shapefile" | "gpkg";
+  source_layer: string | null;
   detected_type: string | null;
   detected_level: number | null;
   level_name: string | null;

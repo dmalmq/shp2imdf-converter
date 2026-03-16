@@ -26,6 +26,8 @@ class ImportedFile(BaseModel):
     geometry_type: str
     feature_count: int
     attribute_columns: list[str]
+    source_format: Literal["shapefile", "gpkg"] = "shapefile"
+    source_layer: str | None = None
     detected_type: str | None = None
     detected_level: int | None = None
     level_name: str | None = None

@@ -86,7 +86,7 @@ export function FileClassStep({
             </colgroup>
             <thead className="sticky top-0 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
               <tr>
-                <th className="px-3 py-2.5">{t("Filename", "ファイル名")}</th>
+                <th className="px-3 py-2.5">{t("Source", "ソース")}</th>
                 <th className="px-3 py-2.5">{t("Geometry", "ジオメトリ")}</th>
                 <th className="px-3 py-2.5">{t("Count", "件数")}</th>
                 <th className="px-3 py-2.5">{t("IMDF Type", "IMDF 種別")}</th>
@@ -105,8 +105,16 @@ export function FileClassStep({
                     onMouseLeave={() => onHoverStem(null)}
                     onClick={() => onSelectStem(isSelected ? null : file.stem)}
                   >
-                    <td className="truncate px-3 py-2.5 font-mono text-xs" title={file.stem}>
-                      {file.stem}
+                    <td
+                      className="px-3 py-2.5 font-mono text-xs"
+                      title={file.source_layer ? `${file.stem} (${file.source_layer})` : file.stem}
+                    >
+                      <div className="truncate">{file.stem}</div>
+                      {file.source_format === "gpkg" && file.source_layer ? (
+                        <div className="truncate font-sans text-[10px] text-slate-500">
+                          {t(`Layer: ${file.source_layer}`, `レイヤー: ${file.source_layer}`)}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2.5">{file.geometry_type}</td>
                     <td className="whitespace-nowrap px-3 py-2.5">{file.feature_count}</td>
