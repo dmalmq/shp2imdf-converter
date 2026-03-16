@@ -6,6 +6,7 @@ from io import BytesIO
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
+import sqlite3
 import shutil
 import tempfile
 from uuid import UUID
@@ -13,7 +14,7 @@ import zipfile
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import Point, Polygon, shape
+from shapely.geometry import GeometryCollection, LineString, Point, Polygon, shape
 
 from backend.src.geocoding import GeocodeAddressParts, GeocodeMatch, GeocodingError
 from backend.src.schemas import CleanupSummary, ImportedFile
@@ -27,6 +28,30 @@ def _upload_payload(sample_dir: Path, stem: str) -> list[tuple[str, tuple[str, b
     return files
 
 
+def _upload_file(path: Path) -> list[tuple[str, tuple[str, bytes, str]]]:
+    return [("files", (path.name, path.read_bytes(), "application/octet-stream"))]
+
+
+def _write_geopackage(
+    root: Path,
+    stem: str,
+    layers: list[tuple[str, gpd.GeoDataFrame]],
+    add_non_spatial_layer: bool = False,
+) -> Path:
+    path = root / f"{stem}.gpkg"
+    for layer_name, gdf in layers:
+        gdf.to_file(path, layer=layer_name, driver="GPKG")
+    if add_non_spatial_layer:
+        connection = sqlite3.connect(path)
+        try:
+            connection.execute("CREATE TABLE plain_table (id INTEGER PRIMARY KEY, name TEXT)")
+            connection.execute("INSERT INTO plain_table (name) VALUES ('plain')")
+            connection.commit()
+        finally:
+            connection.close()
+    return path
+
+
 @pytest.mark.phase1
 def test_import_endpoint_creates_session(test_client, sample_dir: Path) -> None:
     response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
@@ -35,6 +60,65 @@ def test_import_endpoint_creates_session(test_client, sample_dir: Path) -> None:
     assert payload["session_id"]
     assert payload["files"]
     assert "cleanup_summary" in payload
+    assert payload["files"][0]["source_format"] == "shapefile"
+    assert payload["files"][0]["source_layer"] is None
+
+
+@pytest.mark.phase1
+def test_import_endpoint_accepts_geopackage(test_client) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        path = _write_geopackage(
+            root,
+            "station",
+            [
+                (
+                    "units",
+                    gpd.GeoDataFrame(
+                        [{"name": "Shop", "geometry": Polygon([(0, 0), (1, 0), (1, 1), (0, 1), (0, 0)])}],
+                        geometry="geometry",
+                        crs="EPSG:4326",
+                    ),
+                )
+            ],
+        )
+
+        response = test_client.post("/api/import", files=_upload_file(path))
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["files"][0]["source_format"] == "gpkg"
+    assert payload["files"][0]["source_layer"] == "units"
+    assert payload["files"][0]["stem"] == "station__units"
+
+
+@pytest.mark.phase1
+def test_import_endpoint_accepts_mixed_shapefile_and_geopackage(test_client, sample_dir: Path) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        path = _write_geopackage(
+            root,
+            "mixed_sources",
+            [
+                (
+                    "openings",
+                    gpd.GeoDataFrame(
+                        [{"name": "Door", "geometry": LineString([(0, 0), (1, 0)])}],
+                        geometry="geometry",
+                        crs="EPSG:4326",
+                    ),
+                )
+            ],
+        )
+
+        response = test_client.post(
+            "/api/import",
+            files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space") + _upload_file(path),
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert {item["source_format"] for item in payload["files"]} == {"shapefile", "gpkg"}
 
 
 @pytest.mark.phase1
@@ -82,6 +166,63 @@ def test_import_rejects_upload_over_configured_max_size(test_client) -> None:
     payload = response.json()
     assert payload["code"] == "BAD_REQUEST"
     assert "configured limit" in payload["detail"]
+
+
+@pytest.mark.phase1
+def test_shapefile_export_rejects_geopackage_sessions(test_client) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        path = _write_geopackage(
+            root,
+            "station",
+            [
+                (
+                    "units",
+                    gpd.GeoDataFrame(
+                        [{"name": "Shop", "geometry": Polygon([(0, 0), (1, 0), (1, 1), (0, 1), (0, 0)])}],
+                        geometry="geometry",
+                        crs="EPSG:4326",
+                    ),
+                )
+            ],
+        )
+
+        import_response = test_client.post("/api/import", files=_upload_file(path))
+
+    session_id = import_response.json()["session_id"]
+    export_response = test_client.post(f"/api/session/{session_id}/export/shapefiles", json={})
+    assert export_response.status_code == 400
+    assert "GeoPackage sources" in export_response.json()["detail"]
+
+
+@pytest.mark.phase1
+def test_shapefile_export_rejects_mixed_source_sessions(test_client, sample_dir: Path) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        path = _write_geopackage(
+            root,
+            "mixed_sources",
+            [
+                (
+                    "units",
+                    gpd.GeoDataFrame(
+                        [{"name": "Shop", "geometry": Polygon([(0, 0), (1, 0), (1, 1), (0, 1), (0, 0)])}],
+                        geometry="geometry",
+                        crs="EPSG:4326",
+                    ),
+                )
+            ],
+        )
+
+        import_response = test_client.post(
+            "/api/import",
+            files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space") + _upload_file(path),
+        )
+
+    session_id = import_response.json()["session_id"]
+    export_response = test_client.post(f"/api/session/{session_id}/export/shapefiles", json={})
+    assert export_response.status_code == 400
+    assert "GeoPackage sources" in export_response.json()["detail"]
 
 
 @pytest.mark.phase1
@@ -158,6 +299,70 @@ def test_patch_file_updates_type_and_returns_learning_prompt(test_client, sample
     payload = response.json()
     assert payload["file"]["detected_type"] == "opening"
     assert payload["learning_suggestion"] is not None
+
+
+@pytest.mark.phase2
+def test_patch_file_rebuilds_mixed_geopackage_layer_into_polygons(test_client) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        path = _write_geopackage(
+            root,
+            "station",
+            [
+                (
+                    "source",
+                    gpd.GeoDataFrame(
+                        [
+                            {"name": "Shop A", "geometry": Polygon([(0, 0), (2, 0), (2, 2), (0, 2), (0, 0)])},
+                            {"name": "Centerline", "geometry": LineString([(0, 0), (2, 2)])},
+                            {
+                                "name": "Shop B",
+                                "geometry": GeometryCollection(
+                                    [
+                                        Polygon([(3, 0), (5, 0), (5, 2), (3, 2), (3, 0)]),
+                                        LineString([(3, 0), (5, 2)]),
+                                    ]
+                                ),
+                            },
+                        ],
+                        geometry="geometry",
+                        crs="EPSG:4326",
+                    ),
+                )
+            ],
+        )
+
+        import_response = test_client.post("/api/import", files=_upload_file(path))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    imported_file = import_response.json()["files"][0]
+    assert imported_file["stem"] == "station__source"
+    assert imported_file["geometry_type"] == "Mixed"
+    assert imported_file["feature_count"] == 4
+
+    response = test_client.patch(
+        f"/api/session/{session_id}/files/station__source",
+        json={"detected_type": "unit"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["file"]["detected_type"] == "unit"
+    assert payload["file"]["geometry_type"] == "Polygon"
+    assert payload["file"]["feature_count"] == 2
+    assert any("GeoPackage normalization:" in warning for warning in payload["file"]["warnings"])
+
+    features_response = test_client.get(f"/api/session/{session_id}/features")
+    assert features_response.status_code == 200
+    features_payload = features_response.json()
+    assert len(features_payload["features"]) == 2
+    assert all(item["geometry"]["type"] == "Polygon" for item in features_payload["features"])
+
+    session = test_client.app.state.session_manager.get_session(session_id, touch=False)
+    assert session is not None
+    assert session.source_feature_collection is not None
+    assert len(session.source_feature_collection["features"]) == 4
+    assert len(session.feature_collection["features"]) == 2
 
 
 @pytest.mark.phase2

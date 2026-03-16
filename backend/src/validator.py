@@ -8,6 +8,8 @@ import re
 from typing import Any
 from uuid import UUID
 
+from shapely import make_valid
+from shapely.errors import GEOSException
 from shapely.geometry import LineString, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
@@ -137,7 +139,64 @@ def _point_in_geometry(display_point: Any, geom: BaseGeometry | None) -> bool:
         point = shape(display_point)
     except Exception:
         return False
-    return bool(geom.contains(point) or geom.touches(point))
+    return _safe_contains_or_touches(geom, point)
+
+
+def _repair_geometry(geom: BaseGeometry | None) -> BaseGeometry | None:
+    if geom is None or geom.is_empty or geom.is_valid:
+        return geom
+    try:
+        repaired = make_valid(geom)
+        if repaired.is_empty:
+            return geom
+        return repaired
+    except Exception:
+        return geom
+
+
+def _safe_contains_or_touches(container: BaseGeometry | None, target: BaseGeometry | None) -> bool:
+    if container is None or target is None or container.is_empty or target.is_empty:
+        return False
+
+    left = _repair_geometry(container)
+    right = _repair_geometry(target)
+    if left is None or right is None or left.is_empty or right.is_empty:
+        return False
+
+    try:
+        return bool(left.contains(right) or left.touches(right))
+    except GEOSException:
+        return False
+
+
+def _safe_intersects(left: BaseGeometry | None, right: BaseGeometry | None) -> bool:
+    if left is None or right is None or left.is_empty or right.is_empty:
+        return False
+
+    repaired_left = _repair_geometry(left)
+    repaired_right = _repair_geometry(right)
+    if repaired_left is None or repaired_right is None or repaired_left.is_empty or repaired_right.is_empty:
+        return False
+
+    try:
+        return bool(repaired_left.intersects(repaired_right))
+    except GEOSException:
+        return False
+
+
+def _safe_intersection(left: BaseGeometry | None, right: BaseGeometry | None) -> BaseGeometry | None:
+    if left is None or right is None or left.is_empty or right.is_empty:
+        return None
+
+    repaired_left = _repair_geometry(left)
+    repaired_right = _repair_geometry(right)
+    if repaired_left is None or repaired_right is None or repaired_left.is_empty or repaired_right.is_empty:
+        return None
+
+    try:
+        return repaired_left.intersection(repaired_right)
+    except GEOSException:
+        return None
 
 
 def _looks_like_uuid(value: str) -> bool:
@@ -266,6 +325,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 auto_fixable=True,
                 fix_description="Run make_valid() to repair geometry.",
             )
+            geom = _repair_geometry(geom)
         if _coords_out_of_bounds(payload):
             add_issue("error", "coordinates_out_of_bounds", "Coordinates are out of bounds.", feature_id=fid)
         if abs(geom.centroid.x) < 1 and abs(geom.centroid.y) < 1:
@@ -419,12 +479,12 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
     for level_id, pairs in units_by_level.items():
         level_geom = level_geoms.get(level_id)
         for unit_id, unit_geom in pairs:
-            if level_geom and not (level_geom.contains(unit_geom.centroid) or level_geom.touches(unit_geom.centroid)):
+            if level_geom and not _safe_contains_or_touches(level_geom, unit_geom.centroid):
                 add_issue("warning", "unit_outside_level_warning", "Unit centroid is outside assigned level.", feature_id=unit_id)
 
         for left_id, left_geom, right_id, right_geom in _iter_overlapping_pairs(pairs):
-            overlap = left_geom.intersection(right_geom)
-            if not overlap.is_empty and overlap.area > 0:
+            overlap = _safe_intersection(left_geom, right_geom)
+            if overlap is not None and not overlap.is_empty and overlap.area > 0:
                 overlap_geojson = overlap.__geo_interface__
                 add_issue("warning", "overlapping_units", f"Overlaps with unit {right_id[:8]}.", feature_id=left_id, related_feature_id=right_id, overlap_geometry=overlap_geojson)
                 add_issue("warning", "overlapping_units", f"Overlaps with unit {left_id[:8]}.", feature_id=right_id, related_feature_id=left_id, overlap_geometry=overlap_geojson)
@@ -452,14 +512,14 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
         for fid, row in by_id.items():
             if _feature_type(row) == "footprint" and fid in geoms_by_id:
                 centroid = geoms_by_id[fid].centroid
-                if not (venue_geom.contains(centroid) or venue_geom.touches(centroid)):
+                if not _safe_contains_or_touches(venue_geom, centroid):
                     add_issue("warning", "footprint_outside_venue_warning", "Footprint centroid is outside venue.", feature_id=fid)
     if footprints:
         footprints_union = unary_union(footprints)
         for fid, row in by_id.items():
             if _feature_type(row) == "level" and fid in geoms_by_id:
                 centroid = geoms_by_id[fid].centroid
-                if not (footprints_union.contains(centroid) or footprints_union.touches(centroid)):
+                if not _safe_contains_or_touches(footprints_union, centroid):
                     add_issue("warning", "level_outside_footprint_warning", "Level centroid is outside footprint.", feature_id=fid)
 
     level_boundary_cache: dict[str, BaseGeometry | None] = {}
@@ -484,7 +544,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                         else:
                             level_boundary_cache[level_id] = None
                     boundaries = level_boundary_cache[level_id]
-                if boundaries is not None and not geom.intersects(boundaries):
+                if boundaries is not None and not _safe_intersects(geom, boundaries):
                     add_issue("warning", "opening_not_touching_boundary", "Opening does not touch any unit boundary.", feature_id=fid)
                 meters = geom.length * 111_320
                 if meters < 0.3:
@@ -495,7 +555,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 add_issue("warning", "opening_missing_door_warning", "Pedestrian opening is missing door metadata.", feature_id=fid)
         if ftype == "detail":
             level_id = props.get("level_id")
-            if isinstance(level_id, str) and level_id in level_geoms and not level_geoms[level_id].intersects(geoms_by_id[fid]):
+            if isinstance(level_id, str) and level_id in level_geoms and not _safe_intersects(level_geoms[level_id], geoms_by_id[fid]):
                 add_issue("warning", "detail_outside_level", "Detail geometry is outside assigned level.", feature_id=fid)
 
     # Cross-level warnings.

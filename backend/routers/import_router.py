@@ -77,7 +77,7 @@ def _expand_upload(upload: UploadFile, payload: bytes) -> list[tuple[str, bytes]
 @router.post("/import", response_model=ImportResponse, status_code=201)
 async def import_files(
     request: Request,
-    files: Annotated[list[UploadFile], File(description="Shapefile components or a zip file")],
+    files: Annotated[list[UploadFile], File(description="Shapefile components, GeoPackages, or a zip file")],
 ) -> ImportResponse:
     if not files:
         raise ValueError("No files were uploaded.")
@@ -100,11 +100,13 @@ async def import_files(
 
     manager = _session_manager(request)
     artifacts = import_file_blobs(raw_blobs, filename_keywords_path=_keyword_config_path(request))
+    source_feature_collection = sync_feature_types(artifacts.source_feature_collection, artifacts.files)
     feature_collection = sync_feature_types(artifacts.feature_collection, artifacts.files)
     session = manager.create_session(
         files=artifacts.files,
         cleanup_summary=artifacts.cleanup_summary,
         feature_collection=feature_collection,
+        source_feature_collection=source_feature_collection,
         warnings=artifacts.warnings,
     )
     artifact_directory = _persist_session_upload_artifacts(
