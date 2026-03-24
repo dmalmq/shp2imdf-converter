@@ -3,6 +3,7 @@ import Map, { Layer, type LayerProps, type MapLayerMouseEvent, type MapRef, Sour
 
 import { type ReviewFeature, type ReviewIssue, isLocatedFeature } from "./types";
 import { STREET_MAP_STYLE } from "../shared/streetMapStyle";
+import { buildUnitFillColorExpr, buildUnitLineColorExpr, buildUnitOpacityExpr } from "../shared/unitCategoryColors";
 
 
 type Props = {
@@ -21,64 +22,40 @@ const POLYGON_FILL_LAYER: LayerProps = {
   type: "fill",
   filter: ["==", ["geometry-type"], "Polygon"],
   paint: {
-    "fill-color": [
-      "match",
-      ["get", "_feature_type"],
-      "venue",
-      "#334155",
-      "footprint",
-      "#7c3aed",
-      "level",
-      "#2563eb",
-      "unit",
-      "#0ea5e9",
-      "fixture",
-      "#14b8a6",
-      "section",
-      "#0f766e",
-      "geofence",
-      "#16a34a",
-      "kiosk",
-      "#f97316",
-      "facility",
-      "#a855f7",
+    "fill-color": buildUnitFillColorExpr("_feature_type", [
+      "venue", "#334155",
+      "footprint", "#7c3aed",
+      "level", "#2563eb",
+      "fixture", "#14b8a6",
+      "section", "#0f766e",
+      "geofence", "#16a34a",
+      "kiosk", "#f97316",
+      "facility", "#a855f7",
       "#64748b"
-    ],
-    "fill-opacity": 0.35
+    ]),
+    "fill-opacity": buildUnitOpacityExpr("_feature_type", 0.65, 0.35)
   }
-};
+} as LayerProps;
 
 const POLYGON_LINE_LAYER: LayerProps = {
   id: "review-polygons-line",
   type: "line",
   filter: ["==", ["geometry-type"], "Polygon"],
   paint: {
-    "line-color": [
-      "match",
-      ["get", "_feature_type"],
-      "venue",
-      "#1e293b",
-      "footprint",
-      "#6d28d9",
-      "level",
-      "#1d4ed8",
-      "unit",
-      "#0284c7",
-      "fixture",
-      "#0f766e",
-      "section",
-      "#0f766e",
-      "geofence",
-      "#15803d",
-      "kiosk",
-      "#ea580c",
-      "facility",
-      "#7e22ce",
+    "line-color": buildUnitLineColorExpr("_feature_type", [
+      "venue", "#1e293b",
+      "footprint", "#6d28d9",
+      "level", "#1d4ed8",
+      "fixture", "#0f766e",
+      "section", "#0f766e",
+      "geofence", "#15803d",
+      "kiosk", "#ea580c",
+      "facility", "#7e22ce",
       "#475569"
-    ],
+    ]),
     "line-width": 1.5
   }
-};
+} as LayerProps;
 
 const LINE_LAYER: LayerProps = {
   id: "review-lines",

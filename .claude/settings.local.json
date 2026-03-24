@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs ls:*)",
+      "Bash(xargs grep:*)",
+      "Bash(find /c/Repositories/RevitGeoExporter/src -type f \\\\\\(-name *.json -o -name *.config -o -name *.xml \\\\\\))",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}
