@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import Map, { Layer, MapRef, Source } from "react-map-gl/maplibre";
 import { STREET_MAP_STYLE } from "./streetMapStyle";
+import { buildUnitFillColorExpr, buildUnitLineColorExpr, buildUnitOpacityExpr } from "./unitCategoryColors";
 
 
 type BasicFeature = {
@@ -27,30 +28,18 @@ const FILL_LAYER: any = {
   id: "preview-fill",
   type: "fill" as const,
   paint: {
-    "fill-color": [
-      "match",
-      ["get", "feature_type"],
-      "unit",
-      "#1d4ed8",
-      "opening",
-      "#047857",
-      "fixture",
-      "#7c3aed",
-      "detail",
-      "#0f766e",
-      "level",
-      "#475569",
-      "section",
-      "#0f766e",
-      "geofence",
-      "#16a34a",
-      "kiosk",
-      "#f97316",
-      "facility",
-      "#a855f7",
+    "fill-color": buildUnitFillColorExpr("feature_type", [
+      "opening", "#047857",
+      "fixture", "#7c3aed",
+      "detail", "#0f766e",
+      "level", "#475569",
+      "section", "#0f766e",
+      "geofence", "#16a34a",
+      "kiosk", "#f97316",
+      "facility", "#a855f7",
       "#64748b"
-    ],
-    "fill-opacity": 0.3
+    ]),
+    "fill-opacity": buildUnitOpacityExpr("feature_type", 0.65, 0.3)
   }
 };
 
@@ -58,29 +47,17 @@ const LINE_LAYER: any = {
   id: "preview-line",
   type: "line" as const,
   paint: {
-    "line-color": [
-      "match",
-      ["get", "feature_type"],
-      "unit",
-      "#1d4ed8",
-      "opening",
-      "#047857",
-      "fixture",
-      "#7c3aed",
-      "detail",
-      "#0f766e",
-      "level",
-      "#475569",
-      "relationship",
-      "#6d28d9",
-      "section",
-      "#0f766e",
-      "geofence",
-      "#15803d",
-      "facility",
-      "#7e22ce",
+    "line-color": buildUnitLineColorExpr("feature_type", [
+      "opening", "#047857",
+      "fixture", "#7c3aed",
+      "detail", "#0f766e",
+      "level", "#475569",
+      "relationship", "#6d28d9",
+      "section", "#0f766e",
+      "geofence", "#15803d",
+      "facility", "#7e22ce",
       "#64748b"
-    ],
+    ]),
     "line-width": 2
   }
 };
