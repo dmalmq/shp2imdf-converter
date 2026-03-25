@@ -1141,7 +1141,7 @@ def test_resolve_unit_overlaps_safe_fixes_detected_safe_pairs(test_client, sampl
 
 
 @pytest.mark.phase5
-def test_export_blocked_when_validation_errors_exist(test_client, sample_dir: Path) -> None:
+def test_export_allowed_even_with_validation_errors(test_client, sample_dir: Path) -> None:
     import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
     session_id = import_response.json()["session_id"]
     assert test_client.patch(
@@ -1166,9 +1166,11 @@ def test_export_blocked_when_validation_errors_exist(test_client, sample_dir: Pa
         json={"properties": {"level_id": None}},
     ).status_code == 200
 
+    # Export should succeed even with validation errors — users can fix issues
+    # in Apple IMDF Sandbox.
     export_response = test_client.get(f"/api/session/{session_id}/export")
-    assert export_response.status_code == 400
-    assert "Export blocked" in export_response.json()["detail"]
+    assert export_response.status_code == 200
+    assert export_response.headers["content-type"] == "application/zip"
 
 
 @pytest.mark.phase5

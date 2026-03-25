@@ -2,11 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    --color-surface: #ffffff;
+    --color-surface-muted: #f8fafc;
+    --color-surface-raised: #ffffff;
+    --color-border: #e2e8f0;
+    --color-border-muted: #f1f5f9;
+
+    --color-primary: #2563eb;
+    --color-primary-hover: #1d4ed8;
+    --color-primary-muted: #dbeafe;
+
+    --color-success: #059669;
+    --color-success-muted: #d1fae5;
+
+    --color-warning: #d97706;
+    --color-warning-muted: #fef3c7;
+
+    --color-error: #dc2626;
+    --color-error-muted: #fee2e2;
+
+    --color-text: #1e293b;
+    --color-text-secondary: #475569;
+    --color-text-muted: #94a3b8;
+
+    --radius-sm: 0.25rem;
+    --radius-md: 0.375rem;
+    --radius-lg: 0.5rem;
+
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  }
+}
+
 body {
   margin: 0;
   font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", Meiryo, sans-serif;
-  background: #f5f7fb;
-  color: #1f2937;
+  background: var(--color-surface-muted);
+  color: var(--color-text);
 }
 
 :root:lang(ja) body,
@@ -16,4 +50,60 @@ body {
 
 a {
   color: inherit;
+}
+
+/* ─── Animations ──────────────────────────────────────── */
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-out-right {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 200ms ease-out both;
+}
+
+.animate-slide-out-right {
+  animation: slide-out-right 150ms ease-in both;
+}
+
+.animate-fade-in {
+  animation: fade-in 150ms ease-out both;
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 200ms ease-out both;
 }

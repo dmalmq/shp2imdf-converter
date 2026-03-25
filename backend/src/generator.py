@@ -273,6 +273,9 @@ def _collect_level_groups(session: SessionRecord) -> dict[int, dict[str, Any]]:
         if item.outdoor:
             group["outdoor"] = True
         group["stems"].add(item.stem)
+    for group in grouped.values():
+        if group["short_name"] and not group["name"]:
+            group["name"] = group["short_name"]
     return grouped
 
 

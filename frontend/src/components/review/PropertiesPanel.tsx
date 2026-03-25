@@ -12,6 +12,7 @@ type Props = {
   levelOptions: Array<{ id: string; label: string }>;
   addressOptions: Array<{ id: string; label: string }>;
   validationIssues: ReviewIssue[];
+  allFeatures: ReviewFeature[];
   autoFixing: boolean;
   overlapResolving: boolean;
   onSave: (featureId: string, properties: Record<string, unknown>) => void;
@@ -97,6 +98,7 @@ export function PropertiesPanel({
   levelOptions,
   addressOptions,
   validationIssues,
+  allFeatures,
   autoFixing,
   overlapResolving,
   onSave,
@@ -166,26 +168,37 @@ export function PropertiesPanel({
                   {autoFixing ? t("Applying...", "適用中...") : t("Auto-fix", "自動修正")}
                 </button>
               ) : null}
-              {item.check === "overlapping_units" && item.related_feature_id ? (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  <button
-                    type="button"
-                    className="rounded border border-amber-300 px-2 py-0.5 text-[11px]"
-                    onClick={() => onResolveUnitOverlap(feature.id, item.related_feature_id!)}
-                    disabled={overlapResolving}
-                  >
-                    {overlapResolving ? t("Applying...", "適用中...") : t("Keep This Unit", "このユニットを残す")}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded border border-amber-300 px-2 py-0.5 text-[11px]"
-                    onClick={() => onResolveUnitOverlap(item.related_feature_id!, feature.id)}
-                    disabled={overlapResolving}
-                  >
-                    {overlapResolving ? t("Applying...", "適用中...") : t("Keep Other Unit", "相手ユニットを残す")}
-                  </button>
-                </div>
-              ) : null}
+              {item.check === "overlapping_units" && item.related_feature_id ? (() => {
+                const otherFeature = allFeatures.find((f) => f.id === item.related_feature_id);
+                const thisLabel = featureName(feature) || feature.id.slice(0, 8);
+                const otherLabel = otherFeature ? (featureName(otherFeature) || otherFeature.id.slice(0, 8)) : item.related_feature_id.slice(0, 8);
+                return (
+                  <div className="mt-2 space-y-1.5">
+                    <div className="flex flex-col gap-0.5 text-[11px] text-amber-700">
+                      <span>{t("This unit", "このユニット")}: <span className="font-mono">{feature.id.slice(0, 8)}</span>{featureName(feature) ? ` — ${featureName(feature)}` : ""}</span>
+                      <span>{t("Other unit", "相手ユニット")}: <span className="font-mono">{(item.related_feature_id ?? "").slice(0, 8)}</span>{otherFeature && featureName(otherFeature) ? ` — ${featureName(otherFeature)}` : ""}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        className="rounded border border-amber-300 px-2 py-0.5 text-[11px]"
+                        onClick={() => onResolveUnitOverlap(feature.id, item.related_feature_id!)}
+                        disabled={overlapResolving}
+                      >
+                        {overlapResolving ? t("Applying...", "適用中...") : t(`Keep "${thisLabel}"`, `「${thisLabel}」を残す`)}
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded border border-amber-300 px-2 py-0.5 text-[11px]"
+                        onClick={() => onResolveUnitOverlap(item.related_feature_id!, feature.id)}
+                        disabled={overlapResolving}
+                      >
+                        {overlapResolving ? t("Applying...", "適用中...") : t(`Keep "${otherLabel}"`, `「${otherLabel}」を残す`)}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })() : null}
             </div>
           ))}
         </div>

@@ -8,9 +8,11 @@ type Props = {
   levelOptions: Array<{ id: string; label: string }>;
   validationLoaded: boolean;
   overlayVisibility: Record<string, boolean>;
+  showBasemap: boolean;
   onLayerVisibilityChange: (next: Record<string, boolean>) => void;
   onLevelFilterChange: (next: string) => void;
   onOverlayVisibilityChange: (next: Record<string, boolean>) => void;
+  onShowBasemapChange: (next: boolean) => void;
 };
 
 
@@ -21,9 +23,11 @@ export function LayerTree({
   levelOptions,
   validationLoaded,
   overlayVisibility,
+  showBasemap,
   onLayerVisibilityChange,
   onLevelFilterChange,
-  onOverlayVisibilityChange
+  onOverlayVisibilityChange,
+  onShowBasemapChange
 }: Props) {
   const { t } = useUiLanguage();
 
@@ -31,6 +35,15 @@ export function LayerTree({
     <div className="rounded border bg-white p-3">
       <h3 className="mb-2 text-sm font-semibold text-slate-700">{t("Layers", "レイヤー")}</h3>
       <div className="grid gap-1">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={showBasemap}
+            onChange={(event) => onShowBasemapChange(event.target.checked)}
+          />
+          <span>{t("OpenStreetMap", "OpenStreetMap")}</span>
+        </label>
+        <hr className="my-1 border-slate-200" />
         {featureTypes.map((featureType) => {
           const checked = layerVisibility[featureType] ?? true;
           return (

@@ -13,6 +13,7 @@ type Props = {
   validationIssues: ReviewIssue[];
   overlayVisibility: Record<string, boolean>;
   levelFilter: string;
+  showBasemap: boolean;
   onSelectFeature: (id: string, multi?: boolean) => void;
 };
 
@@ -33,9 +34,9 @@ const POLYGON_FILL_LAYER: LayerProps = {
       "facility", "#a855f7",
       "#64748b"
     ]),
-    "fill-opacity": buildUnitOpacityExpr("_feature_type", 0.65, 0.35)
+    "fill-opacity": buildUnitOpacityExpr("_feature_type", 1.0, 0.7)
   }
-} as LayerProps;
+} as unknown as LayerProps;
 
 const POLYGON_LINE_LAYER: LayerProps = {
   id: "review-polygons-line",
@@ -55,7 +56,7 @@ const POLYGON_LINE_LAYER: LayerProps = {
     ]),
     "line-width": 1.5
   }
-} as LayerProps;
+} as unknown as LayerProps;
 
 const LINE_LAYER: LayerProps = {
   id: "review-lines",
@@ -249,9 +250,16 @@ export function MapPanel({
   validationIssues,
   overlayVisibility,
   levelFilter,
+  showBasemap,
   onSelectFeature
 }: Props) {
   const mapRef = useRef<MapRef | null>(null);
+
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !map.getLayer("osm-raster")) return;
+    map.setLayoutProperty("osm-raster", "visibility", showBasemap ? "visible" : "none");
+  }, [showBasemap]);
 
   const toGeoJsonFeature = (feature: ReviewFeature) => ({
     type: "Feature" as const,
@@ -386,7 +394,7 @@ export function MapPanel({
   };
 
   return (
-    <div className="h-[640px] overflow-hidden rounded border">
+    <div className="h-full overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)]">
       <Map
         ref={mapRef}
         mapLib={import("maplibre-gl")}
