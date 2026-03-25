@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { EmptyState } from "../shared/EmptyState";
 import { FeatureTypeIcon } from "../ui";
-import { featureName, type ReviewFeature, type ReviewIssue } from "./types";
+import { DEFAULT_LOCATED_FEATURE_ORDER, featureName, type ReviewFeature, type ReviewIssue } from "./types";
 
 
 type Props = {
@@ -31,6 +31,32 @@ const STATUS_DOT: Record<string, string> = {
   ok: "bg-[var(--color-success)]"
 };
 
+type FeatureGroup = {
+  type: string;
+  features: ReviewFeature[];
+};
+
+const TYPE_ORDER = new Map(DEFAULT_LOCATED_FEATURE_ORDER.map((t, i) => [t, i]));
+
+function groupByType(features: ReviewFeature[]): FeatureGroup[] {
+  const map = new Map<string, ReviewFeature[]>();
+  for (const f of features) {
+    const list = map.get(f.feature_type);
+    if (list) {
+      list.push(f);
+    } else {
+      map.set(f.feature_type, [f]);
+    }
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => {
+      const oa = TYPE_ORDER.get(a) ?? 999;
+      const ob = TYPE_ORDER.get(b) ?? 999;
+      return oa !== ob ? oa - ob : a.localeCompare(b);
+    })
+    .map(([type, features]) => ({ type, features }));
+}
+
 
 export function FeatureList({
   features,
@@ -44,6 +70,7 @@ export function FeatureList({
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [lastClickedId, setLastClickedId] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(features.map((f) => f.feature_type)));
   const listRef = useRef<HTMLDivElement>(null);
 
   const errorIds = useMemo(
@@ -70,6 +97,21 @@ export function FeatureList({
     });
   }, [features, search, typeFilter]);
 
+  const groups = useMemo(() => groupByType(filtered), [filtered]);
+
+  // Flat list of visible (non-collapsed) feature ids for shift-click range selection
+  const visibleIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const group of groups) {
+      if (!collapsed.has(group.type)) {
+        for (const f of group.features) {
+          ids.push(f.id);
+        }
+      }
+    }
+    return ids;
+  }, [groups, collapsed]);
+
   const setSelection = (ids: string[]) => {
     if (onSelectionChange) {
       onSelectionChange(ids);
@@ -84,13 +126,12 @@ export function FeatureList({
 
   const handleClick = (id: string, event: React.MouseEvent) => {
     if (event.shiftKey && lastClickedId) {
-      const ids = filtered.map((f) => f.id);
-      const from = ids.indexOf(lastClickedId);
-      const to = ids.indexOf(id);
+      const from = visibleIds.indexOf(lastClickedId);
+      const to = visibleIds.indexOf(id);
       if (from !== -1 && to !== -1) {
         const start = Math.min(from, to);
         const end = Math.max(from, to);
-        const range = ids.slice(start, end + 1);
+        const range = visibleIds.slice(start, end + 1);
         const next = new Set(selectedFeatureIds);
         range.forEach((rid) => next.add(rid));
         setSelection([...next]);
@@ -109,6 +150,18 @@ export function FeatureList({
       onSelectFeature(id, false);
     }
     setLastClickedId(id);
+  };
+
+  const toggleCollapse = (type: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
   };
 
   return (
@@ -139,33 +192,67 @@ export function FeatureList({
       </div>
 
       <div ref={listRef} className="flex-1 overflow-y-auto">
-        {filtered.map((feature) => {
-          const selected = selectedSet.has(feature.id);
-          const name = featureName(feature);
-          const status = statusForFeature(feature.id, errorIds, warningIds);
-          const category = typeof feature.properties.category === "string" ? feature.properties.category : "";
+        {groups.map((group) => {
+          const isCollapsed = collapsed.has(group.type);
+          const groupErrors = group.features.filter((f) => errorIds.has(f.id)).length;
+          const groupWarnings = group.features.filter((f) => warningIds.has(f.id)).length;
 
           return (
-            <div
-              key={feature.id}
-              className={[
-                "flex items-center gap-2 px-3 py-1.5 cursor-pointer border-b border-[var(--color-border)]/50 text-xs transition-colors",
-                selected
-                  ? "bg-[var(--color-primary-muted)] border-l-2 border-l-[var(--color-primary)]"
-                  : "hover:bg-[var(--color-surface-muted)]"
-              ].join(" ")}
-              onClick={(e) => handleClick(feature.id, e)}
-            >
-              <FeatureTypeIcon featureType={feature.feature_type} size="sm" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium text-[var(--color-text)]">
-                  {name || <span className="font-mono text-[var(--color-text-muted)]">{feature.id.slice(0, 8)}</span>}
-                </div>
-                {category ? (
-                  <div className="truncate text-[10px] text-[var(--color-text-muted)]">{category}</div>
+            <div key={group.type}>
+              {/* Group header */}
+              <div
+                className="sticky top-0 z-[1] flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1.5 cursor-pointer select-none text-xs font-medium text-[var(--color-text)]"
+                onClick={() => toggleCollapse(group.type)}
+              >
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 10 10"
+                  className={`shrink-0 transition-transform ${isCollapsed ? "" : "rotate-90"}`}
+                  fill="currentColor"
+                >
+                  <path d="M3 1l4 4-4 4z" />
+                </svg>
+                <FeatureTypeIcon featureType={group.type} size="sm" />
+                <span className="capitalize">{group.type}</span>
+                <span className="ml-auto text-[10px] text-[var(--color-text-muted)]">{group.features.length}</span>
+                {groupErrors > 0 ? (
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--color-error)]" title={`${groupErrors} errors`} />
+                ) : groupWarnings > 0 ? (
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--color-warning)]" title={`${groupWarnings} warnings`} />
                 ) : null}
               </div>
-              <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[status]}`} />
+
+              {/* Feature rows */}
+              {!isCollapsed && group.features.map((feature) => {
+                const selected = selectedSet.has(feature.id);
+                const name = featureName(feature);
+                const status = statusForFeature(feature.id, errorIds, warningIds);
+                const category = typeof feature.properties.category === "string" ? feature.properties.category : "";
+
+                return (
+                  <div
+                    key={feature.id}
+                    className={[
+                      "flex items-center gap-2 px-3 py-1.5 cursor-pointer border-b border-[var(--color-border)]/50 text-xs transition-colors pl-7",
+                      selected
+                        ? "bg-[var(--color-primary-muted)] border-l-2 border-l-[var(--color-primary)]"
+                        : "hover:bg-[var(--color-surface-muted)]"
+                    ].join(" ")}
+                    onClick={(e) => handleClick(feature.id, e)}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium text-[var(--color-text)]">
+                        {name || <span className="font-mono text-[var(--color-text-muted)]">{feature.id.slice(0, 8)}</span>}
+                      </div>
+                      {category ? (
+                        <div className="truncate text-[10px] text-[var(--color-text-muted)]">{category}</div>
+                      ) : null}
+                    </div>
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[status]}`} />
+                  </div>
+                );
+              })}
             </div>
           );
         })}

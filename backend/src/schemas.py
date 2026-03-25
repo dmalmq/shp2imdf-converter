@@ -167,8 +167,8 @@ class FootprintWizardState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     method: Literal["union_buffer", "convex_hull", "concave_hull"] = "union_buffer"
-    footprint_buffer_m: float = 0.5
-    venue_buffer_m: float = 5.0
+    footprint_buffer_m: float = 0.0
+    venue_buffer_m: float = 0.0
 
 
 class WizardState(BaseModel):

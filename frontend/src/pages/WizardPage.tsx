@@ -74,8 +74,8 @@ const EMPTY_FIXTURE_MAPPING: FixtureMappingState = {
 
 const EMPTY_FOOTPRINT: FootprintWizardState = {
   method: "union_buffer",
-  footprint_buffer_m: 0.5,
-  venue_buffer_m: 5
+  footprint_buffer_m: 0,
+  venue_buffer_m: 0
 };
 
 const SECTION_HELP: Record<string, { en: string; ja: string }> = {
@@ -234,11 +234,13 @@ export function WizardPage() {
     if (buildings.length === 0) return false;
     const assigned = new Set(buildings.flatMap((b) => b.file_stems));
     const allAssigned = required.every((f) => assigned.has(f.stem));
+    const venueName = wizardState?.project?.venue_name?.trim();
+    const allNamed = buildings.every((b) => Boolean(b.name?.trim() || venueName));
     const addressesValid = buildings.every((b) => {
       if (b.address_mode !== "different_address") return true;
       return Boolean(b.address?.locality?.trim() && b.address?.country?.trim());
     });
-    return allAssigned && addressesValid;
+    return allAssigned && allNamed && addressesValid;
   }, [files, wizardState]);
 
   const unitMappingComplete = useMemo(
@@ -246,13 +248,8 @@ export function WizardPage() {
     [hasUnitFiles, wizardState]
   );
 
-  const detailConfirmed = useMemo(
-    () => !hasDetailFiles || Boolean(wizardState?.mappings.detail_confirmed),
-    [hasDetailFiles, wizardState]
-  );
-
   const projectSectionValid = projectComplete && buildingsComplete;
-  const attributeSectionValid = unitMappingComplete && detailConfirmed;
+  const attributeSectionValid = unitMappingComplete;
 
   // ─── Section definitions ────────────────────────────────────────────
 
@@ -290,7 +287,7 @@ export function WizardPage() {
           { id: "unit", labelEn: "Unit Mapping", labelJa: "Unit 対応付け", valid: unitMappingComplete, hidden: !hasUnitFiles },
           { id: "opening", labelEn: "Opening Mapping", labelJa: "Opening 対応付け", valid: true, hidden: !hasOpeningFiles },
           { id: "fixture", labelEn: "Fixture Mapping", labelJa: "Fixture 対応付け", valid: true, hidden: !hasFixtureFiles },
-          { id: "detail", labelEn: "Detail Mapping", labelJa: "Detail 設定", valid: detailConfirmed, hidden: !hasDetailFiles }
+          { id: "detail", labelEn: "Detail Mapping", labelJa: "Detail 設定", valid: true, hidden: !hasDetailFiles }
         ]
       },
       {
@@ -302,7 +299,7 @@ export function WizardPage() {
     ],
     [
       projectSectionValid, projectComplete, buildingsComplete, allClassified,
-      levelsComplete, attributeSectionValid, unitMappingComplete, detailConfirmed,
+      levelsComplete, attributeSectionValid, unitMappingComplete,
       hasUnitFiles, hasOpeningFiles, hasFixtureFiles, hasDetailFiles
     ]
   );
@@ -611,6 +608,7 @@ export function WizardPage() {
           <BuildingStep
             buildings={wizardState?.buildings ?? []}
             allFileStems={files.map((f) => f.stem)}
+            venueName={wizardState?.project?.venue_name ?? ""}
             venueAddress={wizardState?.project?.address ?? null}
             saving={wizardSaveStatus === "saving"}
             onSave={(buildings) => void saveBuildings(buildings)}
@@ -689,12 +687,7 @@ export function WizardPage() {
 
       case "detail":
         return (
-          <DetailMapStep
-            files={files}
-            detailConfirmed={wizardState?.mappings.detail_confirmed ?? false}
-            saving={wizardSaveStatus === "saving"}
-            onSave={(confirmed) => void saveMappings({ detail_confirmed: confirmed })}
-          />
+          <DetailMapStep files={files} />
         );
 
       case "summary":

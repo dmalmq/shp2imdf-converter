@@ -7,6 +7,7 @@ import { useUiLanguage } from "../../hooks/useUiLanguage";
 type Props = {
   buildings: BuildingWizardState[];
   allFileStems: string[];
+  venueName: string;
   venueAddress: AddressInput | null;
   saving: boolean;
   onSave: (buildings: BuildingWizardState[]) => void;
@@ -64,7 +65,7 @@ function normalizeForSave(buildings: BuildingWizardState[]): BuildingWizardState
 }
 
 
-export function BuildingStep({ buildings, allFileStems, venueAddress, saving, onSave }: Props) {
+export function BuildingStep({ buildings, allFileStems, venueName, venueAddress, saving, onSave }: Props) {
   const { t } = useUiLanguage();
   const [rows, setRows] = useState<BuildingWizardState[]>(
     () => (buildings.length ? buildings : [createDefaultBuilding(allFileStems)])
@@ -142,6 +143,7 @@ export function BuildingStep({ buildings, allFileStems, venueAddress, saving, on
                 <span className="mb-1 block text-slate-600">{t("Building Name", "建物名")}</span>
                 <input
                   className="w-full rounded border px-2 py-1.5"
+                  placeholder={venueName || ""}
                   value={building.name ?? ""}
                   onChange={(event) =>
                     setRows((prev) =>

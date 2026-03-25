@@ -6,13 +6,10 @@ import { useUiLanguage } from "../../hooks/useUiLanguage";
 
 type Props = {
   files: ImportedFile[];
-  detailConfirmed: boolean;
-  saving: boolean;
-  onSave: (confirmed: boolean) => void;
 };
 
 
-export function DetailMapStep({ files, detailConfirmed, saving, onSave }: Props) {
+export function DetailMapStep({ files }: Props) {
   const { t } = useUiLanguage();
   const detailFiles = useMemo(() => files.filter((item) => item.detected_type === "detail"), [files]);
   const detailFeatureCount = useMemo(
@@ -38,29 +35,13 @@ export function DetailMapStep({ files, detailConfirmed, saving, onSave }: Props)
         </p>
       </div>
       {detailFiles.length > 0 && (
-        <>
-          <label className="mt-4 flex items-start gap-2 rounded border border-slate-200 p-3 text-sm">
-            <input
-              type="checkbox"
-              checked={detailConfirmed}
-              onChange={(event) => onSave(event.target.checked)}
-              disabled={saving}
-            />
-            <span>
-              {t(
-                "I confirm detail features should export as LineString geometry with only `level_id` properties.",
-                "detail を `level_id` のみを持つ LineString として出力することを確認しました。"
-              )}
-            </span>
-          </label>
-          <ul className="mt-3 space-y-1 text-xs text-slate-600">
-            {detailFiles.map((file) => (
-              <li key={file.stem} className="font-mono">
-                {file.stem}
-              </li>
-            ))}
-          </ul>
-        </>
+        <ul className="mt-3 space-y-1 text-xs text-slate-600">
+          {detailFiles.map((file) => (
+            <li key={file.stem} className="font-mono">
+              {file.stem}
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

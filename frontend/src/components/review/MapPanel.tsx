@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import Map, { Layer, type LayerProps, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
+import MapGL, { Layer, type LayerProps, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
 
 import { type ReviewFeature, type ReviewIssue, isLocatedFeature } from "./types";
 import { STREET_MAP_STYLE } from "../shared/streetMapStyle";
@@ -14,6 +14,7 @@ type Props = {
   overlayVisibility: Record<string, boolean>;
   levelFilter: string;
   showBasemap: boolean;
+  activeIssue?: ReviewIssue | null;
   onSelectFeature: (id: string, multi?: boolean) => void;
 };
 
@@ -185,6 +186,52 @@ const OVERLAP_LAYER: LayerProps = {
   }
 };
 
+const OVERLAP_UNIT_A_FILL: LayerProps = {
+  id: "review-overlap-unit-a-fill",
+  type: "fill",
+  filter: ["==", ["get", "overlap_role"], "a"],
+  paint: {
+    "fill-color": "#2563eb",
+    "fill-opacity": 0.30
+  }
+};
+const OVERLAP_UNIT_A_LINE: LayerProps = {
+  id: "review-overlap-unit-a-line",
+  type: "line",
+  filter: ["==", ["get", "overlap_role"], "a"],
+  paint: {
+    "line-color": "#2563eb",
+    "line-width": 2.5
+  }
+};
+const OVERLAP_UNIT_B_FILL: LayerProps = {
+  id: "review-overlap-unit-b-fill",
+  type: "fill",
+  filter: ["==", ["get", "overlap_role"], "b"],
+  paint: {
+    "fill-color": "#ea580c",
+    "fill-opacity": 0.30
+  }
+};
+const OVERLAP_UNIT_B_LINE: LayerProps = {
+  id: "review-overlap-unit-b-line",
+  type: "line",
+  filter: ["==", ["get", "overlap_role"], "b"],
+  paint: {
+    "line-color": "#ea580c",
+    "line-width": 2.5
+  }
+};
+const OVERLAP_INTERSECTION_FILL: LayerProps = {
+  id: "review-overlap-intersection-fill",
+  type: "fill",
+  filter: ["==", ["get", "overlap_role"], "intersection"],
+  paint: {
+    "fill-color": "#ef4444",
+    "fill-opacity": 0.35
+  }
+};
+
 
 function flattenCoordinates(value: unknown, points: [number, number][]): void {
   if (!Array.isArray(value)) {
@@ -251,6 +298,7 @@ export function MapPanel({
   overlayVisibility,
   levelFilter,
   showBasemap,
+  activeIssue,
   onSelectFeature
 }: Props) {
   const mapRef = useRef<MapRef | null>(null);
@@ -284,10 +332,12 @@ export function MapPanel({
     });
   }, [features, layerVisibility, levelFilter]);
 
+  const selectedSet = useMemo(() => new Set(selectedFeatureIds), [selectedFeatureIds]);
+  const hasSelection = selectedFeatureIds.length > 0;
+
   const selectedFeatures = useMemo(() => {
-    const selectedSet = new Set(selectedFeatureIds);
     return visibleFeatures.filter((feature) => selectedSet.has(feature.id));
-  }, [selectedFeatureIds, visibleFeatures]);
+  }, [selectedSet, visibleFeatures]);
 
   const errorIds = useMemo(() => {
     return new Set(validationIssues.filter((item) => item.severity === "error" && item.feature_id).map((item) => item.feature_id!));
@@ -297,30 +347,99 @@ export function MapPanel({
     return new Set(validationIssues.filter((item) => item.severity === "warning" && item.feature_id).map((item) => item.feature_id!));
   }, [validationIssues]);
 
-  const errorFeatures = useMemo(() => visibleFeatures.filter((feature) => errorIds.has(feature.id)), [visibleFeatures, errorIds]);
-  const warningFeatures = useMemo(
-    () => visibleFeatures.filter((feature) => !errorIds.has(feature.id) && warningIds.has(feature.id)),
-    [visibleFeatures, errorIds, warningIds]
-  );
+  // When features are selected, only show error/warning overlays for those features.
+  // When an active issue is set, narrow further to just that issue's feature.
+  const errorFeatures = useMemo(() => {
+    if (activeIssue) {
+      if (activeIssue.check === "overlapping_units") return [];
+      if (activeIssue.severity !== "error") return [];
+      const targetId = activeIssue.feature_id;
+      return targetId ? visibleFeatures.filter((f) => f.id === targetId) : [];
+    }
+    const pool = hasSelection
+      ? visibleFeatures.filter((f) => selectedSet.has(f.id) && errorIds.has(f.id))
+      : visibleFeatures.filter((f) => errorIds.has(f.id));
+    return pool;
+  }, [visibleFeatures, errorIds, hasSelection, selectedSet, activeIssue]);
 
+  const warningFeatures = useMemo(() => {
+    if (activeIssue) {
+      if (activeIssue.check === "overlapping_units") return [];
+      if (activeIssue.severity !== "warning") return [];
+      const targetId = activeIssue.feature_id;
+      return targetId ? visibleFeatures.filter((f) => f.id === targetId) : [];
+    }
+    const pool = hasSelection
+      ? visibleFeatures.filter((f) => selectedSet.has(f.id) && !errorIds.has(f.id) && warningIds.has(f.id))
+      : visibleFeatures.filter((f) => !errorIds.has(f.id) && warningIds.has(f.id));
+    return pool;
+  }, [visibleFeatures, errorIds, warningIds, hasSelection, selectedSet, activeIssue]);
+
+  // When a feature is selected, show both full overlapping units with distinct colors.
+  // When nothing is selected, show all overlap intersection areas (overview mode).
+  // When an active issue is set, show only that specific overlap pair.
   const overlapFeatures = useMemo(() => {
-    return validationIssues
-      .filter((item) => {
-        if (item.check !== "overlapping_units" || !item.overlap_geometry) {
-          return false;
-        }
-        const geometry = item.overlap_geometry;
-        return typeof geometry === "object" && !Array.isArray(geometry) && typeof geometry.type === "string";
-      })
-      .map((item, index) => ({
-        type: "Feature" as const,
-        id: `overlap-${index}`,
+    const overlapIssues = validationIssues.filter(
+      (item) => item.check === "overlapping_units" && item.overlap_geometry &&
+        typeof item.overlap_geometry === "object" && !Array.isArray(item.overlap_geometry) &&
+        typeof (item.overlap_geometry as Record<string, unknown>).type === "string"
+    );
+
+    if (activeIssue) {
+      // Active issue mode: show only the specific overlap pair, or nothing if not an overlap issue
+      if (activeIssue.check !== "overlapping_units") return [];
+      const match = overlapIssues.find(
+        (item) => item.feature_id === activeIssue.feature_id && item.related_feature_id === activeIssue.related_feature_id
+      );
+      if (!match) return [];
+
+      const featureMap = new Map(features.map((f) => [f.id, f]));
+      const result: Array<Record<string, unknown>> = [];
+      const unitA = match.feature_id ? featureMap.get(match.feature_id) : null;
+      const unitB = match.related_feature_id ? featureMap.get(match.related_feature_id) : null;
+      if (unitA?.geometry) {
+        result.push({ type: "Feature", geometry: unitA.geometry, properties: { overlap_role: "a" } });
+      }
+      if (unitB?.geometry) {
+        result.push({ type: "Feature", geometry: unitB.geometry, properties: { overlap_role: "b" } });
+      }
+      result.push({ type: "Feature", geometry: match.overlap_geometry, properties: { overlap_role: "intersection" } });
+      return result;
+    }
+
+    if (!hasSelection) {
+      // Overview: just show intersection polygons
+      return overlapIssues.map((item) => ({
+        type: "Feature",
         geometry: item.overlap_geometry,
-        properties: {
-          check: item.check
-        }
+        properties: { overlap_role: "intersection" }
       }));
-  }, [validationIssues]);
+    }
+
+    // Selection mode: show full unit geometries + intersection for selected overlaps
+    const featureMap = new Map(features.map((f) => [f.id, f]));
+    const result: Array<Record<string, unknown>> = [];
+    const seenPairs = new Set<string>();
+
+    for (const item of overlapIssues) {
+      if (!item.feature_id || !selectedSet.has(item.feature_id) || !item.related_feature_id) continue;
+      const pairKey = [item.feature_id, item.related_feature_id].sort().join("_");
+      if (seenPairs.has(pairKey)) continue;
+      seenPairs.add(pairKey);
+
+      const unitA = featureMap.get(item.feature_id);
+      const unitB = featureMap.get(item.related_feature_id);
+
+      if (unitA?.geometry) {
+        result.push({ type: "Feature", geometry: unitA.geometry, properties: { overlap_role: "a" } });
+      }
+      if (unitB?.geometry) {
+        result.push({ type: "Feature", geometry: unitB.geometry, properties: { overlap_role: "b" } });
+      }
+      result.push({ type: "Feature", geometry: item.overlap_geometry, properties: { overlap_role: "intersection" } });
+    }
+    return result;
+  }, [validationIssues, hasSelection, selectedSet, features, activeIssue]);
 
   const mapData = useMemo(
     () => ({
@@ -374,6 +493,17 @@ export function MapPanel({
     });
   }, [selectedFeatures, visibleFeatures]);
 
+  // Zoom to the active issue's feature(s) when one is selected
+  useEffect(() => {
+    if (!activeIssue || !mapRef.current) return;
+    const targetIds = [activeIssue.feature_id, activeIssue.related_feature_id].filter(Boolean) as string[];
+    const targetFeatures = features.filter((f) => targetIds.includes(f.id));
+    const bounds = computeBounds(targetFeatures);
+    if (bounds) {
+      mapRef.current.fitBounds(bounds, { padding: 60, duration: 400 });
+    }
+  }, [activeIssue, features]);
+
   const onMapClick = (event: MapLayerMouseEvent) => {
     const hit = event.features?.[0];
     if (!hit) {
@@ -395,7 +525,7 @@ export function MapPanel({
 
   return (
     <div className="h-full overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)]">
-      <Map
+      <MapGL
         ref={mapRef}
         mapLib={import("maplibre-gl")}
         initialViewState={{
@@ -440,10 +570,20 @@ export function MapPanel({
         ) : null}
         {overlayVisibility.overlaps !== false ? (
           <Source id="review-overlap-source" type="geojson" data={overlapData}>
-            <Layer {...OVERLAP_LAYER} />
+            {hasSelection || activeIssue ? (
+              <>
+                <Layer {...OVERLAP_UNIT_A_FILL} />
+                <Layer {...OVERLAP_UNIT_A_LINE} />
+                <Layer {...OVERLAP_UNIT_B_FILL} />
+                <Layer {...OVERLAP_UNIT_B_LINE} />
+                <Layer {...OVERLAP_INTERSECTION_FILL} />
+              </>
+            ) : (
+              <Layer {...OVERLAP_LAYER} />
+            )}
           </Source>
         ) : null}
-      </Map>
+      </MapGL>
     </div>
   );
 }

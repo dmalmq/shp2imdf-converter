@@ -21,6 +21,7 @@ import {
   type ValidationResponse
 } from "../api/client";
 import { FeatureList } from "../components/review/FeatureList";
+import { IssuesPanel } from "../components/review/IssuesPanel";
 import { LayerTree } from "../components/review/LayerTree";
 import { MapPanel } from "../components/review/MapPanel";
 import { PropertiesPanel } from "../components/review/PropertiesPanel";
@@ -249,7 +250,9 @@ export function ReviewPage() {
   const [shapefileLegacyMapText, setShapefileLegacyMapText] = useState("");
   const [exportOptionsError, setExportOptionsError] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [sidebarSection, setSidebarSection] = useState<"features" | "properties" | "layers">("features");
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
+  const [activeIssueIndex, setActiveIssueIndex] = useState<number | null>(null);
+  const [issuesPanelCollapsed, setIssuesPanelCollapsed] = useState(false);
 
   const captureError = (caught: unknown, fallbackMessage: string, title: string) => {
     const message = handleApiError(caught, fallbackMessage, { title });
@@ -355,14 +358,10 @@ export function ReviewPage() {
     return features.find((item) => item.id === selectedFeatureIds[0]) ?? null;
   }, [features, selectedFeatureIds]);
 
-  // Auto-switch to properties tab when a feature is selected
+  // Auto-show right sidebar when a feature is selected
   useEffect(() => {
-    if (selectedFeature && sidebarSection === "features") {
-      setSidebarSection("properties");
-    }
-    if (!selectedFeature && sidebarSection === "properties") {
-      setSidebarSection("features");
-    }
+    setRightSidebarOpen(Boolean(selectedFeature));
+    setActiveIssueIndex(null);
   }, [selectedFeature]);
 
   const saveFeatureProperties = async (featureId: string, properties: Record<string, unknown>) => {
@@ -524,7 +523,13 @@ export function ReviewPage() {
     return issuesByFeature.get(selectedFeature.id) ?? [];
   }, [issuesByFeature, selectedFeature]);
 
+  const activeIssue = useMemo(() => {
+    if (activeIssueIndex === null) return null;
+    return selectedFeatureIssues[activeIssueIndex] ?? null;
+  }, [activeIssueIndex, selectedFeatureIssues]);
+
   const applyPostValidationState = (next: ValidationResponse) => {
+    setActiveIssueIndex(null);
     setValidation(next);
     setValidationResults({
       errors: next.summary.error_count,
@@ -944,95 +949,50 @@ export function ReviewPage() {
         </div>
       ) : null}
 
-      {/* Main area: sidebar + map */}
+      {/* Main area: left sidebar + map + right sidebar */}
       <div className="flex flex-1 overflow-hidden">
-        {/* ── Left sidebar ── */}
+        {/* ── Left sidebar: Layers + Features ── */}
         {!sidebarCollapsed ? (
           <aside
             className="flex flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]"
             style={{ width: sidebarWidth, minWidth: sidebarWidth }}
           >
-            {/* Tab bar */}
-            <div className="flex border-b border-[var(--color-border)]">
-              {(["features", "properties", "layers"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  className={[
-                    "flex-1 px-2 py-2 text-[11px] font-medium capitalize transition-colors",
-                    sidebarSection === tab
-                      ? "border-b-2 border-[var(--color-primary)] text-[var(--color-primary)]"
-                      : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                  ].join(" ")}
-                  onClick={() => setSidebarSection(tab)}
-                >
-                  {tab === "features"
-                    ? t("Features", "フィーチャー")
-                    : tab === "properties"
-                      ? t("Properties", "プロパティ")
-                      : t("Layers", "レイヤー")}
-                </button>
-              ))}
-            </div>
-
-            {/* Tab content */}
             <div className="flex-1 overflow-y-auto">
-              {sidebarSection === "features" ? (
-                loading ? (
-                  <div className="space-y-2 p-3">
-                    <SkeletonBlock className="h-6 w-full" />
-                    <SkeletonBlock className="h-6 w-full" />
-                    <SkeletonBlock className="h-6 w-full" />
-                    <SkeletonBlock className="h-6 w-full" />
-                    <SkeletonBlock className="h-6 w-full" />
-                  </div>
-                ) : (
-                  <FeatureList
-                    features={filteredFeatures}
-                    selectedFeatureIds={selectedFeatureIds}
-                    validationIssues={allValidationIssues}
-                    onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
-                    onSelectionChange={(ids) => setSelectedFeatureIds(ids)}
-                  />
-                )
-              ) : null}
+              {/* Layers section (compact) */}
+              <div className="border-b border-[var(--color-border)] p-3">
+                <LayerTree
+                  featureTypes={locatedFeatureTypes}
+                  layerVisibility={layerVisibility}
+                  levelFilter={mapLevelFilter}
+                  levelOptions={levelOptions}
+                  validationLoaded={validation !== null}
+                  overlayVisibility={overlayVisibility}
+                  showBasemap={showBasemap}
+                  onLayerVisibilityChange={setLayerVisibility}
+                  onLevelFilterChange={setMapLevelFilter}
+                  onOverlayVisibilityChange={setOverlayVisibility}
+                  onShowBasemapChange={setShowBasemap}
+                />
+              </div>
 
-              {sidebarSection === "properties" ? (
-                <div className="p-3">
-                  <PropertiesPanel
-                    feature={selectedFeature}
-                    language={wizardState?.project?.language ?? "en"}
-                    levelOptions={levelOptions}
-                    addressOptions={addressOptions}
-                    validationIssues={selectedFeatureIssues}
-                    allFeatures={features}
-                    autoFixing={autofixing}
-                    overlapResolving={overlapResolving}
-                    onSave={(featureId, properties) => void saveFeatureProperties(featureId, properties)}
-                    onDelete={(featureId) => void deleteFeature(featureId)}
-                    onAutoFixSafe={() => void runAutofix(false)}
-                    onResolveUnitOverlap={(keepFeatureId, clipFeatureId) => void resolveOverlapPair(keepFeatureId, clipFeatureId)}
-                  />
+              {/* Features list */}
+              {loading ? (
+                <div className="space-y-2 p-3">
+                  <SkeletonBlock className="h-6 w-full" />
+                  <SkeletonBlock className="h-6 w-full" />
+                  <SkeletonBlock className="h-6 w-full" />
+                  <SkeletonBlock className="h-6 w-full" />
+                  <SkeletonBlock className="h-6 w-full" />
                 </div>
-              ) : null}
-
-              {sidebarSection === "layers" ? (
-                <div className="p-3">
-                  <LayerTree
-                    featureTypes={locatedFeatureTypes}
-                    layerVisibility={layerVisibility}
-                    levelFilter={mapLevelFilter}
-                    levelOptions={levelOptions}
-                    validationLoaded={validation !== null}
-                    overlayVisibility={overlayVisibility}
-                    showBasemap={showBasemap}
-                    onLayerVisibilityChange={setLayerVisibility}
-                    onLevelFilterChange={setMapLevelFilter}
-                    onOverlayVisibilityChange={setOverlayVisibility}
-                    onShowBasemapChange={setShowBasemap}
-                  />
-                </div>
-              ) : null}
+              ) : (
+                <FeatureList
+                  features={filteredFeatures}
+                  selectedFeatureIds={selectedFeatureIds}
+                  validationIssues={allValidationIssues}
+                  onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
+                  onSelectionChange={(ids) => setSelectedFeatureIds(ids)}
+                />
+              )}
             </div>
 
             {/* Bulk actions bar (when multiple selected) */}
@@ -1098,11 +1058,58 @@ export function ReviewPage() {
                 overlayVisibility={overlayVisibility}
                 levelFilter={mapLevelFilter}
                 showBasemap={showBasemap}
+                activeIssue={activeIssue}
                 onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
               />
             </ErrorBoundary>
           )}
         </div>
+
+        {/* ── Right sidebar: Properties ── */}
+        {rightSidebarOpen && selectedFeature ? (
+          <aside
+            className="flex flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)] overflow-y-auto"
+            style={{ width: 340, minWidth: 340 }}
+          >
+            <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2">
+              <span className="text-xs font-medium text-[var(--color-text)]">{t("Properties", "プロパティ")}</span>
+              <button
+                type="button"
+                className="flex h-5 w-5 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]"
+                onClick={() => setRightSidebarOpen(false)}
+              >
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M2 2l6 6M8 2l-6 6" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              {selectedFeatureIssues.length > 0 ? (
+                <IssuesPanel
+                  issues={selectedFeatureIssues}
+                  activeIndex={activeIssueIndex}
+                  collapsed={issuesPanelCollapsed}
+                  feature={selectedFeature}
+                  allFeatures={features}
+                  autoFixing={autofixing}
+                  overlapResolving={overlapResolving}
+                  onSelectIssue={setActiveIssueIndex}
+                  onToggleCollapsed={() => setIssuesPanelCollapsed((prev) => !prev)}
+                  onAutoFixSafe={() => void runAutofix(false)}
+                  onResolveUnitOverlap={(keepFeatureId, clipFeatureId) => void resolveOverlapPair(keepFeatureId, clipFeatureId)}
+                />
+              ) : null}
+              <PropertiesPanel
+                feature={selectedFeature}
+                language={wizardState?.project?.language ?? "en"}
+                levelOptions={levelOptions}
+                addressOptions={addressOptions}
+                onSave={(featureId, properties) => void saveFeatureProperties(featureId, properties)}
+                onDelete={(featureId) => void deleteFeature(featureId)}
+              />
+            </div>
+          </aside>
+        ) : null}
       </div>
 
       {/* Validation bar */}

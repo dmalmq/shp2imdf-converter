@@ -174,6 +174,7 @@ export function PreviewMap({ features, selectedStem, hoveredStem }: Props) {
     [highlighted]
   );
 
+  // Fit bounds whenever the viewed features change
   useEffect(() => {
     const target = hoveredStem ? highlighted : filtered;
     const bounds = computeBounds(target);
@@ -186,6 +187,17 @@ export function PreviewMap({ features, selectedStem, hoveredStem }: Props) {
     });
   }, [filtered, highlighted, hoveredStem]);
 
+  // Fit to all features on initial load / map ready
+  const initialFitDone = useRef(false);
+  const fitToAll = () => {
+    if (initialFitDone.current || !features.length || !mapRef.current) return;
+    const bounds = computeBounds(features);
+    if (!bounds) return;
+    mapRef.current.fitBounds(bounds, { padding: 32, duration: 0 });
+    initialFitDone.current = true;
+  };
+  useEffect(() => { fitToAll(); }, [features]);
+
   return (
     <div className="h-[58vh] min-h-[430px] max-h-[760px] overflow-hidden rounded border">
       <Map
@@ -197,6 +209,7 @@ export function PreviewMap({ features, selectedStem, hoveredStem }: Props) {
           zoom: 14
         }}
         mapStyle={STREET_MAP_STYLE}
+        onLoad={() => fitToAll()}
       >
         <Source id="preview-source" type="geojson" data={mapData}>
           <Layer {...FILL_LAYER} />

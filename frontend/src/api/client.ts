@@ -582,6 +582,29 @@ export async function patchWizardFootprint(
   return handleJson<WizardStateResponse>(response);
 }
 
+export type FootprintPreview = {
+  footprint: number[][][] | null;
+  venue: number[][][] | null;
+  units_bbox: [number, number, number, number] | null;
+};
+
+export async function fetchFootprintPreview(
+  sessionId: string,
+  method: string,
+  footprintBufferM: number,
+  venueBufferM: number
+): Promise<FootprintPreview> {
+  const params = new URLSearchParams({
+    method,
+    footprint_buffer_m: String(footprintBufferM),
+    venue_buffer_m: String(venueBufferM)
+  });
+  const response = await fetch(
+    `/api/session/${sessionId}/wizard/footprint-preview?${params}`
+  );
+  return handleJson<FootprintPreview>(response);
+}
+
 export async function uploadCompanyMappings(
   sessionId: string,
   file: File
