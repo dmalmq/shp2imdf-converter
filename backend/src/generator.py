@@ -273,6 +273,9 @@ def _collect_level_groups(session: SessionRecord) -> dict[int, dict[str, Any]]:
         if item.outdoor:
             group["outdoor"] = True
         group["stems"].add(item.stem)
+    for group in grouped.values():
+        if group["short_name"] and not group["name"]:
+            group["name"] = group["short_name"]
     return grouped
 
 
@@ -553,6 +556,9 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
             merged = unary_union(geometries)
             if merged.is_empty:
                 continue
+            fp_buffer = max(float(session.wizard.footprint.footprint_buffer_m), 0.0) * DEGREES_PER_METER
+            if fp_buffer > 0:
+                merged = merged.buffer(fp_buffer)
 
             category = "ground" if ordinal == 0 else ("aerial" if ordinal > 0 else "subterranean")
             footprint_id = str(uuid4())

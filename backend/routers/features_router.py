@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Request
 from shapely import make_valid
-from shapely.geometry import mapping, shape
+from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, mapping, shape
 from shapely.ops import unary_union
 
 from backend.src.detector import (
@@ -145,6 +145,15 @@ def _clip_unit_overlap(
     if clipped.is_empty or clipped.area <= 0:
         features.pop(clip_index)
         return 0, 1
+
+    # Normalize to Polygon/MultiPolygon — difference() or make_valid() can
+    # produce GeometryCollection containing lines/points alongside polygons.
+    if isinstance(clipped, GeometryCollection) and not isinstance(clipped, (Polygon, MultiPolygon)):
+        polygons = [g for g in clipped.geoms if isinstance(g, Polygon) and g.area > 0]
+        if not polygons:
+            features.pop(clip_index)
+            return 0, 1
+        clipped = polygons[0] if len(polygons) == 1 else MultiPolygon(polygons)
 
     updated_clip = copy.deepcopy(clip_feature)
     updated_clip["geometry"] = mapping(clipped)

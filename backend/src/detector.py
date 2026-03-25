@@ -118,7 +118,7 @@ def detect_feature_type(stem: str, geometry_type: str, keywords: dict[str, set[s
 def detect_level_ordinal(stem: str) -> int | None:
     normalized = stem.upper()
 
-    basement = re.search(r"(^|[^A-Z0-9])B(\d+)([^A-Z0-9]|$)", normalized)
+    basement = re.search(r"(^|[^A-Z0-9])B(\d+)F?([^A-Z0-9]|$)", normalized)
     if basement:
         return -int(basement.group(2))
 

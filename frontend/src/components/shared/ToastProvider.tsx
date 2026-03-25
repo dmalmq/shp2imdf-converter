@@ -11,6 +11,7 @@ type ToastInput = {
 
 type ToastRecord = ToastInput & {
   id: number;
+  exiting: boolean;
 };
 
 type ToastContextValue = {
@@ -20,9 +21,9 @@ type ToastContextValue = {
 const ToastContext = createContext<ToastContextValue | null>(null);
 
 const VARIANT_STYLE: Record<ToastVariant, string> = {
-  info: "border-slate-300 bg-white text-slate-900",
-  success: "border-emerald-300 bg-emerald-50 text-emerald-900",
-  error: "border-red-300 bg-red-50 text-red-900"
+  info: "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)]",
+  success: "border-[var(--color-success)]/30 bg-[var(--color-success-muted)] text-[var(--color-success)]",
+  error: "border-[var(--color-error)]/30 bg-[var(--color-error-muted)] text-[var(--color-error)]"
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -32,14 +33,22 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setToasts((previous) => previous.filter((item) => item.id !== id));
   }, []);
 
+  const startExit = useCallback((id: number) => {
+    setToasts((previous) =>
+      previous.map((item) => (item.id === id ? { ...item, exiting: true } : item))
+    );
+    // Remove after exit animation completes
+    window.setTimeout(() => removeToast(id), 160);
+  }, [removeToast]);
+
   const pushToast = useCallback(
     (toast: ToastInput) => {
       const id = Date.now() + Math.floor(Math.random() * 1000);
-      const durationMs = toast.durationMs ?? 5000;
-      setToasts((previous) => [...previous, { ...toast, id }]);
-      window.setTimeout(() => removeToast(id), durationMs);
+      const durationMs = toast.durationMs ?? 4000;
+      setToasts((previous) => [...previous, { ...toast, id, exiting: false }]);
+      window.setTimeout(() => startExit(id), durationMs);
     },
-    [removeToast]
+    [startExit]
   );
 
   const contextValue = useMemo<ToastContextValue>(() => ({ pushToast }), [pushToast]);
@@ -47,27 +56,33 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={contextValue}>
       {children}
-      <div className="pointer-events-none fixed right-4 top-4 z-[60] flex w-full max-w-sm flex-col gap-2">
+      <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-full max-w-sm flex-col-reverse gap-2">
         {toasts.map((toast) => {
           const variant = toast.variant ?? "info";
           return (
             <div
               key={toast.id}
-              className={`pointer-events-auto rounded border px-3 py-2 shadow ${VARIANT_STYLE[variant]}`}
+              className={[
+                "pointer-events-auto rounded-[var(--radius-md)] border px-3 py-2.5 shadow-[var(--shadow-md)]",
+                VARIANT_STYLE[variant],
+                toast.exiting ? "animate-slide-out-right" : "animate-slide-in-right"
+              ].join(" ")}
               role="status"
               aria-live="polite"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold">{toast.title}</p>
-                  {toast.description ? <p className="mt-0.5 text-xs opacity-90">{toast.description}</p> : null}
+                  {toast.description ? <p className="mt-0.5 text-xs opacity-80">{toast.description}</p> : null}
                 </div>
                 <button
                   type="button"
-                  className="rounded border border-current px-1.5 py-0.5 text-[11px]"
-                  onClick={() => removeToast(toast.id)}
+                  className="shrink-0 rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[11px] opacity-60 transition-opacity hover:opacity-100"
+                  onClick={() => startExit(toast.id)}
                 >
-                  Close
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                    <path d="M3 3l6 6M9 3l-6 6" />
+                  </svg>
                 </button>
               </div>
             </div>

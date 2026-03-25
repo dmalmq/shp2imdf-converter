@@ -1,7 +1,7 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { type ReviewFeature, type ReviewIssue, featureName } from "./types";
+import { type ReviewFeature, featureName } from "./types";
 
 
 const NON_EDITABLE_KEYS = new Set(["metadata", "issues", "status", "source_file", "display_point"]);
@@ -11,13 +11,8 @@ type Props = {
   language: string;
   levelOptions: Array<{ id: string; label: string }>;
   addressOptions: Array<{ id: string; label: string }>;
-  validationIssues: ReviewIssue[];
-  autoFixing: boolean;
-  overlapResolving: boolean;
   onSave: (featureId: string, properties: Record<string, unknown>) => void;
   onDelete: (featureId: string) => void;
-  onAutoFixSafe: () => void;
-  onResolveUnitOverlap: (keepFeatureId: string, clipFeatureId: string) => void;
 };
 
 
@@ -56,53 +51,13 @@ function toStringValue(value: unknown): string {
 }
 
 
-function normalizeIssues(value: unknown): ReviewIssue[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const normalized: ReviewIssue[] = [];
-  value.forEach((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      return;
-    }
-    const candidate = item as Record<string, unknown>;
-    if (
-      typeof candidate.check !== "string" ||
-      typeof candidate.message !== "string" ||
-      (candidate.severity !== "error" && candidate.severity !== "warning")
-    ) {
-      return;
-    }
-    normalized.push({
-      feature_id: typeof candidate.feature_id === "string" ? candidate.feature_id : null,
-      related_feature_id: typeof candidate.related_feature_id === "string" ? candidate.related_feature_id : null,
-      check: candidate.check,
-      message: candidate.message,
-      severity: candidate.severity,
-      auto_fixable: candidate.auto_fixable === true,
-      fix_description: typeof candidate.fix_description === "string" ? candidate.fix_description : null,
-      overlap_geometry:
-        candidate.overlap_geometry && typeof candidate.overlap_geometry === "object" && !Array.isArray(candidate.overlap_geometry)
-          ? (candidate.overlap_geometry as Record<string, unknown>)
-          : null
-    });
-  });
-  return normalized;
-}
-
-
 export function PropertiesPanel({
   feature,
   language,
   levelOptions,
   addressOptions,
-  validationIssues,
-  autoFixing,
-  overlapResolving,
   onSave,
-  onDelete,
-  onAutoFixSafe,
-  onResolveUnitOverlap
+  onDelete
 }: Props) {
   const { t } = useUiLanguage();
   const [form, setForm] = useState<Record<string, unknown>>({});
@@ -110,16 +65,6 @@ export function PropertiesPanel({
   useEffect(() => {
     setForm(feature?.properties ? { ...feature.properties } : {});
   }, [feature]);
-
-  const issues = useMemo(() => {
-    if (!feature) {
-      return [] as ReviewIssue[];
-    }
-    if (validationIssues.length > 0) {
-      return validationIssues;
-    }
-    return normalizeIssues(feature.properties.issues);
-  }, [feature, validationIssues]);
 
   const editableKeys = useMemo(() => {
     if (!feature) {
@@ -146,54 +91,6 @@ export function PropertiesPanel({
           {feature.feature_type} <span className="font-mono">{feature.id.slice(0, 8)}</span>
         </p>
       </div>
-
-      {issues.length > 0 ? (
-        <div className="space-y-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
-          {issues.map((item, index) => (
-            <div key={`${item.check}-${index}`} className="rounded border border-amber-200 bg-white p-2">
-              <p className="font-medium">
-                [{item.severity}] {item.check}
-              </p>
-              <p>{item.message}</p>
-              {item.fix_description ? <p className="text-amber-700">{item.fix_description}</p> : null}
-              {item.auto_fixable ? (
-                <button
-                  type="button"
-                  className="mt-1 rounded border border-amber-300 px-2 py-0.5 text-[11px]"
-                  onClick={onAutoFixSafe}
-                  disabled={autoFixing}
-                >
-                  {autoFixing ? t("Applying...", "適用中...") : t("Auto-fix", "自動修正")}
-                </button>
-              ) : null}
-              {item.check === "overlapping_units" && item.related_feature_id ? (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  <button
-                    type="button"
-                    className="rounded border border-amber-300 px-2 py-0.5 text-[11px]"
-                    onClick={() => onResolveUnitOverlap(feature.id, item.related_feature_id!)}
-                    disabled={overlapResolving}
-                  >
-                    {overlapResolving ? t("Applying...", "適用中...") : t("Keep This Unit", "このユニットを残す")}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded border border-amber-300 px-2 py-0.5 text-[11px]"
-                    onClick={() => onResolveUnitOverlap(item.related_feature_id!, feature.id)}
-                    disabled={overlapResolving}
-                  >
-                    {overlapResolving ? t("Applying...", "適用中...") : t("Keep Other Unit", "相手ユニットを残す")}
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="rounded border border-slate-200 bg-slate-50 p-2 text-xs text-slate-600">
-          {t("No validation issues loaded yet (Phase 5 integration).", "検証結果はまだ読み込まれていません（Phase 5 連携）。")}
-        </div>
-      )}
 
       <div className="grid gap-2">
         {editableKeys.map((key) => {

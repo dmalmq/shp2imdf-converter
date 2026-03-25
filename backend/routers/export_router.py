@@ -77,9 +77,6 @@ def export_imdf(session_id: str, request: Request) -> Response:
     validation = validate_feature_collection(session.feature_collection)
     session.feature_collection = annotate_feature_collection_with_validation(session.feature_collection, validation)
     session.validation = validation
-    if validation.summary.error_count > 0:
-        manager.save_session(session)
-        raise ValueError("Export blocked: unresolved validation errors remain.")
 
     payload, filename = build_export_archive(session)
     manager.save_session(session)

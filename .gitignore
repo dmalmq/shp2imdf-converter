@@ -8,13 +8,19 @@ __pycache__/
 venv/
 
 # Frontend
+node_modules/
 frontend/node_modules/
 frontend/dist/
 *.tsbuildinfo
+screenshots/
+playwright-report/
+test-results/
 
 # Runtime session artifacts
 data/session_uploads/
 data/sessions/
+backend/data/session_uploads/
+backend/data/sessions/
 
 # Editors and OS
 .DS_Store

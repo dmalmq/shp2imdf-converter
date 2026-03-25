@@ -344,6 +344,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
 
     level_geoms = {fid: geoms_by_id[fid] for fid in level_ids if fid in geoms_by_id}
     units_by_level: dict[str, list[tuple[str, BaseGeometry]]] = defaultdict(list)
+    unit_names: dict[str, str] = {}
 
     for row in rows:
         fid = _feature_id(row)
@@ -371,6 +372,14 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 add_issue("error", "unit_missing_category_error", "Unit has no category.", feature_id=fid)
             elif category.strip().lower() == "unspecified":
                 add_issue("warning", "unspecified_category", "Unit category is unspecified.", feature_id=fid)
+            if fid:
+                name_val = props.get("name")
+                if isinstance(name_val, dict):
+                    first_label = next((v for v in name_val.values() if isinstance(v, str) and v), None)
+                    if first_label:
+                        unit_names[fid] = first_label
+                elif isinstance(name_val, str) and name_val:
+                    unit_names[fid] = name_val
             if fid and geom and isinstance(props.get("level_id"), str):
                 units_by_level[props["level_id"]].append((fid, geom))
             if geom and geom.area < 1e-10:
@@ -486,8 +495,10 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
             overlap = _safe_intersection(left_geom, right_geom)
             if overlap is not None and not overlap.is_empty and overlap.area > 0:
                 overlap_geojson = overlap.__geo_interface__
-                add_issue("warning", "overlapping_units", f"Overlaps with unit {right_id[:8]}.", feature_id=left_id, related_feature_id=right_id, overlap_geometry=overlap_geojson)
-                add_issue("warning", "overlapping_units", f"Overlaps with unit {left_id[:8]}.", feature_id=right_id, related_feature_id=left_id, overlap_geometry=overlap_geojson)
+                right_label = f"{unit_names[right_id]} ({right_id[:8]})" if right_id in unit_names else right_id[:8]
+                left_label = f"{unit_names[left_id]} ({left_id[:8]})" if left_id in unit_names else left_id[:8]
+                add_issue("warning", "overlapping_units", f"Overlaps with unit {right_label}.", feature_id=left_id, related_feature_id=right_id, overlap_geometry=overlap_geojson)
+                add_issue("warning", "overlapping_units", f"Overlaps with unit {left_label}.", feature_id=right_id, related_feature_id=left_id, overlap_geometry=overlap_geojson)
 
     # Duplicate geometry warning.
     geometry_hashes: dict[tuple[str, str | None, str], str] = {}

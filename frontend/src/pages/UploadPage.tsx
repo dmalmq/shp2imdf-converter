@@ -1,13 +1,13 @@
-﻿import { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { useNavigate } from "react-router-dom";
 
 import { importShapefiles, type ImportResponse } from "../api/client";
-import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
+import { Button, Card, Badge } from "../components/ui";
 
 type QueuedUploadFile = {
   id: string;
@@ -84,6 +84,7 @@ function toQueuedUploadFile(file: File): QueuedUploadFile | null {
   };
 }
 
+
 export function UploadPage() {
   const navigate = useNavigate();
   const setSessionId = useAppStore((state) => state.setSessionId);
@@ -99,7 +100,8 @@ export function UploadPage() {
   const [progress, setProgress] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ImportResponse | null>(null);
+  const [cleanupExpanded, setCleanupExpanded] = useState(false);
+  const [lastCleanup, setLastCleanup] = useState<ImportResponse["cleanup_summary"] | null>(null);
 
   const onDrop = (acceptedFiles: File[]) => {
     const parsed = acceptedFiles.map(toQueuedUploadFile);
@@ -202,53 +204,6 @@ export function UploadPage() {
     () => stemRows.filter((row) => row.selected).length,
     [stemRows]
   );
-  const selectedArchiveCount = useMemo(
-    () => archiveRows.filter((row) => row.selected).length,
-    [archiveRows]
-  );
-  const selectedGeoPackageCount = useMemo(
-    () => geoPackageRows.filter((row) => row.selected).length,
-    [geoPackageRows]
-  );
-
-  const fileCountLabel = useMemo(() => {
-    if (stemRows.length === 0 && geoPackageRows.length === 0 && archiveRows.length === 0) {
-      return t("No files selected", "No files selected");
-    }
-
-    const parts: string[] = [];
-    if (stemRows.length > 0) {
-      parts.push(`${selectedStemCount} of ${stemRows.length} shapefile group(s) selected`);
-    }
-    if (geoPackageRows.length > 0) {
-      parts.push(`${selectedGeoPackageCount} of ${geoPackageRows.length} GeoPackage(s) selected`);
-    }
-    if (archiveRows.length > 0) {
-      parts.push(`${selectedArchiveCount} of ${archiveRows.length} archive(s) selected`);
-    }
-
-    const label = parts.join(" - ");
-    return t(label, label);
-  }, [
-    archiveRows.length,
-    geoPackageRows.length,
-    selectedArchiveCount,
-    selectedGeoPackageCount,
-    selectedStemCount,
-    stemRows.length,
-    t
-  ]);
-
-  const componentCountLabel = useMemo(() => {
-    const componentCount = queuedFiles.filter((item) => item.kind === "shapefile").length;
-    const selectedComponentCount = queuedFiles.filter((item) => item.kind === "shapefile" && item.selected).length;
-    if (componentCount === 0) {
-      return null;
-    }
-
-    const label = `${selectedComponentCount} of ${componentCount} component file(s) selected`;
-    return t(label, label);
-  }, [queuedFiles, t]);
 
   const toggleStemGroup = (stemKey: string) => {
     const row = stemRows.find((item) => item.key === stemKey);
@@ -281,22 +236,27 @@ export function UploadPage() {
     );
   };
 
-  const setAllQueuedFilesSelected = (selected: boolean) => {
-    setQueuedFiles((previous) => previous.map((item) => (item.selected === selected ? item : { ...item, selected })));
+  const removeFile = (id: string) => {
+    setQueuedFiles((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const runImport = async () => {
+  const removeStemGroup = (stemKey: string) => {
+    setQueuedFiles((prev) =>
+      prev.filter((item) => {
+        if (item.kind !== "shapefile" || !item.stem) return true;
+        return item.stem.toLowerCase() !== stemKey;
+      })
+    );
+  };
+
+  // Import & auto-continue to wizard
+  const runImportAndContinue = async () => {
     if (selectedFiles.length === 0) {
       const message = t(
         "Select at least one shapefile group, GeoPackage, or zip archive before importing.",
         "Select at least one shapefile group, GeoPackage, or zip archive before importing."
       );
       setError(message);
-      pushToast({
-        title: t("No files selected", "No files selected"),
-        description: message,
-        variant: "error"
-      });
       return;
     }
 
@@ -306,19 +266,21 @@ export function UploadPage() {
     try {
       const payload = await importShapefiles(selectedFiles, setProgress);
       setSessionExpiredMessage(null);
-      setResult(payload);
       setSessionId(payload.session_id);
       setFiles(payload.files);
       setCleanupSummary(payload.cleanup_summary);
-      setCurrentScreen("upload");
+      setLastCleanup(payload.cleanup_summary);
+      setCurrentScreen("wizard");
+
       pushToast({
-        title: t("Import complete", "Import complete"),
-        description: t(`${payload.files.length} dataset(s) imported.`, `${payload.files.length} dataset(s) imported.`),
+        title: t("Import complete", "インポート完了"),
+        description: t(`${payload.files.length} dataset(s) imported.`, `${payload.files.length} 件のデータセットをインポートしました。`),
         variant: "success"
       });
+
       if (payload.warnings.length > 0) {
         pushToast({
-          title: t("Import warnings", "Import warnings"),
+          title: t("Import warnings", "インポート警告"),
           description: t(
             `${payload.warnings.length} warning(s) reported during import.`,
             `${payload.warnings.length} warning(s) reported during import.`
@@ -326,9 +288,12 @@ export function UploadPage() {
           variant: "info"
         });
       }
+
+      // Auto-navigate to wizard
+      navigate("/wizard");
     } catch (caught) {
-      const message = handleApiError(caught, t("Import failed", "Import failed"), {
-        title: t("Import failed", "Import failed")
+      const message = handleApiError(caught, t("Import failed", "インポートに失敗しました"), {
+        title: t("Import failed", "インポート失敗")
       });
       setError(message);
     } finally {
@@ -336,175 +301,234 @@ export function UploadPage() {
     }
   };
 
-  const continueToWizard = () => {
-    setCurrentScreen("wizard");
-    navigate("/wizard");
-  };
+  const hasFiles = stemRows.length > 0 || geoPackageRows.length > 0 || archiveRows.length > 0;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-6 p-6">
-      <h1 className="text-3xl font-semibold">SHP/GPKG to IMDF Converter</h1>
-      <p className="text-sm text-slate-600">
-        {t(
-          "Upload shapefile component files (.shp/.dbf/.shx/.prj), GeoPackages (.gpkg), or a zip archive.",
-          "Upload shapefile component files (.shp/.dbf/.shx/.prj), GeoPackages (.gpkg), or a zip archive."
-        )}
-      </p>
-
-      <section
-        {...getRootProps()}
-        className={`rounded-lg border-2 border-dashed p-8 text-center ${
-          isDragActive ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-white"
-        }`}
-      >
-        <input {...getInputProps()} />
-        {isDragActive ? (
-          <p>{t("Drop files here...", "Drop files here...")}</p>
-        ) : (
-          <p>{t("Drag files/folders here, or click to browse.", "Drag files/folders here, or click to browse.")}</p>
-        )}
-      </section>
-
-      <div className="rounded border bg-white p-4 text-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="font-medium">{fileCountLabel}</p>
-            {componentCountLabel ? <p className="text-xs text-slate-500">{componentCountLabel}</p> : null}
-          </div>
-          {queuedFiles.length > 0 && !loading ? (
-            <div className="flex items-center gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => setAllQueuedFilesSelected(true)}
-                className="rounded border border-slate-300 px-2 py-1 text-slate-700 hover:bg-slate-50"
+    <div className="flex flex-1 items-start justify-center px-4 py-10">
+      <Card padding="lg" className="w-full max-w-2xl animate-fade-in-up">
+        {/* Cleanup summary banner (if exists from a previous import in same session) */}
+        {lastCleanup && !loading ? (
+          <div className="mb-5 rounded-[var(--radius-md)] border border-[var(--color-primary)]/20 bg-[var(--color-primary-muted)] px-3 py-2">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between text-xs font-medium text-[var(--color-primary)]"
+              onClick={() => setCleanupExpanded((prev) => !prev)}
+            >
+              <span>{t("Cleanup Summary", "クリーンアップサマリー")}</span>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                className={`transition-transform ${cleanupExpanded ? "rotate-180" : ""}`}
               >
-                {t("Select all", "Select all")}
-              </button>
-              <button
-                type="button"
-                onClick={() => setAllQueuedFilesSelected(false)}
-                className="rounded border border-slate-300 px-2 py-1 text-slate-700 hover:bg-slate-50"
-              >
-                {t("Select none", "Select none")}
-              </button>
-            </div>
-          ) : null}
-        </div>
-
-        {loading ? (
-          <div className="mt-2 space-y-2">
-            <SkeletonBlock className="h-3 w-full" />
-            <SkeletonBlock className="h-3 w-11/12" />
-            <SkeletonBlock className="h-3 w-4/5" />
-          </div>
-        ) : stemRows.length > 0 || geoPackageRows.length > 0 || archiveRows.length > 0 ? (
-          <div className="mt-3 max-h-[560px] overflow-auto pr-1">
-            {groupedStemRows.map((group) => (
-              <section key={group.suffixGroup} className="mb-4 last:mb-0">
-                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{group.suffixGroup}</h3>
-                <ul className="space-y-1">
-                  {group.rows.map((row) => (
-                    <li key={row.key}>
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={row.selected}
-                          onChange={() => toggleStemGroup(row.key)}
-                          className="h-4 w-4"
-                        />
-                        <span className={row.selected ? "text-slate-900" : "text-slate-500 line-through"}>{row.stem}</span>
-                        <span className="text-xs text-slate-500">
-                          ({row.fileCount} file(s): {row.extensions.map((extension) => `.${extension}`).join(", ")})
-                        </span>
-                      </label>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))}
-
-            {geoPackageRows.length > 0 ? (
-              <section className="mb-4">
-                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">GeoPackage</h3>
-                <ul className="space-y-1">
-                  {geoPackageRows.map((item) => (
-                    <li key={item.id}>
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={item.selected}
-                          onChange={() => toggleGeoPackage(item.id)}
-                          className="h-4 w-4"
-                        />
-                        <span className={item.selected ? "text-slate-900" : "text-slate-500 line-through"}>
-                          {item.file.name}
-                        </span>
-                      </label>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-
-            {archiveRows.length > 0 ? (
-              <section>
-                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">ZIP</h3>
-                <ul className="space-y-1">
-                  {archiveRows.map((item) => (
-                    <li key={item.id}>
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={item.selected}
-                          onChange={() => toggleArchive(item.id)}
-                          className="h-4 w-4"
-                        />
-                        <span className={item.selected ? "text-slate-900" : "text-slate-500 line-through"}>{item.file.name}</span>
-                      </label>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+                <path d="M3 5l4 4 4-4" />
+              </svg>
+            </button>
+            {cleanupExpanded ? (
+              <ul className="mt-2 space-y-0.5 text-xs text-[var(--color-text-secondary)]">
+                <li>{t("Multipolygons exploded", "マルチポリゴン分解")}: {lastCleanup.multipolygons_exploded}</li>
+                <li>{t("Rings closed", "リング閉鎖")}: {lastCleanup.rings_closed}</li>
+                <li>{t("Features reoriented", "フィーチャー方向修正")}: {lastCleanup.features_reoriented}</li>
+                <li>{t("Empty features dropped", "空フィーチャー削除")}: {lastCleanup.empty_features_dropped}</li>
+                <li>{t("Coordinates rounded", "座標丸め")}: {lastCleanup.coordinates_rounded}</li>
+              </ul>
             ) : null}
           </div>
         ) : null}
-      </div>
 
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={runImport}
-          disabled={loading || selectedFileCount === 0}
-          className="rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-60"
+        {/* Dropzone */}
+        <div
+          {...getRootProps()}
+          className={[
+            "flex flex-col items-center justify-center rounded-[var(--radius-lg)] border-2 border-dashed px-6 py-10 text-center transition-colors cursor-pointer",
+            isDragActive
+              ? "border-[var(--color-primary)] bg-[var(--color-primary-muted)]"
+              : "border-[var(--color-border)] bg-[var(--color-surface-muted)] hover:border-[var(--color-primary)]/50"
+          ].join(" ")}
         >
-          {loading ? t("Importing...", "Importing...") : t("Import Files", "Import Files")}
-        </button>
-        {loading && <span className="text-sm text-slate-700">{t(`Upload progress: ${progress}%`, `Upload progress: ${progress}%`)}</span>}
-      </div>
-
-      {error && (
-        <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-      )}
-
-      {result && (
-        <section className="rounded border bg-white p-4">
-          <h2 className="text-lg font-semibold">{t("Cleanup Summary", "Cleanup Summary")}</h2>
-          <ul className="mt-2 text-sm">
-            <li>{t("Multipolygons exploded", "Multipolygons exploded")}: {result.cleanup_summary.multipolygons_exploded}</li>
-            <li>{t("Rings closed", "Rings closed")}: {result.cleanup_summary.rings_closed}</li>
-            <li>{t("Features reoriented", "Features reoriented")}: {result.cleanup_summary.features_reoriented}</li>
-            <li>{t("Empty features dropped", "Empty features dropped")}: {result.cleanup_summary.empty_features_dropped}</li>
-            <li>{t("Coordinates rounded", "Coordinates rounded")}: {result.cleanup_summary.coordinates_rounded}</li>
-          </ul>
-          <button
-            type="button"
-            onClick={continueToWizard}
-            className="mt-4 rounded bg-emerald-600 px-4 py-2 text-white"
+          <input {...getInputProps()} />
+          <svg
+            width="40"
+            height="40"
+            viewBox="0 0 40 40"
+            fill="none"
+            className="mb-3 text-[var(--color-text-muted)]"
           >
-            {t("Continue to Wizard", "Continue to Wizard")}
-          </button>
-        </section>
-      )}
-    </main>
+            <rect x="4" y="8" width="32" height="24" rx="3" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M20 16v10M15 21l5-5 5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          {isDragActive ? (
+            <p className="text-sm font-medium text-[var(--color-primary)]">
+              {t("Drop files here...", "ここにファイルをドロップ...")}
+            </p>
+          ) : (
+            <>
+              <p className="text-sm font-medium text-[var(--color-text)]">
+                {t("Drop files here or click to browse", "ファイルをドロップまたはクリックして選択")}
+              </p>
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                .shp, .dbf, .shx, .prj, .gpkg, .zip
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* File chips */}
+        {hasFiles ? (
+          <div className="mt-5">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-medium text-[var(--color-text-secondary)]">
+                {selectedStemCount + geoPackageRows.filter((r) => r.selected).length + archiveRows.filter((r) => r.selected).length} {t("of", "/")} {stemRows.length + geoPackageRows.length + archiveRows.length} {t("datasets selected", "データセット選択")}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {groupedStemRows.flatMap((group) =>
+                group.rows.map((row) => (
+                  <label
+                    key={row.key}
+                    className={[
+                      "group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors cursor-pointer",
+                      row.selected
+                        ? "border-[var(--color-primary)]/30 bg-[var(--color-primary-muted)] text-[var(--color-primary)]"
+                        : "border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]"
+                    ].join(" ")}
+                  >
+                    <input
+                      type="checkbox"
+                      className="sr-only"
+                      checked={row.selected}
+                      onChange={() => toggleStemGroup(row.key)}
+                    />
+                    <span className="truncate max-w-[180px]">{row.stem}</span>
+                    <Badge variant={row.selected ? "primary" : "default"}>{row.extensions.map((e) => `.${e}`).join(", ")}</Badge>
+                    <button
+                      type="button"
+                      className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-current hover:text-[var(--color-error)]"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        removeStemGroup(row.key);
+                      }}
+                      title={t("Remove", "削除")}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                        <path d="M3 3l6 6M9 3l-6 6" />
+                      </svg>
+                    </button>
+                  </label>
+                ))
+              )}
+
+              {geoPackageRows.map((item) => (
+                <label
+                  key={item.id}
+                  className={[
+                    "group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors cursor-pointer",
+                    item.selected
+                      ? "border-[var(--color-success)]/30 bg-[var(--color-success-muted)] text-[var(--color-success)]"
+                      : "border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]"
+                  ].join(" ")}
+                >
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={item.selected}
+                    onChange={() => toggleGeoPackage(item.id)}
+                  />
+                  <span className="truncate max-w-[180px]">{item.file.name}</span>
+                  <Badge variant={item.selected ? "success" : "default"}>.gpkg</Badge>
+                  <button
+                    type="button"
+                    className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-current hover:text-[var(--color-error)]"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      removeFile(item.id);
+                    }}
+                    title={t("Remove", "削除")}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                      <path d="M3 3l6 6M9 3l-6 6" />
+                    </svg>
+                  </button>
+                </label>
+              ))}
+
+              {archiveRows.map((item) => (
+                <label
+                  key={item.id}
+                  className={[
+                    "group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors cursor-pointer",
+                    item.selected
+                      ? "border-[var(--color-warning)]/30 bg-[var(--color-warning-muted)] text-[var(--color-warning)]"
+                      : "border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]"
+                  ].join(" ")}
+                >
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={item.selected}
+                    onChange={() => toggleArchive(item.id)}
+                  />
+                  <span className="truncate max-w-[180px]">{item.file.name}</span>
+                  <Badge variant={item.selected ? "warning" : "default"}>.zip</Badge>
+                  <button
+                    type="button"
+                    className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-current hover:text-[var(--color-error)]"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      removeFile(item.id);
+                    }}
+                    title={t("Remove", "削除")}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                      <path d="M3 3l6 6M9 3l-6 6" />
+                    </svg>
+                  </button>
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Error */}
+        {error ? (
+          <div className="mt-4 rounded-[var(--radius-md)] border border-[var(--color-error)]/20 bg-[var(--color-error-muted)] px-3 py-2 text-xs text-[var(--color-error)]">
+            {error}
+          </div>
+        ) : null}
+
+        {/* Import button */}
+        <div className="mt-6">
+          <Button
+            variant="primary"
+            className="relative w-full overflow-hidden"
+            onClick={() => void runImportAndContinue()}
+            disabled={loading || selectedFileCount === 0}
+          >
+            {/* Progress bar overlay */}
+            {loading ? (
+              <span
+                className="absolute inset-y-0 left-0 bg-white/20 transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
+            ) : null}
+            <span className="relative">
+              {loading
+                ? t(`Importing... ${progress}%`, `インポート中... ${progress}%`)
+                : hasFiles
+                  ? t("Import & Continue", "インポートして次へ")
+                  : t("Import & Continue", "インポートして次へ")}
+            </span>
+          </Button>
+        </div>
+      </Card>
+    </div>
   );
 }

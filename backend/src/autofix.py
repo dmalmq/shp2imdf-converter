@@ -7,7 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from shapely import make_valid
-from shapely.geometry import mapping, shape
+from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, mapping, shape
 from uuid import UUID
 
 from backend.src.schemas import AutofixApplied, AutofixPrompt, ValidationResponse
@@ -100,6 +100,13 @@ def apply_autofix(
         if issue.check == "invalid_geometry" and isinstance(geometry, dict):
             try:
                 repaired = make_valid(shape(geometry))
+                # make_valid() can produce GeometryCollection with lines/points;
+                # extract only Polygon components to keep the geometry valid for
+                # feature types that require Polygon/MultiPolygon.
+                if isinstance(repaired, GeometryCollection) and not isinstance(repaired, (Polygon, MultiPolygon)):
+                    polygons = [g for g in repaired.geoms if isinstance(g, Polygon) and g.area > 0]
+                    if polygons:
+                        repaired = polygons[0] if len(polygons) == 1 else MultiPolygon(polygons)
                 row["geometry"] = mapping(repaired)
                 fixes_applied.append(
                     AutofixApplied(

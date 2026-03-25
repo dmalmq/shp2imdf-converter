@@ -676,6 +676,73 @@ def patch_wizard_footprint(
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
 
 
+DEGREES_PER_METER = 1 / 111_320
+
+
+@router.get("/wizard/footprint-preview")
+def footprint_preview(
+    session_id: str,
+    request: Request,
+    method: str = "union_buffer",
+    footprint_buffer_m: float = 0.0,
+    venue_buffer_m: float = 0.0,
+) -> dict:
+    """Return simplified footprint + venue outlines for live preview."""
+    session = _get_session_or_raise(session_id, request)
+
+    # Collect all unit geometries
+    collection = session.source_feature_collection or session.feature_collection
+    source_rows = (collection or {}).get("features") or []
+    file_map = {f.stem: f for f in session.files}
+
+    unit_geoms: list = []
+    for row in source_rows:
+        props = row.get("properties") or {}
+        stem = props.get("source_file")
+        if not stem or stem not in file_map:
+            continue
+        if (file_map[stem].detected_type or "").lower() != "unit":
+            continue
+        geometry = row.get("geometry")
+        if not isinstance(geometry, dict):
+            continue
+        geom = shape(geometry)
+        if not geom.is_empty:
+            unit_geoms.append(geom)
+
+    if not unit_geoms:
+        return {"footprint": None, "venue": None, "units_bbox": None}
+
+    merged = unary_union(unit_geoms)
+
+    # Apply footprint buffer
+    fp_buffer = max(float(footprint_buffer_m), 0.0) * DEGREES_PER_METER
+    footprint_geom = merged.buffer(fp_buffer) if fp_buffer > 0 else merged
+
+    # Venue = footprint + venue buffer
+    v_buffer = max(float(venue_buffer_m), 0.0) * DEGREES_PER_METER
+    venue_geom = footprint_geom.buffer(v_buffer) if v_buffer > 0 else footprint_geom
+
+    # Simplify for preview (tolerance ~0.5m)
+    tolerance = 0.5 * DEGREES_PER_METER
+    fp_simple = footprint_geom.simplify(tolerance)
+    venue_simple = venue_geom.simplify(tolerance)
+
+    def geom_coords(geom: Any) -> list:
+        if geom.geom_type == "Polygon":
+            return [list(geom.exterior.coords)]
+        if geom.geom_type == "MultiPolygon":
+            return [list(p.exterior.coords) for p in geom.geoms]
+        return []
+
+    bounds = merged.bounds  # (minx, miny, maxx, maxy)
+    return {
+        "footprint": geom_coords(fp_simple),
+        "venue": geom_coords(venue_simple),
+        "units_bbox": list(bounds),
+    }
+
+
 @router.post("/config/company-mappings", response_model=CompanyMappingsUploadResponse)
 async def upload_company_mappings(
     session_id: str,

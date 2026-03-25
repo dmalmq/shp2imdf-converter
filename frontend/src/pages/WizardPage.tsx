@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 import {
   autofillWizardAddressFromGeometry,
@@ -36,14 +36,14 @@ import { FootprintStep } from "../components/wizard/FootprintStep";
 import { LevelMapStep } from "../components/wizard/LevelMapStep";
 import { OpeningMapStep } from "../components/wizard/OpeningMapStep";
 import { ProjectInfoStep } from "../components/wizard/ProjectInfoStep";
-import { StepSidebar } from "../components/wizard/StepSidebar";
+import { SectionNav, type SectionDef } from "../components/wizard/SectionNav";
 import { SummaryStep } from "../components/wizard/SummaryStep";
 import { UnitMapStep } from "../components/wizard/UnitMapStep";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
+import { Button, Badge } from "../components/ui";
 
-const STEP_ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail", "kiosk", "section"]);
 
 const EMPTY_UNIT_MAPPING: UnitMappingState = {
@@ -74,54 +74,49 @@ const EMPTY_FIXTURE_MAPPING: FixtureMappingState = {
 
 const EMPTY_FOOTPRINT: FootprintWizardState = {
   method: "union_buffer",
-  footprint_buffer_m: 0.5,
-  venue_buffer_m: 5
+  footprint_buffer_m: 0,
+  venue_buffer_m: 0
 };
 
-type StepValidation = {
-  valid: boolean;
-  reason: string | null;
-};
-
-const STEP_HELP_TEXT: Record<number, { en: string; ja: string }> = {
-  1: {
+const SECTION_HELP: Record<string, { en: string; ja: string }> = {
+  project: {
     en: "Set venue basics like name, category, and address. These become your IMDF venue and address records.",
-    ja: "会場名・カテゴリ・住所などの基本情報を設定します。ここでの入力が IMDF の venue/address に使われます。"
+    ja: "会場名・カテゴリ・住所などの基本情報を設定します。"
   },
-  2: {
-    en: "Confirm each source file type (unit/opening/fixture/detail plus optional IMDF types). Correct classification keeps later mapping accurate.",
-    ja: "各ファイルの種別（unit/opening/fixture/detail と追加 IMDF 種別）を確認します。ここが正しいと後続の変換が安定します。"
-  },
-  3: {
-    en: "Set floor levels and names so every feature is assigned to the correct level in IMDF.",
-    ja: "各ファイルの階層（レベル）と名称を設定します。すべての要素が正しい level に紐づきます。"
-  },
-  4: {
+  building: {
     en: "Group level files into buildings and optionally define building-specific addresses.",
-    ja: "レベルファイルを建物ごとに割り当てます。必要に応じて建物別住所も設定できます。"
+    ja: "レベルファイルを建物ごとに割り当てます。"
   },
-  5: {
-    en: "Choose how unit attributes map to IMDF categories and names. Upload company mappings if needed.",
-    ja: "ユニット属性を IMDF カテゴリや名称へ対応付けます。必要なら会社コード対応表をアップロードします。"
-  },
-  6: {
-    en: "Map opening attributes such as category, door type, and accessibility-related fields.",
-    ja: "opening のカテゴリ、ドア種別、アクセシビリティ項目などの対応付けを行います。"
-  },
-  7: {
-    en: "Map fixture names and categories for non-unit physical objects.",
-    ja: "fixture（設備）の名称とカテゴリを対応付けます。"
-  },
-  8: {
-    en: "Detail features are exported as lightweight line features linked to levels only.",
-    ja: "detail は level のみを持つ軽量な線要素として出力されます。"
-  },
-  9: {
+  footprint: {
     en: "Pick how footprint and venue outlines are derived from your source geometry.",
     ja: "元データから footprint / venue 外形を作る方法を選択します。"
   },
-  10: {
-    en: "Review configuration summary, then generate draft IMDF features and continue to review.",
+  files: {
+    en: "Confirm each source file type. Correct classification keeps later mapping accurate.",
+    ja: "各ファイルの種別を確認します。"
+  },
+  levels: {
+    en: "Set floor levels and names so every feature is assigned to the correct level.",
+    ja: "各ファイルの階層（レベル）と名称を設定します。"
+  },
+  unit: {
+    en: "Choose how unit attributes map to IMDF categories and names.",
+    ja: "ユニット属性を IMDF カテゴリや名称へ対応付けます。"
+  },
+  opening: {
+    en: "Map opening attributes such as category, door type, and accessibility-related fields.",
+    ja: "opening のカテゴリ、ドア種別、アクセシビリティ項目などの対応付けを行います。"
+  },
+  fixture: {
+    en: "Map fixture names and categories for non-unit physical objects.",
+    ja: "fixture（設備）の名称とカテゴリを対応付けます。"
+  },
+  detail: {
+    en: "Detail features are exported as lightweight line features linked to levels only.",
+    ja: "detail は level のみを持つ軽量な線要素として出力されます。"
+  },
+  summary: {
+    en: "Review configuration, then generate draft IMDF features and continue to review.",
     ja: "設定内容を最終確認し、ドラフト生成してレビュー画面へ進みます。"
   }
 };
@@ -160,7 +155,7 @@ function isFormTarget(target: EventTarget | null): boolean {
 
 function WizardStepSkeleton() {
   return (
-    <section className="rounded border bg-white p-5">
+    <section className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
       <SkeletonBlock className="h-6 w-56" />
       <div className="mt-4 space-y-3">
         <SkeletonBlock className="h-10 w-full" />
@@ -171,6 +166,7 @@ function WizardStepSkeleton() {
     </section>
   );
 }
+
 
 export function WizardPage() {
   const navigate = useNavigate();
@@ -195,8 +191,7 @@ export function WizardPage() {
   const pushToast = useToast();
   const { t, isJapanese } = useUiLanguage();
 
-  const [step, setStep] = useState(1);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState("project");
   const [loading, setLoading] = useState(false);
   const [features, setFeatures] = useState<
     {
@@ -207,120 +202,110 @@ export function WizardPage() {
     }[]
   >([]);
 
-  const openingCount = useMemo(() => files.filter((item) => item.detected_type === "opening").length, [files]);
-  const fixtureCount = useMemo(() => files.filter((item) => item.detected_type === "fixture").length, [files]);
-  const detailCount = useMemo(() => files.filter((item) => item.detected_type === "detail").length, [files]);
-  const stepHelp = STEP_HELP_TEXT[step] ?? STEP_HELP_TEXT[1];
+  const hasOpeningFiles = useMemo(() => files.some((f) => f.detected_type === "opening"), [files]);
+  const hasFixtureFiles = useMemo(() => files.some((f) => f.detected_type === "fixture"), [files]);
+  const hasDetailFiles = useMemo(() => files.some((f) => f.detected_type === "detail"), [files]);
+  const hasUnitFiles = useMemo(() => files.some((f) => f.detected_type === "unit"), [files]);
+
+  // ─── Validation ─────────────────────────────────────────────────────
 
   const projectComplete = useMemo(() => {
     const project = wizardState?.project;
-    if (!project) {
-      return false;
-    }
+    if (!project) return false;
     return Boolean(
       project.venue_name.trim() &&
-        project.venue_category.trim() &&
-        project.address.locality.trim() &&
-        project.address.country.trim()
+      project.venue_category.trim() &&
+      project.address.locality.trim() &&
+      project.address.country.trim()
     );
   }, [wizardState]);
 
-  const stepValidation = useMemo<Record<number, StepValidation>>(() => {
-    const requiredLevelFiles = files.filter((item) => LEVEL_REQUIRED_TYPES.has(item.detected_type ?? ""));
-    const hasRequiredLevelFiles = requiredLevelFiles.length > 0;
-    const allClassified = files.every((item) => Boolean(item.detected_type));
-    const levelsComplete = !hasRequiredLevelFiles || requiredLevelFiles.every((item) => item.detected_level !== null);
+  const allClassified = useMemo(() => files.every((f) => Boolean(f.detected_type)), [files]);
 
+  const levelsComplete = useMemo(() => {
+    const required = files.filter((f) => LEVEL_REQUIRED_TYPES.has(f.detected_type ?? ""));
+    return required.length === 0 || required.every((f) => f.detected_level !== null);
+  }, [files]);
+
+  const buildingsComplete = useMemo(() => {
+    const required = files.filter((f) => LEVEL_REQUIRED_TYPES.has(f.detected_type ?? ""));
+    if (required.length === 0) return true;
     const buildings = wizardState?.buildings ?? [];
-    const hasBuildingRows = buildings.length > 0;
-    const assignedStems = new Set(buildings.flatMap((item) => item.file_stems));
-    const allRequiredStemsAssigned = !hasRequiredLevelFiles || requiredLevelFiles.every((item) => assignedStems.has(item.stem));
-    const buildingAddressesValid = buildings.every((building) => {
-      if (building.address_mode !== "different_address") {
-        return true;
-      }
-      return Boolean(building.address?.locality?.trim() && building.address?.country?.trim());
+    if (buildings.length === 0) return false;
+    const assigned = new Set(buildings.flatMap((b) => b.file_stems));
+    const allAssigned = required.every((f) => assigned.has(f.stem));
+    const venueName = wizardState?.project?.venue_name?.trim();
+    const allNamed = buildings.every((b) => Boolean(b.name?.trim() || venueName));
+    const addressesValid = buildings.every((b) => {
+      if (b.address_mode !== "different_address") return true;
+      return Boolean(b.address?.locality?.trim() && b.address?.country?.trim());
     });
-    const buildingsComplete = !hasRequiredLevelFiles || (hasBuildingRows && allRequiredStemsAssigned && buildingAddressesValid);
+    return allAssigned && allNamed && addressesValid;
+  }, [files, wizardState]);
 
-    const hasUnitFiles = files.some((item) => item.detected_type === "unit");
-    const unitMappingComplete = !hasUnitFiles || Boolean(wizardState?.mappings.unit.code_column);
-
-    const hasDetailFiles = files.some((item) => item.detected_type === "detail");
-    const detailConfirmed = !hasDetailFiles || Boolean(wizardState?.mappings.detail_confirmed);
-
-    return {
-      1: {
-        valid: projectComplete,
-        reason: projectComplete
-          ? null
-          : t("Complete required Project Info fields before continuing.", "必須のプロジェクト情報を入力してから進んでください。")
-      },
-      2: {
-        valid: allClassified,
-        reason: allClassified
-          ? null
-          : t("Assign an IMDF type for every imported file.", "取り込んだすべてのファイルに IMDF 種別を設定してください。")
-      },
-      3: {
-        valid: levelsComplete,
-        reason: levelsComplete
-          ? null
-          : t(
-              "Set a detected level for each unit, opening, fixture, detail, kiosk, and section file.",
-              "unit/opening/fixture/detail/kiosk/section の各ファイルにレベルを設定してください。"
-            )
-      },
-      4: {
-        valid: buildingsComplete,
-        reason: buildingsComplete
-          ? null
-          : t(
-              "Save at least one building and ensure each mapped source file is assigned to a building.",
-              "少なくとも1つの建物を保存し、対象ファイルを建物へ割り当ててください。"
-            )
-      },
-      5: {
-        valid: unitMappingComplete,
-        reason: unitMappingComplete ? null : t("Select a Unit code column before continuing.", "Unit のコード列を選択してから進んでください。")
-      },
-      6: { valid: true, reason: null },
-      7: { valid: true, reason: null },
-      8: {
-        valid: detailConfirmed,
-        reason: detailConfirmed
-          ? null
-          : t("Confirm detail export settings before continuing.", "detail の出力設定を確認してから進んでください。")
-      },
-      9: { valid: true, reason: null },
-      10: { valid: true, reason: null }
-    };
-  }, [files, projectComplete, t, wizardState]);
-
-  const steps = useMemo(
-    () => [
-      { id: 1, label: t("Project Info", "プロジェクト情報") },
-      { id: 2, label: t("File Classification", "ファイル分類") },
-      { id: 3, label: t("Level Mapping", "レベル対応付け") },
-      { id: 4, label: t("Building Assignment", "建物割り当て") },
-      { id: 5, label: t("Unit Mapping", "Unit 対応付け") },
-      {
-        id: 6,
-        label: openingCount ? t("Opening Mapping", "Opening 対応付け") : t("Opening Mapping (No files)", "Opening 対応付け（対象なし）")
-      },
-      {
-        id: 7,
-        label: fixtureCount ? t("Fixture Mapping", "Fixture 対応付け") : t("Fixture Mapping (No files)", "Fixture 対応付け（対象なし）")
-      },
-      {
-        id: 8,
-        label: detailCount ? t("Detail Mapping", "Detail 設定") : t("Detail Mapping (No files)", "Detail 設定（対象なし）")
-      },
-      { id: 9, label: t("Footprint Options", "Footprint 設定") },
-      { id: 10, label: t("Summary", "概要") }
-    ],
-    [detailCount, fixtureCount, openingCount, t]
+  const unitMappingComplete = useMemo(
+    () => !hasUnitFiles || Boolean(wizardState?.mappings.unit.code_column),
+    [hasUnitFiles, wizardState]
   );
+
+  const projectSectionValid = projectComplete && buildingsComplete;
+  const attributeSectionValid = unitMappingComplete;
+  const canGenerate = projectSectionValid && allClassified && levelsComplete && attributeSectionValid;
+
+  // ─── Section definitions ────────────────────────────────────────────
+
+  const sections: SectionDef[] = useMemo(
+    () => [
+      {
+        id: "project",
+        labelEn: "Project & Venue",
+        labelJa: "プロジェクト & 会場",
+        valid: projectSectionValid,
+        children: [
+          { id: "project-info", labelEn: "Venue Info", labelJa: "会場情報", valid: projectComplete },
+          { id: "building", labelEn: "Buildings", labelJa: "建物", valid: buildingsComplete },
+          { id: "footprint", labelEn: "Footprint", labelJa: "Footprint", valid: true }
+        ]
+      },
+      {
+        id: "files",
+        labelEn: "File Classification",
+        labelJa: "ファイル分類",
+        valid: allClassified
+      },
+      {
+        id: "levels",
+        labelEn: "Level Mapping",
+        labelJa: "レベル対応付け",
+        valid: levelsComplete
+      },
+      {
+        id: "attributes",
+        labelEn: "Attribute Mapping",
+        labelJa: "属性対応付け",
+        valid: attributeSectionValid,
+        children: [
+          { id: "unit", labelEn: "Unit Mapping", labelJa: "Unit 対応付け", valid: unitMappingComplete, hidden: !hasUnitFiles },
+          { id: "opening", labelEn: "Opening Mapping", labelJa: "Opening 対応付け", valid: true, hidden: !hasOpeningFiles },
+          { id: "fixture", labelEn: "Fixture Mapping", labelJa: "Fixture 対応付け", valid: true, hidden: !hasFixtureFiles },
+          { id: "detail", labelEn: "Detail Mapping", labelJa: "Detail 設定", valid: true, hidden: !hasDetailFiles }
+        ]
+      },
+      {
+        id: "summary",
+        labelEn: "Summary & Generate",
+        labelJa: "概要 & 生成",
+        valid: projectSectionValid && allClassified && levelsComplete && attributeSectionValid
+      }
+    ],
+    [
+      projectSectionValid, projectComplete, buildingsComplete, allClassified,
+      levelsComplete, attributeSectionValid, unitMappingComplete,
+      hasUnitFiles, hasOpeningFiles, hasFixtureFiles, hasDetailFiles
+    ]
+  );
+
+  // ─── Data loading ───────────────────────────────────────────────────
 
   useEffect(() => {
     if (!sessionId) {
@@ -337,9 +322,7 @@ export function WizardPage() {
           fetchSessionFeatures(sessionId),
           fetchWizardState(sessionId)
         ]);
-        if (!active) {
-          return;
-        }
+        if (!active) return;
         setSessionExpiredMessage(null);
         setFiles(fileResponse.files);
         setWizardState(wizardResponse.wizard);
@@ -363,21 +346,17 @@ export function WizardPage() {
         });
         setWizardSaveStatus("error", message);
       } finally {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       }
     };
     void load();
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [handleApiError, navigate, sessionId, setFiles, setSessionExpiredMessage, setWizardSaveStatus, setWizardState]);
 
+  // ─── API actions ────────────────────────────────────────────────────
+
   const refreshFeatures = async () => {
-    if (!sessionId) {
-      return;
-    }
+    if (!sessionId) return;
     const featureResponse = await fetchSessionFeatures(sessionId);
     setFeatures(
       (featureResponse.features as Array<Record<string, unknown>>).map((item) => ({
@@ -396,25 +375,19 @@ export function WizardPage() {
   };
 
   const refreshWizard = async () => {
-    if (!sessionId) {
-      return;
-    }
+    if (!sessionId) return;
     const response = await fetchWizardState(sessionId);
     setWizardState(response.wizard);
   };
 
   const syncLevels = async () => {
-    if (!sessionId) {
-      return;
-    }
+    if (!sessionId) return;
     const response = await patchWizardLevels(sessionId, toLevelItemsFromFiles(files));
     setWizardState(response.wizard);
   };
 
   const runDetectAll = async () => {
-    if (!sessionId) {
-      return;
-    }
+    if (!sessionId) return;
     try {
       setWizardSaveStatus("saving");
       const response = await detectAllFiles(sessionId);
@@ -436,9 +409,7 @@ export function WizardPage() {
   };
 
   const patchFile = async (stem: string, payload: UpdateFileRequest) => {
-    if (!sessionId) {
-      return;
-    }
+    if (!sessionId) return;
     try {
       setWizardSaveStatus("saving");
       const response = await updateSessionFile(sessionId, stem, payload);
@@ -459,9 +430,7 @@ export function WizardPage() {
   };
 
   const saveProject = async (payload: ProjectWizardState) => {
-    if (!sessionId) {
-      return;
-    }
+    if (!sessionId) return;
     try {
       setWizardSaveStatus("saving");
       const response = await patchWizardProject(sessionId, payload);
@@ -476,9 +445,7 @@ export function WizardPage() {
   };
 
   const searchProjectAddress = async (query: string, language: string): Promise<GeocodeResultItem[]> => {
-    if (!sessionId) {
-      return [];
-    }
+    if (!sessionId) return [];
     try {
       const response = await searchWizardAddress(sessionId, query, language);
       return response.results;
@@ -491,9 +458,7 @@ export function WizardPage() {
   };
 
   const autofillProjectAddressFromGeometry = async (language: string): Promise<GeocodeResultItem | null> => {
-    if (!sessionId) {
-      return null;
-    }
+    if (!sessionId) return null;
     try {
       const response = await autofillWizardAddressFromGeometry(sessionId, language);
       if (response.warnings.length > 0) {
@@ -513,9 +478,7 @@ export function WizardPage() {
   };
 
   const saveBuildings = async (buildings: BuildingWizardState[]) => {
-    if (!sessionId) {
-      return;
-    }
+    if (!sessionId) return;
     try {
       setWizardSaveStatus("saving");
       const response = await patchWizardBuildings(sessionId, buildings);
@@ -536,9 +499,7 @@ export function WizardPage() {
     detail_confirmed?: boolean;
     unit_category_overrides?: Record<string, string>;
   }) => {
-    if (!sessionId) {
-      return;
-    }
+    if (!sessionId) return;
     try {
       setWizardSaveStatus("saving");
       const response = await patchWizardMappings(sessionId, payload);
@@ -553,9 +514,7 @@ export function WizardPage() {
   };
 
   const saveFootprint = async (payload: FootprintWizardState) => {
-    if (!sessionId) {
-      return;
-    }
+    if (!sessionId) return;
     try {
       setWizardSaveStatus("saving");
       const response = await patchWizardFootprint(sessionId, payload);
@@ -570,9 +529,7 @@ export function WizardPage() {
   };
 
   const applyLearningSuggestion = async () => {
-    if (!sessionId || !learningSuggestion) {
-      return;
-    }
+    if (!sessionId || !learningSuggestion) return;
     const targetStem = learningSuggestion.source_stem;
     if (!targetStem) {
       setLearningSuggestion(null);
@@ -587,9 +544,7 @@ export function WizardPage() {
   };
 
   const uploadMappingsFile = async (file: File) => {
-    if (!sessionId) {
-      return;
-    }
+    if (!sessionId) return;
     try {
       setWizardSaveStatus("saving");
       await uploadCompanyMappings(sessionId, file);
@@ -609,9 +564,7 @@ export function WizardPage() {
   };
 
   const confirmSummary = async () => {
-    if (!sessionId) {
-      return;
-    }
+    if (!sessionId || !canGenerate) return;
     try {
       setWizardSaveStatus("saving");
       await syncLevels();
@@ -633,312 +586,206 @@ export function WizardPage() {
     }
   };
 
-  const showStep = () => {
-    if (step === 1) {
-      return (
-        <ProjectInfoStep
-          project={wizardState?.project ?? null}
-          saving={wizardSaveStatus === "saving"}
-          onSave={(payload) => void saveProject(payload)}
-          onSearchAddress={(query, language) => searchProjectAddress(query, language)}
-          onAutofillFromGeometry={(language) => autofillProjectAddressFromGeometry(language)}
-        />
-      );
-    }
+  // ─── Section rendering ──────────────────────────────────────────────
 
-    if (step === 2) {
-      return (
-        <FileClassStep
-          files={files}
-          features={features}
-          selectedStem={selectedFileStem}
-          hoveredStem={hoveredFileStem}
-          loading={wizardSaveStatus === "saving"}
-          onDetectAll={() => void runDetectAll()}
-          onChangeType={(stem, nextType) =>
-            void patchFile(stem, {
-              detected_type: nextType || null
-            })
-          }
-          onSelectStem={setSelectedFileStem}
-          onHoverStem={setHoveredFileStem}
-        />
-      );
-    }
+  const helpText = SECTION_HELP[activeSection] ?? SECTION_HELP["project"];
 
-    if (step === 3) {
-      return (
-        <LevelMapStep
-          files={files}
-          saving={wizardSaveStatus === "saving"}
-          onPatchFile={(stem, payload) => void patchFile(stem, payload)}
-        />
-      );
-    }
+  const showSection = () => {
+    switch (activeSection) {
+      case "project":
+      case "project-info":
+        return (
+          <ProjectInfoStep
+            project={wizardState?.project ?? null}
+            saving={wizardSaveStatus === "saving"}
+            onSave={(payload) => void saveProject(payload)}
+            onSearchAddress={(query, language) => searchProjectAddress(query, language)}
+            onAutofillFromGeometry={(language) => autofillProjectAddressFromGeometry(language)}
+          />
+        );
 
-    if (step === 4) {
-      return (
-        <BuildingStep
-          buildings={wizardState?.buildings ?? []}
-          allFileStems={files.map((item) => item.stem)}
-          venueAddress={wizardState?.project?.address ?? null}
-          saving={wizardSaveStatus === "saving"}
-          onSave={(buildings) => void saveBuildings(buildings)}
-        />
-      );
-    }
+      case "building":
+        return (
+          <BuildingStep
+            buildings={wizardState?.buildings ?? []}
+            allFileStems={files.map((f) => f.stem)}
+            venueName={wizardState?.project?.venue_name ?? ""}
+            venueAddress={wizardState?.project?.address ?? null}
+            saving={wizardSaveStatus === "saving"}
+            onSave={(buildings) => void saveBuildings(buildings)}
+          />
+        );
 
-    if (step === 5) {
-      return (
-        <UnitMapStep
-          files={files}
-          mapping={wizardState?.mappings.unit ?? EMPTY_UNIT_MAPPING}
-          saving={wizardSaveStatus === "saving"}
-          onSave={(mapping) => void saveMappings({ unit: mapping })}
-          onAssignCategory={(rawCode, category) =>
-            void saveMappings({ unit_category_overrides: { [rawCode]: category } })
-          }
-          onUploadCompanyMappings={(file) => void uploadMappingsFile(file)}
-        />
-      );
-    }
+      case "footprint":
+        return (
+          <FootprintStep
+            footprint={wizardState?.footprint ?? EMPTY_FOOTPRINT}
+            saving={wizardSaveStatus === "saving"}
+            onSave={(payload) => void saveFootprint(payload)}
+          />
+        );
 
-    if (step === 6) {
-      return (
-        <OpeningMapStep
-          files={files}
-          mapping={wizardState?.mappings.opening ?? EMPTY_OPENING_MAPPING}
-          saving={wizardSaveStatus === "saving"}
-          onSave={(mapping) => void saveMappings({ opening: mapping })}
-        />
-      );
-    }
+      case "files":
+        return (
+          <FileClassStep
+            files={files}
+            features={features}
+            selectedStem={selectedFileStem}
+            hoveredStem={hoveredFileStem}
+            loading={wizardSaveStatus === "saving"}
+            onDetectAll={() => void runDetectAll()}
+            onChangeType={(stem, nextType) =>
+              void patchFile(stem, { detected_type: nextType || null })
+            }
+            onSelectStem={setSelectedFileStem}
+            onHoverStem={setHoveredFileStem}
+          />
+        );
 
-    if (step === 7) {
-      return (
-        <FixtureMapStep
-          files={files}
-          mapping={wizardState?.mappings.fixture ?? EMPTY_FIXTURE_MAPPING}
-          saving={wizardSaveStatus === "saving"}
-          onSave={(mapping) => void saveMappings({ fixture: mapping })}
-        />
-      );
-    }
+      case "levels":
+        return (
+          <LevelMapStep
+            files={files}
+            saving={wizardSaveStatus === "saving"}
+            onPatchFile={(stem, payload) => void patchFile(stem, payload)}
+          />
+        );
 
-    if (step === 8) {
-      return (
-        <DetailMapStep
-          files={files}
-          detailConfirmed={wizardState?.mappings.detail_confirmed ?? false}
-          saving={wizardSaveStatus === "saving"}
-          onSave={(confirmed) => void saveMappings({ detail_confirmed: confirmed })}
-        />
-      );
-    }
+      case "attributes":
+      case "unit":
+        return (
+          <UnitMapStep
+            files={files}
+            mapping={wizardState?.mappings.unit ?? EMPTY_UNIT_MAPPING}
+            saving={wizardSaveStatus === "saving"}
+            onSave={(mapping) => void saveMappings({ unit: mapping })}
+            onAssignCategory={(rawCode, category) =>
+              void saveMappings({ unit_category_overrides: { [rawCode]: category } })
+            }
+            onUploadCompanyMappings={(file) => void uploadMappingsFile(file)}
+          />
+        );
 
-    if (step === 9) {
-      return (
-        <FootprintStep
-          footprint={wizardState?.footprint ?? EMPTY_FOOTPRINT}
-          saving={wizardSaveStatus === "saving"}
-          onSave={(payload) => void saveFootprint(payload)}
-        />
-      );
-    }
+      case "opening":
+        return (
+          <OpeningMapStep
+            files={files}
+            mapping={wizardState?.mappings.opening ?? EMPTY_OPENING_MAPPING}
+            saving={wizardSaveStatus === "saving"}
+            onSave={(mapping) => void saveMappings({ opening: mapping })}
+          />
+        );
 
-    return (
-      <SummaryStep
-        files={files}
-        cleanupSummary={cleanupSummary}
-        wizard={wizardState}
-        saving={wizardSaveStatus === "saving"}
-        onConfirm={() => void confirmSummary()}
-      />
-    );
+      case "fixture":
+        return (
+          <FixtureMapStep
+            files={files}
+            mapping={wizardState?.mappings.fixture ?? EMPTY_FIXTURE_MAPPING}
+            saving={wizardSaveStatus === "saving"}
+            onSave={(mapping) => void saveMappings({ fixture: mapping })}
+          />
+        );
+
+      case "detail":
+        return (
+          <DetailMapStep files={files} />
+        );
+
+      case "summary":
+        return (
+          <SummaryStep
+            files={files}
+            cleanupSummary={cleanupSummary}
+            wizard={wizardState}
+            saving={wizardSaveStatus === "saving"}
+            disabled={!canGenerate}
+            onConfirm={() => void confirmSummary()}
+          />
+        );
+
+      default:
+        return null;
+    }
   };
 
-  const nextStep = () => {
-    const currentValidation = stepValidation[step];
-    if (step < 10 && currentValidation && !currentValidation.valid) {
-      pushToast({
-        title: t("Step incomplete", "入力が不足しています"),
-        description: currentValidation.reason ?? t("Complete required fields before continuing.", "必須項目を入力してから進んでください。"),
-        variant: "error"
-      });
-      return;
-    }
-
-    const currentIndex = STEP_ORDER.indexOf(step);
-    if (currentIndex === -1 || currentIndex >= STEP_ORDER.length - 1) {
-      return;
-    }
-    if (step === 3) {
-      void syncLevels();
-    }
-    setStep(STEP_ORDER[currentIndex + 1]);
-  };
-
-  const prevStep = () => {
-    const currentIndex = STEP_ORDER.indexOf(step);
-    if (currentIndex <= 0) {
-      return;
-    }
-    setStep(STEP_ORDER[currentIndex - 1]);
-  };
-
-  const selectStep = (targetStep: number) => {
-    const targetIndex = STEP_ORDER.indexOf(targetStep);
-    if (targetIndex <= 0) {
-      setStep(targetStep);
-      return;
-    }
-
-    const blockingStep = STEP_ORDER.slice(0, targetIndex).find((id) => !stepValidation[id]?.valid);
-    if (blockingStep) {
-      setStep(blockingStep);
-      pushToast({
-        title: t("Complete earlier steps first", "先の手順に進む前に入力が必要です"),
-        description: stepValidation[blockingStep]?.reason ?? t("Complete required fields before continuing.", "必須項目を入力してから進んでください。"),
-        variant: "error"
-      });
-      return;
-    }
-
-    setStep(targetStep);
-  };
-
-  const skipToSummary = () => {
-    const blockingStep = STEP_ORDER.slice(0, 9).find((id) => !stepValidation[id]?.valid);
-    if (blockingStep) {
-      setStep(blockingStep);
-      pushToast({
-        title: t("Summary is locked", "概要へ進むには入力が必要です"),
-        description: stepValidation[blockingStep]?.reason ?? t("Complete required fields before continuing.", "必須項目を入力してから進んでください。"),
-        variant: "error"
-      });
-      return;
-    }
-    setStep(10);
-    void syncLevels();
-  };
-
-  const canGoNext = step < 10 && stepValidation[step]?.valid === true;
-  const nextBlockedReason = step < 10 ? stepValidation[step]?.reason : null;
-
-  useEffect(() => {
-    setHelpOpen(false);
-  }, [step]);
+  // ─── Keyboard shortcuts ─────────────────────────────────────────────
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Enter" || event.defaultPrevented || isFormTarget(event.target)) {
-        return;
-      }
-      if (loading || wizardSaveStatus === "saving") {
-        return;
-      }
-      event.preventDefault();
-      if (step === 10) {
+      if (event.key !== "Enter" || event.defaultPrevented || isFormTarget(event.target)) return;
+      if (loading || wizardSaveStatus === "saving") return;
+      if (activeSection === "summary") {
+        event.preventDefault();
         void confirmSummary();
-        return;
       }
-      nextStep();
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [loading, step, wizardSaveStatus, nextStep, confirmSummary]);
+  }, [loading, activeSection, wizardSaveStatus, confirmSummary]);
+
+  // Sync levels when leaving the levels section
+  useEffect(() => {
+    if (activeSection !== "levels") {
+      void syncLevels();
+    }
+  }, [activeSection]);
+
+  // ─── Render ─────────────────────────────────────────────────────────
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[1850px] flex-col gap-6 px-4 py-5 md:px-6 xl:px-8">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold">{t("Wizard", "ウィザード")}</h1>
-          <p className="text-sm text-slate-600">
-            {t("Session", "セッション")}: <span className="font-mono">{sessionId ?? t("No active session", "アクティブなセッションなし")}</span>
-          </p>
-        </div>
-        <Link className="rounded bg-slate-700 px-3 py-2 text-sm text-white" to="/">
-          {t("Back to Upload", "アップロードへ戻る")}
-        </Link>
-      </div>
+    <main className="mx-auto flex w-full max-w-[1850px] flex-col gap-5 px-4 py-5 md:px-6 xl:px-8">
+      <div className="grid gap-5 lg:grid-cols-[17rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)]">
+        <SectionNav
+          sections={sections}
+          activeSection={activeSection}
+          onSelect={setActiveSection}
+        />
 
-      <div className="grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]">
-        <StepSidebar steps={steps} currentStep={step} onSelectStep={selectStep} onSkipToSummary={skipToSummary} />
-        <div className="space-y-5">
-          <div className="rounded border bg-white px-4 py-3 text-sm">
-            <div className="flex items-center justify-between">
-              <p className="font-medium">{t("Step Help", "ステップヘルプ")}</p>
-              <button
-                type="button"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-300 text-sm font-semibold text-slate-700"
-                onClick={() => setHelpOpen((previous) => !previous)}
-                aria-label={t("Toggle step help", "ヘルプ表示の切り替え")}
-                title={t("Toggle step help", "ヘルプ表示の切り替え")}
-              >
-                ?
-              </button>
-            </div>
-            {helpOpen ? (
-              <p className="mt-2 text-slate-600">{isJapanese ? stepHelp.ja : stepHelp.en}</p>
-            ) : (
-              <p className="mt-2 text-slate-500">{t("Click ? for a short explanation of this step.", "このステップの説明は ? を押してください。")}</p>
-            )}
+        <div className="space-y-4">
+          {/* Section help */}
+          <div className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="shrink-0 text-[var(--color-primary)]">
+              <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.3" />
+              <path d="M8 7v4M8 5h.01" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+            </svg>
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              {isJapanese ? helpText.ja : helpText.en}
+            </p>
           </div>
 
-          {loading ? <WizardStepSkeleton /> : showStep()}
+          {/* Save status */}
+          {wizardSaveStatus !== "idle" ? (
+            <div className="flex items-center gap-2 text-xs">
+              {wizardSaveStatus === "saving" ? (
+                <Badge variant="primary">{t("Saving...", "保存中...")}</Badge>
+              ) : wizardSaveStatus === "saved" ? (
+                <Badge variant="success">{t("Saved", "保存済み")}</Badge>
+              ) : wizardSaveStatus === "error" ? (
+                <Badge variant="error">
+                  {t("Error", "エラー")}: {wizardSaveError ?? t("Unknown", "不明")}
+                </Badge>
+              ) : null}
+            </div>
+          ) : null}
 
-          {learningSuggestion && (
-            <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+          {/* Section content */}
+          {loading ? <WizardStepSkeleton /> : showSection()}
+
+          {/* Learning suggestion banner */}
+          {learningSuggestion ? (
+            <div className="rounded-[var(--radius-md)] border border-[var(--color-warning)]/30 bg-[var(--color-warning-muted)] p-3 text-sm text-[var(--color-warning)]">
               <p>{learningSuggestion.message}</p>
               <div className="mt-2 flex gap-2">
-                <button
-                  type="button"
-                  className="rounded bg-amber-600 px-3 py-1.5 text-xs text-white"
-                  onClick={() => void applyLearningSuggestion()}
-                >
+                <Button variant="primary" size="sm" onClick={() => void applyLearningSuggestion()}>
                   {t("Apply Learning", "学習ルールを適用")}
-                </button>
-                <button
-                  type="button"
-                  className="rounded border border-amber-400 px-3 py-1.5 text-xs"
-                  onClick={() => setLearningSuggestion(null)}
-                >
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setLearningSuggestion(null)}>
                   {t("Dismiss", "閉じる")}
-                </button>
+                </Button>
               </div>
             </div>
-          )}
-
-          <div className="flex items-center justify-between rounded border bg-white px-5 py-3.5">
-            <div className="text-sm">
-              {wizardSaveStatus === "saving" && t("Saving...", "保存中...")}
-              {wizardSaveStatus === "saved" && t("Saved", "保存済み")}
-              {wizardSaveStatus === "error" && (
-                <span className="text-red-700">{t("Save failed", "保存に失敗しました")}: {wizardSaveError ?? t("Unknown error", "不明なエラー")}</span>
-              )}
-              {wizardSaveStatus === "idle" && t("Idle", "待機中")}
-              {!canGoNext && nextBlockedReason ? <p className="mt-1 text-xs text-amber-700">{nextBlockedReason}</p> : null}
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                className="rounded border px-3 py-1.5 text-sm"
-                disabled={step <= 1}
-                onClick={prevStep}
-              >
-                {t("Back", "戻る")}
-              </button>
-              <button
-                type="button"
-                className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-60"
-                disabled={!canGoNext}
-                onClick={nextStep}
-              >
-                {t("Next", "次へ")}
-              </button>
-            </div>
-          </div>
+          ) : null}
         </div>
       </div>
     </main>

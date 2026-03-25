@@ -19,6 +19,19 @@ type LevelBucket = {
 const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail", "kiosk", "section"]);
 
 
+function makeDefaultLevelName(ordinal: number | null): string {
+  if (ordinal === null) {
+    return "";
+  }
+  if (ordinal === 0) {
+    return "Ground";
+  }
+  if (ordinal > 0) {
+    return `Level ${ordinal}`;
+  }
+  return `Basement ${Math.abs(ordinal)}`;
+}
+
 function makeDefaultShortName(ordinal: number | null): string {
   if (ordinal === null) {
     return "";
@@ -140,7 +153,7 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
                   <td className="px-3 py-2.5">
                     <input
                       className="w-full rounded border px-2 py-1"
-                      value={file.level_name ?? ""}
+                      value={file.level_name ?? makeDefaultLevelName(file.detected_level)}
                       onChange={(event) => onPatchFile(file.stem, { level_name: event.target.value })}
                     />
                   </td>
