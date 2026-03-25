@@ -36,7 +36,7 @@ type FeatureGroup = {
   features: ReviewFeature[];
 };
 
-const TYPE_ORDER = new Map(DEFAULT_LOCATED_FEATURE_ORDER.map((t, i) => [t, i]));
+const TYPE_ORDER = new Map<string, number>(DEFAULT_LOCATED_FEATURE_ORDER.map((t, i) => [t, i]));
 
 function groupByType(features: ReviewFeature[]): FeatureGroup[] {
   const map = new Map<string, ReviewFeature[]>();
