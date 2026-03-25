@@ -985,13 +985,29 @@ export function ReviewPage() {
                   <SkeletonBlock className="h-6 w-full" />
                 </div>
               ) : (
-                <FeatureList
-                  features={filteredFeatures}
-                  selectedFeatureIds={selectedFeatureIds}
-                  validationIssues={allValidationIssues}
-                  onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
-                  onSelectionChange={(ids) => setSelectedFeatureIds(ids)}
-                />
+                <>
+                  {filters.status ? (
+                    <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5 text-[11px] text-[var(--color-text-muted)]">
+                      <span>
+                        {t("Showing", "表示中")}: <span className="font-medium capitalize text-[var(--color-text)]">{filters.status}</span>
+                      </span>
+                      <button
+                        type="button"
+                        className="ml-auto rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10px] hover:bg-[var(--color-surface-muted)]"
+                        onClick={() => setFilters({ ...filters, status: undefined })}
+                      >
+                        {t("Clear", "解除")}
+                      </button>
+                    </div>
+                  ) : null}
+                  <FeatureList
+                    features={filteredFeatures}
+                    selectedFeatureIds={selectedFeatureIds}
+                    validationIssues={allValidationIssues}
+                    onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
+                    onSelectionChange={(ids) => setSelectedFeatureIds(ids)}
+                  />
+                </>
               )}
             </div>
 

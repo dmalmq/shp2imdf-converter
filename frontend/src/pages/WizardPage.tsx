@@ -250,6 +250,7 @@ export function WizardPage() {
 
   const projectSectionValid = projectComplete && buildingsComplete;
   const attributeSectionValid = unitMappingComplete;
+  const canGenerate = projectSectionValid && allClassified && levelsComplete && attributeSectionValid;
 
   // ─── Section definitions ────────────────────────────────────────────
 
@@ -563,7 +564,7 @@ export function WizardPage() {
   };
 
   const confirmSummary = async () => {
-    if (!sessionId) return;
+    if (!sessionId || !canGenerate) return;
     try {
       setWizardSaveStatus("saving");
       await syncLevels();
@@ -697,6 +698,7 @@ export function WizardPage() {
             cleanupSummary={cleanupSummary}
             wizard={wizardState}
             saving={wizardSaveStatus === "saving"}
+            disabled={!canGenerate}
             onConfirm={() => void confirmSummary()}
           />
         );

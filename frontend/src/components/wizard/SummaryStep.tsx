@@ -9,6 +9,7 @@ type Props = {
   cleanupSummary: CleanupSummary | null;
   wizard: WizardState | null;
   saving: boolean;
+  disabled?: boolean;
   onConfirm: () => void;
 };
 
@@ -27,7 +28,7 @@ function formatVenueAddress(wizard: WizardState | null): string {
 }
 
 
-export function SummaryStep({ files, cleanupSummary, wizard, saving, onConfirm }: Props) {
+export function SummaryStep({ files, cleanupSummary, wizard, saving, disabled, onConfirm }: Props) {
   const { t } = useUiLanguage();
   const typeCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -58,7 +59,7 @@ export function SummaryStep({ files, cleanupSummary, wizard, saving, onConfirm }
         <button
           type="button"
           className="rounded bg-emerald-600 px-3 py-1.5 text-sm text-white disabled:opacity-60"
-          disabled={saving}
+          disabled={saving || disabled}
           onClick={onConfirm}
         >
           {saving ? t("Generating...", "生成中...") : t("Confirm & Open Review", "確定してレビューへ進む")}
