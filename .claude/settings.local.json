@@ -4,7 +4,27 @@
       "Bash(xargs ls:*)",
       "Bash(xargs grep:*)",
       "Bash(find /c/Repositories/RevitGeoExporter/src -type f \\\\\\(-name *.json -o -name *.config -o -name *.xml \\\\\\))",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(python -m pytest --tb=short -q)",
+      "Bash(python:*)",
+      "Bash(npm run:*)",
+      "Bash(find /c/Repositories/shp2imdf-converter -name vitest.config.* -o -name test*.ts -o -name *.test.ts)",
+      "Bash(find /c/Repositories/shp2imdf-converter/backend/tests -name conftest.py -o -name test_*.py)",
+      "Bash(npx playwright:*)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(curl -s http://localhost:8000/docs)",
+      "Bash(node audit-ui.mjs)",
+      "Bash(npm install:*)",
+      "Bash(node:*)",
+      "Bash(ls /c/Repositories/shp2imdf-converter/screenshots/*.mjs)",
+      "Bash(find /c/Repositories/shp2imdf-converter -maxdepth 2 -name audit* -o -name *audit*)",
+      "Bash(curl -s http://localhost:8000/api/sessions)",
+      "Bash(grep:*)",
+      "Bash(git diff:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr:*)"
     ]
   }
 }

@@ -76,6 +76,16 @@ export type AddressInput = {
   postal_code_vanity: string | null;
 };
 
+export type IsoSubdivision = {
+  code: string;
+  name: string;
+};
+
+export type IsoSubdivisionsResponse = {
+  country: string;
+  subdivisions: IsoSubdivision[];
+};
+
 export type ProjectWizardState = {
   project_name: string | null;
   venue_name: string;
@@ -153,6 +163,7 @@ export type FootprintWizardState = {
   method: "union_buffer" | "convex_hull" | "concave_hull";
   footprint_buffer_m: number;
   venue_buffer_m: number;
+  level_gap_fill_m: number;
 };
 
 export type WizardState = {
@@ -526,6 +537,12 @@ export async function autofillWizardAddressFromGeometry(
   return handleJson<AddressAutofillResponse>(response);
 }
 
+export async function getIsoSubdivisions(country: string): Promise<IsoSubdivisionsResponse> {
+  const params = new URLSearchParams({ country });
+  const response = await fetch(`/api/reference/iso-subdivisions?${params.toString()}`);
+  return handleJson<IsoSubdivisionsResponse>(response);
+}
+
 export async function patchWizardLevels(
   sessionId: string,
   items: LevelWizardItem[]
@@ -592,12 +609,14 @@ export async function fetchFootprintPreview(
   sessionId: string,
   method: string,
   footprintBufferM: number,
-  venueBufferM: number
+  venueBufferM: number,
+  levelGapFillM: number
 ): Promise<FootprintPreview> {
   const params = new URLSearchParams({
     method,
     footprint_buffer_m: String(footprintBufferM),
-    venue_buffer_m: String(venueBufferM)
+    venue_buffer_m: String(venueBufferM),
+    level_gap_fill_m: String(levelGapFillM)
   });
   const response = await fetch(
     `/api/session/${sessionId}/wizard/footprint-preview?${params}`
@@ -668,8 +687,9 @@ export async function resolveSessionUnitOverlapsSafe(sessionId: string): Promise
   return handleJson<ResolveUnitOverlapsResponse>(response);
 }
 
-export async function exportSessionArchive(sessionId: string): Promise<ExportArchiveResponse> {
-  const response = await fetch(`/api/session/${sessionId}/export`);
+export async function exportSessionArchive(sessionId: string, asZip = false): Promise<ExportArchiveResponse> {
+  const query = asZip ? "?ext=zip" : "";
+  const response = await fetch(`/api/session/${sessionId}/export${query}`);
   if (!response.ok) {
     const body = await response.text();
     throw buildApiClientError(response.status, body || "");
@@ -678,7 +698,7 @@ export async function exportSessionArchive(sessionId: string): Promise<ExportArc
   const filenameMatch = contentDisposition.match(/filename=\"?([^\";]+)\"?/i);
   return {
     blob: await response.blob(),
-    filename: filenameMatch?.[1] ?? "output.imdf"
+    filename: filenameMatch?.[1] ?? (asZip ? "output.zip" : "output.imdf")
   };
 }
 

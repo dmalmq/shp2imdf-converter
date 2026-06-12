@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { AddressInput, BuildingWizardState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { ProvinceSelect } from "./ProvinceSelect";
 
 
 type Props = {
@@ -330,16 +331,16 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
                 </label>
                 <label className="text-sm">
                   <span className="mb-1 block text-slate-600">{t("Province", "都道府県 / 州")}</span>
-                  <input
-                    className="w-full rounded border px-2 py-1.5"
-                    value={building.address.province ?? ""}
-                    onChange={(event) =>
+                  <ProvinceSelect
+                    country={building.address.country}
+                    value={building.address.province}
+                    onChange={(province) =>
                       setRows((prev) =>
                         prev.map((item, i) =>
                           i === index && item.address
                             ? {
                                 ...item,
-                                address: { ...item.address, province: event.target.value }
+                                address: { ...item.address, province }
                               }
                             : item
                         )

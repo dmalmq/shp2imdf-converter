@@ -18,24 +18,25 @@ from backend.src.schemas import (
 LEVEL_FILE_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section"}
 
 
-def _default_level_name(ordinal: int | None) -> str | None:
+def _floor_label(ordinal: int | None) -> str | None:
+    """Japanese floor convention, inverse of detect_level_ordinal.
+
+    ordinal 0 = ground = "1F", ordinal 1 = "2F", ordinal -1 = "B1F". The level
+    name and short name use the same label.
+    """
     if ordinal is None:
         return None
-    if ordinal == 0:
-        return "Ground"
-    if ordinal > 0:
-        return f"Level {ordinal}"
-    return f"Basement {abs(ordinal)}"
+    if ordinal < 0:
+        return f"B{abs(ordinal)}F"
+    return f"{ordinal + 1}F"
+
+
+def _default_level_name(ordinal: int | None) -> str | None:
+    return _floor_label(ordinal)
 
 
 def _default_short_name(ordinal: int | None) -> str | None:
-    if ordinal is None:
-        return None
-    if ordinal == 0:
-        return "GH"
-    if ordinal > 0:
-        return f"{ordinal}F"
-    return f"B{abs(ordinal)}"
+    return _floor_label(ordinal)
 
 
 def seed_wizard_state(session: SessionRecord) -> None:

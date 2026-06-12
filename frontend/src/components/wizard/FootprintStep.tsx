@@ -48,7 +48,13 @@ export function FootprintStep({ footprint, saving, onSave }: Props) {
     (state: FootprintWizardState) => {
       if (!sessionId) return;
       setLoadingPreview(true);
-      fetchFootprintPreview(sessionId, state.method, state.footprint_buffer_m, state.venue_buffer_m)
+      fetchFootprintPreview(
+        sessionId,
+        state.method,
+        state.footprint_buffer_m,
+        state.venue_buffer_m,
+        state.level_gap_fill_m
+      )
         .then(setPreview)
         .catch(() => setPreview(null))
         .finally(() => setLoadingPreview(false));
@@ -136,6 +142,22 @@ export function FootprintStep({ footprint, saving, onSave }: Props) {
               value={form.footprint_buffer_m}
               onChange={(event) =>
                 updateForm({ ...form, footprint_buffer_m: Number(event.target.value) })
+              }
+            />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-slate-600">
+              {t("Gap Fill (m)", "隙間埋め (m)")}: {form.level_gap_fill_m.toFixed(2)}
+            </span>
+            <input
+              type="range"
+              className="w-full"
+              min={0}
+              max={1}
+              step={0.05}
+              value={form.level_gap_fill_m}
+              onChange={(event) =>
+                updateForm({ ...form, level_gap_fill_m: Number(event.target.value) })
               }
             />
           </label>

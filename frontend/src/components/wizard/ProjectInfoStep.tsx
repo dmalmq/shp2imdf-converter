@@ -2,6 +2,7 @@
 
 import type { GeocodeResultItem, ProjectWizardState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { ProvinceSelect } from "./ProvinceSelect";
 
 
 type Props = {
@@ -389,13 +390,13 @@ export function ProjectInfoStep({
           </label>
           <label className="text-sm">
             <span className="mb-1 block text-slate-600">{t("Province / State", "都道府県 / 州")}</span>
-            <input
-              className="w-full rounded border px-2 py-1.5"
-              value={form.address.province ?? ""}
-              onChange={(event) =>
+            <ProvinceSelect
+              country={form.address.country}
+              value={form.address.province}
+              onChange={(province) =>
                 setForm((prev) => ({
                   ...prev,
-                  address: { ...prev.address, province: event.target.value }
+                  address: { ...prev.address, province }
                 }))
               }
             />

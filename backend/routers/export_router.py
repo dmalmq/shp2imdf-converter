@@ -68,7 +68,7 @@ def autofix_session(
 
 
 @router.get("/export")
-def export_imdf(session_id: str, request: Request) -> Response:
+def export_imdf(session_id: str, request: Request, ext: str = "imdf") -> Response:
     manager = _session_manager(request)
     session = manager.get_session(session_id=session_id)
     if session is None:
@@ -78,7 +78,7 @@ def export_imdf(session_id: str, request: Request) -> Response:
     session.feature_collection = annotate_feature_collection_with_validation(session.feature_collection, validation)
     session.validation = validation
 
-    payload, filename = build_export_archive(session)
+    payload, filename = build_export_archive(session, extension=ext)
     manager.save_session(session)
     return Response(
         content=payload,

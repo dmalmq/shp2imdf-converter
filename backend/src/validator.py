@@ -15,6 +15,12 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 from shapely.strtree import STRtree
 
+from backend.src.iso_subdivisions import (
+    is_valid_country,
+    is_valid_subdivision,
+    normalize_country,
+    normalize_subdivision,
+)
 from backend.src.schemas import ValidationIssue, ValidationResponse, ValidationSummary
 
 
@@ -24,7 +30,43 @@ POINT_TYPES = {"amenity", "anchor"}
 NULL_GEOM_TYPES = {"address", "building", "occupant"}
 OPTIONAL_GEOM_TYPES = {"relationship"}
 LEVEL_LINKED_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section"}
+
+
+def feature_requires_geometry(ftype: str) -> bool:
+    """True for feature types that must carry geometry (not null/optional types)."""
+    return ftype not in NULL_GEOM_TYPES and ftype not in OPTIONAL_GEOM_TYPES
+
+
+def prune_empty_geometry_features(
+    features: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Drop features that require geometry but have empty/missing geometry.
+
+    Returns ``(survivors, removed_ids)``. Used as a safety net after operations
+    (auto-fix, overlap clipping) that can leave a geometry-required feature with
+    no usable geometry.
+    """
+    survivors: list[dict[str, Any]] = []
+    removed: list[str] = []
+    for row in features:
+        if not isinstance(row, dict):
+            survivors.append(row)
+            continue
+        ftype = row.get("feature_type") or ""
+        payload = row.get("geometry")
+        empty = not isinstance(payload, dict)
+        if not empty:
+            try:
+                empty = shape(payload).is_empty
+            except Exception:
+                empty = True
+        if feature_requires_geometry(ftype) and empty:
+            removed.append(str(row.get("id")))
+            continue
+        survivors.append(row)
+    return survivors, removed
 LABEL_RE = re.compile(r"^[A-Za-z]{2,3}([_-][A-Za-z0-9]{2,8})*$")
+PROVINCE_CODE_RE = re.compile(r"^[A-Z]{2}-[A-Z0-9]{1,3}$")
 
 
 def _iter_overlapping_pairs(
@@ -479,6 +521,34 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 add_issue("error", "venue_missing_address_id", "Venue address_id does not match an address feature.", feature_id=fid)
             if props.get("display_point") is None:
                 add_issue("error", "venue_missing_display_point_error", "Venue is missing display_point.", feature_id=fid)
+
+        if ftype == "address":
+            country = props.get("country")
+            country_code = normalize_country(country) if isinstance(country, str) else None
+            if not is_valid_country(country if isinstance(country, str) else None):
+                add_issue(
+                    "error",
+                    "address_invalid_country",
+                    "Address country is not a valid ISO 3166-1 alpha-2 code.",
+                    feature_id=fid,
+                )
+            province = props.get("province")
+            if isinstance(province, str) and province.strip():
+                code = normalize_subdivision(province)
+                if not PROVINCE_CODE_RE.match(code or "") or not is_valid_subdivision(code):
+                    add_issue(
+                        "error",
+                        "address_invalid_province",
+                        "Address province is not a valid ISO 3166-2 code.",
+                        feature_id=fid,
+                    )
+                elif country_code and not code.startswith(f"{country_code}-"):
+                    add_issue(
+                        "error",
+                        "address_province_country_mismatch",
+                        "Address province ISO code does not match the country code.",
+                        feature_id=fid,
+                    )
 
         if ftype == "building":
             address_id = props.get("address_id")

@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from backend.src.geocoding import GeocodingError, NominatimGeocoder
+from backend.src.geocoding import GeocodingError, NominatimGeocoder, _normalize_address_parts
 
 
 @pytest.mark.phase3
@@ -36,6 +36,37 @@ def test_nominatim_search_maps_rate_limit_to_service_unavailable(monkeypatch) ->
         geocoder.search("Tokyo Station", language="en")
     assert exc_info.value.code == "GEOCODER_RATE_LIMIT"
     assert exc_info.value.status_code == 503
+
+
+@pytest.mark.phase3
+def test_normalize_address_uses_iso_3166_2_code_for_province() -> None:
+    parts = _normalize_address_parts(
+        {
+            "state": "Hokkaidô",
+            "ISO3166-2-lvl4": "JP-01",
+            "country_code": "jp",
+        }
+    )
+    assert parts.province == "JP-01"
+    assert parts.country == "JP"
+
+
+@pytest.mark.phase3
+def test_normalize_address_prefers_lowest_admin_level_code() -> None:
+    parts = _normalize_address_parts(
+        {
+            "ISO3166-2-lvl6": "GB-XYZ",
+            "ISO3166-2-lvl4": "GB-ENG",
+            "country_code": "gb",
+        }
+    )
+    assert parts.province == "GB-ENG"
+
+
+@pytest.mark.phase3
+def test_normalize_address_falls_back_to_name_without_iso_code() -> None:
+    parts = _normalize_address_parts({"state": "Hokkaidô", "country_code": "jp"})
+    assert parts.province == "Hokkaidô"
 
 
 @pytest.mark.phase3
