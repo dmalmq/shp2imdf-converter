@@ -1,4 +1,5 @@
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { layerKeyLabel } from "./types";
 
 
 type Props = {
@@ -58,7 +59,7 @@ export function LayerTree({
                   })
                 }
               />
-              <span className="capitalize">{featureType}</span>
+              <span className="capitalize">{layerKeyLabel(featureType)}</span>
             </label>
           );
         })}

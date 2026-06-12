@@ -29,7 +29,7 @@ import { ValidationBar } from "../components/review/ValidationBar";
 import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
-import { type ReviewFeature, featureName, orderedLocatedFeatureTypes } from "../components/review/types";
+import { type ReviewFeature, featureName, layerKeyBaseType, orderedLayerKeys } from "../components/review/types";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
@@ -330,24 +330,24 @@ export function ReviewPage() {
       }));
   }, [features]);
 
-  const locatedFeatureTypes = useMemo(() => orderedLocatedFeatureTypes(features), [features]);
+  const layerKeys = useMemo(() => orderedLayerKeys(features), [features]);
 
   // Initialize layer visibility: only unit/detail/opening ON by default
   useEffect(() => {
-    if (locatedFeatureTypes.length === 0) {
+    if (layerKeys.length === 0) {
       return;
     }
-    const missingTypes = locatedFeatureTypes.filter((featureType) => !(featureType in layerVisibility));
-    if (missingTypes.length === 0) {
+    const missingKeys = layerKeys.filter((key) => !(key in layerVisibility));
+    if (missingKeys.length === 0) {
       return;
     }
 
     const nextVisibility: Record<string, boolean> = {};
-    missingTypes.forEach((featureType) => {
-      nextVisibility[featureType] = DEFAULT_VISIBLE_TYPES.has(featureType);
+    missingKeys.forEach((key) => {
+      nextVisibility[key] = DEFAULT_VISIBLE_TYPES.has(layerKeyBaseType(key));
     });
     setLayerVisibility({ ...layerVisibility, ...nextVisibility });
-  }, [layerVisibility, locatedFeatureTypes, setLayerVisibility]);
+  }, [layerVisibility, layerKeys, setLayerVisibility]);
 
   const filteredFeatures = useMemo(() => applyFilters(features, filters), [features, filters]);
 
@@ -982,7 +982,7 @@ export function ReviewPage() {
               {/* Layers section (compact) */}
               <div className="border-b border-[var(--color-border)] p-3">
                 <LayerTree
-                  featureTypes={locatedFeatureTypes}
+                  featureTypes={layerKeys}
                   layerVisibility={layerVisibility}
                   levelFilter={mapLevelFilter}
                   levelOptions={levelOptions}
