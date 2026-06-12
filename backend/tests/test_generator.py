@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
-from shapely.geometry import shape
+from shapely.geometry import Polygon, mapping, shape
+
+from backend.src.generator import generate_feature_collection
+from backend.src.schemas import (
+    AddressInput,
+    CleanupSummary,
+    ImportedFile,
+    ProjectWizardState,
+    SessionRecord,
+)
+
+_UNIT_CATEGORIES_PATH = str(Path("backend/config/unit_categories.json"))
 
 
 def _upload_payload(sample_dir: Path, stem: str) -> list[tuple[str, tuple[str, bytes, str]]]:
@@ -128,3 +140,77 @@ def test_venue_geometry_includes_subterranean_footprints_when_ground_exists(test
     venue_geom = shape(venue["geometry"])
     assert all(venue_geom.intersects(shape(item["geometry"])) for item in ground)
     assert all(venue_geom.intersects(shape(item["geometry"])) for item in subterranean)
+
+
+def _unit_source_row(stem: str, square: tuple[float, float]) -> dict:
+    x, y = square
+    return {
+        "type": "Feature",
+        "id": str(uuid4()),
+        "feature_type": "source",
+        "geometry": mapping(
+            Polygon([(x, y), (x + 0.0003, y), (x + 0.0003, y + 0.0003), (x, y + 0.0003), (x, y)])
+        ),
+        "properties": {
+            "source_file": stem,
+            "source_row_index": 0,
+            "source_part_index": 0,
+            "source_feature_ref": f"{stem}:0:0",
+            "status": "mapped",
+            "issues": [],
+            "metadata": {"CATEGORY": "retail"},
+        },
+    }
+
+
+def _multi_level_session(level_ordinals: list[int]) -> SessionRecord:
+    """Build a session with one unit level per given ordinal (no real shapefiles)."""
+    files = [
+        ImportedFile(
+            stem=f"unit_l{ordinal}",
+            geometry_type="Polygon",
+            feature_count=1,
+            attribute_columns=["CATEGORY"],
+            detected_type="unit",
+            detected_level=ordinal,
+            confidence="green",
+        )
+        for ordinal in level_ordinals
+    ]
+    source_features = [
+        _unit_source_row(f"unit_l{ordinal}", (139.7000 + 0.0005 * index, 35.6900))
+        for index, ordinal in enumerate(level_ordinals)
+    ]
+    session = SessionRecord(
+        session_id="footprint-dedup-session",
+        created_at=datetime.now(UTC),
+        last_accessed=datetime.now(UTC),
+        files=files,
+        cleanup_summary=CleanupSummary(),
+        feature_collection={"type": "FeatureCollection", "features": source_features},
+        source_feature_collection={"type": "FeatureCollection", "features": source_features},
+    )
+    session.wizard.project = ProjectWizardState(
+        project_name="Dedup Station",
+        venue_name="Dedup Station",
+        venue_category="transitstation",
+        language="en",
+        address=AddressInput(address="1-1 Demo", locality="Shinjuku", country="JP"),
+    )
+    session.wizard.mappings.unit.code_column = "CATEGORY"
+    return session
+
+
+@pytest.mark.phase4
+def test_footprints_are_deduplicated_per_category() -> None:
+    # Two subterranean levels (B1, B2) plus a ground level: previously this emitted
+    # two `subterranean` footprints; it must now emit exactly one per category.
+    session = _multi_level_session([-2, -1, 0, 1])
+    generated = generate_feature_collection(session, unit_categories_path=_UNIT_CATEGORIES_PATH)
+
+    footprints = [item for item in generated["features"] if item["feature_type"] == "footprint"]
+    categories = [item["properties"]["category"] for item in footprints]
+
+    assert set(categories) <= {"aerial", "ground", "subterranean"}
+    assert len(categories) == len(set(categories)), f"duplicate footprint categories: {categories}"
+    assert sorted(categories) == ["aerial", "ground", "subterranean"]

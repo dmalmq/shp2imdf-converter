@@ -19,6 +19,20 @@ class CleanupSummary(BaseModel):
     coordinates_rounded: int = 0
 
 
+class IsoSubdivision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    name: str
+
+
+class IsoSubdivisionsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    country: str
+    subdivisions: list[IsoSubdivision] = Field(default_factory=list)
+
+
 class ImportedFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -169,6 +183,7 @@ class FootprintWizardState(BaseModel):
     method: Literal["union_buffer", "convex_hull", "concave_hull"] = "union_buffer"
     footprint_buffer_m: float = 0.0
     venue_buffer_m: float = 0.0
+    level_gap_fill_m: float = 0.1
 
 
 class WizardState(BaseModel):

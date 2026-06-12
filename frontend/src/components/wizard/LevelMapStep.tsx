@@ -19,30 +19,16 @@ type LevelBucket = {
 const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail", "kiosk", "section"]);
 
 
-function makeDefaultLevelName(ordinal: number | null): string {
+// Japanese floor convention (inverse of detect_level_ordinal): ordinal 0 = ground = "1F",
+// ordinal 1 = "2F", ordinal -1 = "B1F". Used for both the level name and short name.
+function makeFloorLabel(ordinal: number | null): string {
   if (ordinal === null) {
     return "";
   }
-  if (ordinal === 0) {
-    return "Ground";
+  if (ordinal < 0) {
+    return `B${Math.abs(ordinal)}F`;
   }
-  if (ordinal > 0) {
-    return `Level ${ordinal}`;
-  }
-  return `Basement ${Math.abs(ordinal)}`;
-}
-
-function makeDefaultShortName(ordinal: number | null): string {
-  if (ordinal === null) {
-    return "";
-  }
-  if (ordinal === 0) {
-    return "GH";
-  }
-  if (ordinal > 0) {
-    return `${ordinal}F`;
-  }
-  return `B${Math.abs(ordinal)}`;
+  return `${ordinal + 1}F`;
 }
 
 
@@ -153,14 +139,14 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
                   <td className="px-3 py-2.5">
                     <input
                       className="w-full rounded border px-2 py-1"
-                      value={file.level_name ?? makeDefaultLevelName(file.detected_level)}
+                      value={file.level_name ?? makeFloorLabel(file.detected_level)}
                       onChange={(event) => onPatchFile(file.stem, { level_name: event.target.value })}
                     />
                   </td>
                   <td className="px-3 py-2.5">
                     <input
                       className="w-full max-w-[6rem] rounded border px-2 py-1"
-                      value={file.short_name ?? makeDefaultShortName(file.detected_level)}
+                      value={file.short_name ?? makeFloorLabel(file.detected_level)}
                       onChange={(event) => onPatchFile(file.stem, { short_name: event.target.value })}
                     />
                   </td>

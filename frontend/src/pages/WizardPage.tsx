@@ -75,7 +75,8 @@ const EMPTY_FIXTURE_MAPPING: FixtureMappingState = {
 const EMPTY_FOOTPRINT: FootprintWizardState = {
   method: "union_buffer",
   footprint_buffer_m: 0,
-  venue_buffer_m: 0
+  venue_buffer_m: 0,
+  level_gap_fill_m: 0.1
 };
 
 const SECTION_HELP: Record<string, { en: string; ja: string }> = {

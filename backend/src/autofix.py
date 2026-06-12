@@ -11,9 +11,10 @@ from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, mapping,
 from uuid import UUID
 
 from backend.src.schemas import AutofixApplied, AutofixPrompt, ValidationResponse
+from backend.src.validator import prune_empty_geometry_features
 
 
-PROMPTED_CHECKS = {"duplicate_geometry_warning", "empty_geometry"}
+PROMPTED_CHECKS = {"duplicate_geometry_warning"}
 
 
 def _round_value(value: Any, decimals: int) -> Any:
@@ -133,15 +134,12 @@ def apply_autofix(
 
     # Prompted fixes.
     duplicate_pairs: set[tuple[str, str]] = set()
-    empty_ids: set[str] = set()
     for issue in issues:
         if issue.check not in PROMPTED_CHECKS:
             continue
         if issue.check == "duplicate_geometry_warning" and issue.feature_id and issue.related_feature_id:
             pair = tuple(sorted([issue.feature_id, issue.related_feature_id]))
             duplicate_pairs.add(pair)
-        if issue.check == "empty_geometry" and issue.feature_id:
-            empty_ids.add(issue.feature_id)
 
     for left, right in sorted(duplicate_pairs):
         prompts.append(
@@ -153,22 +151,12 @@ def apply_autofix(
                 description=f"Delete one duplicate geometry ({right[:8]}).",
             )
         )
-    for feature_id in sorted(empty_ids):
-        prompts.append(
-            AutofixPrompt(
-                feature_id=feature_id,
-                check="empty_geometry",
-                action="delete_empty",
-                description="Delete feature with empty geometry.",
-            )
-        )
 
     if apply_prompted:
         to_delete: set[str] = set()
         for left, right in duplicate_pairs:
             # Keep the lexicographically smaller id for deterministic behavior.
             to_delete.add(max(left, right))
-        to_delete.update(empty_ids)
         if to_delete:
             kept: list[dict[str, Any]] = []
             for row in rows:
@@ -187,5 +175,19 @@ def apply_autofix(
                     continue
                 kept.append(row)
             updated["features"] = kept
+
+    # Safety net: remove any feature left without usable geometry — both
+    # pre-existing empties and ones the make_valid repair above collapsed.
+    survivors, removed_empty = prune_empty_geometry_features(updated.get("features", rows))
+    for feature_id in removed_empty:
+        fixes_applied.append(
+            AutofixApplied(
+                feature_id=feature_id,
+                check="empty_geometry",
+                action="delete_empty_geometry",
+                description="Removed feature with empty/missing geometry.",
+            )
+        )
+    updated["features"] = survivors
 
     return updated, fixes_applied, prompts

@@ -29,7 +29,7 @@ import { ValidationBar } from "../components/review/ValidationBar";
 import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
-import { type ReviewFeature, featureName, orderedLocatedFeatureTypes } from "../components/review/types";
+import { type ReviewFeature, featureName, layerKeyBaseType, orderedLayerKeys } from "../components/review/types";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
@@ -241,7 +241,7 @@ export function ReviewPage() {
   const [overlapResolving, setOverlapResolving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
-  const [exportFormat, setExportFormat] = useState<"imdf" | "shapefiles">("imdf");
+  const [exportFormat, setExportFormat] = useState<"imdf" | "imdf_zip" | "shapefiles">("imdf");
   const [shapefileEncoding, setShapefileEncoding] = useState<ShapefileExportEncoding>("preserve_source");
   const [shapefileSourceCategoryField, setShapefileSourceCategoryField] = useState("");
   const [shapefileWriteCategoryToNewField, setShapefileWriteCategoryToNewField] = useState(false);
@@ -330,24 +330,24 @@ export function ReviewPage() {
       }));
   }, [features]);
 
-  const locatedFeatureTypes = useMemo(() => orderedLocatedFeatureTypes(features), [features]);
+  const layerKeys = useMemo(() => orderedLayerKeys(features), [features]);
 
   // Initialize layer visibility: only unit/detail/opening ON by default
   useEffect(() => {
-    if (locatedFeatureTypes.length === 0) {
+    if (layerKeys.length === 0) {
       return;
     }
-    const missingTypes = locatedFeatureTypes.filter((featureType) => !(featureType in layerVisibility));
-    if (missingTypes.length === 0) {
+    const missingKeys = layerKeys.filter((key) => !(key in layerVisibility));
+    if (missingKeys.length === 0) {
       return;
     }
 
     const nextVisibility: Record<string, boolean> = {};
-    missingTypes.forEach((featureType) => {
-      nextVisibility[featureType] = DEFAULT_VISIBLE_TYPES.has(featureType);
+    missingKeys.forEach((key) => {
+      nextVisibility[key] = DEFAULT_VISIBLE_TYPES.has(layerKeyBaseType(key));
     });
     setLayerVisibility({ ...layerVisibility, ...nextVisibility });
-  }, [layerVisibility, locatedFeatureTypes, setLayerVisibility]);
+  }, [layerVisibility, layerKeys, setLayerVisibility]);
 
   const filteredFeatures = useMemo(() => applyFilters(features, filters), [features, filters]);
 
@@ -527,6 +527,27 @@ export function ReviewPage() {
     if (activeIssueIndex === null) return null;
     return selectedFeatureIssues[activeIssueIndex] ?? null;
   }, [activeIssueIndex, selectedFeatureIssues]);
+
+  // When an issue is activated, switch the map to that feature's level so the
+  // zoomed-to geometry is actually visible — otherwise the map fits to a feature
+  // that the current level filter is hiding.
+  useEffect(() => {
+    if (!activeIssue) {
+      return;
+    }
+    const targetId = activeIssue.feature_id ?? activeIssue.related_feature_id;
+    if (!targetId) {
+      return;
+    }
+    const target = features.find((item) => item.id === targetId);
+    if (!target) {
+      return;
+    }
+    const levelId = featureLevelId(target);
+    if (levelId && levelId !== mapLevelFilter) {
+      setMapLevelFilter(levelId);
+    }
+  }, [activeIssue, features, mapLevelFilter]);
 
   const applyPostValidationState = (next: ValidationResponse) => {
     setActiveIssueIndex(null);
@@ -763,9 +784,9 @@ export function ReviewPage() {
     setError(null);
     try {
       const response =
-        exportFormat === "imdf"
-          ? await exportSessionArchive(sessionId)
-          : await exportSessionShapefiles(sessionId, shapefilePayload as ShapefileExportRequest);
+        exportFormat === "shapefiles"
+          ? await exportSessionShapefiles(sessionId, shapefilePayload as ShapefileExportRequest)
+          : await exportSessionArchive(sessionId, exportFormat === "imdf_zip");
       const url = window.URL.createObjectURL(response.blob);
       const link = document.createElement("a");
       link.href = url;
@@ -784,7 +805,7 @@ export function ReviewPage() {
       captureError(
         caught,
         t("Export failed", "Export failed"),
-        exportFormat === "imdf" ? t("Export failed", "Export failed") : t("Shapefile export failed", "Shapefile export failed")
+        exportFormat === "shapefiles" ? t("Shapefile export failed", "Shapefile export failed") : t("Export failed", "Export failed")
       );
     } finally {
       setExporting(false);
@@ -961,7 +982,7 @@ export function ReviewPage() {
               {/* Layers section (compact) */}
               <div className="border-b border-[var(--color-border)] p-3">
                 <LayerTree
-                  featureTypes={locatedFeatureTypes}
+                  featureTypes={layerKeys}
                   layerVisibility={layerVisibility}
                   levelFilter={mapLevelFilter}
                   levelOptions={levelOptions}
@@ -1153,14 +1174,23 @@ export function ReviewPage() {
               <select
                 className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5 text-sm"
                 value={exportFormat}
-                onChange={(event) => setExportFormat(event.target.value as "imdf" | "shapefiles")}
+                onChange={(event) => setExportFormat(event.target.value as "imdf" | "imdf_zip" | "shapefiles")}
               >
                 <option value="imdf">{t("IMDF (.imdf)", "IMDF (.imdf)")}</option>
+                <option value="imdf_zip">{t("IMDF (.zip)", "IMDF (.zip)")}</option>
                 {!hasGeoPackageSources ? (
                   <option value="shapefiles">{t("Shapefiles (.zip)", "Shapefiles (.zip)")}</option>
                 ) : null}
               </select>
             </label>
+            {exportFormat === "imdf_zip" ? (
+              <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+                {t(
+                  "Same contents as the .imdf archive, packaged as .zip for the IMDF Sandbox validator.",
+                  "内容は .imdf アーカイブと同じで、IMDF Sandbox 検証用に .zip 形式でパッケージ化しています。"
+                )}
+              </p>
+            ) : null}
             {hasGeoPackageSources ? (
               <p className="mt-2 rounded-[var(--radius-sm)] border border-[var(--color-warning)]/20 bg-[var(--color-warning-muted)] px-2 py-1 text-xs text-[var(--color-warning)]">
                 {t(
@@ -1178,7 +1208,7 @@ export function ReviewPage() {
               {t(`${validation.summary.warning_count} warnings`, `${validation.summary.warning_count} warnings`)}
             </p>
 
-            {exportFormat === "imdf" && validation && validation.summary.error_count > 0 ? (
+            {exportFormat !== "shapefiles" && validation && validation.summary.error_count > 0 ? (
               <p className="mt-2 rounded-[var(--radius-sm)] border border-[var(--color-warning)]/20 bg-[var(--color-warning-muted)] px-2 py-1 text-xs text-[var(--color-warning)]">
                 {t(
                   `There are ${validation.summary.error_count} validation error(s). The exported IMDF may not pass Apple's validation.`,
@@ -1309,9 +1339,11 @@ export function ReviewPage() {
               >
                 {exporting
                   ? t("Downloading...", "Downloading...")
-                  : exportFormat === "imdf"
-                    ? t("Download .imdf", "Download .imdf")
-                    : t("Download shapefiles .zip", "Download shapefiles .zip")}
+                  : exportFormat === "shapefiles"
+                    ? t("Download shapefiles .zip", "Download shapefiles .zip")
+                    : exportFormat === "imdf_zip"
+                      ? t("Download .zip", "Download .zip")
+                      : t("Download .imdf", "Download .imdf")}
               </Button>
             </div>
           </div>

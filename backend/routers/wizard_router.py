@@ -11,6 +11,7 @@ from fastapi import APIRouter, File, Request, UploadFile
 from shapely.geometry import shape
 from shapely.ops import unary_union
 
+from backend.src.generator import _close_gaps
 from backend.src.geocoding import GeocodeMatch, GeocoderClient, GeocodingError
 from backend.src.mapper import (
     build_unit_code_preview,
@@ -686,6 +687,7 @@ def footprint_preview(
     method: str = "union_buffer",
     footprint_buffer_m: float = 0.0,
     venue_buffer_m: float = 0.0,
+    level_gap_fill_m: float = 0.0,
 ) -> dict:
     """Return simplified footprint + venue outlines for live preview."""
     session = _get_session_or_raise(session_id, request)
@@ -714,6 +716,10 @@ def footprint_preview(
         return {"footprint": None, "venue": None, "units_bbox": None}
 
     merged = unary_union(unit_geoms)
+
+    # Heal hairline gaps between units (mirrors level generation in generator.py)
+    gap_fill = max(float(level_gap_fill_m), 0.0) * DEGREES_PER_METER
+    merged = _close_gaps(merged, gap_fill)
 
     # Apply footprint buffer
     fp_buffer = max(float(footprint_buffer_m), 0.0) * DEGREES_PER_METER

@@ -38,7 +38,7 @@ def _safe_export_name(value: str) -> str:
     return normalized.strip("._-") or "imdf_export"
 
 
-def build_export_archive(session: SessionRecord) -> tuple[bytes, str]:
+def build_export_archive(session: SessionRecord, extension: str = "imdf") -> tuple[bytes, str]:
     output = BytesIO()
     manifest = build_manifest(session)
     files = build_session_imdf_geojson_files(session)
@@ -50,5 +50,8 @@ def build_export_archive(session: SessionRecord) -> tuple[bytes, str]:
 
     project_name = session.wizard.project.project_name if session.wizard.project else None
     fallback = project_name or session.wizard.project.venue_name if session.wizard.project else session.session_id
-    filename = f"{_safe_export_name(fallback)}.imdf"
+    # The archive bytes are identical either way; only the extension differs. A
+    # plain ".zip" is convenient for the Apple IMDF Sandbox validator.
+    safe_ext = "zip" if extension == "zip" else "imdf"
+    filename = f"{_safe_export_name(fallback)}.{safe_ext}"
     return output.getvalue(), filename

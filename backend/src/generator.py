@@ -53,6 +53,27 @@ POINT_MAPPED_TYPES = {"amenity", "anchor"}
 NULL_GEOMETRY_MAPPED_TYPES = {"occupant"}
 
 
+def _close_gaps(geom: Any, gap_deg: float) -> Any:
+    """Morphologically close hairline gaps/slivers in a dissolved geometry.
+
+    Adjacent unit polygons in source data often have sub-centimeter gaps that
+    survive ``unary_union`` as thin interior slivers. A buffer-out/buffer-in
+    ("closing") pass with a mitre join fills gaps narrower than ``gap_deg``
+    while preserving right-angle building corners. Note that ``buffer(0)``
+    alone does not close gaps between polygons. Falls back to the input on any
+    failure or empty result.
+    """
+    if gap_deg <= 0 or geom is None or geom.is_empty:
+        return geom
+    try:
+        closed = geom.buffer(gap_deg, join_style="mitre", mitre_limit=2.0).buffer(
+            -gap_deg, join_style="mitre", mitre_limit=2.0
+        )
+    except Exception:
+        return geom
+    return closed if (closed is not None and not closed.is_empty) else geom
+
+
 def _load_category_set(filename: str) -> set[str]:
     path = CATEGORY_CONFIG_DIR / filename
     if not path.exists():
@@ -89,11 +110,12 @@ OCCUPANT_CATEGORY_PATTERN = _load_occupant_category_pattern()
 
 
 def _default_short_name(ordinal: int) -> str:
-    if ordinal == 0:
-        return "GH"
-    if ordinal > 0:
-        return f"{ordinal}F"
-    return f"B{abs(ordinal)}"
+    # Japanese floor convention (inverse of detect_level_ordinal): ordinal 0 =
+    # ground = "1F", ordinal 1 = "2F", ordinal -1 = "B1F". Used for both the
+    # level name and short name.
+    if ordinal < 0:
+        return f"B{abs(ordinal)}F"
+    return f"{ordinal + 1}F"
 
 
 def _display_point(geom: Any) -> dict[str, Any] | None:
@@ -482,6 +504,10 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
         merged = unary_union(polygon_geoms)
         if merged.is_empty:
             continue
+        # Heal hairline gaps between adjacent units so the level reads as a
+        # clean solid; unit geometries themselves are left untouched.
+        gap_fill = max(float(session.wizard.footprint.level_gap_fill_m), 0.0) * DEGREES_PER_METER
+        merged = _close_gaps(merged, gap_fill)
 
         level_id = str(uuid4())
         level_id_by_ordinal[ordinal] = level_id
@@ -500,7 +526,7 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
                 linked_buildings = [building_uuid_by_id[building_rows[0].id]]
         level_building_ids[ordinal] = linked_buildings
 
-        level_name = group["name"] or f"Level {ordinal}"
+        level_name = group["name"] or _default_short_name(ordinal)
         level_short_name = group["short_name"] or _default_short_name(ordinal)
         level_features.append(
             {
@@ -538,6 +564,11 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
             footprint_targets.append((building.id, building_uuid_by_id[building.id], set(building.file_stems)))
 
     for building_key, building_uuid, building_stems in footprint_targets:
+        # Group level geometries by IMDF footprint category band so each building
+        # gets exactly one footprint per category (aerial/ground/subterranean),
+        # rather than one per level ordinal.
+        geoms_by_category: dict[str, list[Any]] = {}
+        ordinals_by_category: dict[str, list[int]] = {}
         for ordinal, level_geom in sorted(level_geom_by_ordinal.items(), key=lambda item: item[0]):
             geometries = []
             for stem in building_stems:
@@ -556,31 +587,42 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
             merged = unary_union(geometries)
             if merged.is_empty:
                 continue
+            gap_fill = max(float(session.wizard.footprint.level_gap_fill_m), 0.0) * DEGREES_PER_METER
+            merged = _close_gaps(merged, gap_fill)
             fp_buffer = max(float(session.wizard.footprint.footprint_buffer_m), 0.0) * DEGREES_PER_METER
             if fp_buffer > 0:
                 merged = merged.buffer(fp_buffer)
 
             category = "ground" if ordinal == 0 else ("aerial" if ordinal > 0 else "subterranean")
-            footprint_id = str(uuid4())
+            geoms_by_category.setdefault(category, []).append(merged)
+            ordinals_by_category.setdefault(category, []).append(ordinal)
+            first_geom_by_building.setdefault(building_key, merged)
+            if ordinal == 0:
+                ground_geom_by_building[building_key] = merged
+
+        for category in ("subterranean", "ground", "aerial"):
+            geoms = geoms_by_category.get(category)
+            if not geoms:
+                continue
+            combined = unary_union(geoms)
+            if combined.is_empty:
+                continue
             footprint_features.append(
                 {
                     "type": "Feature",
-                    "id": footprint_id,
+                    "id": str(uuid4()),
                     "feature_type": "footprint",
-                    "geometry": mapping(merged),
+                    "geometry": mapping(combined),
                     "properties": {
                         "category": category,
                         "name": None,
                         "building_ids": [building_uuid],
                         "status": "mapped",
                         "issues": [],
-                        "ordinal": ordinal,
+                        "ordinal": min(ordinals_by_category[category]),
                     },
                 }
             )
-            first_geom_by_building.setdefault(building_key, merged)
-            if ordinal == 0:
-                ground_geom_by_building[building_key] = merged
 
     building_features: list[dict[str, Any]]
     if provided_building_features:
@@ -629,6 +671,8 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
 
         if venue_geometries:
             merged_venue = unary_union(venue_geometries)
+            gap_fill = max(float(session.wizard.footprint.level_gap_fill_m), 0.0) * DEGREES_PER_METER
+            merged_venue = _close_gaps(merged_venue, gap_fill)
             venue_buffer = max(float(session.wizard.footprint.venue_buffer_m), 0.0) * DEGREES_PER_METER
             if venue_buffer > 0:
                 merged_venue = merged_venue.buffer(venue_buffer)

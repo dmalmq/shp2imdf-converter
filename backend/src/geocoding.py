@@ -66,6 +66,33 @@ def _first_present(payload: dict[str, Any], keys: list[str]) -> str | None:
     return None
 
 
+def _iso_3166_2_code(payload: dict[str, Any]) -> str | None:
+    """Return the principal-subdivision ISO 3166-2 code from a Nominatim address.
+
+    Nominatim emits one ``ISO3166-2-lvl<admin_level>`` key per subdivision level
+    present (e.g. ``"ISO3166-2-lvl4": "JP-01"``). IMDF's ``address.province`` wants
+    the principal subdivision, i.e. the broadest subdivision below the country,
+    which corresponds to the lowest admin-level number.
+    """
+    prefix = "ISO3166-2-lvl"
+    best_level: int | None = None
+    best_code: str | None = None
+    for key, value in payload.items():
+        if not key.startswith(prefix):
+            continue
+        code = _clean_text(value)
+        if not code:
+            continue
+        try:
+            level = int(key[len(prefix):])
+        except ValueError:
+            continue
+        if best_level is None or level < best_level:
+            best_level = level
+            best_code = code
+    return best_code
+
+
 def _normalize_address_parts(payload: dict[str, Any]) -> GeocodeAddressParts:
     road = _first_present(payload, ["road", "pedestrian", "footway", "street", "residential"])
     house_number = _first_present(payload, ["house_number"])
@@ -81,7 +108,11 @@ def _normalize_address_parts(payload: dict[str, Any]) -> GeocodeAddressParts:
         payload,
         ["city", "town", "village", "municipality", "borough", "city_district", "suburb", "hamlet", "county"],
     )
-    province = _first_present(payload, ["state", "province", "region", "state_district"])
+    # IMDF requires the ISO 3166-2 code (e.g. "JP-01"); prefer Nominatim's code
+    # field and only fall back to the human-readable name when no code is present.
+    province = _iso_3166_2_code(payload) or _first_present(
+        payload, ["state", "province", "region", "state_district"]
+    )
 
     country_code = _clean_text(payload.get("country_code"))
     country_name = _clean_text(payload.get("country"))

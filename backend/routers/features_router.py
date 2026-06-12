@@ -34,7 +34,11 @@ from backend.src.schemas import (
     UpdateFileResponse,
 )
 from backend.src.session import SessionManager
-from backend.src.validator import annotate_feature_collection_with_validation, validate_feature_collection
+from backend.src.validator import (
+    annotate_feature_collection_with_validation,
+    prune_empty_geometry_features,
+    validate_feature_collection,
+)
 
 
 router = APIRouter(prefix="/api/session/{session_id}", tags=["features"])
@@ -425,15 +429,17 @@ def resolve_unit_overlap(
         keep_feature_id=payload.keep_feature_id,
         clip_feature_id=payload.clip_feature_id,
     )
+    resolved = bool(updated_count or deleted_count)
+    features, removed = prune_empty_geometry_features(features)
     session.feature_collection["features"] = features
     validation = _revalidate_session(session)
     manager.save_session(session)
     return ResolveUnitOverlapsResponse(
         session_id=session_id,
-        resolved_pairs=1 if (updated_count or deleted_count) else 0,
+        resolved_pairs=1 if resolved else 0,
         updated_count=updated_count,
-        deleted_count=deleted_count,
-        skipped_count=0 if (updated_count or deleted_count) else 1,
+        deleted_count=deleted_count + len(removed),
+        skipped_count=0 if resolved else 1,
         validation=validation,
     )
 
@@ -490,6 +496,8 @@ def resolve_unit_overlaps_safe(session_id: str, request: Request) -> ResolveUnit
         updated_count += updated_delta
         deleted_count += deleted_delta
 
+    features, removed = prune_empty_geometry_features(features)
+    deleted_count += len(removed)
     session.feature_collection["features"] = features
     revalidation = _revalidate_session(session)
     manager.save_session(session)

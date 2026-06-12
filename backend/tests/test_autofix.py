@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from backend.src.autofix import apply_autofix
-from backend.src.validator import validate_feature_collection
+from backend.src.validator import prune_empty_geometry_features, validate_feature_collection
 
 
 def _upload_payload(sample_dir: Path, stem: str) -> list[tuple[str, tuple[str, bytes, str]]]:
@@ -83,3 +83,40 @@ def test_autofix_prompts_and_applies_duplicate_deletion(test_client, sample_dir:
     applied_collection, fixes_applied, _ = apply_autofix(mutated, validation, apply_prompted=True)
     assert any(item.action == "delete_feature" for item in fixes_applied)
     assert len(applied_collection["features"]) < len(mutated["features"])
+
+
+def test_prune_empty_geometry_features_keeps_null_geom_types() -> None:
+    features = [
+        {"id": "u1", "feature_type": "unit", "geometry": {"type": "Polygon", "coordinates": []}},
+        {"id": "u2", "feature_type": "unit", "geometry": None},
+        {"id": "u3", "feature_type": "unit",
+         "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [0, 1], [1, 1], [0, 0]]]}},
+        {"id": "a1", "feature_type": "address", "geometry": None},
+        {"id": "b1", "feature_type": "building", "geometry": None},
+        {"id": "r1", "feature_type": "relationship", "geometry": None},
+    ]
+    survivors, removed = prune_empty_geometry_features(features)
+    assert sorted(removed) == ["u1", "u2"]
+    assert [item["id"] for item in survivors] == ["u3", "a1", "b1", "r1"]
+
+
+@pytest.mark.phase5
+def test_autofix_removes_empty_geometry_units_without_prompt(test_client, sample_dir: Path) -> None:
+    collection = _generated_collection(test_client, sample_dir)
+    mutated = copy.deepcopy(collection)
+    unit = next(item for item in mutated["features"] if item["feature_type"] == "unit")
+    target_id = unit["id"]
+    unit["geometry"] = {"type": "Polygon", "coordinates": []}
+
+    validation = validate_feature_collection(mutated)
+    assert any(issue.check == "empty_geometry" for issue in validation.errors)
+
+    # A normal auto-fix (no confirmation) should drop the empty unit, not prompt for it.
+    fixed, fixes_applied, prompts = apply_autofix(mutated, validation, apply_prompted=False)
+    surviving_ids = {item["id"] for item in fixed["features"]}
+    assert target_id not in surviving_ids
+    assert any(item.action == "delete_empty_geometry" for item in fixes_applied)
+    assert not any(prompt.check == "empty_geometry" for prompt in prompts)
+
+    after = validate_feature_collection(fixed)
+    assert not any(issue.check == "empty_geometry" for issue in after.errors)

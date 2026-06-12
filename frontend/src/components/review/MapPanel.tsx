@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import MapGL, { Layer, type LayerProps, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
 
-import { type ReviewFeature, type ReviewIssue, isLocatedFeature } from "./types";
+import { type ReviewFeature, type ReviewIssue, featureLayerKey, isLocatedFeature } from "./types";
 import { STREET_MAP_STYLE } from "../shared/streetMapStyle";
 import { buildUnitFillColorExpr, buildUnitLineColorExpr, buildUnitOpacityExpr } from "../shared/unitCategoryColors";
 
@@ -325,7 +325,7 @@ export function MapPanel({
       if (!isLocatedFeature(feature)) {
         return false;
       }
-      if ((layerVisibility[feature.feature_type] ?? true) === false) {
+      if ((layerVisibility[featureLayerKey(feature)] ?? true) === false) {
         return false;
       }
       return isVisibleByLevel(feature, levelFilter);

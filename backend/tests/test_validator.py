@@ -71,6 +71,41 @@ def test_duplicate_uuids_error(test_client, sample_dir: Path) -> None:
     assert any(issue.check == "duplicate_uuids" for issue in result.errors)
 
 
+def _address_feature(collection: dict) -> dict:
+    return next(item for item in collection["features"] if item["feature_type"] == "address")
+
+
+@pytest.mark.phase5
+def test_address_with_valid_iso_codes_has_no_address_errors(test_client, sample_dir: Path) -> None:
+    collection = _generated_collection(test_client, sample_dir)
+    result = validate_feature_collection(collection)
+    assert not any(issue.check.startswith("address_") for issue in result.errors)
+
+
+@pytest.mark.phase5
+def test_address_province_name_flagged_as_invalid_iso(test_client, sample_dir: Path) -> None:
+    collection = copy.deepcopy(_generated_collection(test_client, sample_dir))
+    _address_feature(collection)["properties"]["province"] = "JP-13 Tokyo"
+    result = validate_feature_collection(collection)
+    assert any(issue.check == "address_invalid_province" for issue in result.errors)
+
+
+@pytest.mark.phase5
+def test_address_province_country_mismatch_flagged(test_client, sample_dir: Path) -> None:
+    collection = copy.deepcopy(_generated_collection(test_client, sample_dir))
+    _address_feature(collection)["properties"]["province"] = "US-CA"
+    result = validate_feature_collection(collection)
+    assert any(issue.check == "address_province_country_mismatch" for issue in result.errors)
+
+
+@pytest.mark.phase5
+def test_address_invalid_country_flagged(test_client, sample_dir: Path) -> None:
+    collection = copy.deepcopy(_generated_collection(test_client, sample_dir))
+    _address_feature(collection)["properties"]["country"] = "ZZ"
+    result = validate_feature_collection(collection)
+    assert any(issue.check == "address_invalid_country" for issue in result.errors)
+
+
 @pytest.mark.phase5
 def test_opening_must_be_linestring(test_client, sample_dir: Path) -> None:
     collection = _generated_collection(test_client, sample_dir)

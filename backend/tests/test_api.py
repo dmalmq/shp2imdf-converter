@@ -683,6 +683,27 @@ def test_wizard_address_search_endpoint_returns_geocoder_results(test_client, sa
 
 
 @pytest.mark.phase3
+def test_iso_subdivisions_endpoint_returns_japan_prefectures(test_client) -> None:
+    response = test_client.get("/api/reference/iso-subdivisions", params={"country": "jp"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["country"] == "JP"
+    codes = {item["code"] for item in payload["subdivisions"]}
+    assert "JP-13" in codes
+    tokyo = next(item for item in payload["subdivisions"] if item["code"] == "JP-13")
+    assert tokyo["name"] == "Tokyo"
+
+
+@pytest.mark.phase3
+def test_iso_subdivisions_endpoint_unknown_country_is_empty(test_client) -> None:
+    response = test_client.get("/api/reference/iso-subdivisions", params={"country": "ZZ"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["country"] == "ZZ"
+    assert payload["subdivisions"] == []
+
+
+@pytest.mark.phase3
 def test_wizard_address_autofill_uses_geometry_reverse_geocoding(test_client, sample_dir: Path) -> None:
     import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
     session_id = import_response.json()["session_id"]
@@ -906,6 +927,29 @@ def test_export_includes_manifest_json(test_client, sample_dir: Path) -> None:
             assert "status" not in properties
             assert "issues" not in properties
             assert "metadata" not in properties
+
+
+@pytest.mark.phase5
+def test_export_as_zip_returns_same_archive_with_zip_extension(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+
+    imdf_response = test_client.get(f"/api/session/{session_id}/export")
+    zip_response = test_client.get(f"/api/session/{session_id}/export", params={"ext": "zip"})
+
+    assert zip_response.status_code == 200
+    assert zip_response.headers["content-type"] == "application/zip"
+    assert zip_response.headers["content-disposition"].endswith('.zip"')
+    assert imdf_response.headers["content-disposition"].endswith('.imdf"')
+
+    # Same files inside, just a different download extension.
+    with zipfile.ZipFile(BytesIO(zip_response.content)) as zip_archive:
+        zip_names = set(zip_archive.namelist())
+    with zipfile.ZipFile(BytesIO(imdf_response.content)) as imdf_archive:
+        imdf_names = set(imdf_archive.namelist())
+    assert zip_names == imdf_names
+    assert "manifest.json" in zip_names
 
 
 @pytest.mark.phase4
@@ -1138,6 +1182,40 @@ def test_resolve_unit_overlaps_safe_fixes_detected_safe_pairs(test_client, sampl
     payload = safe_response.json()
     assert payload["resolved_pairs"] >= 1
     assert payload["validation"]["summary"]["overlap_count"] < before_overlap_count
+
+
+@pytest.mark.phase5
+def test_resolve_unit_overlaps_safe_removes_empty_geometry_units(test_client, sample_dir: Path) -> None:
+    import_response = test_client.post("/api/import", files=_upload_payload(sample_dir, "JRTokyoSta_B1_Space"))
+    session_id = import_response.json()["session_id"]
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Tokyo Station",
+            "venue_name": "Tokyo Station",
+            "venue_category": "transitstation",
+            "language": "en",
+            "address": {"address": "1-9-1 Marunouchi", "locality": "Chiyoda-ku", "country": "JP"},
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+
+    # Inject an empty-geometry unit directly into the session (clipping won't touch
+    # it because empty geometry has no overlap), then run Fix Overlaps.
+    manager = test_client.app.state.session_manager
+    session = manager.get_session(session_id, touch=False)
+    units = [item for item in session.feature_collection["features"] if item["feature_type"] == "unit"]
+    assert units
+    empty_unit_id = units[0]["id"]
+    units[0]["geometry"] = {"type": "Polygon", "coordinates": []}
+    manager.save_session(session)
+
+    safe_response = test_client.post(f"/api/session/{session_id}/overlaps/fix-safe")
+    assert safe_response.status_code == 200
+    assert safe_response.json()["deleted_count"] >= 1
+
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    assert empty_unit_id not in {item["id"] for item in features}
 
 
 @pytest.mark.phase5
