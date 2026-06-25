@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { useNavigate } from "react-router-dom";
 
-import { importShapefiles, type ImportResponse } from "../api/client";
+import { importImdf, importShapefiles, type ImportResponse } from "../api/client";
 import { useToast } from "../components/shared/ToastProvider";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
@@ -102,6 +102,8 @@ export function UploadPage() {
   const [error, setError] = useState<string | null>(null);
   const [cleanupExpanded, setCleanupExpanded] = useState(false);
   const [lastCleanup, setLastCleanup] = useState<ImportResponse["cleanup_summary"] | null>(null);
+  const [imdfLoading, setImdfLoading] = useState(false);
+  const [imdfError, setImdfError] = useState<string | null>(null);
 
   const onDrop = (acceptedFiles: File[]) => {
     const parsed = acceptedFiles.map(toQueuedUploadFile);
@@ -247,6 +249,30 @@ export function UploadPage() {
         return item.stem.toLowerCase() !== stemKey;
       })
     );
+  };
+
+  const runImdfImport = async (file: File) => {
+    setImdfLoading(true);
+    setImdfError(null);
+    try {
+      const payload = await importImdf(file);
+      setSessionExpiredMessage(null);
+      setSessionId(payload.session_id);
+      setCurrentScreen("review");
+      pushToast({
+        title: t("IMDF archive opened", "IMDFアーカイブを開きました"),
+        description: t(`${payload.feature_count} features loaded.`, `${payload.feature_count} 件のフィーチャーを読み込みました。`),
+        variant: "success"
+      });
+      navigate("/review");
+    } catch (caught) {
+      const message = handleApiError(caught, t("Failed to open IMDF archive", "IMDFアーカイブを開けませんでした"), {
+        title: t("Open failed", "オープン失敗")
+      });
+      setImdfError(message);
+    } finally {
+      setImdfLoading(false);
+    }
   };
 
   // Import & auto-continue to wizard
@@ -527,6 +553,49 @@ export function UploadPage() {
                   : t("Import & Continue", "インポートして次へ")}
             </span>
           </Button>
+        </div>
+
+        {/* IMDF re-open divider */}
+        <div className="mt-6 flex items-center gap-3">
+          <div className="h-px flex-1 bg-[var(--color-border)]" />
+          <span className="text-xs text-[var(--color-text-muted)]">{t("or", "または")}</span>
+          <div className="h-px flex-1 bg-[var(--color-border)]" />
+        </div>
+
+        <div className="mt-4">
+          <label className="block">
+            <span className="sr-only">{t("Open IMDF archive", "IMDFアーカイブを開く")}</span>
+            <input
+              type="file"
+              accept=".zip"
+              className="hidden"
+              disabled={imdfLoading}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void runImdfImport(file);
+                e.target.value = "";
+              }}
+              id="imdf-file-input"
+            />
+            <Button
+              variant="secondary"
+              className="w-full"
+              disabled={imdfLoading}
+              onClick={() => document.getElementById("imdf-file-input")?.click()}
+            >
+              {imdfLoading
+                ? t("Opening...", "開いています...")
+                : t("Open IMDF archive", "IMDFアーカイブを開く")}
+            </Button>
+          </label>
+          <p className="mt-1 text-center text-xs text-[var(--color-text-muted)]">
+            {t("Re-open a previously exported .imdf.zip for further editing", "以前エクスポートした .imdf.zip を再編集のために開く")}
+          </p>
+          {imdfError ? (
+            <div className="mt-2 rounded-[var(--radius-md)] border border-[var(--color-error)]/20 bg-[var(--color-error-muted)] px-3 py-2 text-xs text-[var(--color-error)]">
+              {imdfError}
+            </div>
+          ) : null}
         </div>
       </Card>
     </div>

@@ -33,6 +33,11 @@ export type ImportResponse = {
   warnings: string[];
 };
 
+export type ImportImdfResponse = {
+  session_id: string;
+  feature_count: number;
+};
+
 export type DetectResponse = {
   session_id: string;
   files: ImportedFile[];
@@ -402,6 +407,13 @@ export async function importShapefiles(
     request.onerror = () => reject(new ApiClientError(0, "NETWORK_ERROR", "Network error during upload."));
     request.send(formData);
   });
+}
+
+export async function importImdf(file: File): Promise<ImportImdfResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch("/api/import/imdf", { method: "POST", body: formData });
+  return handleJson<ImportImdfResponse>(response);
 }
 
 async function handleJson<T>(response: Response): Promise<T> {

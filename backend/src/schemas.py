@@ -517,6 +517,13 @@ class ResolveUnitOverlapsResponse(BaseModel):
     validation: ValidationResponse
 
 
+class ImportImdfResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    feature_count: int
+
+
 class ErrorResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

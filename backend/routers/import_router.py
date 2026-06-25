@@ -11,8 +11,9 @@ import zipfile
 from fastapi import APIRouter, File, Request, UploadFile
 
 from backend.src.detector import sync_feature_types
+from backend.src.imdf_reader import read_imdf_zip
 from backend.src.importer import import_file_blobs
-from backend.src.schemas import ImportResponse
+from backend.src.schemas import CleanupSummary, ImportImdfResponse, ImportResponse
 from backend.src.session import SessionManager
 
 
@@ -72,6 +73,30 @@ def _expand_upload(upload: UploadFile, payload: bytes) -> list[tuple[str, bytes]
                 blobs.append((Path(info.filename).name, archive.read(info.filename)))
         return blobs
     return [(upload.filename or "upload.bin", payload)]
+
+
+@router.post("/import/imdf", response_model=ImportImdfResponse, status_code=201)
+async def import_imdf(
+    request: Request,
+    file: Annotated[UploadFile, File(description="Exported IMDF .zip archive")],
+) -> ImportImdfResponse:
+    payload = await file.read()
+    if len(payload) > _max_upload_bytes(request):
+        raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
+
+    feature_collection = read_imdf_zip(payload)
+    feature_count = len(feature_collection["features"])
+
+    manager = _session_manager(request)
+    session = manager.create_session(
+        files=[],
+        cleanup_summary=CleanupSummary(),
+        feature_collection=feature_collection,
+    )
+    session.wizard.generation_status = "generated"
+    manager.save_session(session)
+
+    return ImportImdfResponse(session_id=session.session_id, feature_count=feature_count)
 
 
 @router.post("/import", response_model=ImportResponse, status_code=201)
