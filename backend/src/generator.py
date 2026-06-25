@@ -670,7 +670,7 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
                         "category": building.category or "unspecified",
                         "restriction": building.restriction,
                         "display_point": _display_point(anchor_geom) if anchor_geom is not None else None,
-                        "address_id": building.address_feature_id,
+                        "address_id": building.address_feature_id or venue_address_id,
                         "status": "mapped",
                         "issues": [],
                     },
