@@ -521,6 +521,23 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 add_issue("error", "venue_missing_address_id", "Venue address_id does not match an address feature.", feature_id=fid)
             if props.get("display_point") is None:
                 add_issue("error", "venue_missing_display_point_error", "Venue is missing display_point.", feature_id=fid)
+            phone = props.get("phone")
+            if isinstance(phone, str) and phone.strip() and not phone.strip().startswith("+"):
+                add_issue(
+                    "warning",
+                    "venue_phone_format",
+                    "Venue phone should be in international format starting with '+' (e.g. +1-555-123-4567).",
+                    feature_id=fid,
+                )
+            hours = props.get("hours")
+            if isinstance(hours, str) and hours.strip():
+                if not re.match(r"^(Mo|Tu|We|Th|Fr|Sa|Su|PH)([ ,\-;]|$)", hours.strip()):
+                    add_issue(
+                        "warning",
+                        "venue_hours_format",
+                        "Venue hours should use OSM opening_hours format (e.g. 'Mo-Fr 09:00-17:00; Sa 10:00-14:00').",
+                        feature_id=fid,
+                    )
 
         if ftype == "address":
             country = props.get("country")
@@ -653,7 +670,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
             add_issue("warning", "level_no_units", "Level has no units assigned.", feature_id=level_id)
 
     failed_checks = {issue.check for issue in [*errors, *warnings]}
-    passed = sorted({"unique_uuids", "valid_geometry", "venue_exists", "building_exists", "labels_format_valid", "display_points_valid"} - failed_checks)
+    passed = sorted({"unique_uuids", "valid_geometry", "venue_exists", "building_exists", "labels_format_valid", "display_points_valid", "venue_phone_format", "venue_hours_format"} - failed_checks)
     summary = ValidationSummary(
         total_features=len(rows),
         by_type=dict(by_type),

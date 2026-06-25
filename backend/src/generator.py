@@ -624,14 +624,38 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
                 }
             )
 
+    footprint_geom_by_building_uuid: dict[str, Any] = {}
+    for fp in footprint_features:
+        fp_props = fp.get("properties") or {}
+        fp_geom_raw = fp.get("geometry")
+        if not fp_geom_raw:
+            continue
+        fp_geom = shape(fp_geom_raw)
+        for buid in (fp_props.get("building_ids") or []):
+            if fp_props.get("category") == "ground":
+                footprint_geom_by_building_uuid[buid] = fp_geom
+            else:
+                footprint_geom_by_building_uuid.setdefault(buid, fp_geom)
+
     building_features: list[dict[str, Any]]
     if provided_building_features:
+        for bldg in provided_building_features:
+            props = bldg.get("properties") or {}
+            if props.get("display_point") is None:
+                buid = str(bldg.get("id") or "")
+                fp_geom = footprint_geom_by_building_uuid.get(buid)
+                if fp_geom:
+                    props["display_point"] = _display_point(fp_geom)
         building_features = provided_building_features
     else:
         building_features = []
         for building in building_rows:
             building_uuid = building_uuid_by_id[building.id]
-            anchor_geom = ground_geom_by_building.get(building.id) or first_geom_by_building.get(building.id)
+            anchor_geom = (
+                footprint_geom_by_building_uuid.get(building_uuid)
+                or ground_geom_by_building.get(building.id)
+                or first_geom_by_building.get(building.id)
+            )
             fallback_name = project.venue_name if project else None
             resolved_name = building.name or fallback_name
             building_features.append(
