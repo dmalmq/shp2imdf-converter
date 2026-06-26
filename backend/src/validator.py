@@ -10,7 +10,7 @@ from uuid import UUID
 
 from shapely import make_valid
 from shapely.errors import GEOSException
-from shapely.geometry import LineString, shape
+from shapely.geometry import LineString, MultiPolygon, Polygon, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 from shapely.strtree import STRtree
@@ -383,6 +383,25 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 auto_fixable=True,
                 fix_description="Round coordinates to 7 decimal places.",
             )
+        if ftype in POLYGON_TYPES and isinstance(geom, Polygon) and list(geom.interiors):
+            add_issue(
+                "warning",
+                "polygon_has_interior_rings",
+                f"Polygon has {len(list(geom.interiors))} interior ring(s) — likely a geometry artifact.",
+                feature_id=fid,
+                auto_fixable=True,
+                fix_description="Remove interior rings, keeping only the exterior boundary.",
+            )
+        elif ftype in POLYGON_TYPES and isinstance(geom, MultiPolygon) and any(list(p.interiors) for p in geom.geoms):
+            total = sum(len(list(p.interiors)) for p in geom.geoms)
+            add_issue(
+                "warning",
+                "polygon_has_interior_rings",
+                f"MultiPolygon has {total} interior ring(s) — likely a geometry artifact.",
+                feature_id=fid,
+                auto_fixable=True,
+                fix_description="Remove interior rings, keeping only the exterior boundaries.",
+            )
         if fid:
             geoms_by_id[fid] = geom
 
@@ -723,7 +742,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
             add_issue("warning", "level_no_units", "Level has no units assigned.", feature_id=level_id)
 
     failed_checks = {issue.check for issue in [*errors, *warnings]}
-    passed = sorted({"unique_uuids", "valid_geometry", "venue_exists", "building_exists", "labels_format_valid", "display_points_valid", "venue_phone_format", "venue_hours_format", "opening_not_touching_boundary"} - failed_checks)
+    passed = sorted({"unique_uuids", "valid_geometry", "venue_exists", "building_exists", "labels_format_valid", "display_points_valid", "venue_phone_format", "venue_hours_format", "opening_not_touching_boundary", "polygon_has_interior_rings"} - failed_checks)
     summary = ValidationSummary(
         total_features=len(rows),
         by_type=dict(by_type),

@@ -14,7 +14,7 @@ from backend.src.schemas import AutofixApplied, AutofixPrompt, ValidationRespons
 from backend.src.validator import prune_empty_geometry_features
 
 
-PROMPTED_CHECKS = {"duplicate_geometry_warning", "unit_sliver"}
+PROMPTED_CHECKS = {"duplicate_geometry_warning", "unit_sliver", "polygon_has_interior_rings"}
 
 
 def _round_value(value: Any, decimals: int) -> Any:
@@ -161,6 +161,34 @@ def apply_autofix(
         for issue in issues:
             if issue.check == "unit_sliver" and issue.feature_id:
                 to_delete.add(issue.feature_id)
+
+        for issue in issues:
+            if issue.check == "polygon_has_interior_rings" and issue.feature_id:
+                row = by_id.get(issue.feature_id)
+                if not row:
+                    continue
+                geometry = row.get("geometry")
+                if not isinstance(geometry, dict):
+                    continue
+                try:
+                    geom = shape(geometry)
+                    if isinstance(geom, Polygon):
+                        stripped = Polygon(geom.exterior)
+                    elif isinstance(geom, MultiPolygon):
+                        stripped = MultiPolygon([Polygon(p.exterior) for p in geom.geoms])
+                    else:
+                        continue
+                    row["geometry"] = mapping(stripped)
+                    fixes_applied.append(
+                        AutofixApplied(
+                            feature_id=issue.feature_id,
+                            check=issue.check,
+                            action="remove_interior_rings",
+                            description="Removed interior rings, keeping only the exterior boundary.",
+                        )
+                    )
+                except Exception:
+                    continue
 
         if to_delete:
             kept: list[dict[str, Any]] = []
