@@ -263,6 +263,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
         auto_fixable: bool = False,
         fix_description: str | None = None,
         overlap_geometry: dict[str, Any] | None = None,
+        snap_candidates: list[str] | None = None,
     ) -> None:
         issue = ValidationIssue(
             feature_id=feature_id,
@@ -273,6 +274,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
             auto_fixable=auto_fixable,
             fix_description=fix_description,
             overlap_geometry=overlap_geometry,
+            snap_candidates=snap_candidates or [],
         )
         if severity == "error":
             errors.append(issue)
@@ -426,6 +428,17 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 units_by_level[props["level_id"]].append((fid, geom))
             if geom and geom.area < 1e-10:
                 add_issue("warning", "sliver_polygon_warning", "Unit appears to be a sliver polygon.", feature_id=fid)
+            if geom:
+                area_sq_m = geom.area * (111_320 ** 2)
+                if area_sq_m < 0.5:
+                    add_issue(
+                        "warning",
+                        "unit_sliver",
+                        f"Unit area is very small ({area_sq_m:.4f} m²) — likely a geometry artifact.",
+                        feature_id=fid,
+                        auto_fixable=True,
+                        fix_description="Delete sliver unit.",
+                    )
 
         if ftype == "opening" and (not isinstance(props.get("category"), str) or not props.get("category")):
             add_issue("error", "opening_missing_category_error", "Opening has no category.", feature_id=fid)
@@ -572,6 +585,29 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
             if address_id is not None and (not isinstance(address_id, str) or address_id not in address_ids):
                 add_issue("error", "building_address_id_valid", "Building address_id does not match an address feature.", feature_id=fid)
 
+    # Orphaned address check.
+    referenced_address_ids: set[str] = set()
+    for row in rows:
+        val = _props(row).get("address_id")
+        if isinstance(val, str):
+            referenced_address_ids.add(val)
+    for row in rows:
+        if _feature_type(row) == "address" and (fid := _feature_id(row)):
+            if fid not in referenced_address_ids:
+                add_issue("warning", "orphaned_address", "Address feature is not referenced by any venue or building.", feature_id=fid)
+
+    # Building without footprint check.
+    footprinted_building_ids: set[str] = set()
+    for row in rows:
+        if _feature_type(row) == "footprint":
+            for buid in (_props(row).get("building_ids") or []):
+                if isinstance(buid, str):
+                    footprinted_building_ids.add(buid)
+    for row in rows:
+        if _feature_type(row) == "building" and (fid := _feature_id(row)):
+            if fid not in footprinted_building_ids:
+                add_issue("error", "building_missing_footprint", "Building has no footprint referencing it.", feature_id=fid)
+
     for level_id, pairs in units_by_level.items():
         level_geom = level_geoms.get(level_id)
         for unit_id, unit_geom in pairs:
@@ -643,7 +679,24 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                             level_boundary_cache[level_id] = None
                     boundaries = level_boundary_cache[level_id]
                 if boundaries is not None and not _safe_intersects(geom, boundaries):
-                    add_issue("warning", "opening_not_touching_boundary", "Opening does not touch any unit boundary.", feature_id=fid)
+                    level_units_list = units_by_level.get(level_id, [])
+                    nearest = sorted(level_units_list, key=lambda x: x[1].boundary.distance(geom))[:3]
+                    snap_cands = [uid for uid, _ in nearest]
+                    add_issue(
+                        "warning",
+                        "opening_not_touching_boundary",
+                        "Opening does not touch any unit boundary.",
+                        feature_id=fid,
+                        snap_candidates=snap_cands,
+                    )
+                level_unit_geoms = [g for _, g in units_by_level.get(level_id, [])] if isinstance(level_id, str) else []
+                if level_unit_geoms and any(g.contains(geom.centroid) for g in level_unit_geoms):
+                    add_issue(
+                        "warning",
+                        "opening_through_unit",
+                        "Opening centroid is inside a unit interior — opening may pass through a wall rather than lie on it.",
+                        feature_id=fid,
+                    )
                 meters = geom.length * 111_320
                 if meters < 0.3:
                     add_issue("warning", "opening_too_short", "Opening length is unusually short.", feature_id=fid)
@@ -670,7 +723,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
             add_issue("warning", "level_no_units", "Level has no units assigned.", feature_id=level_id)
 
     failed_checks = {issue.check for issue in [*errors, *warnings]}
-    passed = sorted({"unique_uuids", "valid_geometry", "venue_exists", "building_exists", "labels_format_valid", "display_points_valid", "venue_phone_format", "venue_hours_format"} - failed_checks)
+    passed = sorted({"unique_uuids", "valid_geometry", "venue_exists", "building_exists", "labels_format_valid", "display_points_valid", "venue_phone_format", "venue_hours_format", "opening_not_touching_boundary"} - failed_checks)
     summary = ValidationSummary(
         total_features=len(rows),
         by_type=dict(by_type),

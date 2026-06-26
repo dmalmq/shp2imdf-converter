@@ -296,6 +296,7 @@ export type ValidationIssue = {
   auto_fixable: boolean;
   fix_description?: string | null;
   overlap_geometry?: Record<string, unknown> | null;
+  snap_candidates?: string[];
 };
 
 export type ValidationSummary = {
@@ -697,6 +698,20 @@ export async function resolveSessionUnitOverlapsSafe(sessionId: string): Promise
     method: "POST"
   });
   return handleJson<ResolveUnitOverlapsResponse>(response);
+}
+
+export type SnapOpeningResponse = {
+  session_id: string;
+  validation: ValidationResponse;
+};
+
+export async function snapOpening(sessionId: string, openingId: string, unitId: string): Promise<SnapOpeningResponse> {
+  const response = await fetch(`/api/session/${sessionId}/snap_opening`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ opening_id: openingId, unit_id: unitId }),
+  });
+  return handleJson<SnapOpeningResponse>(response);
 }
 
 export async function exportSessionArchive(sessionId: string, asZip = false): Promise<ExportArchiveResponse> {

@@ -15,6 +15,7 @@ export type ReviewIssue = {
   auto_fixable: boolean;
   fix_description?: string | null;
   overlap_geometry?: Record<string, unknown> | null;
+  snap_candidates?: string[];
 };
 
 export const DEFAULT_LOCATED_FEATURE_ORDER = [

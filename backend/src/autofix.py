@@ -14,7 +14,7 @@ from backend.src.schemas import AutofixApplied, AutofixPrompt, ValidationRespons
 from backend.src.validator import prune_empty_geometry_features
 
 
-PROMPTED_CHECKS = {"duplicate_geometry_warning"}
+PROMPTED_CHECKS = {"duplicate_geometry_warning", "unit_sliver"}
 
 
 def _round_value(value: Any, decimals: int) -> Any:
@@ -157,6 +157,11 @@ def apply_autofix(
         for left, right in duplicate_pairs:
             # Keep the lexicographically smaller id for deterministic behavior.
             to_delete.add(max(left, right))
+
+        for issue in issues:
+            if issue.check == "unit_sliver" and issue.feature_id:
+                to_delete.add(issue.feature_id)
+
         if to_delete:
             kept: list[dict[str, Any]] = []
             for row in rows:

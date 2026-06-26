@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
+from shapely.affinity import translate
+from shapely.geometry import mapping, shape
+from shapely.ops import nearest_points
 
 from backend.src.autofix import apply_autofix
 from backend.src.exporter import build_export_archive
-from backend.src.schemas import AutofixRequest, AutofixResponse, ShapefileExportRequest, ValidationResponse
+from backend.src.schemas import AutofixRequest, AutofixResponse, ShapefileExportRequest, SnapOpeningRequest, SnapOpeningResponse, ValidationResponse
 from backend.src.session import SessionManager
 from backend.src.shapefile_exporter import build_shapefile_export_archive
 from backend.src.validator import annotate_feature_collection_with_validation, validate_feature_collection
@@ -85,6 +88,34 @@ def export_imdf(session_id: str, request: Request, ext: str = "imdf") -> Respons
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/snap_opening", response_model=SnapOpeningResponse)
+def snap_opening(session_id: str, payload: SnapOpeningRequest, request: Request) -> SnapOpeningResponse:
+    manager = _session_manager(request)
+    session = manager.get_session(session_id=session_id)
+    if session is None:
+        raise KeyError("Session not found")
+
+    features = session.feature_collection.get("features", [])
+    opening_row = next((f for f in features if isinstance(f, dict) and str(f.get("id")) == payload.opening_id), None)
+    unit_row = next((f for f in features if isinstance(f, dict) and str(f.get("id")) == payload.unit_id), None)
+    if opening_row is None or unit_row is None:
+        raise KeyError("Opening or unit feature not found.")
+
+    opening_geom = shape(opening_row["geometry"])
+    unit_boundary = shape(unit_row["geometry"]).boundary
+    nearest_pt = nearest_points(opening_geom.centroid, unit_boundary)[1]
+    dx = nearest_pt.x - opening_geom.centroid.x
+    dy = nearest_pt.y - opening_geom.centroid.y
+    snapped = translate(opening_geom, xoff=dx, yoff=dy)
+    opening_row["geometry"] = mapping(snapped)
+
+    validation = validate_feature_collection(session.feature_collection)
+    session.feature_collection = annotate_feature_collection_with_validation(session.feature_collection, validation)
+    session.validation = validation
+    manager.save_session(session)
+    return SnapOpeningResponse(session_id=session_id, validation=validation)
 
 
 @router.post("/export/shapefiles")

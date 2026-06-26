@@ -13,6 +13,7 @@ import {
   patchSessionFeaturesBulk,
   resolveSessionUnitOverlap,
   resolveSessionUnitOverlapsSafe,
+  snapOpening,
   type ShapefileExportEncoding,
   type ShapefileExportRequest,
   type WizardState,
@@ -239,6 +240,7 @@ export function ReviewPage() {
   const [validating, setValidating] = useState(false);
   const [autofixing, setAutofixing] = useState(false);
   const [overlapResolving, setOverlapResolving] = useState(false);
+  const [openingSnapping, setOpeningSnapping] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState<"imdf" | "imdf_zip" | "shapefiles">("imdf");
@@ -654,6 +656,28 @@ export function ReviewPage() {
       captureError(caught, t("Failed to resolve overlap", "重なりの解消に失敗しました"), t("Overlap fix failed", "重なり修正失敗"));
     } finally {
       setOverlapResolving(false);
+    }
+  };
+
+  const handleSnapOpening = async (openingId: string, unitId: string) => {
+    if (!sessionId) {
+      return;
+    }
+    setOpeningSnapping(true);
+    setError(null);
+    try {
+      const response = await snapOpening(sessionId, openingId, unitId);
+      applyPostValidationState(response.validation);
+      await loadFeatures();
+      pushToast({
+        title: t("Opening snapped", "開口部をスナップしました"),
+        description: t("Opening moved to unit boundary.", "開口部をユニット境界に移動しました。"),
+        variant: "success"
+      });
+    } catch (caught) {
+      captureError(caught, t("Failed to snap opening", "開口部のスナップに失敗しました"), t("Snap failed", "スナップ失敗"));
+    } finally {
+      setOpeningSnapping(false);
     }
   };
 
@@ -1130,10 +1154,12 @@ export function ReviewPage() {
                   allFeatures={features}
                   autoFixing={autofixing}
                   overlapResolving={overlapResolving}
+                  openingSnapping={openingSnapping}
                   onSelectIssue={setActiveIssueIndex}
                   onToggleCollapsed={() => setIssuesPanelCollapsed((prev) => !prev)}
                   onAutoFixSafe={() => void runAutofix(false)}
                   onResolveUnitOverlap={(keepFeatureId, clipFeatureId) => void resolveOverlapPair(keepFeatureId, clipFeatureId)}
+                  onSnapOpening={(openingId, unitId) => void handleSnapOpening(openingId, unitId)}
                 />
               ) : null}
               <PropertiesPanel
