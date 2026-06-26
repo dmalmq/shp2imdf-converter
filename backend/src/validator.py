@@ -675,6 +675,61 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 if not _safe_contains_or_touches(footprints_union, centroid):
                     add_issue("warning", "level_outside_footprint_warning", "Level centroid is outside footprint.", feature_id=fid)
 
+    # Footprint-level ordinal coverage check.
+    # aerial should cover ordinal > 0, ground ordinal == 0, subterranean ordinal < 0.
+    _ORDINAL_MATCH: dict[str, Any] = {
+        "aerial": lambda o: o > 0,
+        "ground": lambda o: o == 0,
+        "subterranean": lambda o: o < 0,
+    }
+    fp_by_building_cat: dict[str, dict[str, list[tuple[str, BaseGeometry]]]] = {}
+    for row in rows:
+        if _feature_type(row) != "footprint":
+            continue
+        fid = _feature_id(row)
+        if not fid or fid not in geoms_by_id:
+            continue
+        category = _props(row).get("category")
+        if category not in _ORDINAL_MATCH:
+            continue
+        for buid in (_props(row).get("building_ids") or []):
+            if isinstance(buid, str):
+                fp_by_building_cat.setdefault(buid, {}).setdefault(category, []).append((fid, geoms_by_id[fid]))
+
+    lvl_by_building: dict[str, list[tuple[str, int, BaseGeometry]]] = {}
+    for row in rows:
+        if _feature_type(row) != "level":
+            continue
+        fid = _feature_id(row)
+        if not fid or fid not in geoms_by_id:
+            continue
+        ordinal = _props(row).get("ordinal")
+        if not isinstance(ordinal, int):
+            continue
+        for buid in (_props(row).get("building_ids") or []):
+            if isinstance(buid, str):
+                lvl_by_building.setdefault(buid, []).append((fid, ordinal, geoms_by_id[fid]))
+
+    for buid, cat_fps in fp_by_building_cat.items():
+        for category, fp_list in cat_fps.items():
+            ordinal_fn = _ORDINAL_MATCH[category]
+            fp_union = unary_union([g for _, g in fp_list])
+            for level_id, ordinal, level_geom in lvl_by_building.get(buid, []):
+                if not ordinal_fn(ordinal):
+                    continue
+                if not _safe_contains_or_touches(fp_union, level_geom.centroid):
+                    # Target the footprint closest to this level for the fix.
+                    fp_id = min(fp_list, key=lambda x: x[1].distance(level_geom.centroid))[0]
+                    add_issue(
+                        "warning",
+                        "footprint_level_coverage",
+                        f"{category.title()} footprint does not cover level (ordinal {ordinal}).",
+                        feature_id=fp_id,
+                        related_feature_id=level_id,
+                        auto_fixable=True,
+                        fix_description=f"Expand {category} footprint to include the level geometry.",
+                    )
+
     level_boundary_cache: dict[str, BaseGeometry | None] = {}
 
     # Opening/detail warnings.
@@ -742,7 +797,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
             add_issue("warning", "level_no_units", "Level has no units assigned.", feature_id=level_id)
 
     failed_checks = {issue.check for issue in [*errors, *warnings]}
-    passed = sorted({"unique_uuids", "valid_geometry", "venue_exists", "building_exists", "labels_format_valid", "display_points_valid", "venue_phone_format", "venue_hours_format", "opening_not_touching_boundary", "polygon_has_interior_rings"} - failed_checks)
+    passed = sorted({"unique_uuids", "valid_geometry", "venue_exists", "building_exists", "labels_format_valid", "display_points_valid", "venue_phone_format", "venue_hours_format", "opening_not_touching_boundary", "polygon_has_interior_rings", "footprint_level_coverage"} - failed_checks)
     summary = ValidationSummary(
         total_features=len(rows),
         by_type=dict(by_type),

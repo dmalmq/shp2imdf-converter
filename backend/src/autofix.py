@@ -14,7 +14,7 @@ from backend.src.schemas import AutofixApplied, AutofixPrompt, ValidationRespons
 from backend.src.validator import prune_empty_geometry_features
 
 
-PROMPTED_CHECKS = {"duplicate_geometry_warning", "unit_sliver", "polygon_has_interior_rings"}
+PROMPTED_CHECKS = {"duplicate_geometry_warning", "unit_sliver", "polygon_has_interior_rings", "footprint_level_coverage"}
 
 
 def _round_value(value: Any, decimals: int) -> Any:
@@ -161,6 +161,37 @@ def apply_autofix(
         for issue in issues:
             if issue.check == "unit_sliver" and issue.feature_id:
                 to_delete.add(issue.feature_id)
+
+        # Footprint expansion: accumulate all uncovered levels per footprint, then apply one union.
+        fp_expansions: dict[str, Any] = {}
+        for issue in issues:
+            if issue.check == "footprint_level_coverage" and issue.feature_id and issue.related_feature_id:
+                fp_row = by_id.get(issue.feature_id)
+                level_row = by_id.get(issue.related_feature_id)
+                if not fp_row or not level_row:
+                    continue
+                fp_geom_raw = fp_row.get("geometry")
+                level_geom_raw = level_row.get("geometry")
+                if not isinstance(fp_geom_raw, dict) or not isinstance(level_geom_raw, dict):
+                    continue
+                try:
+                    base = fp_expansions.get(issue.feature_id) or shape(fp_geom_raw)
+                    fp_expansions[issue.feature_id] = base.union(shape(level_geom_raw))
+                except Exception:
+                    continue
+        for fp_id, expanded in fp_expansions.items():
+            fp_row = by_id.get(fp_id)
+            if not fp_row:
+                continue
+            fp_row["geometry"] = mapping(expanded)
+            fixes_applied.append(
+                AutofixApplied(
+                    feature_id=fp_id,
+                    check="footprint_level_coverage",
+                    action="expand_footprint",
+                    description="Expanded footprint to cover uncovered level(s).",
+                )
+            )
 
         for issue in issues:
             if issue.check == "polygon_has_interior_rings" and issue.feature_id:
