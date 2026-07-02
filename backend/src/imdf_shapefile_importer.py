@@ -36,25 +36,6 @@ ODC_LAYER_ALIASES = {
 ODC_IGNORED_LAYER_SUFFIXES = {("floor", "connect"), ("build", "connect")}
 
 
-def _load_code_map(filename: str) -> dict[str, str]:
-    path = CONFIG_DIR / filename
-    if not path.exists():
-        return {}
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    mappings = payload.get("mappings", {})
-    if not isinstance(mappings, dict):
-        return {}
-    return {
-        str(code).strip().upper(): str(category).strip().lower()
-        for code, category in mappings.items()
-        if str(code).strip() and str(category).strip()
-    }
-
-
-A_CODES = _load_code_map("a-codes.json")
-B_CODES = _load_code_map("b-codes.json")
-
-
 def _metadata_lookup(metadata: dict[str, Any]) -> dict[str, str]:
     lookup: dict[str, str] = {}
     for key in metadata:
@@ -169,6 +150,12 @@ def _category_value(value: Any, code_map: dict[str, str], fallback: str) -> str:
     if mapped:
         return mapped
     return text.lower()
+
+
+def _raw_category_value(value: Any, fallback: str) -> str:
+    # Keeps the literal source code (e.g. "B001") instead of translating it via a-codes.json/b-codes.json.
+    text = _text(value)
+    return text.upper() if text else fallback
 
 
 def _poi_category_value(value: Any) -> str:
@@ -287,7 +274,7 @@ def _build_venues(
                 "feature_type": "venue",
                 "geometry": geometry,
                 "properties": {
-                    "category": _category_value(_metadata_get(metadata, ["category", "venue_category"]), A_CODES, "unspecified"),
+                    "category": _raw_category_value(_metadata_get(metadata, ["category", "venue_category"]), "unspecified"),
                     "restriction": _text(_metadata_get(metadata, ["restriction", "restrict", "restricted"])),
                     "name": _label(_metadata_get(metadata, ["name", "venue_name"]), language),
                     "alt_name": _label(_metadata_get(metadata, ["alt_name", "altname"]), language),
@@ -520,7 +507,7 @@ def _build_level_linked_features(
             common = _source_common(row, metadata)
             if feature_type == "unit":
                 properties = {
-                    "category": _category_value(_metadata_get(metadata, ["category", "imdf_cat", "type"]), B_CODES, "unspecified"),
+                    "category": _raw_category_value(_metadata_get(metadata, ["category", "imdf_cat", "type"]), "unspecified"),
                     "restriction": _text(_metadata_get(metadata, ["restriction", "restrict", "restricted"])),
                     "accessibility": _parse_list(_metadata_get(metadata, ["accessibility", "accessible"])),
                     "name": _label(_metadata_get(metadata, ["name", "unit_name"]), language),

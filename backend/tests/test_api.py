@@ -1820,7 +1820,7 @@ def _write_imdf_schema_shapefiles(root: Path) -> dict[str, str]:
     gpd.GeoDataFrame(
         {
             "id": [site_id],
-            "category": ["transitstation"],
+            "category": ["A001"],
             "name": ["Demo Station"],
             "country": ["JP"],
             "city": ["Tokyo"],
@@ -1851,7 +1851,7 @@ def _write_imdf_schema_shapefiles(root: Path) -> dict[str, str]:
     gpd.GeoDataFrame(
         {
             "id": [unit_id],
-            "category": ["retail"],
+            "category": ["B001"],
             "floor_id": [level_id],
             "name": ["Shop A"],
             "restricted": [None],
@@ -1945,10 +1945,12 @@ def test_imdf_schema_shapefile_import_creates_review_session(test_client) -> Non
     features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
     level = next(item for item in features if item["feature_type"] == "level")
     unit = next(item for item in features if item["feature_type"] == "unit")
+    venue = next(item for item in features if item["feature_type"] == "venue")
     assert level["id"] == ids["level_id"]
     assert unit["id"] == ids["unit_id"]
     assert unit["properties"]["level_id"] == ids["level_id"]
-    assert unit["properties"]["category"] == "retail"
+    assert unit["properties"]["category"] == "B001"
+    assert venue["properties"]["category"] == "A001"
 
     amenity = next(item for item in features if item["feature_type"] == "amenity")
     assert amenity["id"] == ids["amenity_id"]
