@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { useNavigate } from "react-router-dom";
 
-import { importImdf, importShapefiles, type ImportResponse } from "../api/client";
+import { importImdf, importImdfShapefiles, importShapefiles, type ImportResponse } from "../api/client";
 import { useToast } from "../components/shared/ToastProvider";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
@@ -88,6 +88,7 @@ function toQueuedUploadFile(file: File): QueuedUploadFile | null {
 export function UploadPage() {
   const navigate = useNavigate();
   const setSessionId = useAppStore((state) => state.setSessionId);
+  const setImportProfile = useAppStore((state) => state.setImportProfile);
   const setCurrentScreen = useAppStore((state) => state.setCurrentScreen);
   const setFiles = useAppStore((state) => state.setFiles);
   const setCleanupSummary = useAppStore((state) => state.setCleanupSummary);
@@ -99,6 +100,7 @@ export function UploadPage() {
   const [queuedFiles, setQueuedFiles] = useState<QueuedUploadFile[]>([]);
   const [progress, setProgress] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [importMode, setImportMode] = useState<"standard" | "imdf_shapefile">("standard");
   const [error, setError] = useState<string | null>(null);
   const [cleanupExpanded, setCleanupExpanded] = useState(false);
   const [lastCleanup, setLastCleanup] = useState<ImportResponse["cleanup_summary"] | null>(null);
@@ -258,6 +260,7 @@ export function UploadPage() {
       const payload = await importImdf(file);
       setSessionExpiredMessage(null);
       setSessionId(payload.session_id);
+      setImportProfile("standard");
       setCurrentScreen("review");
       pushToast({
         title: t("IMDF archive opened", "IMDFアーカイブを開きました"),
@@ -285,18 +288,30 @@ export function UploadPage() {
       setError(message);
       return;
     }
+    if (importMode === "imdf_shapefile" && selectedFiles.some((file) => fileExtension(file.name) === ".gpkg")) {
+      const message = t(
+        "IMDF-schema shapefile import only accepts shapefile components or zip archives.",
+        "IMDF-schema shapefile import only accepts shapefile components or zip archives."
+      );
+      setError(message);
+      return;
+    }
 
     setLoading(true);
     setProgress(0);
     setError(null);
     try {
-      const payload = await importShapefiles(selectedFiles, setProgress);
+      const payload =
+        importMode === "imdf_shapefile"
+          ? await importImdfShapefiles(selectedFiles, setProgress)
+          : await importShapefiles(selectedFiles, setProgress);
       setSessionExpiredMessage(null);
       setSessionId(payload.session_id);
+      setImportProfile(payload.import_profile);
       setFiles(payload.files);
       setCleanupSummary(payload.cleanup_summary);
       setLastCleanup(payload.cleanup_summary);
-      setCurrentScreen("wizard");
+      setCurrentScreen(payload.import_profile === "imdf_shapefile" ? "review" : "wizard");
 
       pushToast({
         title: t("Import complete", "インポート完了"),
@@ -315,8 +330,7 @@ export function UploadPage() {
         });
       }
 
-      // Auto-navigate to wizard
-      navigate("/wizard");
+      navigate(payload.import_profile === "imdf_shapefile" ? "/review" : "/wizard");
     } catch (caught) {
       const message = handleApiError(caught, t("Import failed", "インポートに失敗しました"), {
         title: t("Import failed", "インポート失敗")
@@ -365,6 +379,39 @@ export function UploadPage() {
             ) : null}
           </div>
         ) : null}
+
+        <div className="mb-5 grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            className={[
+              "rounded-[var(--radius-md)] border px-3 py-2 text-left text-sm transition-colors",
+              importMode === "standard"
+                ? "border-[var(--color-primary)]/40 bg-[var(--color-primary-muted)] text-[var(--color-primary)]"
+                : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-muted)]"
+            ].join(" ")}
+            onClick={() => setImportMode("standard")}
+          >
+            <span className="block font-medium">{t("Standard import", "標準インポート")}</span>
+            <span className="mt-0.5 block text-xs opacity-80">
+              {t("Classify and map source shapefiles in the wizard.", "ウィザードで元データを分類・マッピングします。")}
+            </span>
+          </button>
+          <button
+            type="button"
+            className={[
+              "rounded-[var(--radius-md)] border px-3 py-2 text-left text-sm transition-colors",
+              importMode === "imdf_shapefile"
+                ? "border-[var(--color-primary)]/40 bg-[var(--color-primary-muted)] text-[var(--color-primary)]"
+                : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-muted)]"
+            ].join(" ")}
+            onClick={() => setImportMode("imdf_shapefile")}
+          >
+            <span className="block font-medium">{t("IMDF-schema shapefiles", "IMDFスキーマのシェープファイル")}</span>
+            <span className="mt-0.5 block text-xs opacity-80">
+              {t("Open reviewed features directly and export Open Data Contest 2026 shapefiles.", "直接レビュー画面で開き、オープンデータコンテスト2026形式のシェープファイルを書き出します。")}
+            </span>
+          </button>
+        </div>
 
         {/* Dropzone */}
         <div
@@ -549,8 +596,12 @@ export function UploadPage() {
               {loading
                 ? t(`Importing... ${progress}%`, `インポート中... ${progress}%`)
                 : hasFiles
-                  ? t("Import & Continue", "インポートして次へ")
-                  : t("Import & Continue", "インポートして次へ")}
+                  ? importMode === "imdf_shapefile"
+                    ? t("Import to Review", "レビューへインポート")
+                    : t("Import & Continue", "インポートして次へ")
+                  : importMode === "imdf_shapefile"
+                    ? t("Import to Review", "レビューへインポート")
+                    : t("Import & Continue", "インポートして次へ")}
             </span>
           </Button>
         </div>

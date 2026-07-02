@@ -9,11 +9,13 @@ from pathlib import Path
 import re
 import tempfile
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 import zipfile
 
 import geopandas as gpd
 import pandas as pd
+from shapely.geometry import mapping, shape
+from shapely.ops import unary_union
 
 from backend.src.schemas import SessionRecord, ShapefileExportRequest
 
@@ -67,6 +69,7 @@ LEVEL_EXPORT_COLUMNS = (
     "ordinal",
     "address_id",
 )
+CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 
 
 @dataclass(slots=True)
@@ -570,10 +573,666 @@ def _resolve_legacy_code_map(
     return {}, "none", conflicts
 
 
+def _load_category_code_map(filename: str) -> dict[str, str]:
+    path = CONFIG_DIR / filename
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    mappings = payload.get("mappings", {})
+    if not isinstance(mappings, dict):
+        return {}
+    return {
+        str(code).strip().upper(): str(category).strip().lower()
+        for code, category in mappings.items()
+        if str(code).strip() and str(category).strip()
+    }
+
+
+def _reverse_category_code_map(code_map: dict[str, str]) -> dict[str, list[str]]:
+    reversed_map: dict[str, list[str]] = {}
+    for code, category in code_map.items():
+        reversed_map.setdefault(category.lower(), []).append(code.upper())
+    for codes in reversed_map.values():
+        codes.sort()
+    return reversed_map
+
+
+def _feature_rows(session: SessionRecord) -> list[dict[str, Any]]:
+    rows = session.feature_collection.get("features", [])
+    return rows if isinstance(rows, list) else []
+
+
+def _feature_properties(feature: dict[str, Any]) -> dict[str, Any]:
+    properties = feature.get("properties")
+    return properties if isinstance(properties, dict) else {}
+
+
+def _feature_metadata(feature: dict[str, Any]) -> dict[str, Any]:
+    metadata = _feature_properties(feature).get("metadata")
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _metadata_lookup(metadata: dict[str, Any]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for key in metadata:
+        normalized = str(key).strip().lower()
+        if normalized and normalized not in lookup:
+            lookup[normalized] = str(key)
+    return lookup
+
+
+def _metadata_value(metadata: dict[str, Any], candidates: list[str]) -> Any:
+    lookup = _metadata_lookup(metadata)
+    for candidate in candidates:
+        key = lookup.get(candidate.strip().lower())
+        if key is not None:
+            return metadata.get(key)
+    return None
+
+
+def _text_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    text = str(value).strip()
+    return text or None
+
+
+def _label_text(value: Any) -> str | None:
+    if isinstance(value, dict):
+        for item in value.values():
+            text = _text_or_none(item)
+            if text:
+                return text
+        return None
+    return _text_or_none(value)
+
+
+def _property_or_metadata(feature: dict[str, Any], property_names: list[str], metadata_names: list[str] | None = None) -> Any:
+    properties = _feature_properties(feature)
+    for name in property_names:
+        value = properties.get(name)
+        if _text_or_none(value) is not None:
+            return value
+    metadata = _feature_metadata(feature)
+    value = _metadata_value(metadata, metadata_names or property_names)
+    if _text_or_none(value) is not None:
+        return value
+    return None
+
+
+def _source_value(feature: dict[str, Any]) -> str:
+    return _text_or_none(_property_or_metadata(feature, ["source"], ["source"])) or "1"
+
+
+def _source_code(feature: dict[str, Any], prefix: str, candidates: list[str]) -> str | None:
+    value = _property_or_metadata(feature, [], candidates)
+    text = _text_or_none(value)
+    if text and re.fullmatch(fr"{prefix}\d{{3}}", text.strip(), flags=re.IGNORECASE):
+        return text.strip().upper()
+    return None
+
+
+def _code_for_feature_category(
+    feature: dict[str, Any],
+    prefix: str,
+    source_candidates: list[str],
+    reverse_map: dict[str, list[str]],
+    fallback: str,
+    report: dict[str, Any],
+) -> str:
+    source_code = _source_code(feature, prefix=prefix, candidates=source_candidates)
+    if source_code:
+        return source_code
+
+    category = _text_or_none(_feature_properties(feature).get("category"))
+    if not category:
+        report["category_code_fallbacks"].append(
+            {"feature_id": str(feature.get("id", "")), "fallback": fallback, "reason": "missing_category"}
+        )
+        return fallback
+
+    codes = reverse_map.get(category.lower(), [])
+    if not codes:
+        report["category_code_fallbacks"].append(
+            {
+                "feature_id": str(feature.get("id", "")),
+                "category": category,
+                "fallback": fallback,
+                "reason": "missing_mapping",
+            }
+        )
+        return fallback
+    if len(codes) > 1:
+        report["category_code_ambiguities"].append(
+            {
+                "feature_id": str(feature.get("id", "")),
+                "category": category,
+                "selected_code": codes[0],
+                "candidate_codes": codes,
+            }
+        )
+    return codes[0]
+
+
+def _feature_geometry(feature: dict[str, Any]) -> Any | None:
+    geometry = feature.get("geometry")
+    if isinstance(geometry, dict):
+        try:
+            geom = shape(geometry)
+            if not geom.is_empty:
+                return geom
+        except Exception:
+            return None
+    return None
+
+
+def _metadata_geometry(feature: dict[str, Any], key: str = "__odc_geometry") -> Any | None:
+    geometry = _feature_metadata(feature).get(key)
+    if isinstance(geometry, dict):
+        try:
+            geom = shape(geometry)
+            if not geom.is_empty:
+                return geom
+        except Exception:
+            return None
+    return None
+
+
+def _feature_id_value(feature: dict[str, Any]) -> str:
+    return str(feature.get("id") or uuid4())
+
+
+def _level_label(level: dict[str, Any]) -> str:
+    properties = _feature_properties(level)
+    label = _label_text(properties.get("short_name")) or _label_text(properties.get("name"))
+    if label:
+        return _safe_export_name(label)
+    ordinal = properties.get("ordinal")
+    if isinstance(ordinal, (int, float)) and not isinstance(ordinal, bool):
+        if ordinal < 0:
+            return f"B{abs(int(ordinal))}F"
+        return f"{int(ordinal) + 1}F"
+    return _safe_export_name(str(level.get("id", "level"))[:8])
+
+
+def _display_name(feature: dict[str, Any]) -> str | None:
+    properties = _feature_properties(feature)
+    return _label_text(properties.get("name")) or _text_or_none(_metadata_value(_feature_metadata(feature), ["name"]))
+
+
+def _address_by_id(features: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        str(feature.get("id")): _feature_properties(feature)
+        for feature in features
+        if feature.get("feature_type") == "address" and feature.get("id")
+    }
+
+
+def _address_for_feature(feature: dict[str, Any], addresses: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    address_id = _feature_properties(feature).get("address_id")
+    if isinstance(address_id, str) and address_id in addresses:
+        return addresses[address_id]
+    return {}
+
+
+def _safe_layer_stem(*parts: str) -> str:
+    cleaned = [_safe_export_name(part) for part in parts if part]
+    return "_".join(cleaned) or "layer"
+
+
+def _project_export_base(session: SessionRecord, features: list[dict[str, Any]]) -> str:
+    if session.wizard.project:
+        return _safe_export_name(session.wizard.project.project_name or session.wizard.project.venue_name)
+    venue = next((item for item in features if item.get("feature_type") == "venue"), None)
+    if venue:
+        name = _display_name(venue)
+        if name:
+            return _safe_export_name(name)
+    return _safe_export_name(session.session_id)
+
+
+ODC_POLYGON_GEOMS = ("Polygon", "MultiPolygon")
+ODC_LINE_GEOMS = ("LineString", "MultiLineString")
+ODC_POINT_GEOMS = ("Point",)
+
+
+def _write_odc_layer(
+    output_dir: Path,
+    stem: str,
+    rows: list[dict[str, Any]],
+    geometries: list[Any],
+    write_encoding: str | None,
+    allowed_geoms: tuple[str, ...],
+    report: dict[str, Any],
+) -> bool:
+    kept_rows: list[dict[str, Any]] = []
+    kept_geoms: list[Any] = []
+    for row, geom in zip(rows, geometries):
+        if geom.geom_type in allowed_geoms:
+            kept_rows.append(row)
+            kept_geoms.append(geom)
+        else:
+            report["rows_skipped"].append(
+                {"layer": stem, "feature_id": row.get("id"), "geometry_type": geom.geom_type}
+            )
+    rows, geometries = kept_rows, kept_geoms
+    if not rows or not geometries:
+        return False
+    gdf = gpd.GeoDataFrame(rows, geometry=geometries, crs="EPSG:4326")
+    destination = output_dir / f"{stem}.shp"
+    write_kwargs: dict[str, Any] = {"driver": "ESRI Shapefile", "index": False}
+    if write_encoding is not None:
+        write_kwargs["encoding"] = write_encoding
+    gdf.to_file(destination, **write_kwargs)
+    return True
+
+
+def _odc_report(request: ShapefileExportRequest) -> dict[str, Any]:
+    return {
+        "profile": request.profile,
+        "encoding": request.encoding,
+        "layers_written": [],
+        "layers_skipped": [],
+        "rows_skipped": [],
+        "category_code_ambiguities": [],
+        "category_code_fallbacks": [],
+    }
+
+
+def build_odc2026_shapefile_export_archive(
+    session: SessionRecord,
+    request: ShapefileExportRequest,
+) -> tuple[bytes, str]:
+    if any(item.source_format != "shapefile" for item in session.files):
+        raise ValueError(
+            "Open Data Contest 2026 shapefile export unavailable: this session includes GeoPackage sources. "
+            "Use IMDF export instead."
+        )
+
+    features = _feature_rows(session)
+    report = _odc_report(request)
+    write_encoding = _encoding_for_write(request.encoding)
+    base = _project_export_base(session, features)
+    addresses = _address_by_id(features)
+    a_reverse = _reverse_category_code_map(_load_category_code_map("a-codes.json"))
+    b_reverse = _reverse_category_code_map(_load_category_code_map("b-codes.json"))
+    c_reverse = _reverse_category_code_map(_load_category_code_map("c-codes.json"))
+    f_reverse = _reverse_category_code_map(_load_category_code_map("f-codes.json"))
+
+    levels = sorted(
+        [item for item in features if item.get("feature_type") == "level"],
+        key=lambda item: _feature_properties(item).get("ordinal")
+        if isinstance(_feature_properties(item).get("ordinal"), (int, float))
+        else 0,
+    )
+    level_ids = {str(item.get("id")) for item in levels if item.get("id")}
+    features_by_level: dict[str, dict[str, list[dict[str, Any]]]] = {
+        level_id: {"unit": [], "fixture": [], "opening": [], "detail": [], "section": [], "amenity": [], "occupant": []}
+        for level_id in level_ids
+    }
+    unit_level_by_id = {
+        str(item.get("id")): _feature_properties(item).get("level_id")
+        for item in features
+        if item.get("feature_type") == "unit" and item.get("id")
+    }
+    anchor_unit_by_id = {
+        str(item.get("id")): _feature_properties(item).get("unit_id")
+        for item in features
+        if item.get("feature_type") == "anchor" and item.get("id")
+    }
+
+    def _poi_level_id(feature: dict[str, Any]) -> str | None:
+        candidate = _metadata_value(_feature_metadata(feature), ["__odc_level_id"])
+        if isinstance(candidate, str) and candidate in level_ids:
+            return candidate
+        props = _feature_properties(feature)
+        unit_refs = props.get("unit_ids")
+        if isinstance(unit_refs, list) and unit_refs:
+            candidate = unit_level_by_id.get(str(unit_refs[0]))
+            if isinstance(candidate, str) and candidate in level_ids:
+                return candidate
+        anchor_ref = props.get("anchor_id")
+        if isinstance(anchor_ref, str):
+            candidate = unit_level_by_id.get(str(anchor_unit_by_id.get(anchor_ref)))
+            if isinstance(candidate, str) and candidate in level_ids:
+                return candidate
+        return None
+
+    for feature in features:
+        feature_type = str(feature.get("feature_type") or "")
+        if feature_type not in {"unit", "fixture", "opening", "detail", "section", "amenity", "occupant"}:
+            continue
+        if feature_type in {"amenity", "occupant"}:
+            level_id = _poi_level_id(feature)
+            if level_id is None:
+                report["rows_skipped"].append(
+                    {"layer": feature_type, "feature_id": str(feature.get("id", "")), "reason": "unresolved_level"}
+                )
+                continue
+            features_by_level[level_id][feature_type].append(feature)
+            continue
+        level_id = _feature_properties(feature).get("level_id")
+        if isinstance(level_id, str) and level_id in features_by_level:
+            features_by_level[level_id][feature_type].append(feature)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        site_rows: list[dict[str, Any]] = []
+        site_geoms: list[Any] = []
+        for venue in features:
+            if venue.get("feature_type") != "venue":
+                continue
+            geom = _feature_geometry(venue)
+            if geom is None:
+                continue
+            address = _address_for_feature(venue, addresses)
+            site_rows.append(
+                {
+                    "id": _feature_id_value(venue),
+                    "postalcode": _text_or_none(address.get("postal_code")),
+                    "country": _text_or_none(address.get("country")),
+                    "province": _text_or_none(address.get("province")),
+                    "city": _text_or_none(address.get("locality")),
+                    "address1": _text_or_none(address.get("address")),
+                    "address2": None,
+                    "address3": None,
+                    "address4": None,
+                    "category": _code_for_feature_category(
+                        venue,
+                        prefix="A",
+                        source_candidates=["category"],
+                        reverse_map=a_reverse,
+                        fallback="A999",
+                        report=report,
+                    ),
+                    "hours1": _text_or_none(_feature_properties(venue).get("hours")),
+                    "hours2": None,
+                    "name": _display_name(venue),
+                    "phone": _text_or_none(_feature_properties(venue).get("phone")),
+                    "website": _text_or_none(_feature_properties(venue).get("website")),
+                    "source": _source_value(venue),
+                }
+            )
+            site_geoms.append(geom)
+        site_stem = _safe_layer_stem(base, "Site")
+        if _write_odc_layer(output_dir, site_stem, site_rows, site_geoms, write_encoding, ODC_POLYGON_GEOMS, report):
+            report["layers_written"].append(site_stem)
+        else:
+            report["layers_skipped"].append({"layer": site_stem, "reason": "no_venue_geometry"})
+
+        fallback_building_geom = None
+        if site_geoms:
+            fallback_building_geom = unary_union(site_geoms)
+        building_rows: list[dict[str, Any]] = []
+        building_geoms: list[Any] = []
+        for building in features:
+            if building.get("feature_type") != "building":
+                continue
+            geom = _metadata_geometry(building) or fallback_building_geom
+            if geom is None:
+                continue
+            address = _address_for_feature(building, addresses)
+            building_rows.append(
+                {
+                    "id": _feature_id_value(building),
+                    "postalcode": _text_or_none(address.get("postal_code")),
+                    "country": _text_or_none(address.get("country")),
+                    "province": _text_or_none(address.get("province")),
+                    "city": _text_or_none(address.get("locality")),
+                    "address1": _text_or_none(address.get("address")),
+                    "address2": None,
+                    "address3": None,
+                    "address4": None,
+                    "name": _display_name(building),
+                    "source": _source_value(building),
+                }
+            )
+            building_geoms.append(geom)
+        building_stem = _safe_layer_stem(base, "Building")
+        if _write_odc_layer(output_dir, building_stem, building_rows, building_geoms, write_encoding, ODC_POLYGON_GEOMS, report):
+            report["layers_written"].append(building_stem)
+        else:
+            report["layers_skipped"].append({"layer": building_stem, "reason": "no_building_geometry"})
+
+        for level in levels:
+            level_id = str(level.get("id"))
+            label = _level_label(level)
+            level_geom = _feature_geometry(level)
+            if level_geom is not None:
+                props = _feature_properties(level)
+                floor_stem = _safe_layer_stem(base, label, "Floor")
+                ordinal = props.get("ordinal")
+                floor_rows = [
+                    {
+                        "id": _feature_id_value(level),
+                        "category": "2" if bool(props.get("outdoor")) else "1",
+                        "name": _label_text(props.get("name")),
+                        "ordinal": float(ordinal) if isinstance(ordinal, (int, float)) and not isinstance(ordinal, bool) else None,
+                        "short_name": _label_text(props.get("short_name")),
+                        "source": _source_value(level),
+                    }
+                ]
+                if _write_odc_layer(output_dir, floor_stem, floor_rows, [level_geom], write_encoding, ODC_POLYGON_GEOMS, report):
+                    report["layers_written"].append(floor_stem)
+
+            grouped = features_by_level.get(level_id, {})
+            units = grouped.get("unit", [])
+            space_rows: list[dict[str, Any]] = []
+            space_geoms: list[Any] = []
+            for unit in units:
+                geom = _feature_geometry(unit)
+                if geom is None:
+                    continue
+                props = _feature_properties(unit)
+                metadata = _feature_metadata(unit)
+                nonpublic = _metadata_value(metadata, ["nonpublic"])
+                if _text_or_none(nonpublic) is None and str(props.get("category", "")).lower() == "nonpublic":
+                    nonpublic = "1"
+                space_rows.append(
+                    {
+                        "id": _feature_id_value(unit),
+                        "category": _code_for_feature_category(
+                            unit,
+                            prefix="B",
+                            source_candidates=["category", "imdf_cat"],
+                            reverse_map=b_reverse,
+                            fallback="B999",
+                            report=report,
+                        ),
+                        "floor_id": level_id,
+                        "name": _label_text(props.get("name")),
+                        "restricted": _text_or_none(_metadata_value(metadata, ["restricted", "restrict", "restriction"]))
+                        or _text_or_none(props.get("restriction")),
+                        "suite": _text_or_none(_metadata_value(metadata, ["suite"])),
+                        "nonpublic": _text_or_none(nonpublic),
+                        "toll": _text_or_none(_metadata_value(metadata, ["toll"])),
+                        "source": _source_value(unit),
+                    }
+                )
+                space_geoms.append(geom)
+            space_stem = _safe_layer_stem(base, label, "Space")
+            if _write_odc_layer(output_dir, space_stem, space_rows, space_geoms, write_encoding, ODC_POLYGON_GEOMS, report):
+                report["layers_written"].append(space_stem)
+
+            fixtures = grouped.get("fixture", [])
+            fixture_rows: list[dict[str, Any]] = []
+            fixture_geoms: list[Any] = []
+            for fixture in fixtures:
+                geom = _feature_geometry(fixture)
+                if geom is None:
+                    continue
+                fixture_rows.append(
+                    {
+                        "id": _feature_id_value(fixture),
+                        "category": _code_for_feature_category(
+                            fixture,
+                            prefix="C",
+                            source_candidates=["category"],
+                            reverse_map=c_reverse,
+                            fallback="C999",
+                            report=report,
+                        ),
+                        "floor_id": level_id,
+                        "source": _source_value(fixture),
+                    }
+                )
+                fixture_geoms.append(geom)
+            fixture_stem = _safe_layer_stem(base, label, "Fixture")
+            if _write_odc_layer(output_dir, fixture_stem, fixture_rows, fixture_geoms, write_encoding, ODC_POLYGON_GEOMS, report):
+                report["layers_written"].append(fixture_stem)
+
+            openings = grouped.get("opening", [])
+            opening_rows: list[dict[str, Any]] = []
+            opening_geoms: list[Any] = []
+            for opening in openings:
+                geom = _feature_geometry(opening)
+                if geom is None:
+                    continue
+                opening_rows.append(
+                    {
+                        "id": _feature_id_value(opening),
+                        "floor_id": level_id,
+                        "name": _display_name(opening),
+                        "source": _source_value(opening),
+                    }
+                )
+                opening_geoms.append(geom)
+            opening_stem = _safe_layer_stem(base, label, "Opening")
+            if _write_odc_layer(output_dir, opening_stem, opening_rows, opening_geoms, write_encoding, ODC_LINE_GEOMS, report):
+                report["layers_written"].append(opening_stem)
+
+            details = grouped.get("detail", [])
+            drawing_rows: list[dict[str, Any]] = []
+            drawing_geoms: list[Any] = []
+            for detail in details:
+                geom = _feature_geometry(detail)
+                if geom is None:
+                    continue
+                drawing_rows.append(
+                    {
+                        "id": _feature_id_value(detail),
+                        "floor_id": level_id,
+                        "source": _source_value(detail),
+                    }
+                )
+                drawing_geoms.append(geom)
+            drawing_stem = _safe_layer_stem(base, label, "Drawing")
+            if _write_odc_layer(output_dir, drawing_stem, drawing_rows, drawing_geoms, write_encoding, ODC_LINE_GEOMS, report):
+                report["layers_written"].append(drawing_stem)
+
+            amenities = grouped.get("amenity", [])
+            facility_rows: list[dict[str, Any]] = []
+            facility_geoms: list[Any] = []
+            for amenity in amenities:
+                geom = _feature_geometry(amenity)
+                if geom is None:
+                    continue
+                facility_rows.append(
+                    {
+                        "id": _feature_id_value(amenity),
+                        "category": _code_for_feature_category(
+                            amenity,
+                            prefix="F",
+                            source_candidates=["category"],
+                            reverse_map=f_reverse,
+                            fallback="F999",
+                            report=report,
+                        ),
+                        "floor_id": level_id,
+                        "name": _display_name(amenity),
+                        "source": _source_value(amenity),
+                    }
+                )
+                facility_geoms.append(geom)
+            facility_stem = _safe_layer_stem(base, label, "Facility")
+            if _write_odc_layer(output_dir, facility_stem, facility_rows, facility_geoms, write_encoding, ODC_POINT_GEOMS, report):
+                report["layers_written"].append(facility_stem)
+
+            occupants = grouped.get("occupant", [])
+            occupant_rows: list[dict[str, Any]] = []
+            occupant_geoms: list[Any] = []
+            for occupant in occupants:
+                geom = _metadata_geometry(occupant) or _feature_geometry(occupant)
+                if geom is None:
+                    continue
+                metadata = _feature_metadata(occupant)
+                occupant_rows.append(
+                    {
+                        "id": _feature_id_value(occupant),
+                        "postalcode": _text_or_none(_metadata_value(metadata, ["postalcode", "postal_code"])),
+                        "country": _text_or_none(_metadata_value(metadata, ["country"])),
+                        "province": _text_or_none(_metadata_value(metadata, ["province"])),
+                        "city": _text_or_none(_metadata_value(metadata, ["city", "locality"])),
+                        "address1": _text_or_none(_metadata_value(metadata, ["address1", "address"])),
+                        "address2": _text_or_none(_metadata_value(metadata, ["address2"])),
+                        "address3": _text_or_none(_metadata_value(metadata, ["address3"])),
+                        "category": _text_or_none(_metadata_value(metadata, ["category"]))
+                        or _text_or_none(_feature_properties(occupant).get("category")),
+                        "floor_id": level_id,
+                        "link_id": _text_or_none(_metadata_value(metadata, ["link_id", "linkid"])),
+                        "hours1": _text_or_none(_property_or_metadata(occupant, ["hours"], ["hours1", "hours"])),
+                        "hours2": _text_or_none(_metadata_value(metadata, ["hours2"])),
+                        "name": _display_name(occupant),
+                        "phone": _text_or_none(_property_or_metadata(occupant, ["phone"])),
+                        "suite": _text_or_none(_metadata_value(metadata, ["suite"])),
+                        "taxonomy": _text_or_none(_metadata_value(metadata, ["taxonomy"])),
+                        "website": _text_or_none(_property_or_metadata(occupant, ["website"], ["website", "url"])),
+                        "source": _source_value(occupant),
+                    }
+                )
+                occupant_geoms.append(geom)
+            occupant_stem = _safe_layer_stem(base, label, "Occupant")
+            if _write_odc_layer(output_dir, occupant_stem, occupant_rows, occupant_geoms, write_encoding, ODC_POINT_GEOMS, report):
+                report["layers_written"].append(occupant_stem)
+
+            sections = grouped.get("section", [])
+            segment_rows: list[dict[str, Any]] = []
+            segment_geoms: list[Any] = []
+            for section in sections:
+                geom = _feature_geometry(section)
+                if geom is None:
+                    continue
+                segment_rows.append(
+                    {
+                        "id": _feature_id_value(section),
+                        "floor_id": level_id,
+                        "name": _display_name(section),
+                        "source": _source_value(section),
+                    }
+                )
+                segment_geoms.append(geom)
+            segment_stem = _safe_layer_stem(base, label, "Segment")
+            if _write_odc_layer(output_dir, segment_stem, segment_rows, segment_geoms, write_encoding, ODC_POLYGON_GEOMS, report):
+                report["layers_written"].append(segment_stem)
+
+        archive_bytes = BytesIO()
+        with zipfile.ZipFile(archive_bytes, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for exported_file in sorted(output_dir.glob("*")):
+                if exported_file.is_file():
+                    archive.write(exported_file, arcname=exported_file.name)
+            if request.include_report:
+                archive.writestr("export_report.json", json.dumps(report, ensure_ascii=False, indent=2))
+
+    filename = f"{base}_odc2026_shapefiles.zip"
+    return archive_bytes.getvalue(), filename
+
+
 def build_shapefile_export_archive(
     session: SessionRecord,
     request: ShapefileExportRequest,
 ) -> tuple[bytes, str]:
+    if request.profile == "odc2026":
+        return build_odc2026_shapefile_export_archive(session=session, request=request)
+
     if any(item.source_format != "shapefile" for item in session.files):
         raise ValueError(
             "Shapefile export unavailable: this session includes GeoPackage sources. "

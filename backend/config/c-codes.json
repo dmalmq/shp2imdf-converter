@@ -1,0 +1,31 @@
+{
+  "default_category": "unspecified",
+  "mappings": {
+    "C001": "column",
+    "C002": "bench",
+    "C003": "reception",
+    "C004": "cubicle",
+    "C005": "rubbishbin",
+    "C006": "furniture",
+    "C007": "kiosk",
+    "C008": "obstruction",
+    "C009": "vegetation",
+    "C010": "wall",
+    "C011": "water",
+    "C012": "locker",
+    "C013": "vendingmachine",
+    "C014": "atm",
+    "C015": "stage",
+    "C016": "fence",
+    "C017": "twsi.hazard",
+    "C018": "twsi.guidance",
+    "C019": "twsi.crossing",
+    "C101": "platform.screen",
+    "C102": "platform.gate",
+    "C103": "ticket.vending",
+    "C104": "ticketgate",
+    "C201": "baggage.carousel",
+    "C202": "checkin.kiosk",
+    "C999": "unspecified"
+  }
+}

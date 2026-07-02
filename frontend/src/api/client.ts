@@ -28,6 +28,7 @@ export type ImportedFile = {
 
 export type ImportResponse = {
   session_id: string;
+  import_profile: "standard" | "imdf_shapefile";
   files: ImportedFile[];
   cleanup_summary: CleanupSummary;
   warnings: string[];
@@ -368,6 +369,7 @@ export type ShapefileExportUnitOptions = {
 };
 
 export type ShapefileExportRequest = {
+  profile?: "imdf_roundtrip" | "odc2026";
   mode: "source_update";
   encoding: ShapefileExportEncoding;
   unit: ShapefileExportUnitOptions;
@@ -378,12 +380,27 @@ export async function importShapefiles(
   files: File[],
   onProgress?: (percent: number) => void
 ): Promise<ImportResponse> {
+  return uploadImportFiles("/api/import", files, onProgress);
+}
+
+export async function importImdfShapefiles(
+  files: File[],
+  onProgress?: (percent: number) => void
+): Promise<ImportResponse> {
+  return uploadImportFiles("/api/import/imdf-shapefiles", files, onProgress);
+}
+
+function uploadImportFiles(
+  endpoint: string,
+  files: File[],
+  onProgress?: (percent: number) => void
+): Promise<ImportResponse> {
   const formData = new FormData();
   files.forEach((file) => formData.append("files", file));
 
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("POST", "/api/import");
+    request.open("POST", endpoint);
 
     request.upload.onprogress = (event) => {
       if (!event.lengthComputable || !onProgress) {
@@ -425,9 +442,11 @@ async function handleJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function fetchSessionFiles(sessionId: string): Promise<{ session_id: string; files: ImportedFile[] }> {
+export async function fetchSessionFiles(
+  sessionId: string
+): Promise<{ session_id: string; import_profile: "standard" | "imdf_shapefile"; files: ImportedFile[] }> {
   const response = await fetch(`/api/session/${sessionId}/files`);
-  return handleJson<{ session_id: string; files: ImportedFile[] }>(response);
+  return handleJson<{ session_id: string; import_profile: "standard" | "imdf_shapefile"; files: ImportedFile[] }>(response);
 }
 
 export async function detectAllFiles(sessionId: string): Promise<DetectResponse> {

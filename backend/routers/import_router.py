@@ -12,6 +12,7 @@ from fastapi import APIRouter, File, Request, UploadFile
 
 from backend.src.detector import sync_feature_types
 from backend.src.imdf_reader import read_imdf_zip
+from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
 from backend.src.importer import import_file_blobs
 from backend.src.schemas import CleanupSummary, ImportImdfResponse, ImportResponse
 from backend.src.session import SessionManager
@@ -75,6 +76,28 @@ def _expand_upload(upload: UploadFile, payload: bytes) -> list[tuple[str, bytes]
     return [(upload.filename or "upload.bin", payload)]
 
 
+async def _read_uploaded_blobs(request: Request, files: list[UploadFile]) -> list[tuple[str, bytes]]:
+    if not files:
+        raise ValueError("No files were uploaded.")
+
+    max_upload_bytes = _max_upload_bytes(request)
+    raw_total = 0
+    expanded_total = 0
+    raw_blobs: list[tuple[str, bytes]] = []
+    for upload in files:
+        payload = await upload.read()
+        raw_total += len(payload)
+        if raw_total > max_upload_bytes:
+            raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
+
+        expanded = _expand_upload(upload, payload)
+        expanded_total += sum(len(content) for _, content in expanded)
+        if expanded_total > max_upload_bytes:
+            raise ValueError("Expanded upload exceeds configured limit (MAX_UPLOAD_MB).")
+        raw_blobs.extend(expanded)
+    return raw_blobs
+
+
 @router.post("/import/imdf", response_model=ImportImdfResponse, status_code=201)
 async def import_imdf(
     request: Request,
@@ -104,25 +127,7 @@ async def import_files(
     request: Request,
     files: Annotated[list[UploadFile], File(description="Shapefile components, GeoPackages, or a zip file")],
 ) -> ImportResponse:
-    if not files:
-        raise ValueError("No files were uploaded.")
-
-    max_upload_bytes = _max_upload_bytes(request)
-    raw_total = 0
-    expanded_total = 0
-    raw_blobs: list[tuple[str, bytes]] = []
-    for upload in files:
-        payload = await upload.read()
-        raw_total += len(payload)
-        if raw_total > max_upload_bytes:
-            raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
-
-        expanded = _expand_upload(upload, payload)
-        expanded_total += sum(len(content) for _, content in expanded)
-        if expanded_total > max_upload_bytes:
-            raise ValueError("Expanded upload exceeds configured limit (MAX_UPLOAD_MB).")
-        raw_blobs.extend(expanded)
-
+    raw_blobs = await _read_uploaded_blobs(request, files)
     manager = _session_manager(request)
     artifacts = import_file_blobs(raw_blobs, filename_keywords_path=_keyword_config_path(request))
     source_feature_collection = sync_feature_types(artifacts.source_feature_collection, artifacts.files)
@@ -143,6 +148,40 @@ async def import_files(
     manager.save_session(session)
     return ImportResponse(
         session_id=session.session_id,
+        import_profile=session.import_profile,
+        files=artifacts.files,
+        cleanup_summary=artifacts.cleanup_summary,
+        warnings=artifacts.warnings,
+    )
+
+
+@router.post("/import/imdf-shapefiles", response_model=ImportResponse, status_code=201)
+async def import_imdf_shapefiles(
+    request: Request,
+    files: Annotated[list[UploadFile], File(description="IMDF-schema shapefile components or a zip file")],
+) -> ImportResponse:
+    raw_blobs = await _read_uploaded_blobs(request, files)
+    manager = _session_manager(request)
+    artifacts = import_imdf_shapefile_blobs(raw_blobs, filename_keywords_path=_keyword_config_path(request))
+    session = manager.create_session(
+        files=artifacts.files,
+        cleanup_summary=artifacts.cleanup_summary,
+        feature_collection=artifacts.feature_collection,
+        source_feature_collection=artifacts.source_feature_collection,
+        warnings=artifacts.warnings,
+        import_profile="imdf_shapefile",
+    )
+    session.wizard.generation_status = "generated"
+    artifact_directory = _persist_session_upload_artifacts(
+        session_id=session.session_id,
+        file_blobs=raw_blobs,
+        uploads_root=_session_uploads_dir(request),
+    )
+    session.upload_artifact_dir = str(artifact_directory)
+    manager.save_session(session)
+    return ImportResponse(
+        session_id=session.session_id,
+        import_profile=session.import_profile,
         files=artifacts.files,
         cleanup_summary=artifacts.cleanup_summary,
         warnings=artifacts.warnings,

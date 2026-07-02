@@ -1802,3 +1802,381 @@ def test_shapefile_export_normalizes_other_feature_schemas_and_renames_suffixes(
                 "geometry",
             }
             assert "category" not in level.columns
+
+
+def _write_imdf_schema_shapefiles(root: Path) -> dict[str, str]:
+    site_id = "11111111-1111-4111-8111-111111111111"
+    building_id = "22222222-2222-4222-8222-222222222222"
+    level_id = "33333333-3333-4333-8333-333333333333"
+    unit_id = "44444444-4444-4444-8444-444444444444"
+    amenity_id = "77777777-7777-4777-8777-777777777777"
+    occupant_id = "88888888-8888-4888-8888-888888888888"
+    section_id = "99999999-9999-4999-8999-999999999999"
+
+    site_geom = Polygon([(139.7000, 35.6900), (139.7010, 35.6900), (139.7010, 35.6910), (139.7000, 35.6910), (139.7000, 35.6900)])
+    floor_geom = Polygon([(139.7001, 35.6901), (139.7009, 35.6901), (139.7009, 35.6909), (139.7001, 35.6909), (139.7001, 35.6901)])
+    unit_geom = Polygon([(139.7002, 35.6902), (139.7004, 35.6902), (139.7004, 35.6904), (139.7002, 35.6904), (139.7002, 35.6902)])
+
+    gpd.GeoDataFrame(
+        {
+            "id": [site_id],
+            "category": ["transitstation"],
+            "name": ["Demo Station"],
+            "country": ["JP"],
+            "city": ["Tokyo"],
+            "address1": ["1-1 Demo"],
+            "postalcode": ["100-0001"],
+            "source": ["1"],
+        },
+        geometry=[site_geom],
+        crs="EPSG:4326",
+    ).to_file(root / "Demo_Site.shp", driver="ESRI Shapefile", index=False)
+    gpd.GeoDataFrame(
+        {"id": [building_id], "name": ["Main"], "source": ["1"]},
+        geometry=[site_geom],
+        crs="EPSG:4326",
+    ).to_file(root / "Demo_Building.shp", driver="ESRI Shapefile", index=False)
+    gpd.GeoDataFrame(
+        {
+            "id": [level_id],
+            "category": ["1"],
+            "name": ["First Floor"],
+            "ordinal": [0.0],
+            "short_name": ["1F"],
+            "source": ["1"],
+        },
+        geometry=[floor_geom],
+        crs="EPSG:4326",
+    ).to_file(root / "Demo_1F_Floor.shp", driver="ESRI Shapefile", index=False)
+    gpd.GeoDataFrame(
+        {
+            "id": [unit_id],
+            "category": ["retail"],
+            "floor_id": [level_id],
+            "name": ["Shop A"],
+            "restricted": [None],
+            "suite": ["S-1"],
+            "nonpublic": [None],
+            "toll": [None],
+            "source": ["1"],
+        },
+        geometry=[unit_geom],
+        crs="EPSG:4326",
+    ).to_file(root / "Demo_1F_Space.shp", driver="ESRI Shapefile", index=False)
+    gpd.GeoDataFrame(
+        {
+            "id": [amenity_id],
+            "category": ["F001"],
+            "floor_id": [level_id],
+            "name": ["Info Desk"],
+            "source": ["1"],
+        },
+        geometry=[Point(139.7003, 35.6903)],
+        crs="EPSG:4326",
+    ).to_file(root / "Demo_1F_Facility.shp", driver="ESRI Shapefile", index=False)
+    gpd.GeoDataFrame(
+        {
+            "id": [occupant_id],
+            "postalcode": ["100-0001"],
+            "country": ["JP"],
+            "province": ["JP-13"],
+            "city": ["Tokyo"],
+            "address1": ["1-1 Demo"],
+            "address2": [None],
+            "address3": [None],
+            "category": ["shop"],
+            "floor_id": [level_id],
+            "link_id": [None],
+            "hours1": ["Mo-Su 10:00-20:00"],
+            "hours2": [None],
+            "name": ["Shop A Tenant"],
+            "phone": ["+81-3-0000-0000"],
+            "suite": ["S-1"],
+            "taxonomy": ["retail"],
+            "website": ["https://example.com"],
+            "source": ["1"],
+        },
+        geometry=[Point(139.7003, 35.69035)],
+        crs="EPSG:4326",
+    ).to_file(root / "Demo_1F_Occupant.shp", driver="ESRI Shapefile", index=False)
+    gpd.GeoDataFrame(
+        {"id": [section_id], "floor_id": [level_id], "name": ["Platform 1"], "source": ["1"]},
+        geometry=[
+            Polygon([(139.7005, 35.6905), (139.7006, 35.6905), (139.7006, 35.6906), (139.7005, 35.6906), (139.7005, 35.6905)])
+        ],
+        crs="EPSG:4326",
+    ).to_file(root / "Demo_1F_Segment.shp", driver="ESRI Shapefile", index=False)
+    return {
+        "site_id": site_id,
+        "building_id": building_id,
+        "level_id": level_id,
+        "unit_id": unit_id,
+        "amenity_id": amenity_id,
+        "occupant_id": occupant_id,
+        "section_id": section_id,
+    }
+
+
+def _upload_all_shapefiles(root: Path) -> list[tuple[str, tuple[str, bytes, str]]]:
+    files: list[tuple[str, tuple[str, bytes, str]]] = []
+    for path in sorted(root.glob("*")):
+        if path.suffix.lower() in {".shp", ".shx", ".dbf", ".prj", ".cpg"}:
+            files.append(("files", (path.name, path.read_bytes(), "application/octet-stream")))
+    return files
+
+
+@pytest.mark.phase5
+def test_imdf_schema_shapefile_import_creates_review_session(test_client) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        ids = _write_imdf_schema_shapefiles(root)
+        response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["import_profile"] == "imdf_shapefile"
+    session_id = payload["session_id"]
+
+    session = test_client.app.state.session_manager.get_session(session_id, touch=False)
+    assert session is not None
+    assert session.import_profile == "imdf_shapefile"
+    assert session.wizard.generation_status == "generated"
+
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    level = next(item for item in features if item["feature_type"] == "level")
+    unit = next(item for item in features if item["feature_type"] == "unit")
+    assert level["id"] == ids["level_id"]
+    assert unit["id"] == ids["unit_id"]
+    assert unit["properties"]["level_id"] == ids["level_id"]
+    assert unit["properties"]["category"] == "retail"
+
+    amenity = next(item for item in features if item["feature_type"] == "amenity")
+    assert amenity["id"] == ids["amenity_id"]
+    assert amenity["geometry"]["type"] == "Point"
+    assert amenity["properties"]["category"] == "unspecified"
+    assert amenity["properties"]["metadata"]["category"] == "F001"
+    assert amenity["properties"]["metadata"]["__odc_level_id"] == ids["level_id"]
+
+    occupant = next(item for item in features if item["feature_type"] == "occupant")
+    assert occupant["id"] == ids["occupant_id"]
+    assert occupant["geometry"] is None
+    assert occupant["properties"]["metadata"]["__odc_geometry"]["type"] == "Point"
+    assert occupant["properties"]["metadata"]["__odc_level_id"] == ids["level_id"]
+
+    section = next(item for item in features if item["feature_type"] == "section")
+    assert section["id"] == ids["section_id"]
+
+    footprint = next(item for item in features if item["feature_type"] == "footprint")
+    assert footprint["properties"]["category"] == "ground"
+    assert footprint["properties"]["building_ids"] == [ids["building_id"]]
+
+    validation = test_client.post(f"/api/session/{session_id}/validate").json()
+    error_checks = {issue["check"] for issue in validation["errors"]}
+    assert "building_missing_footprint" not in error_checks
+    assert "duplicate_uuids" not in error_checks
+
+    files_response = test_client.get(f"/api/session/{session_id}/files")
+    assert files_response.json()["import_profile"] == "imdf_shapefile"
+
+
+@pytest.mark.phase5
+def test_imdf_schema_shapefile_import_merges_levels_with_same_name(test_client) -> None:
+    duplicate_level_id = "55555555-5555-4555-8555-555555555555"
+    duplicate_unit_id = "66666666-6666-4666-8666-666666666666"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        ids = _write_imdf_schema_shapefiles(root)
+        duplicate_floor_geom = Polygon(
+            [(139.7011, 35.6901), (139.7019, 35.6901), (139.7019, 35.6909), (139.7011, 35.6909), (139.7011, 35.6901)]
+        )
+        duplicate_unit_geom = Polygon(
+            [(139.7012, 35.6902), (139.7014, 35.6902), (139.7014, 35.6904), (139.7012, 35.6904), (139.7012, 35.6902)]
+        )
+        gpd.GeoDataFrame(
+            {
+                "id": [duplicate_level_id],
+                "category": ["1"],
+                "name": ["First Floor"],
+                "ordinal": [0.0],
+                "short_name": ["1F East"],
+                "source": ["1"],
+            },
+            geometry=[duplicate_floor_geom],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_1F_Z_Floor.shp", driver="ESRI Shapefile", index=False)
+        gpd.GeoDataFrame(
+            {
+                "id": [duplicate_unit_id],
+                "category": ["retail"],
+                "floor_id": [duplicate_level_id],
+                "name": ["Shop B"],
+                "restricted": [None],
+                "suite": ["S-2"],
+                "nonpublic": [None],
+                "toll": [None],
+                "source": ["1"],
+            },
+            geometry=[duplicate_unit_geom],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_1F_Z_Space.shp", driver="ESRI Shapefile", index=False)
+        response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert response.status_code == 201
+    session_id = response.json()["session_id"]
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    levels = [item for item in features if item["feature_type"] == "level"]
+    units = {item["id"]: item for item in features if item["feature_type"] == "unit"}
+
+    assert len(levels) == 1
+    assert levels[0]["id"] == ids["level_id"]
+    assert units[ids["unit_id"]]["properties"]["level_id"] == ids["level_id"]
+    assert units[duplicate_unit_id]["properties"]["level_id"] == ids["level_id"]
+
+
+@pytest.mark.phase5
+def test_odc2026_shapefile_export_from_imdf_schema_import(test_client) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        ids = _write_imdf_schema_shapefiles(root)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"profile": "odc2026"},
+    )
+    assert export_response.status_code == 200
+
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        names = set(archive.namelist())
+        assert "Demo_Station_Site.shp" in names
+        assert "Demo_Station_Building.shp" in names
+        assert "Demo_Station_1F_Floor.shp" in names
+        assert "Demo_Station_1F_Space.shp" in names
+        assert "Demo_Station_1F_Facility.shp" in names
+        assert "Demo_Station_1F_Occupant.shp" in names
+        assert "Demo_Station_1F_Segment.shp" in names
+        assert "export_report.json" in names
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            archive.extractall(output_dir)
+            space = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Space.shp")
+            assert set(space.columns) == {
+                "id",
+                "category",
+                "floor_id",
+                "name",
+                "restricted",
+                "suite",
+                "nonpublic",
+                "toll",
+                "source",
+                "geometry",
+            }
+            assert space.iloc[0]["id"] == ids["unit_id"]
+            assert space.iloc[0]["category"] == "B001"
+            assert space.iloc[0]["floor_id"] == ids["level_id"]
+            assert space.iloc[0]["suite"] == "S-1"
+
+            floor = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Floor.shp")
+            assert floor.iloc[0]["id"] == ids["level_id"]
+            assert floor.iloc[0]["category"] == "1"
+            assert float(floor.iloc[0]["ordinal"]) == 0.0
+
+            facility = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Facility.shp")
+            assert set(facility.columns) == {"id", "category", "floor_id", "name", "source", "geometry"}
+            assert facility.iloc[0]["id"] == ids["amenity_id"]
+            assert facility.iloc[0]["category"] == "F001"
+            assert facility.iloc[0]["floor_id"] == ids["level_id"]
+
+            occupant = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Occupant.shp")
+            assert occupant.iloc[0]["id"] == ids["occupant_id"]
+            assert occupant.iloc[0]["postalcode"] == "100-0001"
+            assert occupant.iloc[0]["category"] == "shop"
+            assert occupant.iloc[0]["floor_id"] == ids["level_id"]
+            assert occupant.iloc[0]["suite"] == "S-1"
+            assert occupant.iloc[0]["taxonomy"] == "retail"
+            assert occupant.geometry.iloc[0].geom_type == "Point"
+
+            segment = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Segment.shp")
+            assert set(segment.columns) == {"id", "floor_id", "name", "source", "geometry"}
+            assert segment.iloc[0]["id"] == ids["section_id"]
+            assert segment.iloc[0]["floor_id"] == ids["level_id"]
+
+
+@pytest.mark.phase5
+def test_odc2026_export_skips_mismatched_geometry_rows(test_client) -> None:
+    bad_unit_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        ids = _write_imdf_schema_shapefiles(root)
+        gpd.GeoDataFrame(
+            {
+                "id": [bad_unit_id],
+                "category": ["retail"],
+                "floor_id": [ids["level_id"]],
+                "name": ["Broken"],
+                "restricted": [None],
+                "suite": [None],
+                "nonpublic": [None],
+                "toll": [None],
+                "source": ["1"],
+            },
+            geometry=[LineString([(139.7005, 35.6905), (139.7006, 35.6906)])],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_1F_Y_Space.shp", driver="ESRI Shapefile", index=False)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"profile": "odc2026"},
+    )
+    assert export_response.status_code == 200
+
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        report = json.loads(archive.read("export_report.json"))
+        skipped_ids = {item["feature_id"] for item in report["rows_skipped"]}
+        assert bad_unit_id in skipped_ids
+        with tempfile.TemporaryDirectory() as output_dir:
+            archive.extractall(output_dir)
+            space = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Space.shp")
+            assert bad_unit_id not in set(space["id"])
+            assert ids["unit_id"] in set(space["id"])
+
+
+@pytest.mark.phase5
+def test_imdf_schema_shapefile_import_dedupes_duplicate_ids(test_client) -> None:
+    duplicate_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        ids = _write_imdf_schema_shapefiles(root)
+        gpd.GeoDataFrame(
+            {
+                "id": [duplicate_id, duplicate_id],
+                "floor_id": [ids["level_id"], ids["level_id"]],
+                "source": ["1", "1"],
+            },
+            geometry=[
+                LineString([(139.7002, 35.6905), (139.7003, 35.6905)]),
+                LineString([(139.7002, 35.6906), (139.7003, 35.6906)]),
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_1F_Drawing.shp", driver="ESRI Shapefile", index=False)
+        response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert response.status_code == 201
+    session_id = response.json()["session_id"]
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+
+    details = [item for item in features if item["feature_type"] == "detail"]
+    assert len(details) == 2
+    detail_ids = [item["id"] for item in details]
+    assert duplicate_id in detail_ids
+    assert len(set(detail_ids)) == 2
+
+    all_ids = [item["id"] for item in features]
+    assert len(all_ids) == len(set(all_ids))

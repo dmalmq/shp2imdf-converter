@@ -16,7 +16,8 @@ test("renders upload page heading", () => {
     </QueryClientProvider>
   );
 
-  expect(screen.getByText("SHP/GPKG to IMDF Converter")).toBeInTheDocument();
+  expect(screen.getByText("Standard import")).toBeInTheDocument();
+  expect(screen.getByText("IMDF-schema shapefiles")).toBeInTheDocument();
 });
 
 test("allows deselecting queued files before import", async () => {
@@ -29,7 +30,7 @@ test("allows deselecting queued files before import", async () => {
     </QueryClientProvider>
   );
 
-  const importButton = screen.getByRole("button", { name: "Import Files" });
+  const importButton = screen.getByRole("button", { name: "Import & Continue" });
   expect(importButton).toBeDisabled();
 
   const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
@@ -48,7 +49,7 @@ test("allows deselecting queued files before import", async () => {
   fireEvent.click(rowCheckbox);
 
   expect(importButton).toBeDisabled();
-  expect(screen.getByText("0 of 1 shapefile group(s) selected")).toBeInTheDocument();
+  expect(screen.getByText("0 of 1 datasets selected")).toBeInTheDocument();
 });
 
 test("groups sidecar components under one stem selection", async () => {
@@ -61,7 +62,7 @@ test("groups sidecar components under one stem selection", async () => {
     </QueryClientProvider>
   );
 
-  const importButton = screen.getByRole("button", { name: "Import Files" });
+  const importButton = screen.getByRole("button", { name: "Import & Continue" });
   const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
   expect(fileInput).not.toBeNull();
 
@@ -76,9 +77,9 @@ test("groups sidecar components under one stem selection", async () => {
   fireEvent.change(fileInput as HTMLInputElement, { target: { files } });
 
   await waitFor(() => expect(importButton).toBeEnabled());
-  expect(screen.getByText("1 of 1 shapefile group(s) selected")).toBeInTheDocument();
-  expect(screen.getByText("2 of 2 component file(s) selected")).toBeInTheDocument();
+  expect(screen.getByText("1 of 1 datasets selected")).toBeInTheDocument();
   expect(screen.getByText("JRShinjukuSta_B1_Space")).toBeInTheDocument();
+  expect(screen.getByText(".shp, .shx")).toBeInTheDocument();
 });
 
 test("queues geopackage uploads as selectable sources", async () => {
@@ -91,7 +92,7 @@ test("queues geopackage uploads as selectable sources", async () => {
     </QueryClientProvider>
   );
 
-  const importButton = screen.getByRole("button", { name: "Import Files" });
+  const importButton = screen.getByRole("button", { name: "Import & Continue" });
   const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
   expect(fileInput).not.toBeNull();
 
@@ -104,6 +105,7 @@ test("queues geopackage uploads as selectable sources", async () => {
   fireEvent.change(fileInput as HTMLInputElement, { target: { files } });
 
   await waitFor(() => expect(importButton).toBeEnabled());
-  expect(screen.getByText("1 of 1 GeoPackage(s) selected")).toBeInTheDocument();
+  expect(screen.getByText("1 of 1 datasets selected")).toBeInTheDocument();
   expect(screen.getByText("station.gpkg")).toBeInTheDocument();
+  expect(screen.getByText(".gpkg")).toBeInTheDocument();
 });

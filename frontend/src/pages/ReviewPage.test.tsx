@@ -92,6 +92,7 @@ beforeEach(() => {
 
   useAppStore.setState({
     sessionId: "session-123",
+    importProfile: "standard",
     currentScreen: "review",
     files: [
       {
@@ -122,6 +123,7 @@ beforeEach(() => {
 
   fetchSessionFilesMock.mockResolvedValue({
     session_id: "session-123",
+    import_profile: "standard",
     files: useAppStore.getState().files
   });
   fetchSessionFeaturesMock.mockResolvedValue({
