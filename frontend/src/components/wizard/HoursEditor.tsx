@@ -21,7 +21,7 @@ const DAYS: { key: string; label: string; labelJa: string }[] = [
 const DEFAULT_FROM = "09:00";
 const DEFAULT_TO = "17:00";
 
-function parseOsmHours(osm: string): Record<string, DayState> {
+export function parseOsmHours(osm: string): Record<string, DayState> {
   const state: Record<string, DayState> = {};
   for (const day of DAYS) {
     state[day.key] = { open: false, from: DEFAULT_FROM, to: DEFAULT_TO };
@@ -54,7 +54,7 @@ function parseOsmHours(osm: string): Record<string, DayState> {
   return state;
 }
 
-function toOsmHours(state: Record<string, DayState>): string | null {
+export function toOsmHours(state: Record<string, DayState>): string | null {
   const DAY_KEYS = DAYS.map((d) => d.key);
   const openDays = DAY_KEYS.filter((k) => state[k]?.open);
   if (openDays.length === 0) return null;
@@ -65,7 +65,8 @@ function toOsmHours(state: Record<string, DayState>): string | null {
     const last = groups[groups.length - 1];
     const prevKeyIdx = last ? DAY_KEYS.indexOf(last.keys[last.keys.length - 1]) : -2;
     const curKeyIdx = DAY_KEYS.indexOf(key);
-    if (last && last.from === from && last.to === to && curKeyIdx === prevKeyIdx + 1) {
+    // PH is not part of the weekday sequence; it must never join a Mo-Su range.
+    if (last && key !== "PH" && last.from === from && last.to === to && curKeyIdx === prevKeyIdx + 1) {
       last.keys.push(key);
     } else {
       groups.push({ keys: [key], from, to });

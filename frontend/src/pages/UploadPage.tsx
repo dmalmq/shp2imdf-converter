@@ -618,7 +618,7 @@ export function UploadPage() {
             <span className="sr-only">{t("Open IMDF archive", "IMDFアーカイブを開く")}</span>
             <input
               type="file"
-              accept=".zip"
+              accept=".imdf,.zip"
               className="hidden"
               disabled={imdfLoading}
               onChange={(e) => {

@@ -7,25 +7,37 @@ import json
 import zipfile
 from typing import Any
 
-
-IMDF_FEATURE_TYPES = {
-    "address", "venue", "building", "footprint", "level",
-    "unit", "opening", "fixture", "detail",
-}
+from backend.src.converter import IMDF_TYPE_ORDER
 
 
-def read_imdf_zip(payload: bytes) -> dict[str, Any]:
+IMDF_FEATURE_TYPES = set(IMDF_TYPE_ORDER)
+
+MAX_ARCHIVE_MEMBERS = 1_000
+
+
+def read_imdf_zip(payload: bytes, max_uncompressed_bytes: int | None = None) -> dict[str, Any]:
     """Parse an IMDF ZIP and return a feature collection ready for the review screen.
 
     Accepts archives with GeoJSON files at the top level or inside a single folder.
     Adds review-only ``status`` and ``issues`` fields to each feature if absent.
-    Raises ``ValueError`` if no recognised IMDF GeoJSON files are found.
+    Raises ``ValueError`` for malformed archives, archives that exceed
+    ``max_uncompressed_bytes`` when expanded, or archives with no recognised
+    IMDF GeoJSON files.
     """
     features: list[dict[str, Any]] = []
     found_types: set[str] = set()
+    remaining = max_uncompressed_bytes
 
-    with zipfile.ZipFile(io.BytesIO(payload)) as zf:
-        for info in zf.infolist():
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(payload))
+    except zipfile.BadZipFile as exc:
+        raise ValueError("The uploaded file is not a valid ZIP archive.") from exc
+
+    with archive as zf:
+        infos = zf.infolist()
+        if len(infos) > MAX_ARCHIVE_MEMBERS:
+            raise ValueError(f"Archive contains more than {MAX_ARCHIVE_MEMBERS} entries.")
+        for info in infos:
             if info.is_dir():
                 continue
             basename = info.filename.rsplit("/", 1)[-1]
@@ -36,10 +48,18 @@ def read_imdf_zip(payload: bytes) -> dict[str, Any]:
                 continue
 
             with zf.open(info) as f:
-                try:
-                    fc = json.load(f)
-                except json.JSONDecodeError:
-                    continue
+                if remaining is not None:
+                    # Cap the actual decompressed read; zip headers can understate size.
+                    raw = f.read(remaining + 1)
+                    if len(raw) > remaining:
+                        raise ValueError("Expanded upload exceeds configured limit (MAX_UPLOAD_MB).")
+                    remaining -= len(raw)
+                else:
+                    raw = f.read()
+            try:
+                fc = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
 
             found_types.add(feature_type)
             for feat in fc.get("features") or []:

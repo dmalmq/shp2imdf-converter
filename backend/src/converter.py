@@ -3,9 +3,21 @@
 from __future__ import annotations
 
 import copy
+import json
+import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from backend.src.schemas import SessionRecord
+
+
+CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+
+# ODC/GSI sessions keep raw spec codes (e.g. "A001", "B001") in category fields;
+# they must be translated back to IMDF categories before IMDF export.
+_SPEC_CODE_PATTERN = re.compile(r"^[A-Za-z]\d{3}$")
+_CATEGORY_CODE_FILES = {"venue": "a-codes.json", "unit": "b-codes.json"}
 
 
 IMDF_TYPE_ORDER = [
@@ -39,11 +51,47 @@ REVIEW_ONLY_PROPERTY_KEYS = {
 }
 
 
+@lru_cache(maxsize=None)
+def _category_code_map(filename: str) -> tuple[dict[str, str], str]:
+    path = CONFIG_DIR / filename
+    default = "unspecified"
+    if not path.exists():
+        return {}, default
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}, default
+    default = str(payload.get("default_category") or default).strip().lower() or "unspecified"
+    mappings = payload.get("mappings")
+    if not isinstance(mappings, dict):
+        return {}, default
+    return (
+        {
+            str(code).strip().upper(): str(category).strip().lower()
+            for code, category in mappings.items()
+            if str(code).strip() and str(category).strip()
+        },
+        default,
+    )
+
+
+def _translate_spec_code_category(feature_type: Any, properties: dict[str, Any]) -> None:
+    code_file = _CATEGORY_CODE_FILES.get(feature_type) if isinstance(feature_type, str) else None
+    if code_file is None:
+        return
+    category = properties.get("category")
+    if not isinstance(category, str) or not _SPEC_CODE_PATTERN.fullmatch(category.strip()):
+        return
+    mappings, default = _category_code_map(code_file)
+    properties["category"] = mappings.get(category.strip().upper(), default)
+
+
 def _clean_export_feature(feature: dict[str, Any]) -> dict[str, Any]:
     cleaned = copy.deepcopy(feature)
     properties = cleaned.get("properties")
     if isinstance(properties, dict):
         cleaned["properties"] = {k: v for k, v in properties.items() if k not in REVIEW_ONLY_PROPERTY_KEYS}
+        _translate_spec_code_category(cleaned.get("feature_type"), cleaned["properties"])
     return cleaned
 
 

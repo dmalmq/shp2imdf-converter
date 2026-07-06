@@ -103,11 +103,12 @@ async def import_imdf(
     request: Request,
     file: Annotated[UploadFile, File(description="Exported IMDF .zip archive")],
 ) -> ImportImdfResponse:
+    max_upload_bytes = _max_upload_bytes(request)
     payload = await file.read()
-    if len(payload) > _max_upload_bytes(request):
+    if len(payload) > max_upload_bytes:
         raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
 
-    feature_collection = read_imdf_zip(payload)
+    feature_collection = read_imdf_zip(payload, max_uncompressed_bytes=max_upload_bytes)
     feature_count = len(feature_collection["features"])
 
     manager = _session_manager(request)
