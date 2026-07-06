@@ -8,7 +8,7 @@ import re
 from typing import Any
 from uuid import UUID
 
-from shapely import make_valid
+from shapely import make_valid, prepare
 from shapely.errors import GEOSException
 from shapely.geometry import LineString, MultiPolygon, Polygon, shape
 from shapely.geometry.base import BaseGeometry
@@ -196,6 +196,19 @@ def _repair_geometry(geom: BaseGeometry | None) -> BaseGeometry | None:
         return geom
 
 
+def _repair_and_prepare(geom: BaseGeometry | None) -> BaseGeometry | None:
+    """Repair once and GEOS-prepare for fast repeated `.intersects()` tests against it.
+
+    Use for a geometry that many other geometries get tested against in a loop
+    (e.g. a per-level boundary or level polygon) — preparing amortizes far better
+    than the unprepared per-call cost once call counts run into the thousands.
+    """
+    repaired = _repair_geometry(geom)
+    if repaired is not None and not repaired.is_empty:
+        prepare(repaired)
+    return repaired
+
+
 def _safe_contains_or_touches(container: BaseGeometry | None, target: BaseGeometry | None) -> bool:
     if container is None or target is None or container.is_empty or target.is_empty:
         return False
@@ -218,6 +231,26 @@ def _safe_intersects(left: BaseGeometry | None, right: BaseGeometry | None) -> b
     repaired_left = _repair_geometry(left)
     repaired_right = _repair_geometry(right)
     if repaired_left is None or repaired_right is None or repaired_left.is_empty or repaired_right.is_empty:
+        return False
+
+    try:
+        return bool(repaired_left.intersects(repaired_right))
+    except GEOSException:
+        return False
+
+
+def _safe_intersects_repaired_left(repaired_left: BaseGeometry | None, right: BaseGeometry | None) -> bool:
+    """Like `_safe_intersects`, but `repaired_left` is assumed already-repaired.
+
+    Used in per-feature loops where `repaired_left` is a shared geometry (e.g. a
+    per-level union) that would otherwise get re-validated via `.is_valid` on every
+    call — that revalidation dominates runtime on large datasets.
+    """
+    if repaired_left is None or right is None or repaired_left.is_empty or right.is_empty:
+        return False
+
+    repaired_right = _repair_geometry(right)
+    if repaired_right is None or repaired_right.is_empty:
         return False
 
     try:
@@ -405,7 +438,8 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
         if fid:
             geoms_by_id[fid] = geom
 
-    level_geoms = {fid: geoms_by_id[fid] for fid in level_ids if fid in geoms_by_id}
+    # Pre-repaired: reused per-feature below (once per level here vs. once per feature there).
+    level_geoms = {fid: _repair_and_prepare(geoms_by_id[fid]) for fid in level_ids if fid in geoms_by_id}
     units_by_level: dict[str, list[tuple[str, BaseGeometry]]] = defaultdict(list)
     unit_names: dict[str, str] = {}
 
@@ -748,11 +782,12 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                     if level_id not in level_boundary_cache:
                         level_units = units_by_level.get(level_id, [])
                         if level_units:
-                            level_boundary_cache[level_id] = unary_union([g.boundary for _, g in level_units]).buffer(5e-6)
+                            raw_boundary = unary_union([g.boundary for _, g in level_units]).buffer(5e-6)
+                            level_boundary_cache[level_id] = _repair_and_prepare(raw_boundary)
                         else:
                             level_boundary_cache[level_id] = None
                     boundaries = level_boundary_cache[level_id]
-                if boundaries is not None and not _safe_intersects(geom, boundaries):
+                if boundaries is not None and not _safe_intersects_repaired_left(boundaries, geom):
                     level_units_list = units_by_level.get(level_id, [])
                     nearest = sorted(level_units_list, key=lambda x: x[1].boundary.distance(geom))[:3]
                     snap_cands = [uid for uid, _ in nearest]
@@ -780,7 +815,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 add_issue("warning", "opening_missing_door_warning", "Pedestrian opening is missing door metadata.", feature_id=fid)
         if ftype == "detail":
             level_id = props.get("level_id")
-            if isinstance(level_id, str) and level_id in level_geoms and not _safe_intersects(level_geoms[level_id], geoms_by_id[fid]):
+            if isinstance(level_id, str) and level_id in level_geoms and not _safe_intersects_repaired_left(level_geoms[level_id], geoms_by_id[fid]):
                 add_issue("warning", "detail_outside_level", "Detail geometry is outside assigned level.", feature_id=fid)
 
     # Cross-level warnings.
