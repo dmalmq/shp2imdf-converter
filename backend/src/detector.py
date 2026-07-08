@@ -118,26 +118,32 @@ def detect_feature_type(stem: str, geometry_type: str, keywords: dict[str, set[s
 def detect_level_ordinal(stem: str) -> int | None:
     normalized = stem.upper()
 
-    basement = re.search(r"(^|[^A-Z0-9])B(\d+)F?([^A-Z0-9]|$)", normalized)
-    if basement:
-        return -int(basement.group(2))
+    # Basement: B<digits>(F?L?)? — e.g. B1, B2F, B4FL. Skip large numbers
+    # (>200) which are likely years, not floors. Use lookarounds to resume
+    # searching past skipped matches.
+    for match in re.finditer(r"(?<![A-Z0-9])B(\d+)(FL?)?(?![A-Z0-9])", normalized):
+        label = int(match.group(1))
+        if label <= 200:
+            return -label
 
-    negative = re.search(r"(^|[^A-Z0-9])-(\d+)([^A-Z0-9]|$)", normalized)
+    negative = re.search(r"(?<![A-Z0-9])-(\d+)(?![A-Z0-9])", normalized)
     if negative:
-        return -int(negative.group(2))
+        return -int(negative.group(1))
 
-    if re.search(r"(^|[^A-Z0-9])(GF|GH|G)([^A-Z0-9]|$)", normalized):
+    if re.search(r"(?<![A-Z0-9])(GF|GH|G)(?![A-Z0-9])", normalized):
         return 0
 
-    zero = re.search(r"(^|[^A-Z0-9])0([^A-Z0-9]|$)", normalized)
-    if zero:
+    if re.search(r"(?<![A-Z0-9])0(?![A-Z0-9])", normalized):
         return 0
 
-    floor = re.search(r"(^|[^A-Z0-9])(\d+)(F)?([^A-Z0-9]|$)", normalized)
-    if floor:
-        # Many source datasets encode human floor labels (1F=ground, 2F=ordinal 1).
-        # Convert positive floor labels to IMDF ordinal by subtracting 1.
-        return int(floor.group(2)) - 1
+    # Positive floor: <digits>(F?L?)? — e.g. 1F, 2F, 1FL, M2. The 1F=ground
+    # convention subtracts 1 from the label. Skip large numbers (>200):
+    # filenames that contain a year (e.g. "..._2024_1F_...") must not resolve
+    # to ordinal 2023; lookarounds let us find the next smaller match instead.
+    for match in re.finditer(r"(?<![A-Z0-9])(\d+)(FL?)?(?![A-Z0-9])", normalized):
+        label = int(match.group(1))
+        if label <= 200:
+            return label - 1
     return None
 
 

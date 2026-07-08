@@ -42,6 +42,13 @@ def test_detect_level_patterns() -> None:
     assert detect_level_ordinal("Station_B1F_Space") == -1
     assert detect_level_ordinal("Station_B2F_Opening") == -2
     assert detect_level_ordinal("Station_B3F_Detail") == -3
+    # FL suffix: 1FL, B1FL増築会階
+    assert detect_level_ordinal("JRTokyoSt_壁あり_2024_1FL_floor_unit") == 0
+    assert detect_level_ordinal("JRTokyoSt_壁あり_2024_B1FL_floor_unit") == -1
+    assert detect_level_ordinal("JRTokyoSt_壁あり_2024_B4FL_総武線コンコース_floor_unit") == -4
+    # Years in filenames must not be mistaken for floor ordinals
+    assert detect_level_ordinal("Demo_2024_1F_Floor") == 0
+    assert detect_level_ordinal("Demo_2024_B1F_Floor") == -1
 
 
 @pytest.mark.phase2

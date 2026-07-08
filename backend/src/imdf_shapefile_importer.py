@@ -32,6 +32,7 @@ ODC_LAYER_ALIASES = {
     "segment": "section",
     "facility": "amenity",
     "occupant": "occupant",
+    "unit": "unit",
 }
 ODC_CONNECT_ALIASES = {("floor", "connect"): "floor_connect"}
 ODC_IGNORED_LAYER_SUFFIXES = {("build", "connect")}
@@ -745,8 +746,32 @@ def _dedupe_feature_ids(features: list[dict[str, Any]]) -> None:
         seen.add(feature_id)
 
 
+def _redirect_column_units_to_fixture(
+    rows_by_type: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]],
+) -> None:
+    # IMDF's "column" is a unit category, but the ODC spec (§8.1.5) classifies
+    # columns as Fixture (固定設置物). Column-tagged unit files (e.g.
+    # ..._floor_unit with category="column") are redirected to fixture type so
+    # the ODC2026 exporter emits them in *_<level>_Fixture.shp with c-code
+    # C001 instead of leaving them orphaned under Space with a B999 fallback.
+    unit_rows = rows_by_type.get("unit")
+    if not unit_rows:
+        return
+    fixture_rows = rows_by_type.setdefault("fixture", [])
+    keep: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for row, metadata in unit_rows:
+        category = _text(_metadata_get(metadata, ["category", "imdf_cat", "type"]))
+        if category is not None and category.lower() == "column":
+            fixture_rows.append((row, metadata))
+            continue
+        keep.append((row, metadata))
+    if len(keep) != len(unit_rows):
+        rows_by_type["unit"] = keep
+
+
 def build_imdf_shapefile_feature_collection(artifacts: ImportArtifacts, language: str = "en") -> dict[str, Any]:
     rows_by_type = _rows_by_type(artifacts)
+    _redirect_column_units_to_fixture(rows_by_type)
     address = _build_address(rows_by_type)
     address_id = str(address["id"])
     venues = _build_venues(rows_by_type, address_id=address_id, language=language)

@@ -2261,3 +2261,52 @@ def test_imdf_schema_shapefile_import_dedupes_duplicate_ids(test_client) -> None
 
     all_ids = [item["id"] for item in features]
     assert len(all_ids) == len(set(all_ids))
+
+
+@pytest.mark.phase5
+def test_imdf_schema_import_redirects_column_units_to_fixture(test_client) -> None:
+    column_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        ids = _write_imdf_schema_shapefiles(root)
+        gpd.GeoDataFrame(
+            {
+                "id": [column_id],
+                "category": ["column"],
+                "floor_id": [ids["level_id"]],
+                "name": [None],
+                "restriction": [None],
+                "source": ["1"],
+            },
+            geometry=[
+                Polygon([(139.7005, 35.6905), (139.7006, 35.6905), (139.7006, 35.6906), (139.7005, 35.6906), (139.7005, 35.6905)])
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_1F_floor_unit.shp", driver="ESRI Shapefile", index=False)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    # Columns should be imported as fixture, not unit (per ODC spec §8.1.5).
+    fixtures = [item for item in features if item["feature_type"] == "fixture"]
+    column_fixtures = [item for item in fixtures if item.get("id") == column_id]
+    assert len(column_fixtures) == 1
+    properties = column_fixtures[0].get("properties", {})
+    assert properties.get("category", "").lower() == "column"
+    assert properties.get("level_id") == ids["level_id"]
+
+    # Export via ODC2026 and confirm the column appears in Fixture.shp with C001.
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"profile": "odc2026"},
+    )
+    assert export_response.status_code == 200
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        names = set(archive.namelist())
+        assert "Demo_Station_1F_Fixture.shp" in names
+        with tempfile.TemporaryDirectory() as output_dir:
+            archive.extractall(output_dir)
+            fixture_shp = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Fixture.shp")
+            assert column_id in set(fixture_shp["id"])
+            assert "C001" in set(fixture_shp["category"])
