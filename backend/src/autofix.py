@@ -14,7 +14,9 @@ from backend.src.schemas import AutofixApplied, AutofixPrompt, ValidationRespons
 from backend.src.validator import prune_empty_geometry_features
 
 
-PROMPTED_CHECKS = {"duplicate_geometry_warning"}
+# Checks that require explicit user confirmation before being applied.
+# Only destructive operations (feature deletion) belong here.
+PROMPTED_CHECKS = {"duplicate_geometry_warning", "unit_sliver"}
 
 
 def _round_value(value: Any, decimals: int) -> Any:
@@ -132,6 +134,48 @@ def apply_autofix(
                 )
             )
 
+        if issue.check == "polygon_has_interior_rings" and isinstance(geometry, dict):
+            try:
+                geom = shape(geometry)
+                if isinstance(geom, Polygon):
+                    stripped = Polygon(geom.exterior)
+                elif isinstance(geom, MultiPolygon):
+                    stripped = MultiPolygon([Polygon(p.exterior) for p in geom.geoms])
+                else:
+                    continue
+                row["geometry"] = mapping(stripped)
+                fixes_applied.append(
+                    AutofixApplied(
+                        feature_id=issue.feature_id,
+                        check=issue.check,
+                        action="remove_interior_rings",
+                        description="Removed interior rings, keeping only the exterior boundary.",
+                    )
+                )
+            except Exception:
+                continue
+
+        if issue.check == "footprint_level_coverage" and issue.related_feature_id and isinstance(geometry, dict):
+            level_row = by_id.get(issue.related_feature_id)
+            level_geom_raw = level_row.get("geometry") if level_row else None
+            if not isinstance(level_geom_raw, dict):
+                continue
+            try:
+                # row["geometry"] may already be expanded by a prior issue for
+                # the same footprint, so always read the current state.
+                expanded = shape(row["geometry"]).union(shape(level_geom_raw))
+                row["geometry"] = mapping(expanded)
+                fixes_applied.append(
+                    AutofixApplied(
+                        feature_id=issue.feature_id,
+                        check=issue.check,
+                        action="expand_footprint",
+                        description="Expanded footprint to cover uncovered level.",
+                    )
+                )
+            except Exception:
+                continue
+
     # Prompted fixes.
     duplicate_pairs: set[tuple[str, str]] = set()
     for issue in issues:
@@ -157,6 +201,11 @@ def apply_autofix(
         for left, right in duplicate_pairs:
             # Keep the lexicographically smaller id for deterministic behavior.
             to_delete.add(max(left, right))
+
+        for issue in issues:
+            if issue.check == "unit_sliver" and issue.feature_id:
+                to_delete.add(issue.feature_id)
+
         if to_delete:
             kept: list[dict[str, Any]] = []
             for row in rows:

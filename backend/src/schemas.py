@@ -57,6 +57,7 @@ class ImportResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session_id: str
+    import_profile: Literal["standard", "imdf_shapefile"] = "standard"
     files: list[ImportedFile]
     cleanup_summary: CleanupSummary
     warnings: list[str] = Field(default_factory=list)
@@ -213,6 +214,7 @@ class ValidationIssue(BaseModel):
     auto_fixable: bool = False
     fix_description: str | None = None
     overlap_geometry: dict[str, Any] | None = None
+    snap_candidates: list[str] = Field(default_factory=list)
 
 
 class ValidationSummary(BaseModel):
@@ -280,6 +282,7 @@ class SessionRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session_id: str
+    import_profile: Literal["standard", "imdf_shapefile"] = "standard"
     created_at: datetime
     last_accessed: datetime
     files: list[ImportedFile]
@@ -459,6 +462,7 @@ class ShapefileExportUnitOptions(BaseModel):
 class ShapefileExportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    profile: Literal["imdf_roundtrip", "odc2026"] = "imdf_roundtrip"
     mode: Literal["source_update"] = "source_update"
     encoding: Literal["preserve_source", "utf-8", "cp932"] = "preserve_source"
     unit: ShapefileExportUnitOptions = Field(default_factory=ShapefileExportUnitOptions)
@@ -514,6 +518,27 @@ class ResolveUnitOverlapsResponse(BaseModel):
     updated_count: int = 0
     deleted_count: int = 0
     skipped_count: int = 0
+    validation: ValidationResponse
+
+
+class ImportImdfResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    feature_count: int
+
+
+class SnapOpeningRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    opening_id: str
+    unit_id: str
+
+
+class SnapOpeningResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
     validation: ValidationResponse
 
 

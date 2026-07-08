@@ -73,7 +73,55 @@ export const UNIT_CATEGORY_COLORS: Record<string, string> = {
   information: "#EFEFF9",
   ticketing: "#C2E389",
   outdoors: "#FFFFFF",
+  // GSI categories with no IMDF equivalent above
+  publicfacility: "#D6EDE7",
 };
+
+// GSI Space category codes (e.g. Space.shp "category" = "B001") map 1:1 to the IMDF
+// names above via backend/config/b-codes.json. ODC2026 imports keep the raw code as
+// the unit's category (see imdf_shapefile_importer.py), so alias each code to the
+// same color as its IMDF equivalent for a consistent preview.
+const SPACE_CODE_TO_CATEGORY: Record<string, string> = {
+  B001: "retail",
+  B002: "office",
+  B003: "publicfacility",
+  B004: "waitingroom",
+  B005: "ticketing",
+  B006: "information",
+  B007: "restroom.male",
+  B008: "restroom.female",
+  B009: "restroom.unisex",
+  B010: "restroom",
+  B011: "restroom",
+  B012: "restroom",
+  B013: "restroom",
+  B014: "restroom",
+  B015: "smokingarea",
+  B016: "mothersroom",
+  B017: "firstaid",
+  B018: "room",
+  B019: "room",
+  B020: "opentobelow",
+  B021: "stairs",
+  B022: "elevator",
+  B023: "escalator",
+  B024: "walkway",
+  B025: "walkway",
+  B026: "nonpublic",
+  B027: "parking",
+  B028: "platform",
+  B029: "walkway",
+  B030: "footbridge", // pedestrian deck
+  B031: "footbridge", // pedestrian overpass
+  B999: "outdoors", // ground level, outside the building
+};
+
+for (const [code, category] of Object.entries(SPACE_CODE_TO_CATEGORY)) {
+  const color = UNIT_CATEGORY_COLORS[category];
+  if (color) {
+    UNIT_CATEGORY_COLORS[code] = color;
+  }
+}
 
 const UNIT_FALLBACK_COLOR = "#CCCCCC";
 const UNIT_STROKE_COLOR = "#94a3b8";

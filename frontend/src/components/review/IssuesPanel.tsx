@@ -12,10 +12,12 @@ type Props = {
   allFeatures: ReviewFeature[];
   autoFixing: boolean;
   overlapResolving: boolean;
+  openingSnapping: boolean;
   onSelectIssue: (index: number | null) => void;
   onToggleCollapsed: () => void;
   onAutoFixSafe: () => void;
   onResolveUnitOverlap: (keepFeatureId: string, clipFeatureId: string) => void;
+  onSnapOpening: (openingId: string, unitId: string) => void;
 };
 
 
@@ -27,10 +29,12 @@ export function IssuesPanel({
   allFeatures,
   autoFixing,
   overlapResolving,
+  openingSnapping,
   onSelectIssue,
   onToggleCollapsed,
   onAutoFixSafe,
-  onResolveUnitOverlap
+  onResolveUnitOverlap,
+  onSnapOpening
 }: Props) {
   const { t } = useUiLanguage();
 
@@ -147,6 +151,29 @@ export function IssuesPanel({
                     </div>
                   );
                 })() : null}
+                {item.check === "opening_not_touching_boundary" && item.snap_candidates && item.snap_candidates.length > 0 ? (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-[11px] text-[var(--color-text-muted)]">{t("Snap to nearby unit:", "近くのユニットにスナップ:")}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {item.snap_candidates.map((unitId) => {
+                        const candidateFeature = allFeatures.find((f) => f.id === unitId);
+                        const label = candidateFeature ? (featureName(candidateFeature) || unitId.slice(0, 8)) : unitId.slice(0, 8);
+                        return (
+                          <button
+                            key={unitId}
+                            type="button"
+                            className="flex items-center gap-1.5 rounded border border-green-300 bg-green-50 px-2 py-0.5 text-[11px] text-green-800 hover:bg-green-100 disabled:opacity-50"
+                            onClick={(e) => { e.stopPropagation(); onSnapOpening(feature.id, unitId); }}
+                            disabled={openingSnapping}
+                          >
+                            <span className="inline-block h-2 w-2 rounded-full bg-green-600" />
+                            {openingSnapping ? t("Snapping...", "スナップ中...") : label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             );
           })}

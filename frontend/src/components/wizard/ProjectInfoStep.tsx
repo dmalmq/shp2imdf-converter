@@ -2,6 +2,7 @@
 
 import type { GeocodeResultItem, ProjectWizardState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { HoursEditor } from "./HoursEditor";
 import { ProvinceSelect } from "./ProvinceSelect";
 
 
@@ -248,20 +249,20 @@ export function ProjectInfoStep({
             <option value="restricted">restricted</option>
           </select>
         </label>
-        <label className="text-sm">
+        <div className="text-sm">
           <span className="mb-1 block text-slate-600">{t("Venue Hours", "営業時間")}</span>
-          <input
-            className="w-full rounded border px-2 py-1.5"
-            value={form.venue_hours ?? ""}
-            onChange={(event) => setForm((prev) => ({ ...prev, venue_hours: event.target.value }))}
+          <HoursEditor
+            value={form.venue_hours ?? null}
+            onChange={(val) => setForm((prev) => ({ ...prev, venue_hours: val }))}
           />
-        </label>
+        </div>
         <label className="text-sm">
           <span className="mb-1 block text-slate-600">{t("Venue Phone", "電話番号")}</span>
           <input
             className="w-full rounded border px-2 py-1.5"
             value={form.venue_phone ?? ""}
             onChange={(event) => setForm((prev) => ({ ...prev, venue_phone: event.target.value }))}
+            placeholder={t("e.g. +1-555-123-4567", "+1-555-123-4567など")}
           />
         </label>
         <label className="text-sm">

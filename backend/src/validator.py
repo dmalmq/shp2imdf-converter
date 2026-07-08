@@ -8,9 +8,9 @@ import re
 from typing import Any
 from uuid import UUID
 
-from shapely import make_valid
+from shapely import make_valid, prepare
 from shapely.errors import GEOSException
-from shapely.geometry import LineString, shape
+from shapely.geometry import LineString, MultiPolygon, Polygon, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 from shapely.strtree import STRtree
@@ -196,6 +196,19 @@ def _repair_geometry(geom: BaseGeometry | None) -> BaseGeometry | None:
         return geom
 
 
+def _repair_and_prepare(geom: BaseGeometry | None) -> BaseGeometry | None:
+    """Repair once and GEOS-prepare for fast repeated `.intersects()` tests against it.
+
+    Use for a geometry that many other geometries get tested against in a loop
+    (e.g. a per-level boundary or level polygon) — preparing amortizes far better
+    than the unprepared per-call cost once call counts run into the thousands.
+    """
+    repaired = _repair_geometry(geom)
+    if repaired is not None and not repaired.is_empty:
+        prepare(repaired)
+    return repaired
+
+
 def _safe_contains_or_touches(container: BaseGeometry | None, target: BaseGeometry | None) -> bool:
     if container is None or target is None or container.is_empty or target.is_empty:
         return False
@@ -218,6 +231,26 @@ def _safe_intersects(left: BaseGeometry | None, right: BaseGeometry | None) -> b
     repaired_left = _repair_geometry(left)
     repaired_right = _repair_geometry(right)
     if repaired_left is None or repaired_right is None or repaired_left.is_empty or repaired_right.is_empty:
+        return False
+
+    try:
+        return bool(repaired_left.intersects(repaired_right))
+    except GEOSException:
+        return False
+
+
+def _safe_intersects_repaired_left(repaired_left: BaseGeometry | None, right: BaseGeometry | None) -> bool:
+    """Like `_safe_intersects`, but `repaired_left` is assumed already-repaired.
+
+    Used in per-feature loops where `repaired_left` is a shared geometry (e.g. a
+    per-level union) that would otherwise get re-validated via `.is_valid` on every
+    call — that revalidation dominates runtime on large datasets.
+    """
+    if repaired_left is None or right is None or repaired_left.is_empty or right.is_empty:
+        return False
+
+    repaired_right = _repair_geometry(right)
+    if repaired_right is None or repaired_right.is_empty:
         return False
 
     try:
@@ -263,6 +296,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
         auto_fixable: bool = False,
         fix_description: str | None = None,
         overlap_geometry: dict[str, Any] | None = None,
+        snap_candidates: list[str] | None = None,
     ) -> None:
         issue = ValidationIssue(
             feature_id=feature_id,
@@ -273,6 +307,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
             auto_fixable=auto_fixable,
             fix_description=fix_description,
             overlap_geometry=overlap_geometry,
+            snap_candidates=snap_candidates or [],
         )
         if severity == "error":
             errors.append(issue)
@@ -381,10 +416,30 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 auto_fixable=True,
                 fix_description="Round coordinates to 7 decimal places.",
             )
+        if ftype in POLYGON_TYPES and isinstance(geom, Polygon) and list(geom.interiors):
+            add_issue(
+                "warning",
+                "polygon_has_interior_rings",
+                f"Polygon has {len(list(geom.interiors))} interior ring(s) — likely a geometry artifact.",
+                feature_id=fid,
+                auto_fixable=True,
+                fix_description="Remove interior rings, keeping only the exterior boundary.",
+            )
+        elif ftype in POLYGON_TYPES and isinstance(geom, MultiPolygon) and any(list(p.interiors) for p in geom.geoms):
+            total = sum(len(list(p.interiors)) for p in geom.geoms)
+            add_issue(
+                "warning",
+                "polygon_has_interior_rings",
+                f"MultiPolygon has {total} interior ring(s) — likely a geometry artifact.",
+                feature_id=fid,
+                auto_fixable=True,
+                fix_description="Remove interior rings, keeping only the exterior boundaries.",
+            )
         if fid:
             geoms_by_id[fid] = geom
 
-    level_geoms = {fid: geoms_by_id[fid] for fid in level_ids if fid in geoms_by_id}
+    # Pre-repaired: reused per-feature below (once per level here vs. once per feature there).
+    level_geoms = {fid: _repair_and_prepare(geoms_by_id[fid]) for fid in level_ids if fid in geoms_by_id}
     units_by_level: dict[str, list[tuple[str, BaseGeometry]]] = defaultdict(list)
     unit_names: dict[str, str] = {}
 
@@ -426,6 +481,17 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 units_by_level[props["level_id"]].append((fid, geom))
             if geom and geom.area < 1e-10:
                 add_issue("warning", "sliver_polygon_warning", "Unit appears to be a sliver polygon.", feature_id=fid)
+            if geom:
+                area_sq_m = geom.area * (111_320 ** 2)
+                if area_sq_m < 0.5:
+                    add_issue(
+                        "warning",
+                        "unit_sliver",
+                        f"Unit area is very small ({area_sq_m:.4f} m²) — likely a geometry artifact.",
+                        feature_id=fid,
+                        auto_fixable=True,
+                        fix_description="Delete sliver unit.",
+                    )
 
         if ftype == "opening" and (not isinstance(props.get("category"), str) or not props.get("category")):
             add_issue("error", "opening_missing_category_error", "Opening has no category.", feature_id=fid)
@@ -521,6 +587,23 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 add_issue("error", "venue_missing_address_id", "Venue address_id does not match an address feature.", feature_id=fid)
             if props.get("display_point") is None:
                 add_issue("error", "venue_missing_display_point_error", "Venue is missing display_point.", feature_id=fid)
+            phone = props.get("phone")
+            if isinstance(phone, str) and phone.strip() and not phone.strip().startswith("+"):
+                add_issue(
+                    "warning",
+                    "venue_phone_format",
+                    "Venue phone should be in international format starting with '+' (e.g. +1-555-123-4567).",
+                    feature_id=fid,
+                )
+            hours = props.get("hours")
+            if isinstance(hours, str) and hours.strip():
+                if not re.match(r"^(Mo|Tu|We|Th|Fr|Sa|Su|PH)([ ,\-;]|$)", hours.strip()):
+                    add_issue(
+                        "warning",
+                        "venue_hours_format",
+                        "Venue hours should use OSM opening_hours format (e.g. 'Mo-Fr 09:00-17:00; Sa 10:00-14:00').",
+                        feature_id=fid,
+                    )
 
         if ftype == "address":
             country = props.get("country")
@@ -554,6 +637,29 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
             address_id = props.get("address_id")
             if address_id is not None and (not isinstance(address_id, str) or address_id not in address_ids):
                 add_issue("error", "building_address_id_valid", "Building address_id does not match an address feature.", feature_id=fid)
+
+    # Orphaned address check.
+    referenced_address_ids: set[str] = set()
+    for row in rows:
+        val = _props(row).get("address_id")
+        if isinstance(val, str):
+            referenced_address_ids.add(val)
+    for row in rows:
+        if _feature_type(row) == "address" and (fid := _feature_id(row)):
+            if fid not in referenced_address_ids:
+                add_issue("warning", "orphaned_address", "Address feature is not referenced by any venue or building.", feature_id=fid)
+
+    # Building without footprint check.
+    footprinted_building_ids: set[str] = set()
+    for row in rows:
+        if _feature_type(row) == "footprint":
+            for buid in (_props(row).get("building_ids") or []):
+                if isinstance(buid, str):
+                    footprinted_building_ids.add(buid)
+    for row in rows:
+        if _feature_type(row) == "building" and (fid := _feature_id(row)):
+            if fid not in footprinted_building_ids:
+                add_issue("error", "building_missing_footprint", "Building has no footprint referencing it.", feature_id=fid)
 
     for level_id, pairs in units_by_level.items():
         level_geom = level_geoms.get(level_id)
@@ -603,6 +709,61 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 if not _safe_contains_or_touches(footprints_union, centroid):
                     add_issue("warning", "level_outside_footprint_warning", "Level centroid is outside footprint.", feature_id=fid)
 
+    # Footprint-level ordinal coverage check.
+    # aerial should cover ordinal > 0, ground ordinal == 0, subterranean ordinal < 0.
+    _ORDINAL_MATCH: dict[str, Any] = {
+        "aerial": lambda o: o > 0,
+        "ground": lambda o: o == 0,
+        "subterranean": lambda o: o < 0,
+    }
+    fp_by_building_cat: dict[str, dict[str, list[tuple[str, BaseGeometry]]]] = {}
+    for row in rows:
+        if _feature_type(row) != "footprint":
+            continue
+        fid = _feature_id(row)
+        if not fid or fid not in geoms_by_id:
+            continue
+        category = _props(row).get("category")
+        if category not in _ORDINAL_MATCH:
+            continue
+        for buid in (_props(row).get("building_ids") or []):
+            if isinstance(buid, str):
+                fp_by_building_cat.setdefault(buid, {}).setdefault(category, []).append((fid, geoms_by_id[fid]))
+
+    lvl_by_building: dict[str, list[tuple[str, int, BaseGeometry]]] = {}
+    for row in rows:
+        if _feature_type(row) != "level":
+            continue
+        fid = _feature_id(row)
+        if not fid or fid not in geoms_by_id:
+            continue
+        ordinal = _props(row).get("ordinal")
+        if not isinstance(ordinal, int):
+            continue
+        for buid in (_props(row).get("building_ids") or []):
+            if isinstance(buid, str):
+                lvl_by_building.setdefault(buid, []).append((fid, ordinal, geoms_by_id[fid]))
+
+    for buid, cat_fps in fp_by_building_cat.items():
+        for category, fp_list in cat_fps.items():
+            ordinal_fn = _ORDINAL_MATCH[category]
+            fp_union = unary_union([g for _, g in fp_list])
+            for level_id, ordinal, level_geom in lvl_by_building.get(buid, []):
+                if not ordinal_fn(ordinal):
+                    continue
+                if not _safe_contains_or_touches(fp_union, level_geom.centroid):
+                    # Target the footprint closest to this level for the fix.
+                    fp_id = min(fp_list, key=lambda x: x[1].distance(level_geom.centroid))[0]
+                    add_issue(
+                        "warning",
+                        "footprint_level_coverage",
+                        f"{category.title()} footprint does not cover level (ordinal {ordinal}).",
+                        feature_id=fp_id,
+                        related_feature_id=level_id,
+                        auto_fixable=True,
+                        fix_description=f"Expand {category} footprint to include the level geometry.",
+                    )
+
     level_boundary_cache: dict[str, BaseGeometry | None] = {}
 
     # Opening/detail warnings.
@@ -621,12 +782,30 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                     if level_id not in level_boundary_cache:
                         level_units = units_by_level.get(level_id, [])
                         if level_units:
-                            level_boundary_cache[level_id] = unary_union([g.boundary for _, g in level_units]).buffer(5e-6)
+                            raw_boundary = unary_union([g.boundary for _, g in level_units]).buffer(5e-6)
+                            level_boundary_cache[level_id] = _repair_and_prepare(raw_boundary)
                         else:
                             level_boundary_cache[level_id] = None
                     boundaries = level_boundary_cache[level_id]
-                if boundaries is not None and not _safe_intersects(geom, boundaries):
-                    add_issue("warning", "opening_not_touching_boundary", "Opening does not touch any unit boundary.", feature_id=fid)
+                if boundaries is not None and not _safe_intersects_repaired_left(boundaries, geom):
+                    level_units_list = units_by_level.get(level_id, [])
+                    nearest = sorted(level_units_list, key=lambda x: x[1].boundary.distance(geom))[:3]
+                    snap_cands = [uid for uid, _ in nearest]
+                    add_issue(
+                        "warning",
+                        "opening_not_touching_boundary",
+                        "Opening does not touch any unit boundary.",
+                        feature_id=fid,
+                        snap_candidates=snap_cands,
+                    )
+                level_unit_geoms = [g for _, g in units_by_level.get(level_id, [])] if isinstance(level_id, str) else []
+                if level_unit_geoms and any(g.contains(geom.centroid) for g in level_unit_geoms):
+                    add_issue(
+                        "warning",
+                        "opening_through_unit",
+                        "Opening centroid is inside a unit interior — opening may pass through a wall rather than lie on it.",
+                        feature_id=fid,
+                    )
                 meters = geom.length * 111_320
                 if meters < 0.3:
                     add_issue("warning", "opening_too_short", "Opening length is unusually short.", feature_id=fid)
@@ -636,7 +815,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 add_issue("warning", "opening_missing_door_warning", "Pedestrian opening is missing door metadata.", feature_id=fid)
         if ftype == "detail":
             level_id = props.get("level_id")
-            if isinstance(level_id, str) and level_id in level_geoms and not _safe_intersects(level_geoms[level_id], geoms_by_id[fid]):
+            if isinstance(level_id, str) and level_id in level_geoms and not _safe_intersects_repaired_left(level_geoms[level_id], geoms_by_id[fid]):
                 add_issue("warning", "detail_outside_level", "Detail geometry is outside assigned level.", feature_id=fid)
 
     # Cross-level warnings.
@@ -653,7 +832,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
             add_issue("warning", "level_no_units", "Level has no units assigned.", feature_id=level_id)
 
     failed_checks = {issue.check for issue in [*errors, *warnings]}
-    passed = sorted({"unique_uuids", "valid_geometry", "venue_exists", "building_exists", "labels_format_valid", "display_points_valid"} - failed_checks)
+    passed = sorted({"unique_uuids", "valid_geometry", "venue_exists", "building_exists", "labels_format_valid", "display_points_valid", "venue_phone_format", "venue_hours_format", "opening_not_touching_boundary", "polygon_has_interior_rings", "footprint_level_coverage"} - failed_checks)
     summary = ValidationSummary(
         total_features=len(rows),
         by_type=dict(by_type),

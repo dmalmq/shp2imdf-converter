@@ -13,6 +13,7 @@ import {
   patchSessionFeaturesBulk,
   resolveSessionUnitOverlap,
   resolveSessionUnitOverlapsSafe,
+  snapOpening,
   type ShapefileExportEncoding,
   type ShapefileExportRequest,
   type WizardState,
@@ -39,6 +40,7 @@ import { StepIndicator } from "../components/shell/StepIndicator";
 
 /** Only these feature types are visible by default on the map. */
 const DEFAULT_VISIBLE_TYPES = new Set(["unit", "detail", "opening"]);
+type ExportFormat = "imdf" | "imdf_zip" | "shapefiles" | "odc2026_shapefiles";
 
 
 function normalizeFeature(item: Record<string, unknown>): ReviewFeature | null {
@@ -203,6 +205,8 @@ function buildShapefileDefaultsFromWizard(wizardState: WizardState | null): {
 export function ReviewPage() {
   const navigate = useNavigate();
   const sessionId = useAppStore((state) => state.sessionId);
+  const importProfile = useAppStore((state) => state.importProfile);
+  const setImportProfile = useAppStore((state) => state.setImportProfile);
   const files = useAppStore((state) => state.files);
   const setFiles = useAppStore((state) => state.setFiles);
   const wizardState = useAppStore((state) => state.wizardState);
@@ -239,9 +243,10 @@ export function ReviewPage() {
   const [validating, setValidating] = useState(false);
   const [autofixing, setAutofixing] = useState(false);
   const [overlapResolving, setOverlapResolving] = useState(false);
+  const [openingSnapping, setOpeningSnapping] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
-  const [exportFormat, setExportFormat] = useState<"imdf" | "imdf_zip" | "shapefiles">("imdf");
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("imdf");
   const [shapefileEncoding, setShapefileEncoding] = useState<ShapefileExportEncoding>("preserve_source");
   const [shapefileSourceCategoryField, setShapefileSourceCategoryField] = useState("");
   const [shapefileWriteCategoryToNewField, setShapefileWriteCategoryToNewField] = useState(false);
@@ -279,6 +284,7 @@ export function ReviewPage() {
         fetchSessionFeatures(sessionId)
       ]);
       setFiles(fileResponse.files);
+      setImportProfile(fileResponse.import_profile ?? "standard");
 
       let response = initialFeatureResponse;
       let rows = (response.features as Record<string, unknown>[])
@@ -657,6 +663,28 @@ export function ReviewPage() {
     }
   };
 
+  const handleSnapOpening = async (openingId: string, unitId: string) => {
+    if (!sessionId) {
+      return;
+    }
+    setOpeningSnapping(true);
+    setError(null);
+    try {
+      const response = await snapOpening(sessionId, openingId, unitId);
+      applyPostValidationState(response.validation);
+      await loadFeatures();
+      pushToast({
+        title: t("Opening snapped", "開口部をスナップしました"),
+        description: t("Opening moved to unit boundary.", "開口部をユニット境界に移動しました。"),
+        variant: "success"
+      });
+    } catch (caught) {
+      captureError(caught, t("Failed to snap opening", "開口部のスナップに失敗しました"), t("Snap failed", "スナップ失敗"));
+    } finally {
+      setOpeningSnapping(false);
+    }
+  };
+
   const resolveSafeOverlaps = async () => {
     if (!sessionId) {
       return;
@@ -690,10 +718,10 @@ export function ReviewPage() {
     () => files.some((item) => item.source_format === "gpkg"),
     [files]
   );
-  const exportBlocked = exportFormat === "shapefiles" && hasGeoPackageSources;
+  const exportBlocked = (exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles") && hasGeoPackageSources;
 
   useEffect(() => {
-    if (hasGeoPackageSources && exportFormat === "shapefiles") {
+    if (hasGeoPackageSources && (exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles")) {
       setExportFormat("imdf");
     }
   }, [exportFormat, hasGeoPackageSources]);
@@ -705,7 +733,7 @@ export function ReviewPage() {
     }
     const defaults = buildShapefileDefaultsFromWizard(wizardState);
     const sourceCategoryField = defaults.sourceCategoryField.trim();
-    setExportFormat("imdf");
+    setExportFormat(importProfile === "imdf_shapefile" && !hasGeoPackageSources ? "odc2026_shapefiles" : "imdf");
     setShapefileEncoding("preserve_source");
     setShapefileSourceCategoryField(sourceCategoryField);
     setShapefileWriteCategoryToNewField(false);
@@ -720,7 +748,7 @@ export function ReviewPage() {
     if (!sessionId) {
       return;
     }
-    if (exportFormat === "shapefiles" && hasGeoPackageSources) {
+    if ((exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles") && hasGeoPackageSources) {
       const message = t(
         "Shapefile export is unavailable for sessions imported from GeoPackages. Use IMDF export instead.",
         "Shapefile export is unavailable for sessions imported from GeoPackages. Use IMDF export instead."
@@ -768,6 +796,7 @@ export function ReviewPage() {
 
       setExportOptionsError(null);
       shapefilePayload = {
+        profile: "imdf_roundtrip",
         mode: "source_update",
         encoding: shapefileEncoding,
         include_report: true,
@@ -778,6 +807,20 @@ export function ReviewPage() {
           legacy_code_map: legacyCodeMap
         }
       };
+    } else if (exportFormat === "odc2026_shapefiles") {
+      setExportOptionsError(null);
+      shapefilePayload = {
+        profile: "odc2026",
+        mode: "source_update",
+        encoding: shapefileEncoding,
+        include_report: true,
+        unit: {
+          write_imdf_category: true,
+          imdf_category_field: "IMDF_CAT",
+          overwrite_legacy_code_field: null,
+          legacy_code_map: {}
+        }
+      };
     }
 
     setExporting(true);
@@ -785,6 +828,7 @@ export function ReviewPage() {
     try {
       const response =
         exportFormat === "shapefiles"
+          || exportFormat === "odc2026_shapefiles"
           ? await exportSessionShapefiles(sessionId, shapefilePayload as ShapefileExportRequest)
           : await exportSessionArchive(sessionId, exportFormat === "imdf_zip");
       const url = window.URL.createObjectURL(response.blob);
@@ -805,7 +849,9 @@ export function ReviewPage() {
       captureError(
         caught,
         t("Export failed", "Export failed"),
-        exportFormat === "shapefiles" ? t("Shapefile export failed", "Shapefile export failed") : t("Export failed", "Export failed")
+        exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles"
+          ? t("Shapefile export failed", "Shapefile export failed")
+          : t("Export failed", "Export failed")
       );
     } finally {
       setExporting(false);
@@ -1130,10 +1176,12 @@ export function ReviewPage() {
                   allFeatures={features}
                   autoFixing={autofixing}
                   overlapResolving={overlapResolving}
+                  openingSnapping={openingSnapping}
                   onSelectIssue={setActiveIssueIndex}
                   onToggleCollapsed={() => setIssuesPanelCollapsed((prev) => !prev)}
                   onAutoFixSafe={() => void runAutofix(false)}
                   onResolveUnitOverlap={(keepFeatureId, clipFeatureId) => void resolveOverlapPair(keepFeatureId, clipFeatureId)}
+                  onSnapOpening={(openingId, unitId) => void handleSnapOpening(openingId, unitId)}
                 />
               ) : null}
               <PropertiesPanel
@@ -1174,12 +1222,15 @@ export function ReviewPage() {
               <select
                 className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5 text-sm"
                 value={exportFormat}
-                onChange={(event) => setExportFormat(event.target.value as "imdf" | "imdf_zip" | "shapefiles")}
+                onChange={(event) => setExportFormat(event.target.value as ExportFormat)}
               >
                 <option value="imdf">{t("IMDF (.imdf)", "IMDF (.imdf)")}</option>
                 <option value="imdf_zip">{t("IMDF (.zip)", "IMDF (.zip)")}</option>
                 {!hasGeoPackageSources ? (
-                  <option value="shapefiles">{t("Shapefiles (.zip)", "Shapefiles (.zip)")}</option>
+                  <>
+                    <option value="shapefiles">{t("Shapefiles (.zip)", "Shapefiles (.zip)")}</option>
+                    <option value="odc2026_shapefiles">{t("Open Data Contest 2026 shapefiles (.zip)", "オープンデータコンテスト2026 シェープファイル (.zip)")}</option>
+                  </>
                 ) : null}
               </select>
             </label>
@@ -1208,7 +1259,7 @@ export function ReviewPage() {
               {t(`${validation.summary.warning_count} warnings`, `${validation.summary.warning_count} warnings`)}
             </p>
 
-            {exportFormat !== "shapefiles" && validation && validation.summary.error_count > 0 ? (
+            {exportFormat !== "shapefiles" && exportFormat !== "odc2026_shapefiles" && validation && validation.summary.error_count > 0 ? (
               <p className="mt-2 rounded-[var(--radius-sm)] border border-[var(--color-warning)]/20 bg-[var(--color-warning-muted)] px-2 py-1 text-xs text-[var(--color-warning)]">
                 {t(
                   `There are ${validation.summary.error_count} validation error(s). The exported IMDF may not pass Apple's validation.`,
@@ -1217,7 +1268,7 @@ export function ReviewPage() {
               </p>
             ) : null}
 
-            {exportFormat === "shapefiles" && !hasGeoPackageSources ? (
+            {(exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles") && !hasGeoPackageSources ? (
               <div className="mt-3 space-y-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-sm">
                 <label className="block">
                   <span className="mb-1 block text-xs uppercase tracking-wide text-[var(--color-text-muted)]">{t("Encoding", "Encoding")}</span>
@@ -1232,6 +1283,17 @@ export function ReviewPage() {
                   </select>
                 </label>
 
+                {exportFormat === "odc2026_shapefiles" ? (
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    {t(
+                      "Uses reviewed IMDF-schema features to generate Site, Building, Floor, Space, Fixture, Opening, Drawing, Facility, Occupant, and Segment shapefiles.",
+                      "レビュー済みの IMDF スキーマ地物から Site・Building・Floor・Space・Fixture・Opening・Drawing・Facility・Occupant・Segment のシェープファイルを生成します。"
+                    )}
+                  </p>
+                ) : null}
+
+                {exportFormat === "shapefiles" ? (
+                  <>
                 <label className="flex items-start gap-2 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-2 text-xs text-[var(--color-text-secondary)]">
                   <input
                     type="checkbox"
@@ -1314,6 +1376,8 @@ export function ReviewPage() {
                     "Use one mapping per line as category=CODE (also accepts category,CODE or category:CODE). Applied only when Legacy code field is set."
                   )}
                 </p>
+                  </>
+                ) : null}
               </div>
             ) : null}
 
@@ -1341,9 +1405,11 @@ export function ReviewPage() {
                   ? t("Downloading...", "Downloading...")
                   : exportFormat === "shapefiles"
                     ? t("Download shapefiles .zip", "Download shapefiles .zip")
-                    : exportFormat === "imdf_zip"
-                      ? t("Download .zip", "Download .zip")
-                      : t("Download .imdf", "Download .imdf")}
+                    : exportFormat === "odc2026_shapefiles"
+                      ? t("Download Open Data Contest 2026 shapefiles .zip", "オープンデータコンテスト2026 シェープファイル .zip をダウンロード")
+                      : exportFormat === "imdf_zip"
+                        ? t("Download .zip", "Download .zip")
+                        : t("Download .imdf", "Download .imdf")}
               </Button>
             </div>
           </div>

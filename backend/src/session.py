@@ -127,12 +127,14 @@ class SessionManager:
         warnings: list[str] | None = None,
         learned_keywords: dict[str, str] | None = None,
         upload_artifact_dir: str | None = None,
+        import_profile: str = "standard",
     ) -> SessionRecord:
         self.prune_expired()
         self._evict_if_needed()
         now = datetime.now(UTC)
         session = SessionRecord(
             session_id=str(uuid4()),
+            import_profile=import_profile,
             created_at=now,
             last_accessed=now,
             files=files,

@@ -269,7 +269,11 @@ def get_features(session_id: str, request: Request) -> FeatureCollectionResponse
 @router.get("/files")
 def get_files(session_id: str, request: Request) -> dict:
     session = _get_session_or_raise(session_id, request)
-    return {"session_id": session_id, "files": [item.model_dump() for item in session.files]}
+    return {
+        "session_id": session_id,
+        "import_profile": session.import_profile,
+        "files": [item.model_dump() for item in session.files],
+    }
 
 
 @router.post("/detect", response_model=DetectResponse)

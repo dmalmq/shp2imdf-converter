@@ -5,6 +5,7 @@ import type { CleanupSummary, ImportedFile, LearningSuggestion, WizardState } fr
 type Screen = "upload" | "wizard" | "review";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 export type UiLanguage = "en" | "ja";
+type ImportProfile = "standard" | "imdf_shapefile";
 
 type Filters = {
   type?: string;
@@ -22,6 +23,7 @@ type ValidationResults = {
 type AppState = {
   uiLanguage: UiLanguage;
   sessionId: string | null;
+  importProfile: ImportProfile;
   sessionExpiredMessage: string | null;
   currentScreen: Screen;
   wizardStep: number;
@@ -42,6 +44,7 @@ type AppState = {
   learningSuggestion: LearningSuggestion | null;
   setUiLanguage: (language: UiLanguage) => void;
   setSessionId: (sessionId: string | null) => void;
+  setImportProfile: (profile: ImportProfile) => void;
   setSessionExpiredMessage: (message: string | null) => void;
   clearSession: () => void;
   setCurrentScreen: (screen: Screen) => void;
@@ -82,6 +85,7 @@ function readInitialLanguage(): UiLanguage {
 const INITIAL_STATE = {
   uiLanguage: readInitialLanguage(),
   sessionId: null,
+  importProfile: "standard" as ImportProfile,
   sessionExpiredMessage: null,
   currentScreen: "upload" as Screen,
   wizardStep: 0,
@@ -111,6 +115,7 @@ export const useAppStore = create<AppState>((set) => ({
     set({ uiLanguage });
   },
   setSessionId: (sessionId) => set({ sessionId }),
+  setImportProfile: (importProfile) => set({ importProfile }),
   setSessionExpiredMessage: (sessionExpiredMessage) => set({ sessionExpiredMessage }),
   clearSession: () =>
     set((state) => ({

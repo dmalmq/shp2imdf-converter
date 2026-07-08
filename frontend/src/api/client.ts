@@ -28,9 +28,15 @@ export type ImportedFile = {
 
 export type ImportResponse = {
   session_id: string;
+  import_profile: "standard" | "imdf_shapefile";
   files: ImportedFile[];
   cleanup_summary: CleanupSummary;
   warnings: string[];
+};
+
+export type ImportImdfResponse = {
+  session_id: string;
+  feature_count: number;
 };
 
 export type DetectResponse = {
@@ -291,6 +297,7 @@ export type ValidationIssue = {
   auto_fixable: boolean;
   fix_description?: string | null;
   overlap_geometry?: Record<string, unknown> | null;
+  snap_candidates?: string[];
 };
 
 export type ValidationSummary = {
@@ -362,6 +369,7 @@ export type ShapefileExportUnitOptions = {
 };
 
 export type ShapefileExportRequest = {
+  profile?: "imdf_roundtrip" | "odc2026";
   mode: "source_update";
   encoding: ShapefileExportEncoding;
   unit: ShapefileExportUnitOptions;
@@ -372,12 +380,27 @@ export async function importShapefiles(
   files: File[],
   onProgress?: (percent: number) => void
 ): Promise<ImportResponse> {
+  return uploadImportFiles("/api/import", files, onProgress);
+}
+
+export async function importImdfShapefiles(
+  files: File[],
+  onProgress?: (percent: number) => void
+): Promise<ImportResponse> {
+  return uploadImportFiles("/api/import/imdf-shapefiles", files, onProgress);
+}
+
+function uploadImportFiles(
+  endpoint: string,
+  files: File[],
+  onProgress?: (percent: number) => void
+): Promise<ImportResponse> {
   const formData = new FormData();
   files.forEach((file) => formData.append("files", file));
 
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("POST", "/api/import");
+    request.open("POST", endpoint);
 
     request.upload.onprogress = (event) => {
       if (!event.lengthComputable || !onProgress) {
@@ -404,6 +427,13 @@ export async function importShapefiles(
   });
 }
 
+export async function importImdf(file: File): Promise<ImportImdfResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch("/api/import/imdf", { method: "POST", body: formData });
+  return handleJson<ImportImdfResponse>(response);
+}
+
 async function handleJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.text();
@@ -412,9 +442,11 @@ async function handleJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function fetchSessionFiles(sessionId: string): Promise<{ session_id: string; files: ImportedFile[] }> {
+export async function fetchSessionFiles(
+  sessionId: string
+): Promise<{ session_id: string; import_profile: "standard" | "imdf_shapefile"; files: ImportedFile[] }> {
   const response = await fetch(`/api/session/${sessionId}/files`);
-  return handleJson<{ session_id: string; files: ImportedFile[] }>(response);
+  return handleJson<{ session_id: string; import_profile: "standard" | "imdf_shapefile"; files: ImportedFile[] }>(response);
 }
 
 export async function detectAllFiles(sessionId: string): Promise<DetectResponse> {
@@ -685,6 +717,20 @@ export async function resolveSessionUnitOverlapsSafe(sessionId: string): Promise
     method: "POST"
   });
   return handleJson<ResolveUnitOverlapsResponse>(response);
+}
+
+export type SnapOpeningResponse = {
+  session_id: string;
+  validation: ValidationResponse;
+};
+
+export async function snapOpening(sessionId: string, openingId: string, unitId: string): Promise<SnapOpeningResponse> {
+  const response = await fetch(`/api/session/${sessionId}/snap_opening`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ opening_id: openingId, unit_id: unitId }),
+  });
+  return handleJson<SnapOpeningResponse>(response);
 }
 
 export async function exportSessionArchive(sessionId: string, asZip = false): Promise<ExportArchiveResponse> {
