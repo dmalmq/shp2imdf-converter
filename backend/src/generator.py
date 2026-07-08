@@ -9,8 +9,9 @@ import re
 from typing import Any
 from uuid import uuid4
 
-from shapely.geometry import mapping, shape
+from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, mapping, shape
 from shapely.ops import unary_union
+from shapely.validation import make_valid
 
 from backend.src.mapper import load_unit_categories, resolve_unit_category, wrap_labels
 from backend.src.schemas import BuildingWizardState, LevelWizardItem, SessionRecord
@@ -123,6 +124,93 @@ def _display_point(geom: Any) -> dict[str, Any] | None:
         return None
     point = geom.representative_point()
     return {"type": "Point", "coordinates": [point.x, point.y]}
+
+
+def _normalize_polygonal(geom: Any) -> Any | None:
+    """Reduce a geometry to Polygon/MultiPolygon, or None if nothing remains.
+
+    ``difference()`` and ``make_valid()`` can emit GeometryCollections that mix
+    polygons with lines/points; only the positive-area polygons are kept.
+    """
+    if geom is None or geom.is_empty or geom.area <= 0:
+        return None
+    geom = make_valid(geom)
+    if geom.is_empty or geom.area <= 0:
+        return None
+    if isinstance(geom, GeometryCollection) and not isinstance(geom, (Polygon, MultiPolygon)):
+        polygons = [g for g in geom.geoms if isinstance(g, Polygon) and g.area > 0]
+        if not polygons:
+            return None
+        geom = polygons[0] if len(polygons) == 1 else MultiPolygon(polygons)
+    return geom
+
+
+def _carve_column_units(mapped_features: list[dict[str, Any]]) -> None:
+    """Subtract column-unit footprints from the units they stand inside.
+
+    IMDF models standalone columns as ``column`` units, so a column always
+    overlaps the room/space around it in the source data. The validator flags
+    every such pair, so the overlap is resolved here at generation time by
+    carving the column footprint out of each overlapping non-column unit on
+    the same level. Units whose geometry disappears entirely are dropped.
+    """
+    units_by_level: dict[str, list[int]] = {}
+    for index, feature in enumerate(mapped_features):
+        if feature.get("feature_type") != "unit":
+            continue
+        props = feature.get("properties")
+        level_id = props.get("level_id") if isinstance(props, dict) else None
+        if not isinstance(level_id, str) or not isinstance(feature.get("geometry"), dict):
+            continue
+        units_by_level.setdefault(level_id, []).append(index)
+
+    removed_indices: set[int] = set()
+    for indices in units_by_level.values():
+        column_geoms = []
+        for index in indices:
+            props = mapped_features[index].get("properties") or {}
+            category = props.get("category")
+            if not (isinstance(category, str) and category.strip().lower() == "column"):
+                continue
+            try:
+                geom = shape(mapped_features[index]["geometry"])
+            except Exception:
+                continue
+            if not geom.is_empty and geom.area > 0:
+                column_geoms.append(geom)
+        if not column_geoms:
+            continue
+
+        try:
+            column_union = make_valid(unary_union(column_geoms))
+        except Exception:
+            continue
+        if column_union.is_empty:
+            continue
+
+        for index in indices:
+            feature = mapped_features[index]
+            props = feature.get("properties") or {}
+            category = props.get("category")
+            if isinstance(category, str) and category.strip().lower() == "column":
+                continue
+            try:
+                geom = shape(feature["geometry"])
+                overlap = geom.intersection(column_union)
+                if overlap.is_empty or overlap.area <= 0:
+                    continue
+                carved = _normalize_polygonal(geom.difference(column_union))
+            except Exception:
+                continue
+            if carved is None:
+                removed_indices.add(index)
+                continue
+            feature["geometry"] = mapping(carved)
+            if "display_point" in props:
+                props["display_point"] = _display_point(carved)
+
+    for index in sorted(removed_indices, reverse=True):
+        mapped_features.pop(index)
 
 
 def _parse_list(value: Any) -> list[str] | None:
@@ -958,6 +1046,8 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
                 "properties": new_properties,
             }
         )
+
+    _carve_column_units(mapped_features)
 
     final_features: list[dict[str, Any]] = []
     final_features.extend(addresses)

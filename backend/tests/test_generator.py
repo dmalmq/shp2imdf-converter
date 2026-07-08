@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 from shapely.geometry import Polygon, mapping, shape
 
-from backend.src.generator import generate_feature_collection
+from backend.src.generator import _carve_column_units, generate_feature_collection
 from backend.src.schemas import (
     AddressInput,
     CleanupSummary,
@@ -214,3 +214,114 @@ def test_footprints_are_deduplicated_per_category() -> None:
     assert set(categories) <= {"aerial", "ground", "subterranean"}
     assert len(categories) == len(set(categories)), f"duplicate footprint categories: {categories}"
     assert sorted(categories) == ["aerial", "ground", "subterranean"]
+
+
+def _square(x: float, y: float, size: float) -> Polygon:
+    return Polygon([(x, y), (x + size, y), (x + size, y + size), (x, y + size), (x, y)])
+
+
+def _mapped_unit(category: str, polygon: Polygon, level_id: str = "level-1") -> dict:
+    return {
+        "type": "Feature",
+        "id": str(uuid4()),
+        "feature_type": "unit",
+        "geometry": mapping(polygon),
+        "properties": {
+            "category": category,
+            "level_id": level_id,
+            "display_point": mapping(polygon.representative_point()),
+        },
+    }
+
+
+@pytest.mark.phase4
+def test_carve_column_units_subtracts_column_from_surrounding_unit() -> None:
+    room_polygon = _square(0.0, 0.0, 0.001)
+    column_polygon = _square(0.0004, 0.0004, 0.0002)
+    room = _mapped_unit("room", room_polygon)
+    column = _mapped_unit("column", column_polygon)
+    features = [room, column]
+
+    _carve_column_units(features)
+
+    assert len(features) == 2
+    carved_room = shape(room["geometry"])
+    assert carved_room.area == pytest.approx(room_polygon.area - column_polygon.area)
+    assert not carved_room.intersection(shape(column["geometry"])).area > 0
+    assert shape(column["geometry"]).equals(column_polygon)
+    display_point = shape(room["properties"]["display_point"])
+    assert carved_room.contains(display_point)
+
+
+@pytest.mark.phase4
+def test_carve_column_units_ignores_non_overlapping_column() -> None:
+    room_polygon = _square(0.0, 0.0, 0.001)
+    room = _mapped_unit("room", room_polygon)
+    column = _mapped_unit("column", _square(0.005, 0.005, 0.0002))
+    features = [room, column]
+
+    _carve_column_units(features)
+
+    assert shape(room["geometry"]).equals(room_polygon)
+
+
+@pytest.mark.phase4
+def test_carve_column_units_only_applies_within_same_level() -> None:
+    room_polygon = _square(0.0, 0.0, 0.001)
+    room = _mapped_unit("room", room_polygon, level_id="level-1")
+    column = _mapped_unit("column", _square(0.0004, 0.0004, 0.0002), level_id="level-2")
+    features = [room, column]
+
+    _carve_column_units(features)
+
+    assert shape(room["geometry"]).equals(room_polygon)
+
+
+@pytest.mark.phase4
+def test_carve_column_units_removes_units_fully_covered_by_columns() -> None:
+    swallowed = _mapped_unit("room", _square(0.0004, 0.0004, 0.0001))
+    column = _mapped_unit("column", _square(0.0003, 0.0003, 0.0004))
+    features = [swallowed, column]
+
+    _carve_column_units(features)
+
+    assert len(features) == 1
+    assert features[0]["properties"]["category"] == "column"
+
+
+@pytest.mark.phase4
+def test_generate_feature_collection_carves_columns_out_of_units() -> None:
+    session = _multi_level_session([0])
+    room_stem = "unit_l0"
+    column_stem = "unit_l0_column"
+    session.files.append(
+        ImportedFile(
+            stem=column_stem,
+            geometry_type="Polygon",
+            feature_count=1,
+            attribute_columns=["CATEGORY"],
+            detected_type="unit",
+            detected_level=0,
+            confidence="green",
+        )
+    )
+    room_row = session.source_feature_collection["features"][0]
+    room_polygon = shape(room_row["geometry"])
+    column_row = _unit_source_row(column_stem, (139.7000, 35.6900))
+    column_polygon = _square(139.7001, 35.69001, 0.0001)
+    column_row["geometry"] = mapping(column_polygon)
+    column_row["properties"]["metadata"] = {"CATEGORY": "column"}
+    session.source_feature_collection["features"].append(column_row)
+    session.feature_collection = session.source_feature_collection
+
+    generated = generate_feature_collection(session, unit_categories_path=_UNIT_CATEGORIES_PATH)
+
+    units = [item for item in generated["features"] if item["feature_type"] == "unit"]
+    categories = {item["properties"]["category"] for item in units}
+    assert "column" in categories
+    column_unit = next(item for item in units if item["properties"]["category"] == "column")
+    other_unit = next(item for item in units if item["properties"]["category"] != "column")
+    assert shape(column_unit["geometry"]).equals_exact(column_polygon, tolerance=1e-12)
+    carved = shape(other_unit["geometry"])
+    assert carved.area == pytest.approx(room_polygon.area - column_polygon.area)
+    assert carved.intersection(shape(column_unit["geometry"])).area == pytest.approx(0.0)

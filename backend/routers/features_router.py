@@ -200,6 +200,17 @@ def _choose_safe_overlap_resolution(
     if overlap.is_empty or overlap.area <= 0:
         return None
 
+    # IMDF models standalone columns as units standing inside other units, so
+    # a column always wins: keep the column and clip the surrounding unit.
+    # This must precede the containment heuristic, which would otherwise
+    # treat the contained column as the unit to clip away.
+    left_category = left_props.get("category") if isinstance(left_props, dict) else None
+    right_category = right_props.get("category") if isinstance(right_props, dict) else None
+    left_is_column = isinstance(left_category, str) and left_category.strip().lower() == "column"
+    right_is_column = isinstance(right_category, str) and right_category.strip().lower() == "column"
+    if left_is_column != right_is_column:
+        return (left_id, right_id) if left_is_column else (right_id, left_id)
+
     left_ratio = overlap.area / left_geom.area
     right_ratio = overlap.area / right_geom.area
     near_match_threshold = 0.98

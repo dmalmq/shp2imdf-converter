@@ -9,7 +9,7 @@ from pathlib import Path
 import sqlite3
 import shutil
 import tempfile
-from uuid import UUID
+from uuid import UUID, uuid4
 import zipfile
 
 import geopandas as gpd
@@ -1182,6 +1182,53 @@ def test_resolve_unit_overlaps_safe_fixes_detected_safe_pairs(test_client, sampl
     payload = safe_response.json()
     assert payload["resolved_pairs"] >= 1
     assert payload["validation"]["summary"]["overlap_count"] < before_overlap_count
+
+
+def _overlap_unit_feature(category: str, coordinates: list[list[list[float]]]) -> dict:
+    return {
+        "type": "Feature",
+        "id": str(uuid4()),
+        "feature_type": "unit",
+        "geometry": {"type": "Polygon", "coordinates": coordinates},
+        "properties": {"category": category, "level_id": "level-1", "name": None},
+    }
+
+
+@pytest.mark.phase5
+def test_safe_overlap_resolution_keeps_column_and_clips_surrounding_unit() -> None:
+    from backend.routers.features_router import _choose_safe_overlap_resolution
+
+    # Column fully contained in a room: without the category rule the
+    # containment heuristic would clip (delete) the column instead.
+    room = _overlap_unit_feature(
+        "room",
+        [[[0.0, 0.0], [0.001, 0.0], [0.001, 0.001], [0.0, 0.001], [0.0, 0.0]]],
+    )
+    column = _overlap_unit_feature(
+        "column",
+        [[[0.0004, 0.0004], [0.0006, 0.0004], [0.0006, 0.0006], [0.0004, 0.0006], [0.0004, 0.0004]]],
+    )
+
+    assert _choose_safe_overlap_resolution(room, column) == (column["id"], room["id"])
+    assert _choose_safe_overlap_resolution(column, room) == (column["id"], room["id"])
+
+
+@pytest.mark.phase5
+def test_safe_overlap_resolution_column_pair_falls_back_to_heuristics() -> None:
+    from backend.routers.features_router import _choose_safe_overlap_resolution
+
+    # Two columns barely touching: neither ratio matches a safe heuristic,
+    # so the pair stays unresolved rather than one column winning by category.
+    left = _overlap_unit_feature(
+        "column",
+        [[[0.0, 0.0], [0.0002, 0.0], [0.0002, 0.0002], [0.0, 0.0002], [0.0, 0.0]]],
+    )
+    right = _overlap_unit_feature(
+        "column",
+        [[[0.00015, 0.0], [0.00035, 0.0], [0.00035, 0.0002], [0.00015, 0.0002], [0.00015, 0.0]]],
+    )
+
+    assert _choose_safe_overlap_resolution(left, right) is None
 
 
 @pytest.mark.phase5
