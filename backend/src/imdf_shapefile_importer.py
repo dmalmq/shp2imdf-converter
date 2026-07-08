@@ -16,10 +16,10 @@ from backend.src.importer import ImportArtifacts, import_file_blobs
 
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
-LEVEL_LINKED_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section"}
+LEVEL_LINKED_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section", "floor_connect"}
 POLYGON_TYPES = {"venue", "level", "unit", "fixture", "section", "kiosk"}
 LINE_TYPES = {"opening", "detail"}
-POINT_TYPES = {"amenity", "anchor"}
+POINT_TYPES = {"amenity", "anchor", "floor_connect"}
 NULL_GEOM_TYPES = {"building", "address", "occupant"}
 ODC_LAYER_ALIASES = {
     "site": "venue",
@@ -33,7 +33,8 @@ ODC_LAYER_ALIASES = {
     "facility": "amenity",
     "occupant": "occupant",
 }
-ODC_IGNORED_LAYER_SUFFIXES = {("floor", "connect"), ("build", "connect")}
+ODC_CONNECT_ALIASES = {("floor", "connect"): "floor_connect"}
+ODC_IGNORED_LAYER_SUFFIXES = {("build", "connect")}
 
 
 def _metadata_lookup(metadata: dict[str, Any]) -> dict[str, str]:
@@ -194,12 +195,14 @@ def _source_common(row: dict[str, Any], metadata: dict[str, Any]) -> dict[str, A
 
 def _stem_alias_type(stem: str) -> str | None:
     tokens = [token.lower() for token in re.findall(r"[A-Za-z0-9]+", stem)]
-    if tuple(tokens[-2:]) in ODC_IGNORED_LAYER_SUFFIXES:
+    suffix2 = tuple(tokens[-2:]) if len(tokens) >= 2 else ()
+    if suffix2 in ODC_CONNECT_ALIASES:
+        return ODC_CONNECT_ALIASES[suffix2]
+    if suffix2 in ODC_IGNORED_LAYER_SUFFIXES:
         return "__ignore__"
     if tokens:
         return ODC_LAYER_ALIASES.get(tokens[-1])
     return None
-
 
 def _effective_type(stem: str, detected_type: str | None) -> str:
     alias = _stem_alias_type(stem)
@@ -491,7 +494,7 @@ def _build_level_linked_features(
     file_ordinals = {item.stem: item.detected_level for item in artifacts.files}
     output: list[dict[str, Any]] = []
 
-    for feature_type in ("unit", "opening", "fixture", "detail", "section", "kiosk", "amenity", "occupant"):
+    for feature_type in ("unit", "opening", "fixture", "detail", "section", "kiosk", "amenity", "occupant", "floor_connect"):
         for row, metadata in rows_by_type.get(feature_type, []):
             geometry = row.get("geometry") if isinstance(row.get("geometry"), dict) else None
             if geometry is None:
@@ -584,6 +587,16 @@ def _build_level_linked_features(
                     **common,
                 }
                 geometry = None
+            elif feature_type == "floor_connect":
+                # ODC 階層間接続点 (Floor_Connect): preserve spec fields in metadata for round-trip.
+                enriched_metadata = dict(metadata)
+                if level_id:
+                    enriched_metadata["__odc_level_id"] = level_id
+                common = _source_common(row, enriched_metadata)
+                properties = {
+                    "level_id": level_id,
+                    **common,
+                }
             else:
                 properties = {
                     "name": _label(_metadata_get(metadata, ["name", "kiosk_name"]), language),

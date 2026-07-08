@@ -1859,6 +1859,7 @@ def _write_imdf_schema_shapefiles(root: Path) -> dict[str, str]:
     amenity_id = "77777777-7777-4777-8777-777777777777"
     occupant_id = "88888888-8888-4888-8888-888888888888"
     section_id = "99999999-9999-4999-8999-999999999999"
+    floor_connect_id = "aaaaaaaa-aaaa-4aaa-9aaa-aaaaaaaaaaa1"
 
     site_geom = Polygon([(139.7000, 35.6900), (139.7010, 35.6900), (139.7010, 35.6910), (139.7000, 35.6910), (139.7000, 35.6900)])
     floor_geom = Polygon([(139.7001, 35.6901), (139.7009, 35.6901), (139.7009, 35.6909), (139.7001, 35.6909), (139.7001, 35.6901)])
@@ -1953,6 +1954,19 @@ def _write_imdf_schema_shapefiles(root: Path) -> dict[str, str]:
         ],
         crs="EPSG:4326",
     ).to_file(root / "Demo_1F_Segment.shp", driver="ESRI Shapefile", index=False)
+    gpd.GeoDataFrame(
+        {
+            "id": [floor_connect_id],
+            "floor_id": [level_id],
+            "node_id": [None],
+            "anch_id_1": [None],
+            "direction1": ["1"],
+            "anch_id_2": [None],
+            "direction2": [None],
+        },
+        geometry=[Point(139.7004, 35.6904)],
+        crs="EPSG:4326",
+    ).to_file(root / "Demo_1F_Floor_Connect.shp", driver="ESRI Shapefile", index=False)
     return {
         "site_id": site_id,
         "building_id": building_id,
@@ -1961,6 +1975,7 @@ def _write_imdf_schema_shapefiles(root: Path) -> dict[str, str]:
         "amenity_id": amenity_id,
         "occupant_id": occupant_id,
         "section_id": section_id,
+        "floor_connect_id": floor_connect_id,
     }
 
 
@@ -2107,6 +2122,7 @@ def test_odc2026_shapefile_export_from_imdf_schema_import(test_client) -> None:
         assert "Demo_Station_1F_Facility.shp" in names
         assert "Demo_Station_1F_Occupant.shp" in names
         assert "Demo_Station_1F_Segment.shp" in names
+        assert "Demo_Station_1F_Floor_Connect.shp" in names
         assert "export_report.json" in names
 
         with tempfile.TemporaryDirectory() as output_dir:
@@ -2153,6 +2169,22 @@ def test_odc2026_shapefile_export_from_imdf_schema_import(test_client) -> None:
             assert set(segment.columns) == {"id", "floor_id", "name", "source", "geometry"}
             assert segment.iloc[0]["id"] == ids["section_id"]
             assert segment.iloc[0]["floor_id"] == ids["level_id"]
+
+            floor_connect = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Floor_Connect.shp")
+            assert set(floor_connect.columns) == {
+                "id",
+                "floor_id",
+                "node_id",
+                "anch_id_1",
+                "direction1",
+                "anch_id_2",
+                "direction2",
+                "geometry",
+            }
+            assert floor_connect.iloc[0]["id"] == ids["floor_connect_id"]
+            assert floor_connect.iloc[0]["floor_id"] == ids["level_id"]
+            assert floor_connect.iloc[0]["direction1"] == "1"
+            assert floor_connect.geometry.iloc[0].geom_type == "Point"
 
 
 @pytest.mark.phase5

@@ -875,7 +875,7 @@ def build_odc2026_shapefile_export_archive(
     )
     level_ids = {str(item.get("id")) for item in levels if item.get("id")}
     features_by_level: dict[str, dict[str, list[dict[str, Any]]]] = {
-        level_id: {"unit": [], "fixture": [], "opening": [], "detail": [], "section": [], "amenity": [], "occupant": []}
+        level_id: {"unit": [], "fixture": [], "opening": [], "detail": [], "section": [], "amenity": [], "occupant": [], "floor_connect": []}
         for level_id in level_ids
     }
     unit_level_by_id = {
@@ -908,7 +908,7 @@ def build_odc2026_shapefile_export_archive(
 
     for feature in features:
         feature_type = str(feature.get("feature_type") or "")
-        if feature_type not in {"unit", "fixture", "opening", "detail", "section", "amenity", "occupant"}:
+        if feature_type not in {"unit", "fixture", "opening", "detail", "section", "amenity", "occupant", "floor_connect"}:
             continue
         if feature_type in {"amenity", "occupant"}:
             level_id = _poi_level_id(feature)
@@ -1213,6 +1213,30 @@ def build_odc2026_shapefile_export_archive(
             segment_stem = _safe_layer_stem(base, label, "Segment")
             if _write_odc_layer(output_dir, segment_stem, segment_rows, segment_geoms, write_encoding, ODC_POLYGON_GEOMS, report):
                 report["layers_written"].append(segment_stem)
+
+            floor_connects = grouped.get("floor_connect", [])
+            floor_connect_rows: list[dict[str, Any]] = []
+            floor_connect_geoms: list[Any] = []
+            for fc in floor_connects:
+                geom = _feature_geometry(fc)
+                if geom is None:
+                    continue
+                metadata = _feature_metadata(fc)
+                floor_connect_rows.append(
+                    {
+                        "id": _feature_id_value(fc),
+                        "floor_id": level_id,
+                        "node_id": _text_or_none(_metadata_value(metadata, ["node_id", "nodeid"])),
+                        "anch_id_1": _text_or_none(_metadata_value(metadata, ["anch_id_1", "anchid_1"])),
+                        "direction1": _text_or_none(_metadata_value(metadata, ["direction1"])),
+                        "anch_id_2": _text_or_none(_metadata_value(metadata, ["anch_id_2", "anchid_2"])),
+                        "direction2": _text_or_none(_metadata_value(metadata, ["direction2"])),
+                    }
+                )
+                floor_connect_geoms.append(geom)
+            floor_connect_stem = _safe_layer_stem(base, label, "Floor_Connect")
+            if _write_odc_layer(output_dir, floor_connect_stem, floor_connect_rows, floor_connect_geoms, write_encoding, ODC_POINT_GEOMS, report):
+                report["layers_written"].append(floor_connect_stem)
 
         archive_bytes = BytesIO()
         with zipfile.ZipFile(archive_bytes, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
