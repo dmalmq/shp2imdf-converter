@@ -1,8 +1,6 @@
 import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, expect, test, vi } from "vitest";
-
 import {
   autofixSession,
   deleteSessionFeature,
@@ -15,6 +13,7 @@ import {
   patchSessionFeaturesBulk,
   resolveSessionUnitOverlap,
   resolveSessionUnitOverlapsSafe,
+  type WizardState,
   validateSession
 } from "../api/client";
 import { ToastProvider } from "../components/shared/ToastProvider";
@@ -25,6 +24,7 @@ vi.mock("../api/client", () => ({
   autofixSession: vi.fn(),
   deleteSessionFeature: vi.fn(),
   exportSessionArchive: vi.fn(),
+  exportSessionQgisProject: vi.fn(),
   exportSessionShapefiles: vi.fn(),
   fetchSessionFeatures: vi.fn(),
   fetchSessionFiles: vi.fn(),
@@ -269,4 +269,53 @@ test("hides shapefile export when the session includes geopackage sources", asyn
     )
   ).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Download .imdf" })).toBeEnabled();
+});
+
+test("requires an explicit prefix for open data export", async () => {
+  const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+  const wizardState = {
+    project: {
+      project_name: "JRTokyoSta",
+      venue_name: "JR Tokyo Station",
+      language: "en"
+    },
+    mappings: { unit: { code_column: null } },
+    company_mappings: {}
+  } as unknown as WizardState;
+  useAppStore.setState({
+    importProfile: "imdf_shapefile",
+    files: [],
+    wizardState
+  });
+  fetchSessionFilesMock.mockResolvedValue({
+    session_id: "session-123",
+    import_profile: "imdf_shapefile",
+    files: []
+  });
+
+  renderPage();
+  const exportButton = await screen.findByRole("button", { name: "Export" });
+  await waitFor(() => expect(exportButton).toBeEnabled());
+  fireEvent.click(exportButton);
+
+  await waitFor(() => expect(validateSessionMock).toHaveBeenCalledWith("session-123"));
+  const formatSelect = screen.getByRole("combobox", { name: "Format" });
+  fireEvent.change(formatSelect, { target: { value: "odc2026_shapefiles" } });
+  await waitFor(() => expect(formatSelect).toHaveValue("odc2026_shapefiles"));
+  const nameInput = await screen.findByRole("textbox", { name: "Export file prefix (required)" });
+  expect(nameInput).toHaveValue("");
+
+  fireEvent.click(screen.getByRole("button", { name: "Download Open Data Contest 2026 shapefiles .zip" }));
+  expect(await screen.findAllByText("Enter an export file prefix.")).not.toHaveLength(0);
+  expect(exportSessionShapefilesMock).not.toHaveBeenCalled();
+
+  fireEvent.change(nameInput, { target: { value: "TokyoSta" } });
+  fireEvent.click(screen.getByRole("button", { name: "Download Open Data Contest 2026 shapefiles .zip" }));
+  await waitFor(() =>
+    expect(exportSessionShapefilesMock).toHaveBeenCalledWith(
+      "session-123",
+      expect.objectContaining({ profile: "odc2026", export_name: "TokyoSta" })
+    )
+  );
+  anchorClick.mockRestore();
 });

@@ -467,6 +467,7 @@ class ShapefileExportRequest(BaseModel):
     encoding: Literal["preserve_source", "utf-8", "cp932"] = "preserve_source"
     unit: ShapefileExportUnitOptions = Field(default_factory=ShapefileExportUnitOptions)
     include_report: bool = True
+    export_name: str | None = None
 
 
 class FeatureResponse(BaseModel):

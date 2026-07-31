@@ -5,6 +5,7 @@ import {
   autofixSession,
   deleteSessionFeature,
   exportSessionArchive,
+  exportSessionQgisProject,
   exportSessionShapefiles,
   fetchSessionFiles,
   fetchSessionFeatures,
@@ -40,8 +41,7 @@ import { StepIndicator } from "../components/shell/StepIndicator";
 
 /** Only these feature types are visible by default on the map. */
 const DEFAULT_VISIBLE_TYPES = new Set(["unit", "detail", "opening"]);
-type ExportFormat = "imdf" | "imdf_zip" | "shapefiles" | "odc2026_shapefiles";
-
+type ExportFormat = "imdf" | "imdf_zip" | "shapefiles" | "odc2026_shapefiles" | "qgis_project";
 
 function normalizeFeature(item: Record<string, unknown>): ReviewFeature | null {
   if (typeof item.id !== "string" || typeof item.feature_type !== "string") {
@@ -253,6 +253,7 @@ export function ReviewPage() {
   const [shapefileCategoryField, setShapefileCategoryField] = useState("IMDF_CAT");
   const [shapefileLegacyCodeField, setShapefileLegacyCodeField] = useState("");
   const [shapefileLegacyMapText, setShapefileLegacyMapText] = useState("");
+  const [shapefileExportName, setShapefileExportName] = useState("");
   const [exportOptionsError, setExportOptionsError] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
@@ -718,14 +719,13 @@ export function ReviewPage() {
     () => files.some((item) => item.source_format === "gpkg"),
     [files]
   );
-  const exportBlocked = (exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles") && hasGeoPackageSources;
+  const exportBlocked = (exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles" || exportFormat === "qgis_project") && hasGeoPackageSources;
 
   useEffect(() => {
-    if (hasGeoPackageSources && (exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles")) {
+    if (hasGeoPackageSources && (exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles" || exportFormat === "qgis_project")) {
       setExportFormat("imdf");
     }
   }, [exportFormat, hasGeoPackageSources]);
-
   const openExportDialog = async () => {
     const validationResult = await runValidation();
     if (!validationResult) {
@@ -740,6 +740,7 @@ export function ReviewPage() {
     setShapefileCategoryField(sourceCategoryField || "IMDF_CAT");
     setShapefileLegacyCodeField("");
     setShapefileLegacyMapText(defaults.legacyMapText);
+    setShapefileExportName("");
     setExportOptionsError(null);
     setExportDialogOpen(true);
   };
@@ -748,10 +749,10 @@ export function ReviewPage() {
     if (!sessionId) {
       return;
     }
-    if ((exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles") && hasGeoPackageSources) {
+    if ((exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles" || exportFormat === "qgis_project") && hasGeoPackageSources) {
       const message = t(
-        "Shapefile export is unavailable for sessions imported from GeoPackages. Use IMDF export instead.",
-        "Shapefile export is unavailable for sessions imported from GeoPackages. Use IMDF export instead."
+        "Shapefile/QGIS export is unavailable for sessions imported from GeoPackages. Use IMDF export instead.",
+        "シェープファイル・QGIS エクスポートは GeoPackage から読み込んだセッションでは利用できません。IMDF エクスポートを使用してください。"
       );
       setExportOptionsError(message);
       setError(message);
@@ -807,13 +808,24 @@ export function ReviewPage() {
           legacy_code_map: legacyCodeMap
         }
       };
-    } else if (exportFormat === "odc2026_shapefiles") {
+    } else if (exportFormat === "odc2026_shapefiles" || exportFormat === "qgis_project") {
+      const exportName = shapefileExportName.trim();
+      if (!exportName) {
+        const message = t(
+          "Enter an export file prefix.",
+          "エクスポートファイルの接頭辞を入力してください。"
+        );
+        setExportOptionsError(message);
+        setError(message);
+        return;
+      }
       setExportOptionsError(null);
       shapefilePayload = {
         profile: "odc2026",
         mode: "source_update",
         encoding: shapefileEncoding,
         include_report: true,
+        export_name: exportName,
         unit: {
           write_imdf_category: true,
           imdf_category_field: "IMDF_CAT",
@@ -826,9 +838,10 @@ export function ReviewPage() {
     setExporting(true);
     setError(null);
     try {
-      const response =
-        exportFormat === "shapefiles"
-          || exportFormat === "odc2026_shapefiles"
+      const isQgis = exportFormat === "qgis_project";
+      const response = isQgis
+        ? await exportSessionQgisProject(sessionId, shapefilePayload as ShapefileExportRequest)
+        : exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles"
           ? await exportSessionShapefiles(sessionId, shapefilePayload as ShapefileExportRequest)
           : await exportSessionArchive(sessionId, exportFormat === "imdf_zip");
       const url = window.URL.createObjectURL(response.blob);
@@ -849,9 +862,11 @@ export function ReviewPage() {
       captureError(
         caught,
         t("Export failed", "Export failed"),
-        exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles"
-          ? t("Shapefile export failed", "Shapefile export failed")
-          : t("Export failed", "Export failed")
+        exportFormat === "qgis_project"
+          ? t("QGIS project export failed", "QGIS プロジェクトのエクスポートに失敗しました")
+          : exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles"
+            ? t("Shapefile export failed", "Shapefile export failed")
+            : t("Export failed", "Export failed")
       );
     } finally {
       setExporting(false);
@@ -1230,6 +1245,7 @@ export function ReviewPage() {
                   <>
                     <option value="shapefiles">{t("Shapefiles (.zip)", "Shapefiles (.zip)")}</option>
                     <option value="odc2026_shapefiles">{t("Open Data Contest 2026 shapefiles (.zip)", "オープンデータコンテスト2026 シェープファイル (.zip)")}</option>
+                    <option value="qgis_project">{t("QGIS project (.qgz + shapefiles .zip)", "QGIS プロジェクト (.qgz + シェープファイル .zip)")}</option>
                   </>
                 ) : null}
               </select>
@@ -1259,7 +1275,7 @@ export function ReviewPage() {
               {t(`${validation.summary.warning_count} warnings`, `${validation.summary.warning_count} warnings`)}
             </p>
 
-            {exportFormat !== "shapefiles" && exportFormat !== "odc2026_shapefiles" && validation && validation.summary.error_count > 0 ? (
+            {exportFormat !== "shapefiles" && exportFormat !== "odc2026_shapefiles" && exportFormat !== "qgis_project" && validation && validation.summary.error_count > 0 ? (
               <p className="mt-2 rounded-[var(--radius-sm)] border border-[var(--color-warning)]/20 bg-[var(--color-warning-muted)] px-2 py-1 text-xs text-[var(--color-warning)]">
                 {t(
                   `There are ${validation.summary.error_count} validation error(s). The exported IMDF may not pass Apple's validation.`,
@@ -1268,7 +1284,7 @@ export function ReviewPage() {
               </p>
             ) : null}
 
-            {(exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles") && !hasGeoPackageSources ? (
+            {(exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles" || exportFormat === "qgis_project") && !hasGeoPackageSources ? (
               <div className="mt-3 space-y-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-sm">
                 <label className="block">
                   <span className="mb-1 block text-xs uppercase tracking-wide text-[var(--color-text-muted)]">{t("Encoding", "Encoding")}</span>
@@ -1283,6 +1299,38 @@ export function ReviewPage() {
                   </select>
                 </label>
 
+                {exportFormat === "odc2026_shapefiles" || exportFormat === "qgis_project" ? (
+                  <div>
+                    <label
+                      htmlFor="shapefile-export-name"
+                      className="mb-1 block text-xs uppercase tracking-wide text-[var(--color-text-muted)]"
+                    >
+                      {t("Export file prefix (required)", "エクスポートファイルの接頭辞（必須）")}
+                    </label>
+                    <input
+                      id="shapefile-export-name"
+                      required
+                      aria-describedby="shapefile-export-name-help"
+                      className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5"
+                      value={shapefileExportName}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setShapefileExportName(value);
+                        if (value.trim()) {
+                          setExportOptionsError(null);
+                        }
+                      }}
+                      placeholder="TokyoSta"
+                    />
+                    <p id="shapefile-export-name-help" className="mt-1 text-xs text-[var(--color-text-muted)]">
+                      {t(
+                        `Required. Prefixes every exported file, e.g. "${(shapefileExportName.trim() || "TokyoSta")}_1_Floor".`,
+                        `必須。すべての書き出しファイルの接頭辞になります（例: "${(shapefileExportName.trim() || "TokyoSta")}_1_Floor"）。`
+                      )}
+                    </p>
+                  </div>
+                ) : null}
+
                 {exportFormat === "odc2026_shapefiles" ? (
                   <p className="text-xs text-[var(--color-text-muted)]">
                     {t(
@@ -1292,11 +1340,19 @@ export function ReviewPage() {
                   </p>
                 ) : null}
 
+                {exportFormat === "qgis_project" ? (
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    {t(
+                      "Generates a styled QGIS .qgz project (floors grouped as layers, spaces colored by category) bundled with the ODC2026 shapefiles. Extract the zip and open the .qgz in QGIS.",
+                      "階層ごとにレイヤをグループ化し、空間をカテゴリ別に色分けした QGIS プロジェクト (.qgz) を ODC2026 シェープファイルと一緒に zip で出力します。zip を展開して .qgz を QGIS で開いてください。"
+                    )}
+                  </p>
+                ) : null}
+
                 {exportFormat === "shapefiles" ? (
                   <>
                 <label className="flex items-start gap-2 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-2 text-xs text-[var(--color-text-secondary)]">
                   <input
-                    type="checkbox"
                     className="mt-0.5 h-4 w-4"
                     checked={shapefileWriteCategoryToNewField}
                     onChange={(event) => {
@@ -1407,9 +1463,11 @@ export function ReviewPage() {
                     ? t("Download shapefiles .zip", "Download shapefiles .zip")
                     : exportFormat === "odc2026_shapefiles"
                       ? t("Download Open Data Contest 2026 shapefiles .zip", "オープンデータコンテスト2026 シェープファイル .zip をダウンロード")
-                      : exportFormat === "imdf_zip"
-                        ? t("Download .zip", "Download .zip")
-                        : t("Download .imdf", "Download .imdf")}
+                      : exportFormat === "qgis_project"
+                        ? t("Download QGIS project .zip", "QGIS プロジェクト .zip をダウンロード")
+                        : exportFormat === "imdf_zip"
+                          ? t("Download .zip", "Download .zip")
+                          : t("Download .imdf", "Download .imdf")}
               </Button>
             </div>
           </div>

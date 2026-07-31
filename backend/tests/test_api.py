@@ -1838,6 +1838,7 @@ def test_shapefile_export_normalizes_other_feature_schemas_and_renames_suffixes(
             level = gpd.read_file(Path(output_dir) / "DemoSta_2_level.shp")
             assert set(level.columns) == {
                 "id",
+                "category",
                 "name",
                 "source",
                 "restrict",
@@ -1848,7 +1849,8 @@ def test_shapefile_export_normalizes_other_feature_schemas_and_renames_suffixes(
                 "address_id",
                 "geometry",
             }
-            assert "category" not in level.columns
+            # category (ODC spec 8.1.3 屋内外区分) is preserved from the source floor.
+            assert str(level.iloc[0]["category"]).strip() in {"1", "1.0"}
 
 
 def _write_imdf_schema_shapefiles(root: Path) -> dict[str, str]:
@@ -2109,7 +2111,7 @@ def test_odc2026_shapefile_export_from_imdf_schema_import(test_client) -> None:
     session_id = import_response.json()["session_id"]
     export_response = test_client.post(
         f"/api/session/{session_id}/export/shapefiles",
-        json={"profile": "odc2026"},
+        json={"profile": "odc2026", "export_name": "Demo_Station"},
     )
     assert export_response.status_code == 200
 
@@ -2117,17 +2119,17 @@ def test_odc2026_shapefile_export_from_imdf_schema_import(test_client) -> None:
         names = set(archive.namelist())
         assert "Demo_Station_Site.shp" in names
         assert "Demo_Station_Building.shp" in names
-        assert "Demo_Station_1F_Floor.shp" in names
-        assert "Demo_Station_1F_Space.shp" in names
-        assert "Demo_Station_1F_Facility.shp" in names
-        assert "Demo_Station_1F_Occupant.shp" in names
-        assert "Demo_Station_1F_Segment.shp" in names
-        assert "Demo_Station_1F_Floor_Connect.shp" in names
+        assert "Demo_Station_1_Floor.shp" in names
+        assert "Demo_Station_1_Space.shp" in names
+        assert "Demo_Station_1_Facility.shp" in names
+        assert "Demo_Station_1_Occupant.shp" not in names
+        assert "Demo_Station_1_Segment.shp" not in names
+        assert "Demo_Station_1_Floor_Connect.shp" not in names
         assert "export_report.json" in names
 
         with tempfile.TemporaryDirectory() as output_dir:
             archive.extractall(output_dir)
-            space = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Space.shp")
+            space = gpd.read_file(Path(output_dir) / "Demo_Station_1_Space.shp")
             assert set(space.columns) == {
                 "id",
                 "category",
@@ -2145,46 +2147,188 @@ def test_odc2026_shapefile_export_from_imdf_schema_import(test_client) -> None:
             assert space.iloc[0]["floor_id"] == ids["level_id"]
             assert space.iloc[0]["suite"] == "S-1"
 
-            floor = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Floor.shp")
+            floor = gpd.read_file(Path(output_dir) / "Demo_Station_1_Floor.shp")
             assert floor.iloc[0]["id"] == ids["level_id"]
             assert floor.iloc[0]["category"] == "1"
             assert float(floor.iloc[0]["ordinal"]) == 0.0
+            assert floor.crs.to_epsg() == 6668
 
-            facility = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Facility.shp")
+            facility = gpd.read_file(Path(output_dir) / "Demo_Station_1_Facility.shp")
             assert set(facility.columns) == {"id", "category", "floor_id", "name", "source", "geometry"}
             assert facility.iloc[0]["id"] == ids["amenity_id"]
             assert facility.iloc[0]["category"] == "F001"
             assert facility.iloc[0]["floor_id"] == ids["level_id"]
 
-            occupant = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Occupant.shp")
-            assert occupant.iloc[0]["id"] == ids["occupant_id"]
-            assert occupant.iloc[0]["postalcode"] == "100-0001"
-            assert occupant.iloc[0]["category"] == "shop"
-            assert occupant.iloc[0]["floor_id"] == ids["level_id"]
-            assert occupant.iloc[0]["suite"] == "S-1"
-            assert occupant.iloc[0]["taxonomy"] == "retail"
-            assert occupant.geometry.iloc[0].geom_type == "Point"
+            building = gpd.read_file(Path(output_dir) / "Demo_Station_Building.shp")
+            assert len(building) == 1
+            assert building.geometry.iloc[0].equals_exact(floor.geometry.iloc[0], tolerance=1e-12)
+            assert space.crs.to_epsg() == 6668
+            assert facility.crs.to_epsg() == 6668
 
-            segment = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Segment.shp")
-            assert set(segment.columns) == {"id", "floor_id", "name", "source", "geometry"}
-            assert segment.iloc[0]["id"] == ids["section_id"]
-            assert segment.iloc[0]["floor_id"] == ids["level_id"]
 
-            floor_connect = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Floor_Connect.shp")
-            assert set(floor_connect.columns) == {
-                "id",
-                "floor_id",
-                "node_id",
-                "anch_id_1",
-                "direction1",
-                "anch_id_2",
-                "direction2",
-                "geometry",
+@pytest.mark.phase5
+def test_odc2026_export_builds_facility_from_facility_merge(test_client) -> None:
+    inside_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1"
+    no_image_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2"
+    fare_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb6"
+    platform_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb7"
+    basement_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3"
+    outside_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4"
+    unmapped_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5"
+    basement_level_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        ids = _write_imdf_schema_shapefiles(root)
+        # A basement concourse that lies completely outside the 1F footprint,
+        # mirroring the Keiyo line levels at Tokyo station.
+        gpd.GeoDataFrame(
+            {
+                "id": [basement_level_id],
+                "category": ["1"],
+                "name": ["B3F"],
+                "ordinal": [-3.0],
+                "short_name": ["B3F"],
+                "source": ["1"],
+            },
+            geometry=[
+                Polygon(
+                    [
+                        (139.7020, 35.6920),
+                        (139.7028, 35.6920),
+                        (139.7028, 35.6928),
+                        (139.7020, 35.6928),
+                        (139.7020, 35.6920),
+                    ]
+                )
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_B3_Floor.shp", driver="ESRI Shapefile", index=False)
+        gpd.GeoDataFrame(
+            {
+                "id": [inside_id, no_image_id, fare_id, platform_id, basement_id, outside_id, unmapped_id],
+                "category": ["toilet", "movement", "Fare adjustment", "home", "toilet", "toilet", "toilet"],
+                "image": [
+                    "/marker/male.png",
+                    None,
+                    # Shared icon: 切符売り場 and 精算所 differ only by category.
+                    "/marker/ticket.png",
+                    # Platform number logo: facility-specific file name.
+                    "/marker/T01_s.svg",
+                    "/marker/unisex.png",
+                    "/marker/female.png",
+                    "/marker/multipurpose.png",
+                ],
+                "floor": ["F1", "F1", "F1", "F1", "KB3", "F1", "F7"],
+                "name": [
+                    "Toilet",
+                    "Escalator",
+                    "Fare adjustment",
+                    "Platform 1",
+                    "Keiyo toilet",
+                    "Outside toilet",
+                    "Tower toilet",
+                ],
+                "source": ["1", "1", "1", "1", "1", "1", "1"],
+            },
+            geometry=[
+                Point(139.7003, 35.6903),
+                Point(139.7004, 35.6904),
+                Point(139.70055, 35.69055),
+                Point(139.70065, 35.69065),
+                # Inside the B3 concourse, far outside the 1F footprint.
+                Point(139.7024, 35.6924),
+                # Outside every level polygon.
+                Point(139.7100, 35.7000),
+                Point(139.7005, 35.6905),
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Facility_Merge.shp", driver="ESRI Shapefile", index=False)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"profile": "odc2026", "export_name": "Demo_Station"},
+    )
+    assert export_response.status_code == 200
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        report = json.loads(archive.read("export_report.json"))
+        assert report["facility_merge_unmapped"] == [{"feature_id": unmapped_id, "floor": "F7"}]
+        assert report["facility_merge_outside_building"] == [{"feature_id": outside_id, "floor": "F1"}]
+        assert report["facility_merge_missing_image"] == [{"feature_id": no_image_id, "floor": "F1"}]
+        assert report["facility_merge_missing_category"] == [{"feature_id": no_image_id, "floor": "F1"}]
+        with tempfile.TemporaryDirectory() as output_dir:
+            archive.extractall(output_dir)
+            facility = gpd.read_file(Path(output_dir) / "Demo_Station_1_Facility.shp")
+            assert set(facility.columns) == {"id", "category", "image", "floor_id", "name", "source", "geometry"}
+            by_id = {
+                row["id"]: (row["category"], row["image"])
+                for _, row in facility.iterrows()
             }
-            assert floor_connect.iloc[0]["id"] == ids["floor_connect_id"]
-            assert floor_connect.iloc[0]["floor_id"] == ids["level_id"]
-            assert floor_connect.iloc[0]["direction1"] == "1"
-            assert floor_connect.geometry.iloc[0].geom_type == "Point"
+            assert by_id == {
+                # Icon drives the 別表8.3.1 category, exported as English name.
+                inside_id: ("Lavatory(Male)", "/marker/male.png"),
+                # `movement` with no icon cannot be resolved to a category.
+                no_image_id: (None, None),
+                # Source category breaks the shared-icon tie (F103, not F101).
+                fare_id: ("Fare Adjustment", "/marker/ticket.png"),
+                # Facility-specific icon falls back to the source category.
+                platform_id: ("Notes for Map Representation", "/marker/T01_s.svg"),
+            }
+            assert set(facility["floor_id"]) == {ids["level_id"]}
+            assert ids["amenity_id"] not in set(facility["id"])
+
+            # A facility inside its own basement level survives even though it
+            # falls outside the 1F building outline.
+            basement = gpd.read_file(Path(output_dir) / "Demo_Station_B3_Facility.shp")
+            assert list(basement["id"]) == [basement_id]
+            assert list(basement["category"]) == ["Lavatory (Unisex)"]
+            assert list(basement["image"]) == ["/marker/unisex.png"]
+            assert list(basement["floor_id"]) == [basement_level_id]
+
+
+@pytest.mark.phase5
+def test_odc2026_shapefile_export_requires_explicit_export_name(test_client) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_imdf_schema_shapefiles(root)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"profile": "odc2026", "export_name": "   "},
+    )
+
+    assert export_response.status_code == 400
+    assert export_response.json()["detail"] == "Open data export requires a file name prefix."
+
+
+@pytest.mark.phase5
+def test_odc2026_shapefile_export_honors_custom_export_name(test_client) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_imdf_schema_shapefiles(root)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"profile": "odc2026", "export_name": "TokyoSta"},
+    )
+    assert export_response.status_code == 200
+
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        names = set(archive.namelist())
+        assert "TokyoSta_Site.shp" in names
+        assert "TokyoSta_Building.shp" in names
+        assert "TokyoSta_1_Floor.shp" in names
+        assert "TokyoSta_1_Space.shp" in names
+        # The derived project name must no longer prefix any file.
+        assert not any(name.startswith("Demo_Station") for name in names)
 
 
 @pytest.mark.phase5
@@ -2214,7 +2358,7 @@ def test_odc2026_export_skips_mismatched_geometry_rows(test_client) -> None:
     session_id = import_response.json()["session_id"]
     export_response = test_client.post(
         f"/api/session/{session_id}/export/shapefiles",
-        json={"profile": "odc2026"},
+        json={"profile": "odc2026", "export_name": "Demo_Station"},
     )
     assert export_response.status_code == 200
 
@@ -2224,7 +2368,7 @@ def test_odc2026_export_skips_mismatched_geometry_rows(test_client) -> None:
         assert bad_unit_id in skipped_ids
         with tempfile.TemporaryDirectory() as output_dir:
             archive.extractall(output_dir)
-            space = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Space.shp")
+            space = gpd.read_file(Path(output_dir) / "Demo_Station_1_Space.shp")
             assert bad_unit_id not in set(space["id"])
             assert ids["unit_id"] in set(space["id"])
 
@@ -2299,14 +2443,153 @@ def test_imdf_schema_import_redirects_column_units_to_fixture(test_client) -> No
     # Export via ODC2026 and confirm the column appears in Fixture.shp with C001.
     export_response = test_client.post(
         f"/api/session/{session_id}/export/shapefiles",
-        json={"profile": "odc2026"},
+        json={"profile": "odc2026", "export_name": "Demo_Station"},
     )
     assert export_response.status_code == 200
     with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
         names = set(archive.namelist())
-        assert "Demo_Station_1F_Fixture.shp" in names
+        assert "Demo_Station_1_Fixture.shp" in names
         with tempfile.TemporaryDirectory() as output_dir:
             archive.extractall(output_dir)
-            fixture_shp = gpd.read_file(Path(output_dir) / "Demo_Station_1F_Fixture.shp")
+            fixture_shp = gpd.read_file(Path(output_dir) / "Demo_Station_1_Fixture.shp")
             assert column_id in set(fixture_shp["id"])
             assert "C001" in set(fixture_shp["category"])
+
+
+@pytest.mark.phase5
+def test_imdf_schema_import_links_orphan_floor_uuid_column_by_filename_label(test_client) -> None:
+    column_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    orphan_floor_id = "deadbeef-dead-4dea-8dea-deaddeaddead"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        ids = _write_imdf_schema_shapefiles(root)
+        assert orphan_floor_id != ids["level_id"]
+        # Filename floor label "1F" matches the built level's short_name, but the
+        # source floor_id is a UUID absent from the dataset's levels. The importer
+        # must fall back to the filename label to rescue the orphaned column.
+        gpd.GeoDataFrame(
+            {
+                "id": [column_id],
+                "category": ["column"],
+                "floor_id": [orphan_floor_id],
+                "name": [None],
+                "restriction": [None],
+                "source": ["1"],
+            },
+            geometry=[
+                Polygon([(139.7005, 35.6905), (139.7006, 35.6905), (139.7006, 35.6906), (139.7005, 35.6906), (139.7005, 35.6905)])
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_1F_floor_unit.shp", driver="ESRI Shapefile", index=False)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+
+    # The column is redirected to a fixture (per ODC spec §8.1.5).
+    column_fixtures = [f for f in features if f["feature_type"] == "fixture" and f.get("id") == column_id]
+    assert len(column_fixtures) == 1
+    props = column_fixtures[0]["properties"]
+    assert props.get("category", "").lower() == "column"
+
+    # The orphan floor_id must be rescued to the real level via the filename label,
+    # never left pointing at the non-existent UUID.
+    assert props.get("level_id") == ids["level_id"]
+    assert props.get("level_id") != orphan_floor_id
+    level_ids = {f["id"] for f in features if f["feature_type"] == "level"}
+    assert props.get("level_id") in level_ids
+
+    # The column must not also leak out as a unit.
+    assert all(f.get("id") != column_id for f in features if f["feature_type"] == "unit")
+
+
+@pytest.mark.phase5
+def test_imdf_schema_import_column_only_synthesizes_levels_and_links_mezzanine(test_client) -> None:
+    first_floor_column_id = "11111111-1111-4111-8111-111111111111"
+    mezzanine_column_id = "22222222-2222-4222-8222-222222222222"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        # Only column ("壁あり" / floor_unit) shapefiles, with NO Floor file at all,
+        # so the importer must reach _synthesize_levels. The floor_id UUIDs are
+        # deliberately absent from the dataset's levels, and the two squares are
+        # disjoint so their unions cannot side-location conflict for the wrong
+        # reason -- the crash regression is about the synthesize union path itself.
+        gpd.GeoDataFrame(
+            {
+                "id": [first_floor_column_id],
+                "category": ["column"],
+                "floor_id": ["deadbeef-dead-4dea-8dea-deaddead0001"],
+                "name": [None],
+                "restriction": [None],
+                "source": ["1"],
+            },
+            geometry=[
+                Polygon([(139.7005, 35.6905), (139.7006, 35.6905), (139.7006, 35.6906), (139.7005, 35.6906), (139.7005, 35.6905)])
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_1FL_floor_unit.shp", driver="ESRI Shapefile", index=False)
+        # "M2FL" carries no numeric ordinal (detect_level_ordinal returns None), so
+        # this exercises the mezzanine grouping-by-filename-label path.
+        gpd.GeoDataFrame(
+            {
+                "id": [mezzanine_column_id],
+                "category": ["column"],
+                "floor_id": ["deadbeef-dead-4dea-8dea-deaddead0002"],
+                "name": [None],
+                "restriction": [None],
+                "source": ["1"],
+            },
+            geometry=[
+                Polygon([(139.7010, 35.6910), (139.7011, 35.6910), (139.7011, 35.6911), (139.7010, 35.6911), (139.7010, 35.6910)])
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_M2FL_floor_unit.shp", driver="ESRI Shapefile", index=False)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    # Crash regression: unioning near-coincident column polygons with NO Floor file
+    # previously raised a GEOS TopologyException and returned HTTP 500.
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+
+    level_ids = {f["id"] for f in features if f["feature_type"] == "level"}
+    assert level_ids  # at least one level was synthesized despite no Floor file
+
+    resolved: dict[str, str] = {}
+    for column_id in (first_floor_column_id, mezzanine_column_id):
+        # Each column is emitted as a fixture with category "column", never a unit.
+        column_fixtures = [
+            f for f in features if f["feature_type"] == "fixture" and f.get("id") == column_id
+        ]
+        assert len(column_fixtures) == 1
+        props = column_fixtures[0]["properties"]
+        assert props.get("category", "").lower() == "column"
+        assert all(f.get("id") != column_id for f in features if f["feature_type"] == "unit")
+
+        # Orphaning regression: the column links to a level that actually exists in
+        # the returned collection (zero orphans), including the mezzanine floor.
+        level_id = props.get("level_id")
+        assert level_id is not None
+        assert level_id in level_ids
+        resolved[column_id] = level_id
+
+    # 1FL and M2FL are distinct floors, so they must resolve to distinct levels.
+    assert resolved[first_floor_column_id] != resolved[mezzanine_column_id]
+
+
+@pytest.mark.phase5
+def test_safe_union_tolerates_invalid_geometry() -> None:
+    from backend.src.imdf_shapefile_importer import _safe_union
+
+    bowtie = Polygon([(0, 0), (1, 1), (1, 0), (0, 1), (0, 0)])
+    square = Polygon([(2, 0), (3, 0), (3, 1), (2, 1), (2, 0)])
+    assert not bowtie.is_valid  # the input really is self-intersecting
+
+    result = _safe_union([bowtie, square])
+    assert result is not None
+    assert result.is_valid
+    assert not result.is_empty
+    assert result.contains(square.representative_point()) or result.intersects(square)
+
+    assert _safe_union([]) is None

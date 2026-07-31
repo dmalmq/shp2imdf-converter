@@ -9,6 +9,8 @@ import re
 from typing import Any
 from uuid import UUID, uuid4
 
+from shapely import make_valid, union_all
+from shapely.errors import GEOSException
 from shapely.geometry import mapping, shape
 from shapely.ops import unary_union
 
@@ -36,6 +38,9 @@ ODC_LAYER_ALIASES = {
 }
 ODC_CONNECT_ALIASES = {("floor", "connect"): "floor_connect"}
 ODC_IGNORED_LAYER_SUFFIXES = {("build", "connect")}
+# Facility_Merge (地図記号表示点) is a station-wide point layer that the ODC
+# export splits back into per-floor Facility layers.
+ODC_SUFFIX_ALIASES = {("facility", "merge"): "amenity"}
 
 
 def _metadata_lookup(metadata: dict[str, Any]) -> dict[str, str]:
@@ -201,6 +206,8 @@ def _stem_alias_type(stem: str) -> str | None:
         return ODC_CONNECT_ALIASES[suffix2]
     if suffix2 in ODC_IGNORED_LAYER_SUFFIXES:
         return "__ignore__"
+    if suffix2 in ODC_SUFFIX_ALIASES:
+        return ODC_SUFFIX_ALIASES[suffix2]
     if tokens:
         return ODC_LAYER_ALIASES.get(tokens[-1])
     return None
@@ -326,6 +333,42 @@ def _build_buildings(
     return buildings
 
 
+def _safe_union(geoms: list[Any]) -> Any | None:
+    """Union geometries, tolerating invalid or near-coincident source data.
+
+    GEOS raises a TopologyException ("side location conflict") when unioning
+    polygons whose edges nearly coincide, which is common in ODC column data.
+    Retry with each part made valid and the operation snapped to a fine grid,
+    then fall back to an envelope union that cannot side-location conflict.
+    """
+    cleaned = [geom for geom in geoms if geom is not None and not geom.is_empty]
+    if not cleaned:
+        return None
+    try:
+        return unary_union(cleaned)
+    except GEOSException:
+        pass
+    valid: list[Any] = []
+    for geom in cleaned:
+        try:
+            fixed = make_valid(geom)
+        except Exception:
+            continue
+        if not fixed.is_empty:
+            valid.append(fixed)
+    if not valid:
+        return None
+    for grid_size in (1e-9, 1e-8, 1e-7, 1e-6):
+        try:
+            return union_all(valid, grid_size=grid_size)
+        except GEOSException:
+            continue
+    try:
+        return union_all([geom.envelope for geom in valid])
+    except GEOSException:
+        return None
+
+
 def _build_levels(
     rows_by_type: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]],
     building_ids: list[str],
@@ -393,8 +436,8 @@ def _build_levels(
             if not geom.is_empty:
                 geoms.append(geom)
         if geoms:
-            merged = unary_union(geoms)
-            if not merged.is_empty:
+            merged = _safe_union(geoms)
+            if merged is not None and not merged.is_empty:
                 merged_geometry = mapping(merged)
                 feature["geometry"] = merged_geometry
                 feature["properties"]["display_point"] = _display_point(merged_geometry)
@@ -409,6 +452,17 @@ def _synthesized_level_label(ordinal: int) -> str:
     return f"{ordinal + 1}F"
 
 
+def _ordinal_from_floor_code(code: str) -> int:
+    match = re.fullmatch(r"(B|M)?(\d+)F", code)
+    if not match:
+        return 0
+    prefix, number = match.group(1), int(match.group(2))
+    if prefix == "B":
+        return -number
+    # Ground-floor-as-zero convention, matching detect_level_ordinal.
+    return number - 1
+
+
 def _synthesize_levels(
     artifacts: ImportArtifacts,
     rows_by_type: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]],
@@ -416,31 +470,53 @@ def _synthesize_levels(
     language: str,
 ) -> tuple[list[dict[str, Any]], dict[int, str]]:
     file_ordinals = {item.stem: item.detected_level for item in artifacts.files}
-    geoms_by_ordinal: dict[int, list[Any]] = defaultdict(list)
+    file_labels = {item.stem: _floor_label_from_stem(item.stem) for item in artifacts.files}
+    # Group by the filename floor label so mezzanine floors (e.g. "M2FL") that
+    # carry no numeric ordinal still get a synthesized level; fall back to the
+    # ordinal for files without a parseable floor label.
+    groups: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
     for feature_type in LEVEL_LINKED_TYPES:
         for row, _ in rows_by_type.get(feature_type, []):
             props = row.get("properties") if isinstance(row.get("properties"), dict) else {}
             stem = props.get("source_file")
+            label = file_labels.get(stem) if isinstance(stem, str) else None
             ordinal = file_ordinals.get(stem) if isinstance(stem, str) else None
+            if label is None and ordinal is None:
+                continue
             geometry = row.get("geometry")
-            if ordinal is None or not isinstance(geometry, dict):
+            if not isinstance(geometry, dict):
                 continue
             try:
                 geom = shape(geometry)
             except Exception:
                 continue
-            if not geom.is_empty and geom.geom_type in {"Polygon", "MultiPolygon"}:
-                geoms_by_ordinal[ordinal].append(geom)
+            if geom.is_empty or geom.geom_type not in {"Polygon", "MultiPolygon"}:
+                continue
+            key = label if label is not None else f"ordinal:{ordinal}"
+            group = groups.get(key)
+            if group is None:
+                groups[key] = {"label": label, "ordinal": ordinal, "geoms": [geom]}
+                order.append(key)
+            else:
+                if group["ordinal"] is None:
+                    group["ordinal"] = ordinal
+                group["geoms"].append(geom)
 
     levels: list[dict[str, Any]] = []
     level_id_by_ordinal: dict[int, str] = {}
-    for ordinal, geoms in sorted(geoms_by_ordinal.items()):
-        merged = unary_union(geoms)
-        if merged.is_empty:
+    for key in order:
+        group = groups[key]
+        merged = _safe_union(group["geoms"])
+        if merged is None or merged.is_empty:
             continue
+        label = group["label"]
+        ordinal = group["ordinal"]
+        if ordinal is None:
+            ordinal = _ordinal_from_floor_code(label) if label else 0
+        level_name = label or _synthesized_level_label(ordinal)
         level_id = str(uuid4())
-        level_id_by_ordinal[ordinal] = level_id
-        label = _synthesized_level_label(ordinal)
+        level_id_by_ordinal.setdefault(ordinal, level_id)
         levels.append(
             {
                 "type": "Feature",
@@ -452,8 +528,8 @@ def _synthesize_levels(
                     "restriction": None,
                     "outdoor": False,
                     "ordinal": ordinal,
-                    "name": {language: label},
-                    "short_name": {language: label},
+                    "name": {language: level_name},
+                    "short_name": {language: level_name},
                     "display_point": _display_point(mapping(merged)),
                     "address_id": None,
                     "building_ids": building_ids,
@@ -466,22 +542,66 @@ def _synthesize_levels(
     return levels, level_id_by_ordinal
 
 
+def _floor_code(value: Any) -> str | None:
+    """Normalize a floor label ("2FL"/"2F"/"B1FL"/"M2FL") to a canonical code
+    ("2F", "B1F", "M2F"). Returns None for non-floor text such as a year
+    ("2024"), which has no trailing F."""
+    text = _label_text(value)
+    if not text:
+        return None
+    match = re.fullmatch(r"\s*(B|M)?(\d+)FL?\s*", text, re.IGNORECASE)
+    if not match:
+        return None
+    prefix = (match.group(1) or "").upper()
+    return f"{prefix}{int(match.group(2))}F"
+
+
+def _floor_label_from_stem(stem: str) -> str | None:
+    for token in re.findall(r"[A-Za-z0-9]+", stem):
+        code = _floor_code(token)
+        if code:
+            return code
+    return None
+
+
+def _build_label_to_level(levels: list[dict[str, Any]]) -> dict[str, str]:
+    label_to_level: dict[str, str] = {}
+    for level in levels:
+        props = level.get("properties") or {}
+        for source in (props.get("short_name"), props.get("name")):
+            code = _floor_code(source)
+            if code:
+                label_to_level.setdefault(code, str(level["id"]))
+    return label_to_level
+
+
 def _level_id_for_row(
     metadata: dict[str, Any],
     source_to_level: dict[str, str],
     ordinal_to_level: dict[int, str],
     fallback_ordinal: int | None,
+    label_to_level: dict[str, str] | None = None,
+    fallback_label: str | None = None,
 ) -> str | None:
     source_level = _text(_metadata_get(metadata, ["level_id", "floor_id", "floorid", "levelid"]))
+    if source_level and source_level in source_to_level:
+        return source_to_level[source_level]
+    # The source level_id does not resolve to a level in this dataset (the 壁あり
+    # column files carry floor UUIDs from a separate export). Link by the floor
+    # parsed from the filename before falling back to the raw UUID.
+    if fallback_label and label_to_level:
+        mapped = label_to_level.get(fallback_label)
+        if mapped:
+            return mapped
+    if fallback_ordinal is not None:
+        mapped = ordinal_to_level.get(fallback_ordinal)
+        if mapped:
+            return mapped
     if source_level:
-        if source_level in source_to_level:
-            return source_to_level[source_level]
         try:
             return str(UUID(source_level))
         except ValueError:
             pass
-    if fallback_ordinal is not None:
-        return ordinal_to_level.get(fallback_ordinal)
     return None
 
 
@@ -490,9 +610,11 @@ def _build_level_linked_features(
     rows_by_type: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]],
     source_to_level: dict[str, str],
     ordinal_to_level: dict[int, str],
+    label_to_level: dict[str, str],
     language: str,
 ) -> list[dict[str, Any]]:
     file_ordinals = {item.stem: item.detected_level for item in artifacts.files}
+    file_labels = {item.stem: _floor_label_from_stem(item.stem) for item in artifacts.files}
     output: list[dict[str, Any]] = []
 
     for feature_type in ("unit", "opening", "fixture", "detail", "section", "kiosk", "amenity", "occupant", "floor_connect"):
@@ -503,7 +625,15 @@ def _build_level_linked_features(
             props = row.get("properties") if isinstance(row.get("properties"), dict) else {}
             stem = props.get("source_file")
             fallback_ordinal = file_ordinals.get(stem) if isinstance(stem, str) else None
-            level_id = _level_id_for_row(metadata, source_to_level, ordinal_to_level, fallback_ordinal)
+            fallback_label = file_labels.get(stem) if isinstance(stem, str) else None
+            level_id = _level_id_for_row(
+                metadata,
+                source_to_level,
+                ordinal_to_level,
+                fallback_ordinal,
+                label_to_level=label_to_level,
+                fallback_label=fallback_label,
+            )
             if feature_type in LEVEL_LINKED_TYPES and not level_id:
                 continue
 
@@ -634,8 +764,8 @@ def _fallback_union_geometry(features: list[dict[str, Any]]) -> dict[str, Any] |
             geoms.append(geom)
     if not geoms:
         return None
-    merged = unary_union(geoms)
-    if merged.is_empty:
+    merged = _safe_union(geoms)
+    if merged is None or merged.is_empty:
         return None
     return mapping(merged)
 
@@ -783,11 +913,13 @@ def build_imdf_shapefile_feature_collection(artifacts: ImportArtifacts, language
         levels = synthesized_levels
         ordinal_to_level.update(synthesized_by_ordinal)
 
+    label_to_level = _build_label_to_level(levels)
     linked_features = _build_level_linked_features(
         artifacts=artifacts,
         rows_by_type=rows_by_type,
         source_to_level=source_to_level,
         ordinal_to_level=ordinal_to_level,
+        label_to_level=label_to_level,
         language=language,
     )
     features = [address, *venues, *buildings, *levels, *linked_features]

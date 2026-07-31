@@ -60,6 +60,7 @@ DETAIL_EXPORT_COLUMNS = (
 )
 LEVEL_EXPORT_COLUMNS = (
     "id",
+    "category",
     "name",
     "source",
     "restrict",
@@ -467,6 +468,7 @@ def _normalize_level_columns_for_export(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFra
         export_columns=LEVEL_EXPORT_COLUMNS,
         aliases={
             "id": ["id"],
+            "category": ["category"],
             "name": ["name"],
             "source": ["source"],
             "restrict": ["restrict", "restriction", "restricted"],
@@ -750,16 +752,40 @@ def _feature_id_value(feature: dict[str, Any]) -> str:
     return str(feature.get("id") or uuid4())
 
 
-def _level_label(level: dict[str, Any]) -> str:
+def _floor_code_of(text: str | None) -> str | None:
+    """Canonical floor code ("1F", "B1F", "M2F") for floor-label text, else None."""
+    if not text:
+        return None
+    match = re.fullmatch(r"\s*(B|M)?(\d+)FL?\s*", text, re.IGNORECASE)
+    if not match:
+        return None
+    return f"{(match.group(1) or '').upper()}{int(match.group(2))}F"
+
+
+def _odc_floor_token(level: dict[str, Any]) -> str:
+    """Floor token for ODC filenames per spec 2.6.1: "1F"->"1", "B1F"->"B1",
+    "M2F"->"M2". Labels that are not floor codes (e.g. the outdoor ground level
+    named after the venue) fall back to the floor token in the source file stem
+    ("JRTokyoSta_0_Floor" -> "0"), then to the ordinal."""
     properties = _feature_properties(level)
     label = _label_text(properties.get("short_name")) or _label_text(properties.get("name"))
-    if label:
-        return _safe_export_name(label)
+    code = _floor_code_of(label)
+    if code:
+        return code[:-1]
+    stem = properties.get("source_file")
+    if isinstance(stem, str):
+        for candidate in re.findall(r"[A-Za-z0-9]+", stem):
+            token = _floor_code_of(candidate)
+            if token:
+                return token[:-1]
+            match = re.fullmatch(r"(B|M)?(\d+)", candidate, re.IGNORECASE)
+            if match and len(match.group(2)) <= 2:
+                return f"{(match.group(1) or '').upper()}{int(match.group(2))}"
     ordinal = properties.get("ordinal")
     if isinstance(ordinal, (int, float)) and not isinstance(ordinal, bool):
         if ordinal < 0:
-            return f"B{abs(int(ordinal))}F"
-        return f"{int(ordinal) + 1}F"
+            return f"B{abs(int(ordinal))}"
+        return str(int(ordinal) + 1)
     return _safe_export_name(str(level.get("id", "level"))[:8])
 
 
@@ -788,20 +814,107 @@ def _safe_layer_stem(*parts: str) -> str:
     return "_".join(cleaned) or "layer"
 
 
-def _project_export_base(session: SessionRecord, features: list[dict[str, Any]]) -> str:
-    if session.wizard.project:
-        return _safe_export_name(session.wizard.project.project_name or session.wizard.project.venue_name)
-    venue = next((item for item in features if item.get("feature_type") == "venue"), None)
-    if venue:
-        name = _display_name(venue)
-        if name:
-            return _safe_export_name(name)
-    return _safe_export_name(session.session_id)
 
 
 ODC_POLYGON_GEOMS = ("Polygon", "MultiPolygon")
 ODC_LINE_GEOMS = ("LineString", "MultiLineString")
 ODC_POINT_GEOMS = ("Point",)
+
+# ステナビフロアID (Facility_Merge `floor` attribute) → ODC floor code, per spec
+# Table 2-2 (the 東京駅 area floor master).
+FACILITY_MERGE_FLOOR_MAP = {
+    "SB5": "B5F",
+    "KB4": "B4F",
+    "SB4": "B4F",
+    "KB3": "B3F",
+    "B2": "B2F",
+    "B1": "B1F",
+    "F1": "1F",
+    "M2": "M2F",
+    "F2": "2F",
+    "F3": "3F",
+}
+
+# The opendata Building layer carries a single building (the station itself)
+# whose polygon is the ground-floor (1F) level shape.
+ODC_BUILDING_NAME = "JR東京駅"
+ODC_GROUND_FLOOR_CODE = "1F"
+# Facility_Merge display points may sit fractionally off the level outline;
+# anything beyond this distance from its own floor's Level polygon belongs to a
+# neighbouring facility (Yaesu underground, Metro, the towers) and is dropped.
+FACILITY_INSIDE_TOLERANCE_M = 0.5
+DEGREES_PER_METER = 1 / 111_320
+
+# 地図記号 image → 別表8.3.1 設備POI category, exported as the table's English
+# name (the F-code is kept here only for traceability).
+FACILITY_MERGE_IMAGE_CATEGORIES = {
+    "male": "Lavatory(Male)",  # F001
+    "female": "Lavatory(Female)",  # F002
+    "unisex": "Lavatory (Unisex)",  # F003
+    "multipurpose": "Multipurpose Lavatory",  # F005
+    "baby": "Multipurpose Lavatory (Change Diaper)",  # F007
+    "stairs_up": "Stairs",  # F011
+    "stairs_down": "Stairs",  # F011
+    "elevator": "Elevator",  # F012
+    "elevator_up": "Elevator",  # F012
+    "elevator_down": "Elevator",  # F012
+    "escalator": "Escalator",  # F013
+    "slope": "Slope",  # F014
+    "info": "Information",  # F018
+    "smoking": "Smoking Area",  # F024
+    "locker": "Coin Lockers",  # F031
+    "silver_bell": "Landmark",  # F043
+    "bus": "Busstop",  # F038
+    "free_shuttle_bus": "Busstop",  # F038
+    "taxi": "Taxistop",  # F039
+    "ticket": "Ticket Office",  # F101 (精算所 resolves to F103 below)
+    "mv": "Ticket Office",  # F101 みどりの窓口
+    "exchange": "Currency Exchange",  # F214
+}
+
+# Two 別表8.3.1 categories share one icon; the Facility_Merge category breaks
+# the tie.
+FACILITY_MERGE_CATEGORY_OVERRIDES = {
+    ("ticket", "fare adjustment"): "Fare Adjustment",  # F103
+}
+
+# Fallbacks for icons whose file name is facility-specific: platform number
+# logos and 施設ロゴ carry no shared basename.
+FACILITY_MERGE_SOURCE_CATEGORIES = {
+    "home": "Notes for Map Representation",  # F042 platform number logos
+    "area": "Store",  # F025 named facility logos
+}
+FACILITY_MERGE_MAP_NOTE_PREFIX = "map_rogo"
+FACILITY_MERGE_MAP_NOTE_CATEGORY = "Notes for Map Representation"  # F042
+
+
+def _facility_merge_category(metadata: dict[str, Any]) -> str | None:
+    """設備POI category (別表8.3.1 English name) for a Facility_Merge row.
+
+    The 地図記号 image is finer grained than the source category (`toilet`
+    alone cannot separate F001/F002/F005), so the image drives the mapping and
+    the source category only breaks ties or covers facility-specific icons.
+    """
+    image = _text_or_none(_metadata_value(metadata, ["image"]))
+    source_category = (_text_or_none(_metadata_value(metadata, ["category"])) or "").lower()
+    basename = ""
+    if image:
+        basename = image.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower()
+    if basename:
+        if basename.startswith(FACILITY_MERGE_MAP_NOTE_PREFIX):
+            return FACILITY_MERGE_MAP_NOTE_CATEGORY
+        override = FACILITY_MERGE_CATEGORY_OVERRIDES.get((basename, source_category))
+        if override:
+            return override
+        mapped = FACILITY_MERGE_IMAGE_CATEGORIES.get(basename)
+        if mapped:
+            return mapped
+    return FACILITY_MERGE_SOURCE_CATEGORIES.get(source_category)
+
+
+def _is_facility_merge_feature(feature: dict[str, Any]) -> bool:
+    stem = _feature_properties(feature).get("source_file")
+    return isinstance(stem, str) and "facility_merge" in stem.lower()
 
 
 def _write_odc_layer(
@@ -827,6 +940,8 @@ def _write_odc_layer(
     if not rows or not geometries:
         return False
     gdf = gpd.GeoDataFrame(rows, geometry=geometries, crs="EPSG:4326")
+    # Opendata is delivered in JGD2011 geographic coordinates (EPSG:6668).
+    gdf = gdf.to_crs("EPSG:6668")
     destination = output_dir / f"{stem}.shp"
     write_kwargs: dict[str, Any] = {"driver": "ESRI Shapefile", "index": False}
     if write_encoding is not None:
@@ -844,23 +959,31 @@ def _odc_report(request: ShapefileExportRequest) -> dict[str, Any]:
         "rows_skipped": [],
         "category_code_ambiguities": [],
         "category_code_fallbacks": [],
+        "facility_merge_unmapped": [],
+        "facility_merge_outside_building": [],
+        "facility_merge_missing_image": [],
+        "facility_merge_missing_category": [],
     }
 
 
-def build_odc2026_shapefile_export_archive(
+def _write_odc2026_shapefiles(
     session: SessionRecord,
     request: ShapefileExportRequest,
-) -> tuple[bytes, str]:
+    output_dir: Path,
+) -> tuple[dict[str, Any], str]:
     if any(item.source_format != "shapefile" for item in session.files):
         raise ValueError(
             "Open Data Contest 2026 shapefile export unavailable: this session includes GeoPackage sources. "
             "Use IMDF export instead."
         )
 
+    if not request.export_name or not request.export_name.strip():
+        raise ValueError("Open data export requires a file name prefix.")
+
     features = _feature_rows(session)
     report = _odc_report(request)
     write_encoding = _encoding_for_write(request.encoding)
-    base = _project_export_base(session, features)
+    base = _safe_export_name(request.export_name)
     addresses = _address_by_id(features)
     a_reverse = _reverse_category_code_map(_load_category_code_map("a-codes.json"))
     b_reverse = _reverse_category_code_map(_load_category_code_map("b-codes.json"))
@@ -875,9 +998,26 @@ def build_odc2026_shapefile_export_archive(
     )
     level_ids = {str(item.get("id")) for item in levels if item.get("id")}
     features_by_level: dict[str, dict[str, list[dict[str, Any]]]] = {
-        level_id: {"unit": [], "fixture": [], "opening": [], "detail": [], "section": [], "amenity": [], "occupant": [], "floor_connect": []}
+        level_id: {"unit": [], "fixture": [], "opening": [], "detail": [], "amenity": []}
         for level_id in level_ids
     }
+    level_id_by_floor_code: dict[str, str] = {}
+    for level in levels:
+        props = _feature_properties(level)
+        code = _floor_code_of(_label_text(props.get("short_name"))) or _floor_code_of(_label_text(props.get("name")))
+        if code and level.get("id"):
+            level_id_by_floor_code.setdefault(code, str(level.get("id")))
+    facility_merge_active = any(
+        feature.get("feature_type") == "amenity" and _is_facility_merge_feature(feature)
+        for feature in features
+    )
+    level_geom_by_id = {
+        str(level.get("id")): _feature_geometry(level)
+        for level in levels
+        if level.get("id")
+    }
+    ground_level_geom = level_geom_by_id.get(level_id_by_floor_code.get(ODC_GROUND_FLOOR_CODE, ""))
+    inside_tolerance = FACILITY_INSIDE_TOLERANCE_M * DEGREES_PER_METER
     unit_level_by_id = {
         str(item.get("id")): _feature_properties(item).get("level_id")
         for item in features
@@ -908,23 +1048,45 @@ def build_odc2026_shapefile_export_archive(
 
     for feature in features:
         feature_type = str(feature.get("feature_type") or "")
-        if feature_type not in {"unit", "fixture", "opening", "detail", "section", "amenity", "occupant", "floor_connect"}:
+        if feature_type not in {"unit", "fixture", "opening", "detail", "amenity"}:
             continue
-        if feature_type in {"amenity", "occupant"}:
-            level_id = _poi_level_id(feature)
-            if level_id is None:
-                report["rows_skipped"].append(
-                    {"layer": feature_type, "feature_id": str(feature.get("id", "")), "reason": "unresolved_level"}
-                )
-                continue
+        if feature_type == "amenity":
+            if facility_merge_active:
+                # Facility layers are built from Facility_Merge (ステナビ地図記号
+                # 表示点); per-floor *_Facility.shp amenities are superseded.
+                if not _is_facility_merge_feature(feature):
+                    continue
+                floor_attr = _text_or_none(_metadata_value(_feature_metadata(feature), ["floor"]))
+                floor_code = FACILITY_MERGE_FLOOR_MAP.get(floor_attr.upper()) if floor_attr else None
+                level_id = level_id_by_floor_code.get(floor_code) if floor_code else None
+                if level_id is None:
+                    report["facility_merge_unmapped"].append(
+                        {"feature_id": str(feature.get("id", "")), "floor": floor_attr}
+                    )
+                    continue
+                level_geom = level_geom_by_id.get(level_id)
+                if level_geom is not None:
+                    point = _feature_geometry(feature)
+                    if point is not None and level_geom.distance(point) > inside_tolerance:
+                        report["facility_merge_outside_building"].append(
+                            {"feature_id": str(feature.get("id", "")), "floor": floor_attr}
+                        )
+                        continue
+            else:
+                level_id = _poi_level_id(feature)
+                if level_id is None:
+                    report["rows_skipped"].append(
+                        {"layer": feature_type, "feature_id": str(feature.get("id", "")), "reason": "unresolved_level"}
+                    )
+                    continue
             features_by_level[level_id][feature_type].append(feature)
             continue
         level_id = _feature_properties(feature).get("level_id")
         if isinstance(level_id, str) and level_id in features_by_level:
             features_by_level[level_id][feature_type].append(feature)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        output_dir = Path(tmpdir)
+    def _emit() -> None:
+
 
         site_rows: list[dict[str, Any]] = []
         site_geoms: list[Any] = []
@@ -972,31 +1134,34 @@ def build_odc2026_shapefile_export_archive(
         fallback_building_geom = None
         if site_geoms:
             fallback_building_geom = unary_union(site_geoms)
+        # The Building polygon takes the shape of the ground floor (1F level).
+        buildings = [item for item in features if item.get("feature_type") == "building"]
+        station_building = next(
+            (item for item in buildings if (_display_name(item) or "") == ODC_BUILDING_NAME),
+            buildings[0] if buildings else None,
+        )
         building_rows: list[dict[str, Any]] = []
         building_geoms: list[Any] = []
-        for building in features:
-            if building.get("feature_type") != "building":
-                continue
-            geom = _metadata_geometry(building) or fallback_building_geom
-            if geom is None:
-                continue
-            address = _address_for_feature(building, addresses)
-            building_rows.append(
-                {
-                    "id": _feature_id_value(building),
-                    "postalcode": _text_or_none(address.get("postal_code")),
-                    "country": _text_or_none(address.get("country")),
-                    "province": _text_or_none(address.get("province")),
-                    "city": _text_or_none(address.get("locality")),
-                    "address1": _text_or_none(address.get("address")),
-                    "address2": None,
-                    "address3": None,
-                    "address4": None,
-                    "name": _display_name(building),
-                    "source": _source_value(building),
-                }
-            )
-            building_geoms.append(geom)
+        if station_building is not None:
+            geom = ground_level_geom or _metadata_geometry(station_building) or fallback_building_geom
+            if geom is not None:
+                address = _address_for_feature(station_building, addresses)
+                building_rows.append(
+                    {
+                        "id": _feature_id_value(station_building),
+                        "postalcode": _text_or_none(address.get("postal_code")),
+                        "country": _text_or_none(address.get("country")),
+                        "province": _text_or_none(address.get("province")),
+                        "city": _text_or_none(address.get("locality")),
+                        "address1": _text_or_none(address.get("address")),
+                        "address2": None,
+                        "address3": None,
+                        "address4": None,
+                        "name": _display_name(station_building),
+                        "source": _source_value(station_building),
+                    }
+                )
+                building_geoms.append(geom)
         building_stem = _safe_layer_stem(base, "Building")
         if _write_odc_layer(output_dir, building_stem, building_rows, building_geoms, write_encoding, ODC_POLYGON_GEOMS, report):
             report["layers_written"].append(building_stem)
@@ -1005,7 +1170,7 @@ def build_odc2026_shapefile_export_archive(
 
         for level in levels:
             level_id = str(level.get("id"))
-            label = _level_label(level)
+            label = _odc_floor_token(level)
             level_geom = _feature_geometry(level)
             if level_geom is not None:
                 props = _feature_properties(level)
@@ -1136,118 +1301,100 @@ def build_odc2026_shapefile_export_archive(
                 geom = _feature_geometry(amenity)
                 if geom is None:
                     continue
-                facility_rows.append(
-                    {
-                        "id": _feature_id_value(amenity),
-                        "category": _code_for_feature_category(
-                            amenity,
-                            prefix="F",
-                            source_candidates=["category"],
-                            reverse_map=f_reverse,
-                            fallback="F999",
-                            report=report,
-                        ),
-                        "floor_id": level_id,
-                        "name": _display_name(amenity),
-                        "source": _source_value(amenity),
-                    }
-                )
+                if facility_merge_active:
+                    # Facility_Merge carries the 地図記号 image path
+                    # ("/marker/male.png"); the 別表8.3.1 category is derived
+                    # from it. Both replace the ODC F-code column.
+                    metadata = _feature_metadata(amenity)
+                    image = _text_or_none(_metadata_value(metadata, ["image"]))
+                    category = _facility_merge_category(metadata)
+                    floor_attr = _text_or_none(_metadata_value(metadata, ["floor"]))
+                    if image is None:
+                        report["facility_merge_missing_image"].append(
+                            {"feature_id": _feature_id_value(amenity), "floor": floor_attr}
+                        )
+                    if category is None:
+                        report["facility_merge_missing_category"].append(
+                            {"feature_id": _feature_id_value(amenity), "floor": floor_attr}
+                        )
+                    facility_rows.append(
+                        {
+                            "id": _feature_id_value(amenity),
+                            "category": category,
+                            "image": image,
+                            "floor_id": level_id,
+                            "name": _display_name(amenity),
+                            "source": _source_value(amenity),
+                        }
+                    )
+                else:
+                    facility_rows.append(
+                        {
+                            "id": _feature_id_value(amenity),
+                            "category": _code_for_feature_category(
+                                amenity,
+                                prefix="F",
+                                source_candidates=["category"],
+                                reverse_map=f_reverse,
+                                fallback="F999",
+                                report=report,
+                            ),
+                            "floor_id": level_id,
+                            "name": _display_name(amenity),
+                            "source": _source_value(amenity),
+                        }
+                    )
                 facility_geoms.append(geom)
             facility_stem = _safe_layer_stem(base, label, "Facility")
             if _write_odc_layer(output_dir, facility_stem, facility_rows, facility_geoms, write_encoding, ODC_POINT_GEOMS, report):
                 report["layers_written"].append(facility_stem)
 
-            occupants = grouped.get("occupant", [])
-            occupant_rows: list[dict[str, Any]] = []
-            occupant_geoms: list[Any] = []
-            for occupant in occupants:
-                geom = _metadata_geometry(occupant) or _feature_geometry(occupant)
-                if geom is None:
-                    continue
-                metadata = _feature_metadata(occupant)
-                occupant_rows.append(
-                    {
-                        "id": _feature_id_value(occupant),
-                        "postalcode": _text_or_none(_metadata_value(metadata, ["postalcode", "postal_code"])),
-                        "country": _text_or_none(_metadata_value(metadata, ["country"])),
-                        "province": _text_or_none(_metadata_value(metadata, ["province"])),
-                        "city": _text_or_none(_metadata_value(metadata, ["city", "locality"])),
-                        "address1": _text_or_none(_metadata_value(metadata, ["address1", "address"])),
-                        "address2": _text_or_none(_metadata_value(metadata, ["address2"])),
-                        "address3": _text_or_none(_metadata_value(metadata, ["address3"])),
-                        "category": _text_or_none(_metadata_value(metadata, ["category"]))
-                        or _text_or_none(_feature_properties(occupant).get("category")),
-                        "floor_id": level_id,
-                        "link_id": _text_or_none(_metadata_value(metadata, ["link_id", "linkid"])),
-                        "hours1": _text_or_none(_property_or_metadata(occupant, ["hours"], ["hours1", "hours"])),
-                        "hours2": _text_or_none(_metadata_value(metadata, ["hours2"])),
-                        "name": _display_name(occupant),
-                        "phone": _text_or_none(_property_or_metadata(occupant, ["phone"])),
-                        "suite": _text_or_none(_metadata_value(metadata, ["suite"])),
-                        "taxonomy": _text_or_none(_metadata_value(metadata, ["taxonomy"])),
-                        "website": _text_or_none(_property_or_metadata(occupant, ["website"], ["website", "url"])),
-                        "source": _source_value(occupant),
-                    }
-                )
-                occupant_geoms.append(geom)
-            occupant_stem = _safe_layer_stem(base, label, "Occupant")
-            if _write_odc_layer(output_dir, occupant_stem, occupant_rows, occupant_geoms, write_encoding, ODC_POINT_GEOMS, report):
-                report["layers_written"].append(occupant_stem)
+    _emit()
+    return report, base
 
-            sections = grouped.get("section", [])
-            segment_rows: list[dict[str, Any]] = []
-            segment_geoms: list[Any] = []
-            for section in sections:
-                geom = _feature_geometry(section)
-                if geom is None:
-                    continue
-                segment_rows.append(
-                    {
-                        "id": _feature_id_value(section),
-                        "floor_id": level_id,
-                        "name": _display_name(section),
-                        "source": _source_value(section),
-                    }
-                )
-                segment_geoms.append(geom)
-            segment_stem = _safe_layer_stem(base, label, "Segment")
-            if _write_odc_layer(output_dir, segment_stem, segment_rows, segment_geoms, write_encoding, ODC_POLYGON_GEOMS, report):
-                report["layers_written"].append(segment_stem)
 
-            floor_connects = grouped.get("floor_connect", [])
-            floor_connect_rows: list[dict[str, Any]] = []
-            floor_connect_geoms: list[Any] = []
-            for fc in floor_connects:
-                geom = _feature_geometry(fc)
-                if geom is None:
-                    continue
-                metadata = _feature_metadata(fc)
-                floor_connect_rows.append(
-                    {
-                        "id": _feature_id_value(fc),
-                        "floor_id": level_id,
-                        "node_id": _text_or_none(_metadata_value(metadata, ["node_id", "nodeid"])),
-                        "anch_id_1": _text_or_none(_metadata_value(metadata, ["anch_id_1", "anchid_1"])),
-                        "direction1": _text_or_none(_metadata_value(metadata, ["direction1"])),
-                        "anch_id_2": _text_or_none(_metadata_value(metadata, ["anch_id_2", "anchid_2"])),
-                        "direction2": _text_or_none(_metadata_value(metadata, ["direction2"])),
-                    }
-                )
-                floor_connect_geoms.append(geom)
-            floor_connect_stem = _safe_layer_stem(base, label, "Floor_Connect")
-            if _write_odc_layer(output_dir, floor_connect_stem, floor_connect_rows, floor_connect_geoms, write_encoding, ODC_POINT_GEOMS, report):
-                report["layers_written"].append(floor_connect_stem)
-
+def build_odc2026_shapefile_export_archive(
+    session: SessionRecord,
+    request: ShapefileExportRequest,
+) -> tuple[bytes, str]:
+    """Open Data Contest 2026 shapefile bundle (.zip)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = Path(tmpdir)
+        report, base = _write_odc2026_shapefiles(session, request, out)
         archive_bytes = BytesIO()
         with zipfile.ZipFile(archive_bytes, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for exported_file in sorted(output_dir.glob("*")):
+            for exported_file in sorted(out.glob("*")):
                 if exported_file.is_file():
                     archive.write(exported_file, arcname=exported_file.name)
             if request.include_report:
                 archive.writestr("export_report.json", json.dumps(report, ensure_ascii=False, indent=2))
+    return archive_bytes.getvalue(), f"{base}_odc2026_shapefiles.zip"
 
-    filename = f"{base}_odc2026_shapefiles.zip"
-    return archive_bytes.getvalue(), filename
+
+def build_qgis_project_archive(
+    session: SessionRecord,
+    request: ShapefileExportRequest,
+) -> tuple[bytes, str]:
+    """Styled QGIS project (.qgz) bundled with its ODC2026 source shapefiles.
+
+    The .qgz stores relative paths, so extracting the zip and opening the
+    project resolves every sibling shapefile automatically.
+    """
+    from backend.src.qgis_export import generate_qgis_project_for_folder
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = Path(tmpdir)
+        report, base = _write_odc2026_shapefiles(session, request, out)
+        qgz_name = f"{base}_qgis.qgz"
+        generate_qgis_project_for_folder(out, out / qgz_name, base)
+        archive_bytes = BytesIO()
+        with zipfile.ZipFile(archive_bytes, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for exported_file in sorted(out.glob("*")):
+                if exported_file.is_file():
+                    archive.write(exported_file, arcname=exported_file.name)
+            if request.include_report:
+                archive.writestr("export_report.json", json.dumps(report, ensure_ascii=False, indent=2))
+    return archive_bytes.getvalue(), f"{base}_qgis_project.zip"
 
 
 def build_shapefile_export_archive(
