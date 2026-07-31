@@ -38,14 +38,14 @@ Built for indoor mapping professionals who receive per-floor shapefiles from CAD
 ```
 ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
 │ 1. Upload│ →  │ 2. Wizard│ →  │ 3. Review│ →  │ 4. Export│
-│   Files  │    │  Config  │    │ Map+Table│    │   .imdf  │
+│   Files  │    │  Config  │    │ Map+Table│    │  Archive │
 └──────────┘    └──────────┘    └──────────┘    └──────────┘
 ```
 
-- **Upload** — Drop shapefiles or pick a folder; feature types are auto-detected from filenames
+- **Upload** — Drop shapefiles or pick a folder; feature types are auto-detected from filenames. Existing IMDF archives (`.imdf`) or IMDF-schema shapefiles can also be re-opened directly, skipping the wizard.
 - **Wizard** — Step-by-step guided configuration for levels, categories, and mappings
 - **Review** — Interactive map + table with geometry colored by category and bidirectional selection
-- **Export** — Validation, autofix, and download of the final IMDF archive
+- **Export** — Validation, autofix, and download as an IMDF archive, an Open Data Contest 2026 shapefile set, or a styled QGIS project
 
 ---
 
@@ -54,9 +54,13 @@ Built for indoor mapping professionals who receive per-floor shapefiles from CAD
 - Auto-detection of IMDF feature types from shapefile filenames
 - Configurable unit category code lookup (company-specific codes supported)
 - Auto-generation of footprints, buildings, and venue features from unit geometry
+- Column-unit footprints carved out of overlapping units; `Floor_Connect` (階層間接続点) import support
 - Geometry quality checks, spatial containment validation, and opening placement verification
 - Validation results appear as filterable rows alongside normal features
 - Keyboard shortcuts for efficient review (`Ctrl+Z`, `Escape`, `Enter`)
+- Round-trip: re-open a previously exported IMDF archive or IMDF-schema shapefile set for further review/re-export
+- Export as a raw IMDF archive, an **Open Data Contest 2026** (ODC2026) shapefile profile, or a styled QGIS `.qgz` project built from that profile
+- Standalone Adobe Illustrator (`.ai`) → GeoPackage + QGIS project converter, for turning layered artwork (e.g. CAD/illustrator floor plans) into GIS-ready layers with original colors preserved
 
 ---
 
@@ -67,6 +71,8 @@ Built for indoor mapping professionals who receive per-floor shapefiles from CAD
 ![FastAPI](https://img.shields.io/badge/FastAPI-0f766e?style=for-the-badge&logo=fastapi&logoColor=ffffff)
 ![GeoPandas](https://img.shields.io/badge/GeoPandas-139c5a?style=for-the-badge)
 ![Shapely](https://img.shields.io/badge/Shapely-475569?style=for-the-badge)
+
+Also uses `fiona`/`pyproj` for shapefile I/O, `pdfminer.six` to parse Illustrator/PDF content streams, and `jsonschema`/`pycountry` for IMDF validation. QGIS project export shells out to a QGIS-bundled Python interpreter (`QGIS_PYTHON`) and is optional — the rest of the app works without QGIS installed.
 
 ### Frontend
 ![React](https://img.shields.io/badge/React_18-61dafb?style=for-the-badge&logo=react&logoColor=111827)
@@ -88,7 +94,7 @@ conda create -n shp2imdf python=3.11 -y
 conda activate shp2imdf
 pip install -r backend/requirements.txt
 
-# Optional: runtime defaults
+# Optional: runtime defaults (also where QGIS_PYTHON is configured, if using QGIS export)
 cp .env.example .env
 
 # Frontend dependencies
@@ -118,22 +124,14 @@ Colleagues can access `http://<pc-hostname>:8000`.
 ## Tests
 
 ```bash
-python -m pytest backend/tests/test_api.py -v
-python -m pytest backend/tests/test_edge_cases.py -v
+python -m pytest backend/tests -v
 cd frontend && npm run test && npm run build
 ```
 
 ---
 
-## Documentation
-
-- **`DEVELOPMENT.md`** — Setup and operations source of truth
-- **`SPEC.md`** — Functional and API specification
-
----
-
 <div align="center">
 
-Shapefiles → guided configuration → visual review → IMDF archive
+Shapefiles / IMDF / Illustrator artwork → guided configuration → visual review → IMDF, ODC2026, or QGIS export
 
 </div>

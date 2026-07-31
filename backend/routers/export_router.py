@@ -12,7 +12,7 @@ from backend.src.autofix import apply_autofix
 from backend.src.exporter import build_export_archive
 from backend.src.schemas import AutofixRequest, AutofixResponse, ShapefileExportRequest, SnapOpeningRequest, SnapOpeningResponse, ValidationResponse
 from backend.src.session import SessionManager
-from backend.src.shapefile_exporter import build_shapefile_export_archive
+from backend.src.shapefile_exporter import build_qgis_project_archive, build_shapefile_export_archive
 from backend.src.validator import annotate_feature_collection_with_validation, validate_feature_collection
 
 
@@ -130,6 +130,33 @@ def export_shapefiles(
         raise KeyError("Session not found")
 
     archive, filename = build_shapefile_export_archive(session=session, request=payload)
+    manager.save_session(session)
+    return Response(
+        content=archive,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+
+@router.post("/export/qgis")
+def export_qgis_project(
+    session_id: str,
+    payload: ShapefileExportRequest,
+    request: Request,
+) -> Response:
+    """Download a styled QGIS project (.qgz) bundled with its source shapefiles.
+
+    Reuses the Open Data Contest 2026 profile so the layer structure matches
+    the standard open-data export exactly.
+    """
+    manager = _session_manager(request)
+    session = manager.get_session(session_id=session_id)
+    if session is None:
+        raise KeyError("Session not found")
+
+    payload.profile = "odc2026"
+    archive, filename = build_qgis_project_archive(session=session, request=payload)
     manager.save_session(session)
     return Response(
         content=archive,

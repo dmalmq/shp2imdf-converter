@@ -1,0 +1,60 @@
+# shp2imdf-converter
+
+Web app that converts Shapefiles into IMDF-compliant GeoJSON archives for Apple Indoor
+Maps and similar platforms. FastAPI backend + React/TypeScript frontend with MapLibre
+GL for review. Runs on a shared Windows PC; colleagues use it via browser with no
+client install. See `README.md` for the product overview.
+
+## Commands
+
+```powershell
+./dev.ps1            # starts backend (uvicorn --reload) and frontend (npm run dev) together
+./dev.sh             # bash equivalent
+```
+
+```bash
+uvicorn backend.main:app --reload    # backend only
+cd frontend && npm run dev           # frontend only
+pytest                               # testpaths = backend/tests
+cd frontend && npx vitest            # frontend unit tests
+npx playwright test                  # e2e
+node audit-ui.mjs                    # UI audit helper
+node audit-review.mjs                # review-screen audit helper
+```
+
+`dev.ps1` spawns two `pwsh` windows and kills both on exit — if a port is still held
+after a crash, check for orphaned uvicorn/node processes.
+
+## Test markers
+
+`pyproject.toml` registers phase markers matching the build plan, so you can run a
+slice of the suite:
+
+```bash
+pytest -m phase3     # wizard mapping (mapper, config, generation setup)
+pytest -m phase5     # validation and export (converter, validator, autofix)
+```
+
+`phase0` generates test fixtures; `phase1`–`phase6` run foundation → polish.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `backend/routers/` | FastAPI route modules |
+| `backend/src/` | Conversion core: detection, mapping, generation, validation |
+| `backend/config/` | Server-side configuration |
+| `backend/tests/` | pytest suite (phase-marked) |
+| `frontend/src/` | React wizard, map view, table view |
+| `tools/` | Supporting scripts |
+| `shape_data/`, `data/` | Sample and working shapefile data |
+| `symbology-style.db` | Symbology lookup used during generation |
+
+## Notes
+
+- IMDF output is a **spec-conformant archive** — validation failures are the point of
+  the validation phase, not incidental. When changing the generator, run `pytest -m phase5`
+  before assuming output is still valid.
+- Input shapefiles arrive per-floor from CAD/GIS workflows and are inconsistent by
+  nature; detection/classification is heuristic. Prefer widening a heuristic with a new
+  fixture over special-casing one dataset.

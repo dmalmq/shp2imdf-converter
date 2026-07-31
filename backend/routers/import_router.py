@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from io import BytesIO
+import json
 from pathlib import Path
 import shutil
 from typing import Annotated
+from urllib.parse import quote
 import zipfile
 
 from fastapi import APIRouter, File, Request, UploadFile
+from fastapi.responses import Response
 
 from backend.src.detector import sync_feature_types
+from backend.src.illustrator_importer import convert_ai_to_geopackage_bundle
 from backend.src.imdf_reader import read_imdf_zip
 from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
 from backend.src.importer import import_file_blobs
@@ -121,6 +125,48 @@ async def import_imdf(
     manager.save_session(session)
 
     return ImportImdfResponse(session_id=session.session_id, feature_count=feature_count)
+
+
+@router.post("/convert/illustrator")
+async def convert_illustrator(
+    request: Request,
+    file: Annotated[UploadFile, File(description="Adobe Illustrator (.ai) or PDF file")],
+) -> Response:
+    """Convert an Illustrator (.ai / PDF) file into a downloadable zip.
+
+    The zip bundles a GeoPackage (one layer per Illustrator layer; filled paths
+    become polygons, stroked paths become lines, colors preserved as attributes)
+    and a styled QGIS project (.qgs) that orders the layers like the Illustrator
+    stack and colors each layer from its fill_color / stroke_color attribute.
+    """
+    max_upload_bytes = _max_upload_bytes(request)
+    payload = await file.read()
+    if not payload:
+        raise ValueError("The uploaded file is empty.")
+    if len(payload) > max_upload_bytes:
+        raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
+
+    name = file.filename or "illustrator.ai"
+    if not name.lower().endswith((".ai", ".pdf")):
+        raise ValueError("Upload an Adobe Illustrator (.ai) or PDF file.")
+    if not payload.lstrip()[:5].startswith(b"%PDF"):
+        raise ValueError(
+            "Not a PDF-based Illustrator file. Re-save the .ai with 'Create PDF Compatible File' enabled."
+        )
+
+    zip_bytes, filename, report = convert_ai_to_geopackage_bundle(payload, name)
+    # HTTP headers must be latin-1; keep a plain ASCII fallback and carry the
+    # real (possibly Japanese) name via RFC 5987 filename*.
+    ascii_name = filename.encode("ascii", "ignore").decode() or "output.zip"
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}",
+            # ensure_ascii keeps non-ASCII layer names out of the raw header bytes.
+            "X-Conversion-Report": json.dumps(report.to_dict()),
+        },
+    )
 
 
 @router.post("/import", response_model=ImportResponse, status_code=201)

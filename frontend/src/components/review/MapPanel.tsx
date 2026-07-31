@@ -263,11 +263,19 @@ function computeBounds(features: ReviewFeature[]): [[number, number], [number, n
     return null;
   }
 
-  const lons = points.map((point) => point[0]);
-  const lats = points.map((point) => point[1]);
+  let minLon = Infinity;
+  let minLat = Infinity;
+  let maxLon = -Infinity;
+  let maxLat = -Infinity;
+  for (const [lon, lat] of points) {
+    if (lon < minLon) minLon = lon;
+    if (lon > maxLon) maxLon = lon;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  }
   return [
-    [Math.min(...lons), Math.min(...lats)],
-    [Math.max(...lons), Math.max(...lats)]
+    [minLon, minLat],
+    [maxLon, maxLat]
   ];
 }
 

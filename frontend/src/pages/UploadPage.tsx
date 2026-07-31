@@ -2,7 +2,14 @@ import { useMemo, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { useNavigate } from "react-router-dom";
 
-import { importImdf, importImdfShapefiles, importShapefiles, type ImportResponse } from "../api/client";
+import {
+  convertIllustrator,
+  importImdf,
+  importImdfShapefiles,
+  importShapefiles,
+  type IllustratorConversionReport,
+  type ImportResponse
+} from "../api/client";
 import { useToast } from "../components/shared/ToastProvider";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
@@ -106,6 +113,9 @@ export function UploadPage() {
   const [lastCleanup, setLastCleanup] = useState<ImportResponse["cleanup_summary"] | null>(null);
   const [imdfLoading, setImdfLoading] = useState(false);
   const [imdfError, setImdfError] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiReport, setAiReport] = useState<IllustratorConversionReport | null>(null);
 
   const onDrop = (acceptedFiles: File[]) => {
     const parsed = acceptedFiles.map(toQueuedUploadFile);
@@ -275,6 +285,41 @@ export function UploadPage() {
       setImdfError(message);
     } finally {
       setImdfLoading(false);
+    }
+  };
+
+  const runIllustratorConvert = async (file: File) => {
+    setAiLoading(true);
+    setAiError(null);
+    setAiReport(null);
+    try {
+      const result = await convertIllustrator(file);
+      const url = URL.createObjectURL(result.blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = result.filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setAiReport(result.report);
+      const layerCount = result.report ? Object.keys(result.report.layers).length : 0;
+      const featureCount = result.report?.total_features ?? 0;
+      pushToast({
+        title: t("GeoPackage created", "GeoPackageを作成しました"),
+        description: t(
+          `${featureCount} shape(s) across ${layerCount} layer(s) — download started.`,
+          `${layerCount} レイヤー・${featureCount} 図形をダウンロードしました。`
+        ),
+        variant: "success"
+      });
+    } catch (caught) {
+      const message = handleApiError(caught, t("Conversion failed", "変換に失敗しました"), {
+        title: t("Conversion failed", "変換失敗")
+      });
+      setAiError(message);
+    } finally {
+      setAiLoading(false);
     }
   };
 
@@ -645,6 +690,61 @@ export function UploadPage() {
           {imdfError ? (
             <div className="mt-2 rounded-[var(--radius-md)] border border-[var(--color-error)]/20 bg-[var(--color-error-muted)] px-3 py-2 text-xs text-[var(--color-error)]">
               {imdfError}
+            </div>
+          ) : null}
+        </div>
+
+        {/* Illustrator (.ai) -> GeoPackage */}
+        <div className="mt-4">
+          <label className="block">
+            <span className="sr-only">{t("Convert Illustrator file", "Illustratorファイルを変換")}</span>
+            <input
+              type="file"
+              accept=".ai,.pdf"
+              className="hidden"
+              disabled={aiLoading}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void runIllustratorConvert(file);
+                e.target.value = "";
+              }}
+              id="illustrator-file-input"
+            />
+            <Button
+              variant="secondary"
+              className="w-full"
+              disabled={aiLoading}
+              onClick={() => document.getElementById("illustrator-file-input")?.click()}
+            >
+              {aiLoading
+                ? t("Converting...", "変換中...")
+                : t("Illustrator (.ai) → GeoPackage + QGIS", "Illustrator (.ai) → GeoPackage + QGIS")}
+            </Button>
+          </label>
+          <p className="mt-1 text-center text-xs text-[var(--color-text-muted)]">
+            {t(
+              "Convert an .ai file's layers into a .gpkg plus a styled QGIS project (.qgs), downloaded as a .zip",
+              ".ai のレイヤーを .gpkg とスタイル付き QGIS プロジェクト(.qgs)に変換し、.zip でダウンロード"
+            )}
+          </p>
+          {aiReport ? (
+            <div className="mt-2 rounded-[var(--radius-md)] border border-[var(--color-success)]/20 bg-[var(--color-success-muted)] px-3 py-2 text-xs text-[var(--color-success)]">
+              <p className="font-medium">
+                {t(
+                  `${aiReport.total_features} shape(s) in ${Object.keys(aiReport.layers).length} layer(s).`,
+                  `${Object.keys(aiReport.layers).length} レイヤー・${aiReport.total_features} 図形。`
+                )}
+              </p>
+              {aiReport.warnings.length > 0 ? (
+                <p className="mt-0.5 opacity-80">
+                  {t(`${aiReport.warnings.length} warning(s).`, `警告 ${aiReport.warnings.length} 件。`)}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {aiError ? (
+            <div className="mt-2 rounded-[var(--radius-md)] border border-[var(--color-error)]/20 bg-[var(--color-error-muted)] px-3 py-2 text-xs text-[var(--color-error)]">
+              {aiError}
             </div>
           ) : null}
         </div>

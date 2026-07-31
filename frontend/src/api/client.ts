@@ -374,6 +374,7 @@ export type ShapefileExportRequest = {
   encoding: ShapefileExportEncoding;
   unit: ShapefileExportUnitOptions;
   include_report: boolean;
+  export_name?: string | null;
 };
 
 export async function importShapefiles(
@@ -425,6 +426,46 @@ function uploadImportFiles(
     request.onerror = () => reject(new ApiClientError(0, "NETWORK_ERROR", "Network error during upload."));
     request.send(formData);
   });
+}
+
+export type IllustratorConversionReport = {
+  source_name: string;
+  page_count: number;
+  total_features: number;
+  layers: Record<string, { polygon: number; line: number }>;
+  warnings: string[];
+};
+
+export type IllustratorConversionResult = {
+  blob: Blob;
+  filename: string;
+  report: IllustratorConversionReport | null;
+};
+
+export async function convertIllustrator(file: File): Promise<IllustratorConversionResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch("/api/convert/illustrator", { method: "POST", body: formData });
+  if (!response.ok) {
+    const body = await response.text();
+    throw buildApiClientError(response.status, body || "");
+  }
+  const contentDisposition = response.headers.get("content-disposition") ?? "";
+  const filenameStarMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  const filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+  const filename = filenameStarMatch
+    ? decodeURIComponent(filenameStarMatch[1])
+    : filenameMatch?.[1] ?? "output.zip";
+  let report: IllustratorConversionReport | null = null;
+  const rawReport = response.headers.get("x-conversion-report");
+  if (rawReport) {
+    try {
+      report = JSON.parse(rawReport) as IllustratorConversionReport;
+    } catch {
+      report = null;
+    }
+  }
+  return { blob: await response.blob(), filename, report };
 }
 
 export async function importImdf(file: File): Promise<ImportImdfResponse> {
@@ -768,5 +809,28 @@ export async function exportSessionShapefiles(
   return {
     blob: await response.blob(),
     filename: filenameMatch?.[1] ?? "output_shapefiles.zip"
+  };
+}
+
+export async function exportSessionQgisProject(
+  sessionId: string,
+  payload: ShapefileExportRequest
+): Promise<ExportArchiveResponse> {
+  const response = await fetch(`/api/session/${sessionId}/export/qgis`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw buildApiClientError(response.status, body || "");
+  }
+  const contentDisposition = response.headers.get("content-disposition") ?? "";
+  const filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+  return {
+    blob: await response.blob(),
+    filename: filenameMatch?.[1] ?? "qgis_project.zip"
   };
 }

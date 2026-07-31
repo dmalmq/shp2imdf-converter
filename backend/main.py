@@ -20,6 +20,8 @@ from backend.routers.import_router import router as import_router
 from backend.routers.reference_router import router as reference_router
 from backend.routers.wizard_router import router as wizard_router
 from backend.src.geocoding import GeocodingError, build_geocoder
+from backend.src.illustrator_importer import IllustratorConversionError
+from backend.src.qgis_export import QgisExportError, QgisUnavailableError
 from backend.src.schemas import ErrorResponse
 from backend.src.session import SessionManager, build_session_backend
 
@@ -132,6 +134,24 @@ async def value_error_handler(_: Request, exc: ValueError) -> JSONResponse:
 async def geocoding_error_handler(_: Request, exc: GeocodingError) -> JSONResponse:
     payload = ErrorResponse(detail=exc.detail, code=exc.code)
     return JSONResponse(status_code=exc.status_code, content=payload.model_dump())
+
+
+@app.exception_handler(QgisUnavailableError)
+async def qgis_unavailable_handler(_: Request, exc: QgisUnavailableError) -> JSONResponse:
+    payload = ErrorResponse(detail=str(exc), code="QGIS_UNAVAILABLE")
+    return JSONResponse(status_code=503, content=payload.model_dump())
+
+
+@app.exception_handler(QgisExportError)
+async def qgis_export_error_handler(_: Request, exc: QgisExportError) -> JSONResponse:
+    payload = ErrorResponse(detail=str(exc), code="QGIS_EXPORT_FAILED")
+    return JSONResponse(status_code=500, content=payload.model_dump())
+
+
+@app.exception_handler(IllustratorConversionError)
+async def illustrator_conversion_error_handler(_: Request, exc: IllustratorConversionError) -> JSONResponse:
+    payload = ErrorResponse(detail=str(exc), code="ILLUSTRATOR_CONVERSION_FAILED")
+    return JSONResponse(status_code=422, content=payload.model_dump())
 
 
 @app.exception_handler(RequestValidationError)
