@@ -834,3 +834,127 @@ export async function exportSessionQgisProject(
     filename: filenameMatch?.[1] ?? "qgis_project.zip"
   };
 }
+
+export type IllustratorLayerSummary = {
+  table: string;
+  ai_layer: string;
+  role: string;
+  feature_count: number;
+};
+
+export type IllustratorPreviewResponse = {
+  conversion_id: string;
+  report: IllustratorConversionReport;
+  layers: IllustratorLayerSummary[];
+  artwork_bounds: [number, number, number, number];
+  preview: { type: "FeatureCollection"; features: any[] };
+  preview_features: number;
+  total_features: number;
+  suggested_crs: string;
+  suggested_crs_label: string;
+};
+
+export type TransformPayload = {
+  artwork_anchor: [number, number];
+  map_anchor: [number, number];
+  rotation_deg: number;
+  metres_per_point: number;
+  working_crs: string;
+};
+
+export type ExportFormatsPayload = {
+  geopackage: boolean;
+  shapefile: boolean;
+  qgis: boolean;
+};
+
+export type PlacementItem = {
+  id: number;
+  name: string;
+  transform: TransformPayload;
+  artwork_bounds: [number, number, number, number];
+  created_at: string;
+  updated_at: string;
+};
+
+export type PlacementRequestBody = {
+  name: string;
+  transform: TransformPayload;
+  artwork_bounds: [number, number, number, number];
+};
+
+export async function previewIllustrator(file: File): Promise<IllustratorPreviewResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch("/api/convert/illustrator/preview", {
+    method: "POST",
+    body: formData
+  });
+  return handleJson<IllustratorPreviewResponse>(response);
+}
+
+export async function exportIllustrator(
+  conversionId: string,
+  body: { transform: TransformPayload; output_crs: string; formats: ExportFormatsPayload }
+): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(`/api/convert/illustrator/${conversionId}/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    throw buildApiClientError(response.status, (await response.text()) || "");
+  }
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const starMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
+  return {
+    blob: await response.blob(),
+    filename: starMatch ? decodeURIComponent(starMatch[1]) : plainMatch?.[1] ?? "output.zip"
+  };
+}
+
+export async function geocodeSearch(
+  query: string,
+  language: string,
+  limit = 5
+): Promise<GeocodeResultItem[]> {
+  const params = new URLSearchParams({ query, language, limit: String(limit) });
+  const response = await fetch(`/api/geocode?${params.toString()}`);
+  const payload = await handleJson<{ results: GeocodeResultItem[] }>(response);
+  return payload.results;
+}
+
+export async function listPlacements(): Promise<PlacementItem[]> {
+  const response = await fetch("/api/placements");
+  const payload = await handleJson<{ placements: PlacementItem[] }>(response);
+  return payload.placements;
+}
+
+export async function createPlacement(body: PlacementRequestBody): Promise<PlacementItem> {
+  const response = await fetch("/api/placements", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  return handleJson<PlacementItem>(response);
+}
+
+export async function updatePlacement(
+  id: number,
+  body: PlacementRequestBody
+): Promise<PlacementItem> {
+  const response = await fetch(`/api/placements/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  return handleJson<PlacementItem>(response);
+}
+
+export async function deletePlacement(id: number): Promise<void> {
+  const response = await fetch(`/api/placements/${id}`, { method: "DELETE" });
+  if (!response.ok) {
+    throw buildApiClientError(response.status, (await response.text()) || "");
+  }
+}
