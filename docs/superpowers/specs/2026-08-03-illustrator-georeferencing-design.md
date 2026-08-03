@@ -76,7 +76,7 @@ Anchor-relative similarity transform, four degrees of freedom:
 Transform {
   artwork_anchor:   [x0, y0]     # PDF points
   map_anchor:       [lon, lat]   # WGS84
-  rotation_deg:     θ            # CCW from grid north of working_crs
+  rotation_deg:     θ            # CCW from TRUE north at map_anchor
   metres_per_point: s
   working_crs:      "EPSG:6677"  # fixed when placement begins
 }
@@ -87,27 +87,32 @@ handle, and correcting scale does not translate the drawing. Flattened at export
 `shapely.affinity.affine_transform([a, b, d, e, xoff, yoff])` with
 
 ```
-a =  s·cos θ                b = -s·sin θ
-d =  s·sin θ                e =  s·cos θ
-xoff = E0 - s(x0·cos θ - y0·sin θ)
-yoff = N0 - s(x0·sin θ + y0·cos θ)
+θg = θ - γ                  # γ = grid bearing of true north at the anchor
+a =  s·cos θg               b = -s·sin θg
+d =  s·sin θg               e =  s·cos θg
+xoff = E0 - s(x0·cos θg - y0·sin θg)
+yoff = N0 - s(x0·sin θg + y0·cos θg)
 ```
 
 where `(E0, N0)` is `map_anchor` projected into `working_crs`.
 
+### Rotation is measured from true north
+
+Rotation is defined CCW from **true north at the anchor**, not from any projection's grid
+north. Grid north differs from true north by the meridian convergence, `+0.0776°` in JPR
+zone IX at Tokyo. The backend subtracts that convergence when flattening to a
+`working_crs` affine; `θ` itself is projection-independent, which is what makes a saved
+placement portable and the preview frame agree with the export frame.
+
+This was measured, not assumed. Defining `θ` in grid north while previewing in a
+true-north frame put a 59 m artwork **8.00 cm** out and a 2.4 km site **297 cm** out.
+
 ### Why working_crs is separate from output_crs
 
-Rotation is measured from grid north, which is not true north. Convergence in JPR zone IX
-at Tokyo is `γ = (λ - λ0)·sin φ = -0.0776°`. Re-fitting a transform into a different CRS
-would therefore move geometry — measured at **40.7 cm** across a 300 m building.
-
-**Sign convention, stated explicitly because a rotation sign error is invisible at this
-magnitude:** `γ` as defined above is negative west of the central meridian. The *grid
-bearing of true north* is `-γ`, i.e. `+0.0776°` at Tokyo. `rotation_deg` is measured in
-the grid frame, so implementations must not mix the two.
-
-The pipeline is: fit in `working_crs` → build geometry → reproject geometry to
-`output_crs`. The export CRS control changes only the output file's declared CRS.
+`working_crs` is the metric frame geometry is built in. Re-fitting a placement into a
+different CRS would move geometry, so the pipeline is: fit in `working_crs` → build
+geometry → reproject the geometry to `output_crs`. The export CRS control therefore
+changes only the output file's declared CRS and can never move the building.
 
 ### Inputs
 
@@ -147,10 +152,25 @@ averaged in silently.
 
 ### Preview approximation
 
-The browser transforms in Web-Mercator metres via `maplibre-gl`'s `MercatorCoordinate`,
-applying a single `1/cos φ` factor taken at the anchor. Across a 300 m extent at Tokyo
-latitude this drifts about 1 cm, roughly 1/60 px at z18. Export ignores the approximation
-and uses `pyproj` in `working_crs`. No `proj4` dependency is added.
+The browser previews in a **local ENU tangent frame** anchored at `map_anchor`, converting
+offsets to lon/lat with the WGS84 radii of curvature — meridian `M(φ) = a(1-e²)/(1-e²sin²φ)^1.5`
+and prime vertical `N(φ) = a/√(1-e²sin²φ)`. No `proj4` dependency is added.
+
+**Web Mercator was tried first and rejected.** It is not conformal on the ellipsoid: its
+north scale is `a·sec φ / M(φ)` and its east scale `a·sec φ / (N·cos φ)`, differing by
+about 0.45% at Tokyo. A similarity transform in Mercator metres is therefore *not* a
+similarity on the ground, and the artwork arrives visibly stretched. Measured worst-case
+disagreement with the export, on a 59 m artwork:
+
+| Preview frame | Rotation frame | 59 m artwork | 2.4 km site |
+|---|---|---|---|
+| Web Mercator | grid north | 23.35 cm | 953 cm |
+| Web Mercator | true north | 17.01 cm | 751 cm |
+| Local ENU | grid north | 8.00 cm | 297 cm |
+| **Local ENU** | **true north** | **0.58 cm** | **36.6 cm** |
+
+The residual at 2.4 km is the JPR grid scale factor's own variation and is irrelevant to a
+preview. Export is unaffected either way: it uses `pyproj` in `working_crs`.
 
 ## Backend
 
@@ -268,7 +288,7 @@ panel, export controls).
 MapLibre has no transform widget. The artwork is one GeoJSON source and the handles are a
 second (anchor, rotate handle offset along +N, scale handle at a bbox corner).
 `pointerdown` disables `dragPan`, pointer moves convert screen px → lng/lat →
-Mercator metres → reducer, re-emitting GeoJSON throttled to `requestAnimationFrame`.
+local ENU metres → reducer, re-emitting GeoJSON throttled to `requestAnimationFrame`.
 
 The preview is decimated server-side so dragging stays responsive on a station plan.
 Tolerance is `1/2000` of the `artwork_bounds` diagonal: geometries are passed through
@@ -358,7 +378,7 @@ not asserted from memory.
 | Nearest-origin zone rule | 20/21 reference cities; fails Hakodate (X instead of XI). |
 | `min \|easting\|` zone rule | 18/21 — rejected; ignores latitude bands, puts Sapporo in zone X. |
 | GSI + Esri tile endpoints | Live at z17 over Tokyo (19.5 KB / 22.7 KB / 23.2 KB). GSI used; Esri not, on ToS grounds. |
+| Preview/export frame agreement | Measured. Local ENU + true-north rotation agrees with the EPSG:6677 export to **0.58 cm** on a 59 m artwork and 36.6 cm on a 2.4 km site. Web Mercator was measured at 23.35 cm and rejected. |
 
-Frontend claims are unmeasured and rest on documented API surface: `maplibre-gl` 4.5
-`MercatorCoordinate`, and the ~1 cm preview drift, which follows from `1/cos φ` varying
-across a 300 m extent at 35.7°N. Both are checked during implementation, not before.
+Remaining frontend claims rest on documented API surface and are checked during
+implementation, not before.
