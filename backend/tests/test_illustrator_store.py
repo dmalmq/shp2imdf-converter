@@ -64,3 +64,48 @@ def test_prune_reports_how_many_it_removed(tmp_path: Path) -> None:
     store.put(parse_ai(payload, "two.ai"))
     assert store.prune() == 2
     assert store.prune() == 0
+
+
+FLOORS = [
+    {"label": "1F", "box": [0.0, 0.0, 200.0, 200.0], "layer_names": None},
+    {"label": "2F", "box": [200.0, 0.0, 400.0, 200.0], "layer_names": ["壁"]},
+]
+
+
+@pytest.mark.georef
+def test_new_conversions_have_no_assignment(store: ConversionStore) -> None:
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+    assert cached.floors is None
+
+
+@pytest.mark.georef
+def test_assign_stores_and_round_trips_floors(store: ConversionStore) -> None:
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+    stored = store.assign(cached.conversion_id, FLOORS)
+    assert stored.floors == FLOORS
+
+    fetched = store.get(cached.conversion_id)
+    assert fetched.floors == FLOORS
+
+
+@pytest.mark.georef
+def test_assign_replaces_a_previous_assignment(store: ConversionStore) -> None:
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+    store.assign(cached.conversion_id, FLOORS)
+    replaced = store.assign(cached.conversion_id, [FLOORS[0]])
+    assert replaced.floors == [FLOORS[0]]
+
+
+@pytest.mark.georef
+def test_assign_to_an_unknown_id_raises(store: ConversionStore) -> None:
+    with pytest.raises(ConversionExpiredError):
+        store.assign("does-not-exist", FLOORS)
+
+
+@pytest.mark.georef
+def test_prune_removes_the_floors_file_too(tmp_path: Path) -> None:
+    store = ConversionStore(root=tmp_path, ttl_seconds=-1, max_entries=10)
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+    store.assign(cached.conversion_id, FLOORS)
+    assert store.prune() == 1
+    assert not cached.directory.exists()
