@@ -141,3 +141,98 @@ def test_non_positive_scale_is_rejected() -> None:
     transform.metres_per_point = 0.0
     with pytest.raises(GeoreferenceError):
         transform.to_affine_matrix()
+
+
+from backend.src.illustrator_georeference import fit_helmert, residuals
+
+
+def _synthesise_pairs(rotation_deg: float, scale: float) -> tuple[list, list]:
+    """Artwork points, and the WGS84 points a known transform maps them to.
+
+    The truth transform anchors at the artwork centroid so that the fitted
+    centroid lands exactly on the truth anchor: a fitted rotation is expressed
+    about the fit's own anchor, and comparing it against a rotation expressed
+    about a different anchor would carry the meridian-convergence gradient.
+    """
+    artwork = [(0.0, 0.0), (500.0, 0.0), (500.0, 300.0)]
+    centroid = (sum(x for x, _ in artwork) / 3, sum(y for _, y in artwork) / 3)
+    truth = SimilarityTransform(
+        artwork_anchor=centroid,
+        map_anchor=(GOLDEN_ANCHOR_LON, GOLDEN_ANCHOR_LAT),
+        rotation_deg=rotation_deg,
+        metres_per_point=scale,
+        working_crs="EPSG:6677",
+    )
+    matrix = truth.to_affine_matrix()
+    mapped = []
+    for x, y in artwork:
+        east = matrix[0] * x + matrix[1] * y + matrix[4]
+        north = matrix[2] * x + matrix[3] * y + matrix[5]
+        mapped.append(unproject_point(east, north, "EPSG:6677"))
+    return artwork, mapped
+
+
+@pytest.mark.georef
+def test_helmert_recovers_known_rotation_and_scale() -> None:
+    artwork, mapped = _synthesise_pairs(rotation_deg=42.5, scale=0.25)
+    fitted = fit_helmert(artwork, mapped, "EPSG:6677")
+    assert fitted.rotation_deg == pytest.approx(42.5, abs=1e-6)
+    assert fitted.metres_per_point == pytest.approx(0.25, abs=1e-9)
+
+
+@pytest.mark.georef
+def test_helmert_with_locked_scale_solves_rotation_only() -> None:
+    artwork, mapped = _synthesise_pairs(rotation_deg=-17.25, scale=0.176389)
+    fitted = fit_helmert(artwork, mapped, "EPSG:6677", fixed_metres_per_point=0.176389)
+    assert fitted.metres_per_point == 0.176389
+    assert fitted.rotation_deg == pytest.approx(-17.25, abs=1e-6)
+
+
+@pytest.mark.georef
+def test_helmert_normalises_rotation_into_180_range() -> None:
+    artwork, mapped = _synthesise_pairs(rotation_deg=200.0, scale=0.2)
+    fitted = fit_helmert(artwork, mapped, "EPSG:6677")
+    assert -180.0 < fitted.rotation_deg <= 180.0
+    assert fitted.rotation_deg == pytest.approx(-160.0, abs=1e-6)
+
+
+@pytest.mark.georef
+def test_residuals_are_zero_for_an_exact_fit() -> None:
+    artwork, mapped = _synthesise_pairs(rotation_deg=10.0, scale=0.3)
+    fitted = fit_helmert(artwork, mapped, "EPSG:6677")
+    per_point, rmse = residuals(fitted, artwork, mapped)
+    assert len(per_point) == 3
+    assert rmse == pytest.approx(0.0, abs=1e-6)
+
+
+@pytest.mark.georef
+def test_residuals_expose_a_mistyped_control_point() -> None:
+    artwork, mapped = _synthesise_pairs(rotation_deg=10.0, scale=0.3)
+    bad = list(mapped)
+    bad[2] = (bad[2][0] + 0.001, bad[2][1])  # roughly 90 m east
+    fitted = fit_helmert(artwork, bad, "EPSG:6677")
+    per_point, rmse = residuals(fitted, artwork, bad)
+    assert rmse > 1.0
+    assert max(per_point) > 1.0
+
+
+@pytest.mark.georef
+def test_helmert_requires_two_pairs() -> None:
+    with pytest.raises(GeoreferenceError):
+        fit_helmert([(0.0, 0.0)], [(139.7, 35.7)], "EPSG:6677")
+
+
+@pytest.mark.georef
+def test_helmert_rejects_mismatched_pair_counts() -> None:
+    with pytest.raises(GeoreferenceError):
+        fit_helmert([(0.0, 0.0), (1.0, 1.0)], [(139.7, 35.7)], "EPSG:6677")
+
+
+@pytest.mark.georef
+def test_helmert_rejects_coincident_artwork_points() -> None:
+    with pytest.raises(GeoreferenceError):
+        fit_helmert(
+            [(10.0, 10.0), (10.0, 10.0)],
+            [(139.70, 35.69), (139.71, 35.69)],
+            "EPSG:6677",
+        )
