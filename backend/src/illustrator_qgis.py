@@ -32,6 +32,29 @@ _UNKNOWN_SRS = (
 )
 
 
+def _srs_xml(crs: str | None) -> str:
+    """A QGIS ``<spatialrefsys>`` block for ``crs``, or the unknown-CRS block."""
+    if not crs:
+        return _UNKNOWN_SRS
+
+    from pyproj import CRS as _PyprojCRS  # local import keeps module import cheap
+
+    parsed = _PyprojCRS.from_user_input(crs)
+    authority = parsed.to_authority()
+    authid = f"{authority[0]}:{authority[1]}" if authority else crs
+    srid = authority[1] if authority else "0"
+    return (
+        '<spatialrefsys nativeFormat="Wkt">'
+        f"<wkt>{escape(parsed.to_wkt())}</wkt><proj4>{escape(parsed.to_proj4())}</proj4>"
+        f"<srsid>{escape(str(srid))}</srsid><srid>{escape(str(srid))}</srid>"
+        f"<authid>{escape(authid)}</authid>"
+        f"<description>{escape(parsed.name)}</description>"
+        "<projectionacronym></projectionacronym><ellipsoidacronym></ellipsoidacronym>"
+        f"<geographicflag>{'true' if parsed.is_geographic else 'false'}</geographicflag>"
+        "</spatialrefsys>"
+    )
+
+
 @dataclass(slots=True)
 class QgisLayerSpec:
     """A GeoPackage table to expose as a styled QGIS layer."""
@@ -111,7 +134,7 @@ def _line_renderer() -> str:
     )
 
 
-def _maplayer(spec: QgisLayerSpec, layer_id: str, gpkg_filename: str) -> str:
+def _maplayer(spec: QgisLayerSpec, layer_id: str, gpkg_filename: str, srs_xml: str) -> str:
     is_poly = spec.role == "polygon"
     geometry = "Polygon" if is_poly else "Line"
     wkb = "MultiPolygon" if is_poly else "MultiLineString"
@@ -124,19 +147,27 @@ def _maplayer(spec: QgisLayerSpec, layer_id: str, gpkg_filename: str) -> str:
         f"<id>{layer_id}</id>"
         f"<datasource>{escape(datasource)}</datasource>"
         f"<layername>{escape(spec.display_name)}</layername>"
-        f"<srs>{_UNKNOWN_SRS}</srs>"
+        f"<srs>{srs_xml}</srs>"
         "<provider encoding=\"UTF-8\">ogr</provider>"
         f"{renderer}"
         "</maplayer>"
     )
 
 
-def build_qgs_project(layers: list[QgisLayerSpec], gpkg_filename: str, project_name: str) -> str:
+def build_qgs_project(
+    layers: list[QgisLayerSpec],
+    gpkg_filename: str,
+    project_name: str,
+    crs: str | None = None,
+) -> str:
     """Return a ``.qgs`` XML document for ``layers`` (given top-first).
 
     ``layers`` order is preserved as the QGIS layer-tree order (first = top of
     the stack / drawn on top), which should mirror the Illustrator layer order.
+    ``crs`` names the authority code (e.g. ``"EPSG:6677"``) the project and
+    every layer declare; ``None`` keeps the previous ungeoreferenced output.
     """
+    srs_xml = _srs_xml(crs)
     ids = [f"lyr{i:03d}_{uuid4().hex}" for i in range(len(layers))]
 
     tree_entries = "".join(
@@ -147,13 +178,15 @@ def build_qgs_project(layers: list[QgisLayerSpec], gpkg_filename: str, project_n
         "</layer-tree-layer>"
         for lid, spec in zip(ids, layers)
     )
-    maplayers = "".join(_maplayer(spec, lid, gpkg_filename) for lid, spec in zip(ids, layers))
+    maplayers = "".join(
+        _maplayer(spec, lid, gpkg_filename, srs_xml) for lid, spec in zip(ids, layers)
+    )
     layerorder = "".join(f"<layer id=\"{lid}\"/>" for lid in ids)
 
     return (
         "<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>"
         f"<qgis version=\"3.34.0\" projectname={quoteattr(project_name)}>"
-        f"<projectCrs>{_UNKNOWN_SRS}</projectCrs>"
+        f"<projectCrs>{srs_xml}</projectCrs>"
         f"<layer-tree-group>{tree_entries}<custom-order enabled=\"0\"/></layer-tree-group>"
         f"<projectlayers>{maplayers}</projectlayers>"
         f"<layerorder>{layerorder}</layerorder>"
