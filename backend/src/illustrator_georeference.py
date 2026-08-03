@@ -176,3 +176,82 @@ def residuals(
         distances.append(math.dist((a * x + b * y + xoff, d * x + e * y + yoff), (east, north)))
     rmse = math.sqrt(sum(value**2 for value in distances) / len(distances))
     return distances, rmse
+
+
+# Japan Plane Rectangular CS I-XIX under JGD2011, EPSG:6669-6687 in order.
+JPR_ZONES: tuple[str, ...] = (
+    "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+    "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX",
+)
+
+# (lat_0, lon_0) per zone, fixed by 測量法施行令 and pinned by test.
+ZONE_ORIGINS: dict[str, tuple[float, float]] = {
+    "I": (33.0, 129.5), "II": (33.0, 131.0), "III": (36.0, 132.0 + 10 / 60),
+    "IV": (33.0, 133.5), "V": (36.0, 134.0 + 20 / 60), "VI": (36.0, 136.0),
+    "VII": (36.0, 137.0 + 10 / 60), "VIII": (36.0, 138.5),
+    "IX": (36.0, 139.0 + 50 / 60), "X": (40.0, 140.0 + 50 / 60),
+    "XI": (44.0, 140.25), "XII": (44.0, 142.25), "XIII": (44.0, 144.25),
+    "XIV": (26.0, 142.0), "XV": (26.0, 127.5), "XVI": (26.0, 124.0),
+    "XVII": (26.0, 131.0), "XVIII": (20.0, 136.0), "XIX": (26.0, 154.0),
+}
+
+# ISO 3166-2:JP code to candidate zones. Forty-three prefectures have exactly
+# one. Hokkaido, Tokyo, Okinawa and Kagoshima span several and are narrowed
+# geometrically among their own candidates.
+PREFECTURE_ZONES: dict[str, tuple[str, ...]] = {
+    "JP-01": ("XI", "XII", "XIII"), "JP-02": ("X",), "JP-03": ("X",),
+    "JP-04": ("X",), "JP-05": ("X",), "JP-06": ("X",), "JP-07": ("IX",),
+    "JP-08": ("IX",), "JP-09": ("IX",), "JP-10": ("IX",), "JP-11": ("IX",),
+    "JP-12": ("IX",), "JP-13": ("IX", "XIV", "XVIII", "XIX"), "JP-14": ("IX",),
+    "JP-15": ("VIII",), "JP-16": ("VII",), "JP-17": ("VII",), "JP-18": ("VI",),
+    "JP-19": ("VIII",), "JP-20": ("VIII",), "JP-21": ("VII",), "JP-22": ("VIII",),
+    "JP-23": ("VII",), "JP-24": ("VI",), "JP-25": ("VI",), "JP-26": ("VI",),
+    "JP-27": ("VI",), "JP-28": ("V",), "JP-29": ("VI",), "JP-30": ("VI",),
+    "JP-31": ("V",), "JP-32": ("III",), "JP-33": ("V",), "JP-34": ("III",),
+    "JP-35": ("III",), "JP-36": ("IV",), "JP-37": ("IV",), "JP-38": ("IV",),
+    "JP-39": ("IV",), "JP-40": ("II",), "JP-41": ("II",), "JP-42": ("I",),
+    "JP-43": ("II",), "JP-44": ("II",), "JP-45": ("II",), "JP-46": ("II", "I"),
+    "JP-47": ("XV", "XVI", "XVII"),
+}
+
+
+def zone_epsg(roman: str) -> int:
+    """EPSG code for a JPR zone given its Roman numeral."""
+    try:
+        return 6669 + JPR_ZONES.index(roman)
+    except ValueError as exc:
+        raise GeoreferenceError(f"Unknown Japan Plane Rectangular zone: {roman}") from exc
+
+
+def _nearest_zone(lon: float, lat: float, candidates: tuple[str, ...]) -> str:
+    def separation(roman: str) -> float:
+        lat0, lon0 = ZONE_ORIGINS[roman]
+        return math.hypot((lon - lon0) * math.cos(math.radians(lat)), lat - lat0)
+
+    return min(candidates, key=separation)
+
+
+def resolve_working_crs(lon: float, lat: float, prefecture_code: str | None = None) -> str:
+    """Pick the JPR zone for a location.
+
+    Zone membership is defined by prefecture, so an ISO 3166-2 code is
+    authoritative and is used whenever one is available. Without one — the
+    geocoder is optional — the nearest zone origin is used instead. That is
+    right for 20 of 21 reference cities but places Hakodate in zone X rather
+    than XI, because zone X's origin is closer across the Tsugaru Strait.
+    """
+    candidates = PREFECTURE_ZONES.get(prefecture_code or "", JPR_ZONES)
+    if len(candidates) == 1:
+        return f"EPSG:{zone_epsg(candidates[0])}"
+    return f"EPSG:{zone_epsg(_nearest_zone(lon, lat, candidates))}"
+
+
+def zone_label(crs: str) -> str:
+    """``"EPSG:6677 — JPR CS IX"`` for JPR zones, the bare code otherwise."""
+    try:
+        code = int(crs.split(":")[1])
+    except (IndexError, ValueError):
+        return crs
+    if 6669 <= code <= 6687:
+        return f"{crs} — JPR CS {JPR_ZONES[code - 6669]}"
+    return crs

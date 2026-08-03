@@ -236,3 +236,119 @@ def test_helmert_rejects_coincident_artwork_points() -> None:
             [(139.70, 35.69), (139.71, 35.69)],
             "EPSG:6677",
         )
+
+
+from pyproj import CRS
+
+from backend.src.illustrator_georeference import (
+    JPR_ZONES,
+    PREFECTURE_ZONES,
+    ZONE_ORIGINS,
+    resolve_working_crs,
+    zone_epsg,
+    zone_label,
+)
+
+
+@pytest.mark.georef
+def test_zone_epsg_codes_span_6669_to_6687_in_order() -> None:
+    assert len(JPR_ZONES) == 19
+    assert [zone_epsg(z) for z in JPR_ZONES] == list(range(6669, 6688))
+
+
+@pytest.mark.georef
+@pytest.mark.parametrize("roman", JPR_ZONES)
+def test_hardcoded_zone_origins_match_pyproj(roman: str) -> None:
+    """The origin table is law, but pin it so a typo cannot slip through."""
+    params = CRS.from_epsg(zone_epsg(roman)).to_dict()
+    lat0, lon0 = ZONE_ORIGINS[roman]
+    assert params["lat_0"] == pytest.approx(lat0, abs=1e-9)
+    assert params["lon_0"] == pytest.approx(lon0, abs=1e-9)
+
+
+@pytest.mark.georef
+def test_prefecture_table_covers_all_47_codes() -> None:
+    assert len(PREFECTURE_ZONES) == 47
+    assert {f"JP-{n:02d}" for n in range(1, 48)} == set(PREFECTURE_ZONES)
+
+
+@pytest.mark.georef
+@pytest.mark.parametrize(
+    ("code", "lon", "lat", "expected"),
+    [
+        ("JP-13", 139.7671, 35.6812, 6677),   # Tokyo
+        ("JP-27", 135.4959, 34.7024, 6674),   # Osaka
+        ("JP-23", 136.8816, 35.1709, 6675),   # Nagoya
+        ("JP-40", 130.4200, 33.5900, 6670),   # Fukuoka
+        ("JP-42", 129.8737, 32.7448, 6669),   # Nagasaki, the sole zone I prefecture
+        ("JP-01", 141.3507, 43.0687, 6680),   # Sapporo, Hokkaido zone XII
+        ("JP-01", 140.7288, 41.7687, 6679),   # Hakodate, Hokkaido zone XI
+        ("JP-47", 127.6792, 26.2124, 6683),   # Naha, Okinawa zone XV
+        ("JP-47", 124.1558, 24.3448, 6684),   # Ishigaki, Okinawa zone XVI
+    ],
+)
+def test_prefecture_code_resolves_the_correct_zone(code, lon, lat, expected) -> None:
+    assert resolve_working_crs(lon, lat, code) == f"EPSG:{expected}"
+
+
+@pytest.mark.georef
+def test_hakodate_needs_the_prefecture_code_to_be_correct() -> None:
+    """Regression guard: geometry alone puts Hakodate in zone X across the strait."""
+    assert resolve_working_crs(140.7288, 41.7687, "JP-01") == "EPSG:6679"
+    assert resolve_working_crs(140.7288, 41.7687, None) == "EPSG:6678"
+
+
+@pytest.mark.georef
+@pytest.mark.parametrize(
+    ("lon", "lat", "expected"),
+    [
+        (139.7671, 35.6812, 6677),
+        (135.4959, 34.7024, 6674),
+        (130.4200, 33.5900, 6670),
+        (141.3507, 43.0687, 6680),
+    ],
+)
+def test_geometric_fallback_without_a_prefecture_code(lon, lat, expected) -> None:
+    assert resolve_working_crs(lon, lat, None) == f"EPSG:{expected}"
+
+
+@pytest.mark.georef
+def test_unknown_prefecture_code_falls_back_to_geometry() -> None:
+    assert resolve_working_crs(139.7671, 35.6812, "XX-99") == "EPSG:6677"
+
+
+@pytest.mark.georef
+def test_every_prefecture_capital_sits_inside_its_zone_envelope() -> None:
+    """A zone is designed for +/-130 km of easting; a wrong row shows up here."""
+    capitals = {
+        "JP-02": (140.7400, 40.8244), "JP-03": (141.1527, 39.7036),
+        "JP-04": (140.8719, 38.2688), "JP-05": (140.1024, 39.7186),
+        "JP-06": (140.3633, 38.2404), "JP-07": (140.4676, 37.7500),
+        "JP-08": (140.4468, 36.3418), "JP-09": (139.8836, 36.5658),
+        "JP-10": (139.0608, 36.3912), "JP-11": (139.6489, 35.8569),
+        "JP-12": (140.1233, 35.6051), "JP-14": (139.6425, 35.4478),
+        "JP-15": (139.0232, 37.9026), "JP-16": (137.2113, 36.6953),
+        "JP-17": (136.6256, 36.5947), "JP-18": (136.2216, 36.0652),
+        "JP-19": (138.5683, 35.6642), "JP-20": (138.1812, 36.6513),
+        "JP-21": (136.7222, 35.3912), "JP-22": (138.3831, 34.9769),
+        "JP-24": (136.5086, 34.7303), "JP-25": (135.8686, 35.0045),
+        "JP-26": (135.7556, 35.0211), "JP-28": (135.1830, 34.6913),
+        "JP-29": (135.8328, 34.6851), "JP-30": (135.1675, 34.2261),
+        "JP-31": (134.2380, 35.5039), "JP-32": (133.0505, 35.4723),
+        "JP-33": (133.9350, 34.6618), "JP-34": (132.4596, 34.3853),
+        "JP-35": (131.4714, 34.1859), "JP-36": (134.5594, 34.0658),
+        "JP-37": (134.0434, 34.3401), "JP-38": (132.7657, 33.8416),
+        "JP-39": (133.5311, 33.5597), "JP-41": (130.2988, 33.2494),
+        "JP-43": (130.7417, 32.7898), "JP-44": (131.6126, 33.2382),
+        "JP-45": (131.4239, 31.9077), "JP-46": (130.5581, 31.5602),
+    }
+    for code, (lon, lat) in capitals.items():
+        crs = resolve_working_crs(lon, lat, code)
+        east, _north = project_point(lon, lat, crs)
+        assert abs(east) < 130_000, f"{code} easting {east:.0f} m in {crs}"
+
+
+@pytest.mark.georef
+def test_zone_label_is_human_readable() -> None:
+    assert zone_label("EPSG:6677") == "EPSG:6677 — JPR CS IX"
+    assert zone_label("EPSG:4326") == "EPSG:4326"
