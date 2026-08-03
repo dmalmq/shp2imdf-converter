@@ -60,7 +60,7 @@ Built for indoor mapping professionals who receive per-floor shapefiles from CAD
 - Keyboard shortcuts for efficient review (`Ctrl+Z`, `Escape`, `Enter`)
 - Round-trip: re-open a previously exported IMDF archive or IMDF-schema shapefile set for further review/re-export
 - Export as a raw IMDF archive, an **Open Data Contest 2026** (ODC2026) shapefile profile, or a styled QGIS `.qgz` project built from that profile
-- Standalone Adobe Illustrator (`.ai`) → GeoPackage + QGIS project converter, for turning layered artwork (e.g. CAD/illustrator floor plans) into GIS-ready layers with original colors preserved
+- Standalone Adobe Illustrator (`.ai`) → georeferenced GeoPackage, shapefiles and QGIS project: search for the building, place the artwork on OSM or GSI aerial imagery with a scale derived from the drawing, then export in a chosen CRS. Placements can be saved by name and reapplied to the other floors of the same building.
 
 ---
 
