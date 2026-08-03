@@ -19,6 +19,7 @@ test-results/
 # Runtime session artifacts
 data/session_uploads/
 data/sessions/
+data/tmp/
 backend/data/session_uploads/
 backend/data/sessions/
 data/placements.db
