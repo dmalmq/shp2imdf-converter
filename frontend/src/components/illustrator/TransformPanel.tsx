@@ -41,8 +41,38 @@ export function TransformPanel({ state, dispatch }: Props) {
     }
   };
 
+  const activeFloor = state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
+
   return (
     <div className="space-y-4 text-sm">
+      {state.floors.length > 1 ? (
+        <section>
+          <label className="block text-xs font-medium">{t("Floor", "フロア")}</label>
+          <select
+            className={`mt-1 ${FIELD}`}
+            value={state.activeFloorLabel ?? ""}
+            onChange={(event) => dispatch({ type: "setActiveFloor", label: event.target.value })}
+          >
+            {state.floors.map((floor) => (
+              <option key={floor.label} value={floor.label}>
+                {floor.label}
+                {floor.linked ? "" : t(" (unlinked)", "（非連動）")}
+              </option>
+            ))}
+          </select>
+          {activeFloor && !activeFloor.linked ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="mt-1"
+              onClick={() => dispatch({ type: "relinkFloor", label: activeFloor.label })}
+            >
+              {t("Relink to shared frame", "共通フレームに再リンク")}
+            </Button>
+          ) : null}
+        </section>
+      ) : null}
+
       <section>
         <label className="block text-xs font-medium">{t("Find the building", "建物を検索")}</label>
         <div className="mt-1 flex gap-2">
