@@ -1,11 +1,13 @@
 import { useReducer, useState } from "react";
 
 import {
+  assignFloors,
   exportIllustrator,
   previewIllustrator,
   type ExportFormatsPayload,
   type IllustratorPreviewResponse
 } from "../api/client";
+import { AssignmentPanel } from "../components/illustrator/AssignmentPanel";
 import { ControlPointList } from "../components/illustrator/ControlPointList";
 import { PlacementLibrary } from "../components/illustrator/PlacementLibrary";
 import { PlacementMap } from "../components/illustrator/PlacementMap";
@@ -23,34 +25,58 @@ const CRS_CHOICES = (suggested: string, suggestedLabel: string) => [
   { value: "EPSG:4326", label: "EPSG:4326 — WGS84 lon/lat" }
 ];
 
-function initialState(preview: IllustratorPreviewResponse): PlacementState {
-  const [minX, minY, maxX, maxY] = preview.artwork_bounds;
+type AssignedRegion = {
+  label: string;
+  box: [number, number, number, number];
+  layer_names: string[] | null;
+};
+
+function initialStateFromAssignment(
+  preview: IllustratorPreviewResponse,
+  assignment: AssignedRegion[]
+): PlacementState {
+  const regions: AssignedRegion[] = assignment.length
+    ? assignment
+    : [{ label: "artwork", box: preview.artwork_bounds, layer_names: null }];
+  const first = regions[0];
   return {
     frame: { rotationDeg: 0, metresPerPoint: 0.176389, workingCrs: preview.suggested_crs },
-    activeFloorLabel: "artwork",
+    activeFloorLabel: first.label,
     scaleLocked: false,
-    floors: [
-      {
-        label: "artwork",
-        linked: true,
-        // The anchor is set once, at the artwork centre, and never recomputed.
-        artworkAnchor: [(minX + maxX) / 2, (minY + maxY) / 2],
-        mapAnchor: [139.7671, 35.6812],
-        controlPoints: [],
-        artworkBounds: [minX, minY, maxX, maxY]
-      }
-    ]
+    floors: regions.map((region) => ({
+      label: region.label,
+      linked: true,
+      artworkAnchor: [
+        (region.box[0] + region.box[2]) / 2,
+        (region.box[1] + region.box[3]) / 2
+      ],
+      mapAnchor: [139.7671, 35.6812],
+      controlPoints: [],
+      artworkBounds: region.box
+    }))
   };
 }
 
-const DEFAULT_STATE: PlacementState = initialState({
-  artwork_bounds: [0, 0, 100, 100],
-  suggested_crs: "EPSG:6677"
-} as IllustratorPreviewResponse);
+const DEFAULT_STATE: PlacementState = {
+  frame: { rotationDeg: 0, metresPerPoint: 0.176389, workingCrs: "EPSG:6677" },
+  activeFloorLabel: "artwork",
+  scaleLocked: false,
+  floors: [
+    {
+      label: "artwork",
+      linked: true,
+      artworkAnchor: [50, 50],
+      mapAnchor: [139.7671, 35.6812],
+      controlPoints: [],
+      artworkBounds: [0, 0, 100, 100]
+    }
+  ]
+};
 
 export function IllustratorPage() {
   const { t } = useUiLanguage();
   const [preview, setPreview] = useState<IllustratorPreviewResponse | null>(null);
+  const [assignment, setAssignment] = useState<AssignedRegion[] | null>(null);
   const [lastFile, setLastFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,10 +95,10 @@ export function IllustratorPage() {
     try {
       const response = await previewIllustrator(file);
       setPreview(response);
+      setAssignment(null);
       setLastFile(file);
       setOutputCrs(response.suggested_crs);
-      const fresh = initialState(response);
-      dispatch({ type: "applyFloors", floors: toFloorPayloads(fresh) });
+      dispatch({ type: "applyFloors", floors: toFloorPayloads(initialStateFromAssignment(response, [])) });
       dispatch({ type: "unlockScale" });
     } catch {
       setError(
@@ -147,6 +173,48 @@ export function IllustratorPage() {
           >
             {loading ? t("Converting...", "変換中...") : t("Choose .ai file", ".ai を選択")}
           </Button>
+          {error ? <p className="mt-2 text-xs text-[var(--color-error)]">{error}</p> : null}
+        </Card>
+      </div>
+    );
+  }
+
+  if (assignment === null) {
+    return (
+      <div className="flex flex-1 items-start justify-center px-4 py-10">
+        <Card padding="lg" className="w-full max-w-2xl">
+          <h1 className="text-lg font-semibold">
+            {t("Assign floors", "フロアを割り当て")}
+          </h1>
+          <AssignmentPanel
+            preview={preview.preview}
+            artworkBounds={preview.artwork_bounds}
+            layerSummaries={preview.layers}
+            onSkip={() => setAssignment([])}
+            onAssigned={async (floors) => {
+              const regions: AssignedRegion[] = floors.map((floor) => ({
+                label: floor.label,
+                box: floor.box,
+                layer_names: floor.layerNames
+              }));
+              try {
+                await assignFloors(preview.conversion_id, regions);
+                setAssignment(regions);
+                dispatch({
+                  type: "applyFloors",
+                  floors: toFloorPayloads(initialStateFromAssignment(preview, regions))
+                });
+                dispatch({ type: "unlockScale" });
+              } catch {
+                setError(
+                  t(
+                    "Could not save the floor assignment.",
+                    "フロア割り当てを保存できませんでした。"
+                  )
+                );
+              }
+            }}
+          />
           {error ? <p className="mt-2 text-xs text-[var(--color-error)]">{error}</p> : null}
         </Card>
       </div>
