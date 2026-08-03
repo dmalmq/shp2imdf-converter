@@ -611,7 +611,7 @@ class PlacementRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=120)
-    transform: TransformPayload
+    floors: list[FloorExportPayload] = Field(min_length=1)
     artwork_bounds: list[float] = Field(min_length=4, max_length=4)
 
 
@@ -620,7 +620,7 @@ class PlacementItem(BaseModel):
 
     id: int
     name: str
-    transform: TransformPayload
+    floors: list[FloorExportPayload]
     artwork_bounds: list[float]
     created_at: str
     updated_at: str

@@ -150,13 +150,18 @@ def test_legacy_direct_download_endpoint_still_works(test_client) -> None:
 
 PLACEMENT_BODY = {
     "name": "Placement CRUD Test",
-    "transform": {
-        "artwork_anchor": [250.0, 275.0],
-        "map_anchor": [139.700258, 35.690921],
-        "rotation_deg": 12.5,
-        "metres_per_point": 0.176389,
-        "working_crs": "EPSG:6677",
-    },
+    "floors": [
+        {
+            "label": "1F",
+            "transform": {
+                "artwork_anchor": [85.0, 80.0],
+                "map_anchor": [139.700258, 35.690921],
+                "rotation_deg": 12.5,
+                "metres_per_point": 0.176389,
+                "working_crs": "EPSG:6677",
+            },
+        }
+    ],
     "artwork_bounds": [0.0, 0.0, 500.0, 550.0],
 }
 
@@ -172,11 +177,13 @@ def test_placement_crud_round_trip(test_client) -> None:
 
         changed = {
             **PLACEMENT_BODY,
-            "transform": {**PLACEMENT_BODY["transform"], "rotation_deg": -3.0},
+            "floors": [
+                {**PLACEMENT_BODY["floors"][0], "transform": {**PLACEMENT_BODY["floors"][0]["transform"], "rotation_deg": -3.0}}
+            ],
         }
         updated = test_client.put(f"/api/placements/{placement_id}", json=changed)
         assert updated.status_code == 200
-        assert updated.json()["transform"]["rotation_deg"] == -3.0
+        assert updated.json()["floors"][0]["transform"]["rotation_deg"] == -3.0
     finally:
         assert test_client.delete(f"/api/placements/{placement_id}").status_code == 204
 

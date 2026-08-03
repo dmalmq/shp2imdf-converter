@@ -20,13 +20,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS placements (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
-  working_crs TEXT NOT NULL,
-  anchor_lon REAL NOT NULL,
-  anchor_lat REAL NOT NULL,
-  artwork_anchor_x REAL NOT NULL,
-  artwork_anchor_y REAL NOT NULL,
-  rotation_deg REAL NOT NULL,
-  metres_per_point REAL NOT NULL,
+  floors TEXT NOT NULL,
   artwork_bounds TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -46,7 +40,7 @@ class PlacementNotFoundError(KeyError):
 class Placement:
     id: int
     name: str
-    transform: dict
+    floors: list[dict]
     artwork_bounds: list[float]
     created_at: str
     updated_at: str
@@ -73,30 +67,10 @@ class PlacementStore:
         return Placement(
             id=row["id"],
             name=row["name"],
-            transform={
-                "artwork_anchor": [row["artwork_anchor_x"], row["artwork_anchor_y"]],
-                "map_anchor": [row["anchor_lon"], row["anchor_lat"]],
-                "rotation_deg": row["rotation_deg"],
-                "metres_per_point": row["metres_per_point"],
-                "working_crs": row["working_crs"],
-            },
+            floors=json.loads(row["floors"]),
             artwork_bounds=json.loads(row["artwork_bounds"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
-        )
-
-    @staticmethod
-    def _columns(name: str, transform: dict, artwork_bounds: list[float]) -> tuple:
-        return (
-            name.strip(),
-            transform["working_crs"],
-            transform["map_anchor"][0],
-            transform["map_anchor"][1],
-            transform["artwork_anchor"][0],
-            transform["artwork_anchor"][1],
-            transform["rotation_deg"],
-            transform["metres_per_point"],
-            json.dumps(artwork_bounds),
         )
 
     def list_all(self) -> list[Placement]:
@@ -104,16 +78,14 @@ class PlacementStore:
             rows = connection.execute("SELECT * FROM placements ORDER BY name").fetchall()
         return [self._to_placement(row) for row in rows]
 
-    def create(self, name: str, transform: dict, artwork_bounds: list[float]) -> Placement:
+    def create(self, name: str, floors: list[dict], artwork_bounds: list[float]) -> Placement:
         stamp = _now()
         try:
             with self._connect() as connection:
                 cursor = connection.execute(
-                    "INSERT INTO placements (name, working_crs, anchor_lon, anchor_lat,"
-                    " artwork_anchor_x, artwork_anchor_y, rotation_deg, metres_per_point,"
-                    " artwork_bounds, created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (*self._columns(name, transform, artwork_bounds), stamp, stamp),
+                    "INSERT INTO placements (name, floors, artwork_bounds, created_at, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (name.strip(), json.dumps(floors), json.dumps(artwork_bounds), stamp, stamp),
                 )
                 row = connection.execute(
                     "SELECT * FROM placements WHERE id = ?", (cursor.lastrowid,)
@@ -123,16 +95,14 @@ class PlacementStore:
         return self._to_placement(row)
 
     def update(
-        self, placement_id: int, name: str, transform: dict, artwork_bounds: list[float]
+        self, placement_id: int, name: str, floors: list[dict], artwork_bounds: list[float]
     ) -> Placement:
         try:
             with self._connect() as connection:
                 cursor = connection.execute(
-                    "UPDATE placements SET name = ?, working_crs = ?, anchor_lon = ?,"
-                    " anchor_lat = ?, artwork_anchor_x = ?, artwork_anchor_y = ?,"
-                    " rotation_deg = ?, metres_per_point = ?, artwork_bounds = ?,"
+                    "UPDATE placements SET name = ?, floors = ?, artwork_bounds = ?,"
                     " updated_at = ? WHERE id = ?",
-                    (*self._columns(name, transform, artwork_bounds), _now(), placement_id),
+                    (name.strip(), json.dumps(floors), json.dumps(artwork_bounds), _now(), placement_id),
                 )
                 if cursor.rowcount == 0:
                     raise PlacementNotFoundError(f"No placement with id {placement_id}.")

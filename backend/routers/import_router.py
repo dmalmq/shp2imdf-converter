@@ -40,6 +40,7 @@ from backend.src.schemas import (
     AssignFloorsResponse,
     CleanupSummary,
     GeocodeSearchResponse,
+    FloorExportPayload,
     IllustratorExportRequest,
     IllustratorPreviewResponse,
     ImportImdfResponse,
@@ -405,7 +406,7 @@ def _placement_item(placement) -> PlacementItem:
     return PlacementItem(
         id=placement.id,
         name=placement.name,
-        transform=TransformPayload(**placement.transform),
+        floors=[FloorExportPayload(**floor) for floor in placement.floors],
         artwork_bounds=placement.artwork_bounds,
         created_at=placement.created_at,
         updated_at=placement.updated_at,
@@ -423,7 +424,9 @@ async def list_placements(request: Request) -> PlacementListResponse:
 async def create_placement(request: Request, payload: PlacementRequest) -> PlacementItem:
     return _placement_item(
         _placement_store(request).create(
-            payload.name, payload.transform.model_dump(), payload.artwork_bounds
+            payload.name,
+            [floor.model_dump() for floor in payload.floors],
+            payload.artwork_bounds,
         )
     )
 
@@ -434,7 +437,10 @@ async def update_placement(
 ) -> PlacementItem:
     return _placement_item(
         _placement_store(request).update(
-            placement_id, payload.name, payload.transform.model_dump(), payload.artwork_bounds
+            placement_id,
+            payload.name,
+            [floor.model_dump() for floor in payload.floors],
+            payload.artwork_bounds,
         )
     )
 
