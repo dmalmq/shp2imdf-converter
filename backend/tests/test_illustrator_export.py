@@ -102,18 +102,22 @@ def test_export_places_the_anchor_at_the_requested_location(cached, tmp_path: Pa
     assert filename.endswith(".zip")
 
     gpkg = _extract(payload, ".gpkg", tmp_path / "out.gpkg")
-    bounds = [0.0, 0.0, 0.0, 0.0]
+    bounds = None
     first_crs = None
     for spec in cached.written_layers:
         gdf = gpd.read_file(gpkg, layer=spec["table"])
         first_crs = first_crs or gdf.crs
         minx, miny, maxx, maxy = gdf.total_bounds
-        bounds = [
-            min(bounds[0], minx),
-            min(bounds[1], miny),
-            max(bounds[2], maxx),
-            max(bounds[3], maxy),
-        ]
+        bounds = (
+            [minx, miny, maxx, maxy]
+            if bounds is None
+            else [
+                min(bounds[0], minx),
+                min(bounds[1], miny),
+                max(bounds[2], maxx),
+                max(bounds[3], maxy),
+            ]
+        )
     expected = project_point(ANCHOR_LON, ANCHOR_LAT, "EPSG:6677")
     assert math.dist(((bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2), expected) < 1.0
     assert first_crs.to_epsg() == 6677
