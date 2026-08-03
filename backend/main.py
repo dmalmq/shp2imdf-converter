@@ -20,6 +20,7 @@ from backend.routers.import_router import router as import_router
 from backend.routers.reference_router import router as reference_router
 from backend.routers.wizard_router import router as wizard_router
 from backend.src.geocoding import GeocodingError, build_geocoder
+from backend.src.illustrator_export import FloorExportError
 from backend.src.illustrator_importer import IllustratorConversionError
 from backend.src.illustrator_store import ConversionExpiredError, ConversionStore
 from backend.src.placements import DuplicatePlacementError, PlacementStore
@@ -169,6 +170,12 @@ async def illustrator_conversion_error_handler(_: Request, exc: IllustratorConve
 async def conversion_expired_handler(_: Request, exc: ConversionExpiredError) -> JSONResponse:
     payload = ErrorResponse(detail=str(exc), code="CONVERSION_EXPIRED")
     return JSONResponse(status_code=404, content=payload.model_dump())
+
+
+@app.exception_handler(FloorExportError)
+async def floor_export_error_handler(_: Request, exc: FloorExportError) -> JSONResponse:
+    payload = ErrorResponse(detail=str(exc), code="FLOOR_MISMATCH")
+    return JSONResponse(status_code=422, content=payload.model_dump())
 
 
 @app.exception_handler(DuplicatePlacementError)

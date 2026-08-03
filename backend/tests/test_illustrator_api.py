@@ -20,13 +20,18 @@ def _preview(test_client):
 
 def _body(bounds):
     return {
-        "transform": {
-            "artwork_anchor": [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2],
-            "map_anchor": [139.700258, 35.690921],
-            "rotation_deg": 12.5,
-            "metres_per_point": 0.176389,
-            "working_crs": "EPSG:6677",
-        },
+        "floors": [
+            {
+                "label": "artwork",
+                "transform": {
+                    "artwork_anchor": [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2],
+                    "map_anchor": [139.700258, 35.690921],
+                    "rotation_deg": 12.5,
+                    "metres_per_point": 0.176389,
+                    "working_crs": "EPSG:6677",
+                },
+            }
+        ],
         "output_crs": "EPSG:6677",
         "formats": {"geopackage": True, "shapefile": True, "qgis": True},
     }
@@ -92,7 +97,7 @@ def test_export_rejects_a_qgis_project_without_its_geopackage(test_client) -> No
 def test_export_rejects_a_non_positive_scale(test_client) -> None:
     payload = _preview(test_client).json()
     body = _body(payload["artwork_bounds"])
-    body["transform"]["metres_per_point"] = 0
+    body["floors"][0]["transform"]["metres_per_point"] = 0
     response = test_client.post(
         f"/api/convert/illustrator/{payload['conversion_id']}/export", json=body
     )
@@ -192,3 +197,105 @@ def test_duplicate_placement_name_is_409(test_client) -> None:
 @pytest.mark.georef
 def test_deleting_an_unknown_placement_is_404(test_client) -> None:
     assert test_client.delete("/api/placements/999999").status_code == 404
+
+
+def _assign_body():
+    return {
+        "floors": [
+            {"label": "1F", "box": [0.0, 0.0, 85.0, 200.0], "layer_names": None},
+            {"label": "2F", "box": [85.0, 0.0, 200.0, 200.0], "layer_names": None},
+        ]
+    }
+
+
+@pytest.mark.georef
+def test_assign_returns_per_floor_counts(test_client) -> None:
+    payload = _preview(test_client).json()
+    response = test_client.post(
+        f"/api/convert/illustrator/{payload['conversion_id']}/assign",
+        json=_assign_body(),
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert {floor["label"] for floor in data["floors"]} == {"1F", "2F"}
+    assert data["total_features"] == payload["total_features"]
+    assert data["unassigned_count"] + sum(
+        floor["feature_count"] for floor in data["floors"]
+    ) == data["total_features"]
+
+
+@pytest.mark.georef
+def test_assign_rejects_duplicate_labels(test_client) -> None:
+    payload = _preview(test_client).json()
+    body = _assign_body()
+    body["floors"][1]["label"] = "1F"
+    response = test_client.post(
+        f"/api/convert/illustrator/{payload['conversion_id']}/assign", json=body
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.georef
+def test_assign_rejects_unknown_layers(test_client) -> None:
+    payload = _preview(test_client).json()
+    body = _assign_body()
+    body["floors"][0]["layer_names"] = ["存在しない層"]
+    response = test_client.post(
+        f"/api/convert/illustrator/{payload['conversion_id']}/assign", json=body
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.georef
+def test_export_after_assignment_requires_all_floors(test_client) -> None:
+    payload = _preview(test_client).json()
+    assert test_client.post(
+        f"/api/convert/illustrator/{payload['conversion_id']}/assign", json=_assign_body()
+    ).status_code == 200
+    bounds = payload["artwork_bounds"]
+    body = _body(bounds)
+    body["floors"] = body["floors"][:1]
+    body["floors"][0]["label"] = "1F"
+    response = test_client.post(
+        f"/api/convert/illustrator/{payload['conversion_id']}/export", json=body
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "FLOOR_MISMATCH"
+
+
+@pytest.mark.georef
+def test_export_after_assignment_with_all_floors_succeeds(test_client) -> None:
+    payload = _preview(test_client).json()
+    assert test_client.post(
+        f"/api/convert/illustrator/{payload['conversion_id']}/assign", json=_assign_body()
+    ).status_code == 200
+    bounds = payload["artwork_bounds"]
+    body = _body(bounds)
+    body["floors"] = [
+        {"label": label, "transform": body["floors"][0]["transform"]}
+        for label in ("1F", "2F")
+    ]
+    response = test_client.post(
+        f"/api/convert/illustrator/{payload['conversion_id']}/export", json=body
+    )
+    assert response.status_code == 200, response.text
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = archive.namelist()
+    assert any(n.endswith(".gpkg") for n in names)
+    assert "export_report.json" in names
+
+
+@pytest.mark.georef
+def test_export_without_assignment_still_works_single_floor(test_client) -> None:
+    """Backward compatibility: one implicit floor, no assign call."""
+    payload = _preview(test_client).json()
+    response = test_client.post(
+        f"/api/convert/illustrator/{payload['conversion_id']}/export",
+        json=_body(payload["artwork_bounds"]),
+    )
+    assert response.status_code == 200, response.text
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = archive.namelist()
+    assert any(n.endswith(".gpkg") for n in names)
+    assert any(n.endswith(".qgs") for n in names)
+    assert "export_report.json" in names
