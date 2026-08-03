@@ -871,7 +871,7 @@ export type ExportFormatsPayload = {
 export type PlacementItem = {
   id: number;
   name: string;
-  transform: TransformPayload;
+  floors: { label: string; transform: TransformPayload }[];
   artwork_bounds: [number, number, number, number];
   created_at: string;
   updated_at: string;
@@ -879,7 +879,7 @@ export type PlacementItem = {
 
 export type PlacementRequestBody = {
   name: string;
-  transform: TransformPayload;
+  floors: { label: string; transform: TransformPayload }[];
   artwork_bounds: [number, number, number, number];
 };
 
@@ -895,7 +895,11 @@ export async function previewIllustrator(file: File): Promise<IllustratorPreview
 
 export async function exportIllustrator(
   conversionId: string,
-  body: { transform: TransformPayload; output_crs: string; formats: ExportFormatsPayload }
+  body: {
+    floors: { label: string; transform: TransformPayload }[];
+    output_crs: string;
+    formats: ExportFormatsPayload;
+  }
 ): Promise<{ blob: Blob; filename: string }> {
   const response = await fetch(`/api/convert/illustrator/${conversionId}/export`, {
     method: "POST",

@@ -13,7 +13,7 @@ import { TransformPanel } from "../components/illustrator/TransformPanel";
 import { Button, Card } from "../components/ui";
 import {
   placementReducer,
-  toTransformPayload,
+  toFloorPayloads,
   type PlacementState
 } from "../hooks/useIllustratorPlacement";
 import { useUiLanguage } from "../hooks/useUiLanguage";
@@ -26,30 +26,27 @@ const CRS_CHOICES = (suggested: string, suggestedLabel: string) => [
 function initialState(preview: IllustratorPreviewResponse): PlacementState {
   const [minX, minY, maxX, maxY] = preview.artwork_bounds;
   return {
-    transform: {
-      // The anchor is set once, at the artwork centre, and never recomputed.
-      artworkAnchor: [(minX + maxX) / 2, (minY + maxY) / 2],
-      mapAnchor: [139.7671, 35.6812],
-      rotationDeg: 0,
-      metresPerPoint: 0.176389,
-      workingCrs: preview.suggested_crs
-    },
+    frame: { rotationDeg: 0, metresPerPoint: 0.176389, workingCrs: preview.suggested_crs },
+    activeFloorLabel: "artwork",
     scaleLocked: false,
-    controlPoints: []
+    floors: [
+      {
+        label: "artwork",
+        linked: true,
+        // The anchor is set once, at the artwork centre, and never recomputed.
+        artworkAnchor: [(minX + maxX) / 2, (minY + maxY) / 2],
+        mapAnchor: [139.7671, 35.6812],
+        controlPoints: [],
+        artworkBounds: [minX, minY, maxX, maxY]
+      }
+    ]
   };
 }
 
-const DEFAULT_STATE: PlacementState = {
-  transform: {
-    artworkAnchor: [0, 0],
-    mapAnchor: [139.7671, 35.6812],
-    rotationDeg: 0,
-    metresPerPoint: 0.176389,
-    workingCrs: "EPSG:6677"
-  },
-  scaleLocked: false,
-  controlPoints: []
-};
+const DEFAULT_STATE: PlacementState = initialState({
+  artwork_bounds: [0, 0, 100, 100],
+  suggested_crs: "EPSG:6677"
+} as IllustratorPreviewResponse);
 
 export function IllustratorPage() {
   const { t } = useUiLanguage();
@@ -74,7 +71,8 @@ export function IllustratorPage() {
       setPreview(response);
       setLastFile(file);
       setOutputCrs(response.suggested_crs);
-      dispatch({ type: "applyTransform", transform: initialState(response).transform });
+      const fresh = initialState(response);
+      dispatch({ type: "applyFloors", floors: toFloorPayloads(fresh) });
       dispatch({ type: "unlockScale" });
     } catch {
       setError(
@@ -93,7 +91,7 @@ export function IllustratorPage() {
     setError(null);
     try {
       const result = await exportIllustrator(preview.conversion_id, {
-        transform: toTransformPayload(state.transform),
+        floors: toFloorPayloads(state),
         output_crs: outputCrs,
         formats
       });
@@ -222,7 +220,8 @@ export function IllustratorPage() {
               type: "addControlPoint",
               point: {
                 id: `${Date.now()}`,
-                artwork: state.transform.artworkAnchor,
+                artwork:
+                  state.floors.find((f) => f.label === state.activeFloorLabel)?.artworkAnchor ?? [0, 0],
                 map: lngLat
               }
             });

@@ -1,35 +1,51 @@
 import { useEffect } from "react";
 import type { MapRef } from "react-map-gl/maplibre";
 
-import type { PlacementAction, PlacementState } from "../../hooks/useIllustratorPlacement";
-import { applyMatrix, enuToLngLat, lngLatToEnu, toEnuMatrix } from "../../lib/similarity";
+import type { PlacementAction } from "../../hooks/useIllustratorPlacement";
+import {
+  applyMatrix,
+  enuToLngLat,
+  lngLatToEnu,
+  toEnuMatrix,
+  type SimilarityTransform
+} from "../../lib/similarity";
 
 type Props = {
-  state: PlacementState;
+  transform: SimilarityTransform;
   dispatch: (action: PlacementAction) => void;
   map: MapRef | null;
   artworkBounds: [number, number, number, number];
+  floorLabel: string;
+  linked: boolean;
+  scaleLocked: boolean;
 };
 
 const HANDLE_SOURCE = "placement-handles";
 const HANDLE_LAYER = "placement-handle-circles";
 
 /**
- * Move, rotate and scale gizmo.
+ * Move, rotate and scale gizmo for the active floor.
  *
- * MapLibre has no transform widget, so the handles are their own GeoJSON source
- * and pointer events are captured on the canvas. Panning is disabled for the
- * duration of a drag and updates are throttled to animation frames. All maths
- * happens in the same local ENU frame the preview uses, so the handles and the
- * artwork can never disagree.
+ * All maths happens in the same local ENU frame the preview uses, so the
+ * handles and the artwork can never disagree. Anchor drags pin the floor
+ * (`dragFloor`); rotate and scale are frame operations, so they only make
+ * sense while the floor is linked — an unlinked floor shows inert handles.
  */
-export function TransformHandles({ state, dispatch, map, artworkBounds }: Props) {
+export function TransformHandles({
+  transform,
+  dispatch,
+  map,
+  artworkBounds,
+  floorLabel,
+  linked,
+  scaleLocked
+}: Props) {
   useEffect(() => {
     if (!map) return undefined;
     const instance = map.getMap();
     const canvas = instance.getCanvas();
-    const [lon0, lat0] = state.transform.mapAnchor;
-    const matrix = toEnuMatrix(state.transform);
+    const [lon0, lat0] = transform.mapAnchor;
+    const matrix = toEnuMatrix(transform);
     const [minX, minY, maxX, maxY] = artworkBounds;
 
     const handleAt = (x: number, y: number) => {
@@ -61,6 +77,9 @@ export function TransformHandles({ state, dispatch, map, artworkBounds }: Props)
     const onDown = (event: any) => {
       const role = roleAt(event.point);
       if (!role) return;
+      // Rotate/scale are frame operations; an unlinked floor cannot offer them.
+      if (role !== "anchor" && !linked) return;
+      if (role === "scale" && scaleLocked) return;
       active = role;
       instance.dragPan.disable();
       canvas.style.cursor = "grabbing";
@@ -76,24 +95,28 @@ export function TransformHandles({ state, dispatch, map, artworkBounds }: Props)
       frame = requestAnimationFrame(() => {
         frame = 0;
         if (active === "anchor") {
-          dispatch({ type: "moveAnchor", mapAnchor: [event.lngLat.lng, event.lngLat.lat] });
+          dispatch({
+            type: "dragFloor",
+            label: floorLabel,
+            mapAnchor: [event.lngLat.lng, event.lngLat.lat]
+          });
           return;
         }
         // Offset of the pointer from the anchor, in ENU metres.
         const [east, north] = lngLatToEnu(event.lngLat.lng, event.lngLat.lat, lon0, lat0);
 
         if (active === "rotate") {
-          // ENU +north is true north, which is the frame rotation_deg uses.
+          // ENU +north is true north, which is the frame's rotation frame.
           const raw = (Math.atan2(east, north) * 180) / Math.PI;
           const snapped = event.originalEvent?.shiftKey ? Math.round(raw / 15) * 15 : raw;
-          dispatch({ type: "rotate", rotationDeg: snapped });
+          dispatch({ type: "rotateFrame", rotationDeg: snapped });
           return;
         }
-        if (active === "scale" && !state.scaleLocked) {
-          const [ax, ay] = state.transform.artworkAnchor;
+        if (active === "scale") {
+          const [ax, ay] = transform.artworkAnchor;
           const reach = Math.hypot(maxX - ax, minY - ay);
           if (reach > 0) {
-            dispatch({ type: "scale", metresPerPoint: Math.hypot(east, north) / reach });
+            dispatch({ type: "scaleFrame", metresPerPoint: Math.hypot(east, north) / reach });
           }
         }
       });
@@ -116,7 +139,7 @@ export function TransformHandles({ state, dispatch, map, artworkBounds }: Props)
       if (frame) cancelAnimationFrame(frame);
       instance.dragPan.enable();
     };
-  }, [map, state, dispatch, artworkBounds]);
+  }, [map, transform, dispatch, artworkBounds, floorLabel, linked, scaleLocked]);
 
   return null;
 }

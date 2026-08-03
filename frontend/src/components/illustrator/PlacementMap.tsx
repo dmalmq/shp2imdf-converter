@@ -2,7 +2,11 @@ import { useMemo, useRef, useState } from "react";
 import MapGL, { Layer, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import type { PlacementAction, PlacementState } from "../../hooks/useIllustratorPlacement";
+import {
+  resolvedTransform,
+  type PlacementAction,
+  type PlacementState
+} from "../../hooks/useIllustratorPlacement";
 import { transformGeoJson } from "../../lib/similarity";
 import {
   BASEMAP_ORDER,
@@ -24,7 +28,6 @@ type Props = {
 
 export function PlacementMap({
   preview,
-  artworkBounds,
   state,
   dispatch,
   pickingControlPoint,
@@ -35,21 +38,25 @@ export function PlacementMap({
   const [ready, setReady] = useState(false);
   const [basemap, setBasemap] = useState<BasemapId>("osm");
 
+  // Interim single-floor rendering: the active floor, resolved from the frame.
+  // Per-floor sources land in the multi-floor map task.
+  const activeFloor = state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
+  const activeTransform = activeFloor ? resolvedTransform(state, activeFloor) : null;
   const placed = useMemo(
-    () => transformGeoJson(preview, state.transform),
-    [preview, state.transform]
+    () => (activeTransform ? transformGeoJson(preview, activeTransform) : preview),
+    [preview, activeTransform]
   );
 
   const controlPointData = useMemo(
     () => ({
       type: "FeatureCollection" as const,
-      features: state.controlPoints.map((point, index) => ({
+      features: (activeFloor?.controlPoints ?? []).map((point, index) => ({
         type: "Feature" as const,
         properties: { label: String(index + 1) },
         geometry: { type: "Point" as const, coordinates: point.map }
       }))
     }),
-    [state.controlPoints]
+    [activeFloor]
   );
 
   const onClick = (event: MapLayerMouseEvent) => {
@@ -63,8 +70,8 @@ export function PlacementMap({
         ref={mapRef}
         mapLib={import("maplibre-gl")}
         initialViewState={{
-          longitude: state.transform.mapAnchor[0],
-          latitude: state.transform.mapAnchor[1],
+          longitude: activeTransform?.mapAnchor[0] ?? 139.7671,
+          latitude: activeTransform?.mapAnchor[1] ?? 35.6812,
           zoom: 17
         }}
         mapStyle={BASEMAP_STYLES[basemap]}
@@ -136,12 +143,15 @@ export function PlacementMap({
           />
         </Source>
 
-        {ready ? (
+        {ready && activeFloor && activeTransform ? (
           <TransformHandles
-            state={state}
+            transform={activeTransform}
             dispatch={dispatch}
             map={mapRef.current}
-            artworkBounds={artworkBounds}
+            artworkBounds={activeFloor.artworkBounds}
+            floorLabel={activeFloor.label}
+            linked={activeFloor.linked}
+            scaleLocked={state.scaleLocked}
           />
         ) : null}
       </MapGL>

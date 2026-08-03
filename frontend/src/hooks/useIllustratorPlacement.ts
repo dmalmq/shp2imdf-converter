@@ -17,141 +17,331 @@ export type ControlPoint = {
   map: [number, number];
 };
 
-export type PlacementState = {
-  transform: SimilarityTransform;
-  scaleLocked: boolean;
+export type FloorPlacement = {
+  label: string;
+  /** True: scale/rotation follow the frame and the anchor is derived. */
+  linked: boolean;
+  artworkAnchor: [number, number];
+  mapAnchor: [number, number];
   controlPoints: ControlPoint[];
+  artworkBounds: [number, number, number, number];
+  /** Own scale/rotation once unlinked; undefined while linked (frame is used). */
+  rotationDeg?: number;
+  metresPerPoint?: number;
+};
+
+export type PlacementState = {
+  frame: { rotationDeg: number; metresPerPoint: number; workingCrs: string };
+  floors: FloorPlacement[];
+  activeFloorLabel: string | null;
+  scaleLocked: boolean;
 };
 
 export type PlacementAction =
-  | { type: "moveAnchor"; mapAnchor: [number, number] }
-  | { type: "rotate"; rotationDeg: number }
-  | { type: "scale"; metresPerPoint: number }
+  | { type: "positionBuilding"; mapAnchor: [number, number] }
+  | { type: "dragFloor"; label: string; mapAnchor: [number, number] }
+  | { type: "rotateFrame"; rotationDeg: number }
+  | { type: "scaleFrame"; metresPerPoint: number }
   | { type: "setDrawingScale"; denominator: number }
   | { type: "calibrateDistance"; artworkDistance: number; realMetres: number }
   | { type: "unlockScale" }
+  | { type: "unlockFloor"; label: string }
+  | { type: "relinkFloor"; label: string }
+  | { type: "setActiveFloor"; label: string }
   | { type: "setWorkingCrs"; workingCrs: string }
   | { type: "addControlPoint"; point: ControlPoint }
   | { type: "removeControlPoint"; id: string }
   | { type: "fitControlPoints" }
-  | { type: "applyTransform"; transform: SimilarityTransform };
+  | { type: "applyFloors"; floors: { label: string; transform: TransformPayload }[] };
 
 function normaliseRotation(degrees: number): number {
   const wrapped = ((degrees + 180) % 360) - 180;
   return wrapped <= -180 ? wrapped + 360 : wrapped;
 }
 
-/** Control points as ENU metres about the current anchor. */
-function toEnuPairs(state: PlacementState): [number, number][] {
-  const [lon0, lat0] = state.transform.mapAnchor;
-  return state.controlPoints.map((point) => lngLatToEnu(point.map[0], point.map[1], lon0, lat0));
+/** The active floor's full transform, resolved from the frame when linked. */
+export function resolvedTransform(
+  state: PlacementState,
+  floor: FloorPlacement
+): SimilarityTransform {
+  return {
+    artworkAnchor: floor.artworkAnchor,
+    mapAnchor: floor.mapAnchor,
+    rotationDeg: floor.linked ? state.frame.rotationDeg : (floor.rotationDeg ?? state.frame.rotationDeg),
+    metresPerPoint: floor.linked
+      ? state.frame.metresPerPoint
+      : (floor.metresPerPoint ?? state.frame.metresPerPoint),
+    workingCrs: state.frame.workingCrs
+  };
+}
+
+function activeFloor(state: PlacementState): FloorPlacement | null {
+  return state.floors.find((f) => f.label === state.activeFloorLabel) ?? null;
+}
+
+/** Derived anchor: active anchor + the frame applied to the artwork offset. */
+function deriveAnchor(state: PlacementState, floor: FloorPlacement): [number, number] {
+  const active = activeFloor(state);
+  if (!active) return floor.mapAnchor;
+  const dx = floor.artworkAnchor[0] - active.artworkAnchor[0];
+  const dy = floor.artworkAnchor[1] - active.artworkAnchor[1];
+  const theta = (state.frame.rotationDeg * Math.PI) / 180;
+  const s = state.frame.metresPerPoint;
+  const east = s * (Math.cos(theta) * dx - Math.sin(theta) * dy);
+  const north = s * (Math.sin(theta) * dx + Math.cos(theta) * dy);
+  return enuToLngLat(east, north, active.mapAnchor[0], active.mapAnchor[1]);
+}
+
+function recomputeLinked(state: PlacementState): PlacementState {
+  const active = activeFloor(state);
+  if (!active) return state;
+  return {
+    ...state,
+    floors: state.floors.map((f) =>
+      f.label === active.label || !f.linked ? f : { ...f, mapAnchor: deriveAnchor(state, f) }
+    )
+  };
+}
+
+/** One full transform payload per floor, for the export request. */
+export function toFloorPayloads(
+  state: PlacementState
+): { label: string; transform: TransformPayload }[] {
+  return state.floors.map((f) => {
+    const t = resolvedTransform(state, f);
+    return {
+      label: f.label,
+      transform: {
+        artwork_anchor: t.artworkAnchor,
+        map_anchor: t.mapAnchor,
+        rotation_deg: t.rotationDeg,
+        metres_per_point: t.metresPerPoint,
+        working_crs: t.workingCrs
+      }
+    };
+  });
+}
+
+/** Rebuild state from a saved floor set; anchors and frame come from the save. */
+export function floorPayloadsToState(
+  floors: { label: string; transform: TransformPayload }[],
+  current: PlacementState
+): PlacementState {
+  const active = floors[0]?.label ?? null;
+  const frameTransform = floors.find((f) => f.label === active)?.transform;
+  const byLabel = new Map(floors.map((f) => [f.label, f.transform]));
+  return {
+    frame: {
+      rotationDeg: frameTransform?.rotation_deg ?? current.frame.rotationDeg,
+      metresPerPoint: frameTransform?.metres_per_point ?? current.frame.metresPerPoint,
+      workingCrs: frameTransform?.working_crs ?? current.frame.workingCrs
+    },
+    activeFloorLabel: active,
+    scaleLocked: true,
+    floors: current.floors.map((f) => {
+      const saved = byLabel.get(f.label);
+      return saved
+        ? {
+            ...f,
+            linked: true,
+            mapAnchor: [saved.map_anchor[0], saved.map_anchor[1]] as [number, number],
+            rotationDeg: undefined,
+            metresPerPoint: undefined,
+            controlPoints: []
+          }
+        : f;
+    })
+  };
 }
 
 export function placementReducer(state: PlacementState, action: PlacementAction): PlacementState {
   switch (action.type) {
-    case "moveAnchor":
-      return { ...state, transform: { ...state.transform, mapAnchor: action.mapAnchor } };
+    case "positionBuilding": {
+      const active = activeFloor(state);
+      if (!active) return state;
+      const moved = {
+        ...state,
+        floors: state.floors.map((f) =>
+          f.label === active.label ? { ...f, mapAnchor: action.mapAnchor } : f
+        )
+      };
+      return active.linked ? recomputeLinked(moved) : moved;
+    }
 
-    case "rotate":
+    case "dragFloor": {
+      const single = state.floors.length === 1;
       return {
         ...state,
-        transform: { ...state.transform, rotationDeg: normaliseRotation(action.rotationDeg) }
+        floors: state.floors.map((f) =>
+          f.label === action.label
+            ? { ...f, mapAnchor: action.mapAnchor, linked: single ? f.linked : false }
+            : f
+        )
       };
+    }
 
-    case "scale":
-      // A locked scale came from the drawing itself; dragging must not destroy it.
+    case "rotateFrame": {
+      const rotationDeg = normaliseRotation(action.rotationDeg);
+      if (!state.floors.some((f) => f.linked)) return state;
+      return recomputeLinked({ ...state, frame: { ...state.frame, rotationDeg } });
+    }
+
+    case "scaleFrame": {
       if (state.scaleLocked || !(action.metresPerPoint > 0)) return state;
-      return { ...state, transform: { ...state.transform, metresPerPoint: action.metresPerPoint } };
+      return recomputeLinked({
+        ...state,
+        frame: { ...state.frame, metresPerPoint: action.metresPerPoint }
+      });
+    }
 
-    case "setDrawingScale":
+    case "setDrawingScale": {
       if (!(action.denominator > 0)) return state;
-      return {
+      return recomputeLinked({
         ...state,
         scaleLocked: true,
-        transform: {
-          ...state.transform,
-          metresPerPoint: metresPerPointForScale(action.denominator)
-        }
-      };
+        frame: { ...state.frame, metresPerPoint: metresPerPointForScale(action.denominator) }
+      });
+    }
 
-    case "calibrateDistance":
+    case "calibrateDistance": {
       if (!(action.artworkDistance > 0) || !(action.realMetres > 0)) return state;
-      return {
+      return recomputeLinked({
         ...state,
         scaleLocked: true,
-        transform: {
-          ...state.transform,
-          metresPerPoint: action.realMetres / action.artworkDistance
-        }
-      };
+        frame: { ...state.frame, metresPerPoint: action.realMetres / action.artworkDistance }
+      });
+    }
 
     case "unlockScale":
       return { ...state, scaleLocked: false };
 
     case "setWorkingCrs":
-      return { ...state, transform: { ...state.transform, workingCrs: action.workingCrs } };
+      return { ...state, frame: { ...state.frame, workingCrs: action.workingCrs } };
+
+    case "unlockFloor":
+      return {
+        ...state,
+        floors: state.floors.map((f) =>
+          f.label === action.label
+            ? {
+                ...f,
+                linked: false,
+                rotationDeg: state.frame.rotationDeg,
+                metresPerPoint: state.frame.metresPerPoint
+              }
+            : f
+        )
+      };
+
+    case "relinkFloor": {
+      const floor = state.floors.find((f) => f.label === action.label);
+      if (!floor || floor.linked) return state;
+      const linked = {
+        ...floor,
+        linked: true,
+        rotationDeg: undefined,
+        metresPerPoint: undefined
+      };
+      return recomputeLinked({
+        ...state,
+        floors: state.floors.map((f) => (f.label === action.label ? linked : f))
+      });
+    }
+
+    case "setActiveFloor":
+      return { ...state, activeFloorLabel: action.label };
 
     case "addControlPoint":
-      return { ...state, controlPoints: [...state.controlPoints, action.point] };
+      return {
+        ...state,
+        floors: state.floors.map((f) =>
+          f.label === state.activeFloorLabel
+            ? { ...f, controlPoints: [...f.controlPoints, action.point] }
+            : f
+        )
+      };
 
     case "removeControlPoint":
       return {
         ...state,
-        controlPoints: state.controlPoints.filter((point) => point.id !== action.id)
+        floors: state.floors.map((f) =>
+          f.label === state.activeFloorLabel
+            ? { ...f, controlPoints: f.controlPoints.filter((p) => p.id !== action.id) }
+            : f
+        )
       };
 
     case "fitControlPoints": {
-      if (state.controlPoints.length < 2) return state;
-      const [lon0, lat0] = state.transform.mapAnchor;
+      const active = activeFloor(state);
+      if (!active || active.controlPoints.length < 2) return state;
+      const [lon0, lat0] = active.mapAnchor;
+      const enu = active.controlPoints.map((p) => lngLatToEnu(p.map[0], p.map[1], lon0, lat0));
       const fitted = fitHelmert(
-        state.controlPoints.map((point) => point.artwork),
-        toEnuPairs(state),
-        state.transform.workingCrs,
-        state.scaleLocked ? state.transform.metresPerPoint : undefined
+        active.controlPoints.map((p) => p.artwork),
+        enu,
+        state.frame.workingCrs,
+        active.linked && state.scaleLocked ? state.frame.metresPerPoint : undefined
       );
-      // fitHelmert returns the anchor in ENU metres; store lon/lat.
       const [lon, lat] = enuToLngLat(fitted.mapAnchor[0], fitted.mapAnchor[1], lon0, lat0);
-      return { ...state, transform: { ...fitted, mapAnchor: [lon, lat] } };
+      const single = state.floors.length === 1;
+      if (single) {
+        // One floor: the fit applies through the frame and the floor stays
+        // linked, preserving the single-floor behaviour.
+        return {
+          ...state,
+          frame: {
+            ...state.frame,
+            rotationDeg: fitted.rotationDeg,
+            metresPerPoint: state.scaleLocked
+              ? state.frame.metresPerPoint
+              : fitted.metresPerPoint
+          },
+          floors: state.floors.map((f) =>
+            f.label === active.label ? { ...f, mapAnchor: [lon, lat] } : f
+          )
+        };
+      }
+      // Multi-floor: the fit owns this floor's full transform, including its
+      // own anchor; keeping the region-centroid anchor would make residuals
+      // wrong. The floor unlinks so the frame never fights the fit.
+      return {
+        ...state,
+        floors: state.floors.map((f) =>
+          f.label === active.label
+            ? {
+                ...f,
+                linked: false,
+                artworkAnchor: [fitted.artworkAnchor[0], fitted.artworkAnchor[1]],
+                mapAnchor: [lon, lat],
+                rotationDeg: fitted.rotationDeg,
+                metresPerPoint: fitted.metresPerPoint
+              }
+            : f
+        )
+      };
     }
 
-    case "applyTransform":
-      return { ...state, transform: action.transform, scaleLocked: true };
+    case "applyFloors":
+      return floorPayloadsToState(action.floors, state);
 
     default:
       return state;
   }
 }
 
-/** Residuals of the current control points, or null below the fit minimum. */
+/** Residuals of the active floor's control points, or null below the minimum. */
 export function currentResiduals(
   state: PlacementState
 ): { perPoint: number[]; rmse: number } | null {
-  if (state.controlPoints.length < 2) return null;
+  const active = activeFloor(state);
+  if (!active || active.controlPoints.length < 2) return null;
+  const [lon0, lat0] = active.mapAnchor;
+  const enu = active.controlPoints.map((p) => lngLatToEnu(p.map[0], p.map[1], lon0, lat0));
   return residuals(
-    state.transform,
-    state.controlPoints.map((point) => point.artwork),
-    toEnuPairs(state)
+    resolvedTransform(state, active),
+    active.controlPoints.map((p) => p.artwork),
+    enu
   );
-}
-
-export function toTransformPayload(transform: SimilarityTransform): TransformPayload {
-  return {
-    artwork_anchor: transform.artworkAnchor,
-    map_anchor: transform.mapAnchor,
-    rotation_deg: transform.rotationDeg,
-    metres_per_point: transform.metresPerPoint,
-    working_crs: transform.workingCrs
-  };
-}
-
-export function fromTransformPayload(payload: TransformPayload): SimilarityTransform {
-  return {
-    artworkAnchor: payload.artwork_anchor,
-    mapAnchor: payload.map_anchor,
-    rotationDeg: payload.rotation_deg,
-    metresPerPoint: payload.metres_per_point,
-    workingCrs: payload.working_crs
-  };
 }
 
 export function useIllustratorPlacement(initial: PlacementState) {

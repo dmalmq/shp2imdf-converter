@@ -8,8 +8,7 @@ import {
 } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
-  fromTransformPayload,
-  toTransformPayload,
+  toFloorPayloads,
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
@@ -59,7 +58,7 @@ export function PlacementLibrary({ state, dispatch, artworkBounds }: Props) {
     try {
       await createPlacement({
         name: name.trim(),
-        transform: toTransformPayload(state.transform),
+        floors: toFloorPayloads(state),
         artwork_bounds: artworkBounds
       });
       setName("");
@@ -70,12 +69,17 @@ export function PlacementLibrary({ state, dispatch, artworkBounds }: Props) {
   };
 
   const apply = (placement: PlacementItem) => {
-    dispatch({ type: "applyTransform", transform: fromTransformPayload(placement.transform) });
+    dispatch({ type: "applyFloors", floors: placement.floors });
+    const saved = new Set(placement.floors.map((f) => f.label));
+    const current = new Set(state.floors.map((f) => f.label));
+    const missing = [...saved].filter((label) => !current.has(label));
+    const extra = [...current].filter((label) => !saved.has(label));
+    const floorMismatch = missing.length + extra.length > 0;
     setWarning(
-      boundsWarning(placement.artwork_bounds, artworkBounds)
+      boundsWarning(placement.artwork_bounds, artworkBounds) || floorMismatch
         ? t(
-            "This drawing's artboard differs from the saved placement. Check the alignment.",
-            "この図面のアートボードは保存時と異なります。位置合わせを確認してください。"
+            "This drawing or its floors differ from the saved placement. Check the alignment.",
+            "この図面またはフロア構成は保存時と異なります。位置合わせを確認してください。"
           )
         : null
     );
