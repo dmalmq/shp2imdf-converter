@@ -682,6 +682,14 @@ def _source_code(feature: dict[str, Any], prefix: str, candidates: list[str]) ->
     return None
 
 
+def _source_facility_code(feature: dict[str, Any]) -> str | None:
+    value = _property_or_metadata(feature, [], ["category"])
+    text = _text_or_none(value)
+    if text and re.fullmatch(r"F\d{3}[A-Za-z]?", text.strip(), flags=re.IGNORECASE):
+        return text.strip()
+    return None
+
+
 def _code_for_feature_category(
     feature: dict[str, Any],
     prefix: str,
@@ -845,71 +853,47 @@ ODC_GROUND_FLOOR_CODE = "1F"
 FACILITY_INSIDE_TOLERANCE_M = 0.5
 DEGREES_PER_METER = 1 / 111_320
 
-# 地図記号 image → 別表8.3.1 設備POI category, exported as the table's English
-# name (the F-code is kept here only for traceability).
-FACILITY_MERGE_IMAGE_CATEGORIES = {
-    "male": "Lavatory(Male)",  # F001
-    "female": "Lavatory(Female)",  # F002
-    "unisex": "Lavatory (Unisex)",  # F003
-    "multipurpose": "Multipurpose Lavatory",  # F005
-    "baby": "Multipurpose Lavatory (Change Diaper)",  # F007
-    "stairs_up": "Stairs",  # F011
-    "stairs_down": "Stairs",  # F011
-    "elevator": "Elevator",  # F012
-    "elevator_up": "Elevator",  # F012
-    "elevator_down": "Elevator",  # F012
-    "escalator": "Escalator",  # F013
-    "slope": "Slope",  # F014
-    "info": "Information",  # F018
-    "smoking": "Smoking Area",  # F024
-    "locker": "Coin Lockers",  # F031
-    "silver_bell": "Landmark",  # F043
-    "bus": "Busstop",  # F038
-    "free_shuttle_bus": "Busstop",  # F038
-    "taxi": "Taxistop",  # F039
-    "ticket": "Ticket Office",  # F101 (精算所 resolves to F103 below)
-    "mv": "Ticket Office",  # F101 みどりの窓口
-    "exchange": "Currency Exchange",  # F214
+# 地図記号 image → 別表8.3.1 設備POI F-code. Unlisted icons (children, bus,
+# taxi, prayer, K01, map_rogo, store, platform logos, etc.) export as null.
+FACILITY_MERGE_IMAGE_F_CODES = {
+    "male": "F001",
+    "female": "F002",
+    "unisex": "F003",
+    "multipurpose": "F005",
+    "stairs_up": "F011",
+    "stairs_down": "F011",
+    "elevator": "F012",
+    "elevator_up": "F012",
+    "elevator_down": "F012",
+    "escalator": "F013",
+    "slope": "F014",
+    "info": "F018",
+    "smoking": "F024",
+    "locker": "F031",
+    "ticket": "F101",
+    "mv": "F101",
+    "exchange": "F214",
 }
 
-# Two 別表8.3.1 categories share one icon; the Facility_Merge category breaks
-# the tie.
-FACILITY_MERGE_CATEGORY_OVERRIDES = {
-    ("ticket", "fare adjustment"): "Fare Adjustment",  # F103
-}
 
-# Fallbacks for icons whose file name is facility-specific: platform number
-# logos and 施設ロゴ carry no shared basename.
-FACILITY_MERGE_SOURCE_CATEGORIES = {
-    "home": "Notes for Map Representation",  # F042 platform number logos
-    "area": "Store",  # F025 named facility logos
-}
-FACILITY_MERGE_MAP_NOTE_PREFIX = "map_rogo"
-FACILITY_MERGE_MAP_NOTE_CATEGORY = "Notes for Map Representation"  # F042
+def _facility_merge_f_code(metadata: dict[str, Any]) -> str | None:
+    """設備POI F-code (別表8.3.1) for a Facility_Merge row.
 
-
-def _facility_merge_category(metadata: dict[str, Any]) -> str | None:
-    """設備POI category (別表8.3.1 English name) for a Facility_Merge row.
-
-    The 地図記号 image is finer grained than the source category (`toilet`
-    alone cannot separate F001/F002/F005), so the image drives the mapping and
-    the source category only breaks ties or covers facility-specific icons.
+    Driven by the 地図記号 image basename. `baby.png` is F021 unless the row
+    is toilet-related (category/name contains toilet/トイレ), in which case
+    it is null. Icons not in the map export as null.
     """
     image = _text_or_none(_metadata_value(metadata, ["image"]))
-    source_category = (_text_or_none(_metadata_value(metadata, ["category"])) or "").lower()
-    basename = ""
-    if image:
-        basename = image.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower()
-    if basename:
-        if basename.startswith(FACILITY_MERGE_MAP_NOTE_PREFIX):
-            return FACILITY_MERGE_MAP_NOTE_CATEGORY
-        override = FACILITY_MERGE_CATEGORY_OVERRIDES.get((basename, source_category))
-        if override:
-            return override
-        mapped = FACILITY_MERGE_IMAGE_CATEGORIES.get(basename)
-        if mapped:
-            return mapped
-    return FACILITY_MERGE_SOURCE_CATEGORIES.get(source_category)
+    if not image:
+        return None
+    basename = image.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower()
+    if basename == "baby":
+        source_category = (_text_or_none(_metadata_value(metadata, ["category"])) or "").lower()
+        name = (_text_or_none(_metadata_value(metadata, ["name"])) or "").lower()
+        if "toilet" in source_category or "toilet" in name or "トイレ" in name:
+            return None
+        return "F021"
+    return FACILITY_MERGE_IMAGE_F_CODES.get(basename)
 
 
 def _is_facility_merge_feature(feature: dict[str, Any]) -> bool:
@@ -961,7 +945,6 @@ def _odc_report(request: ShapefileExportRequest) -> dict[str, Any]:
         "category_code_fallbacks": [],
         "facility_merge_unmapped": [],
         "facility_merge_outside_building": [],
-        "facility_merge_missing_image": [],
         "facility_merge_missing_category": [],
     }
 
@@ -988,7 +971,6 @@ def _write_odc2026_shapefiles(
     a_reverse = _reverse_category_code_map(_load_category_code_map("a-codes.json"))
     b_reverse = _reverse_category_code_map(_load_category_code_map("b-codes.json"))
     c_reverse = _reverse_category_code_map(_load_category_code_map("c-codes.json"))
-    f_reverse = _reverse_category_code_map(_load_category_code_map("f-codes.json"))
 
     levels = sorted(
         [item for item in features if item.get("feature_type") == "level"],
@@ -1007,10 +989,6 @@ def _write_odc2026_shapefiles(
         code = _floor_code_of(_label_text(props.get("short_name"))) or _floor_code_of(_label_text(props.get("name")))
         if code and level.get("id"):
             level_id_by_floor_code.setdefault(code, str(level.get("id")))
-    facility_merge_active = any(
-        feature.get("feature_type") == "amenity" and _is_facility_merge_feature(feature)
-        for feature in features
-    )
     level_geom_by_id = {
         str(level.get("id")): _feature_geometry(level)
         for level in levels
@@ -1018,6 +996,10 @@ def _write_odc2026_shapefiles(
     }
     ground_level_geom = level_geom_by_id.get(level_id_by_floor_code.get(ODC_GROUND_FLOOR_CODE, ""))
     inside_tolerance = FACILITY_INSIDE_TOLERANCE_M * DEGREES_PER_METER
+    facility_merge_active = any(
+        feature.get("feature_type") == "amenity" and _is_facility_merge_feature(feature)
+        for feature in features
+    )
     unit_level_by_id = {
         str(item.get("id")): _feature_properties(item).get("level_id")
         for item in features
@@ -1053,7 +1035,8 @@ def _write_odc2026_shapefiles(
         if feature_type == "amenity":
             if facility_merge_active:
                 # Facility layers are built from Facility_Merge (ステナビ地図記号
-                # 表示点); per-floor *_Facility.shp amenities are superseded.
+                # 表示点); its semantic categories are mapped to 別表8.3.1 F-codes
+                # and per-floor *_Facility.shp amenities are superseded.
                 if not _is_facility_merge_feature(feature):
                     continue
                 floor_attr = _text_or_none(_metadata_value(_feature_metadata(feature), ["floor"]))
@@ -1302,48 +1285,26 @@ def _write_odc2026_shapefiles(
                 if geom is None:
                     continue
                 if facility_merge_active:
-                    # Facility_Merge carries the 地図記号 image path
-                    # ("/marker/male.png"); the 別表8.3.1 category is derived
-                    # from it. Both replace the ODC F-code column.
+                    # Facility_Merge rows carry a semantic category and a 地図記号
+                    # image; both resolve to the 別表8.3.1 F-code column.
                     metadata = _feature_metadata(amenity)
-                    image = _text_or_none(_metadata_value(metadata, ["image"]))
-                    category = _facility_merge_category(metadata)
-                    floor_attr = _text_or_none(_metadata_value(metadata, ["floor"]))
-                    if image is None:
-                        report["facility_merge_missing_image"].append(
-                            {"feature_id": _feature_id_value(amenity), "floor": floor_attr}
-                        )
+                    category = _facility_merge_f_code(metadata)
                     if category is None:
+                        floor_attr = _text_or_none(_metadata_value(metadata, ["floor"]))
                         report["facility_merge_missing_category"].append(
                             {"feature_id": _feature_id_value(amenity), "floor": floor_attr}
                         )
-                    facility_rows.append(
-                        {
-                            "id": _feature_id_value(amenity),
-                            "category": category,
-                            "image": image,
-                            "floor_id": level_id,
-                            "name": _display_name(amenity),
-                            "source": _source_value(amenity),
-                        }
-                    )
                 else:
-                    facility_rows.append(
-                        {
-                            "id": _feature_id_value(amenity),
-                            "category": _code_for_feature_category(
-                                amenity,
-                                prefix="F",
-                                source_candidates=["category"],
-                                reverse_map=f_reverse,
-                                fallback="F999",
-                                report=report,
-                            ),
-                            "floor_id": level_id,
-                            "name": _display_name(amenity),
-                            "source": _source_value(amenity),
-                        }
-                    )
+                    category = _source_facility_code(amenity)
+                facility_rows.append(
+                    {
+                        "id": _feature_id_value(amenity),
+                        "category": category,
+                        "floor_id": level_id,
+                        "name": _display_name(amenity),
+                        "source": _source_value(amenity),
+                    }
+                )
                 facility_geoms.append(geom)
             facility_stem = _safe_layer_stem(base, label, "Facility")
             if _write_odc_layer(output_dir, facility_stem, facility_rows, facility_geoms, write_encoding, ODC_POINT_GEOMS, report):

@@ -1853,7 +1853,7 @@ def test_shapefile_export_normalizes_other_feature_schemas_and_renames_suffixes(
             assert str(level.iloc[0]["category"]).strip() in {"1", "1.0"}
 
 
-def _write_imdf_schema_shapefiles(root: Path) -> dict[str, str]:
+def _write_imdf_schema_shapefiles(root: Path, *, facility_category: str = "F001") -> dict[str, str]:
     site_id = "11111111-1111-4111-8111-111111111111"
     building_id = "22222222-2222-4222-8222-222222222222"
     level_id = "33333333-3333-4333-8333-333333333333"
@@ -1916,7 +1916,7 @@ def _write_imdf_schema_shapefiles(root: Path) -> dict[str, str]:
     gpd.GeoDataFrame(
         {
             "id": [amenity_id],
-            "category": ["F001"],
+            "category": [facility_category],
             "floor_id": [level_id],
             "name": ["Info Desk"],
             "source": ["1"],
@@ -2104,7 +2104,7 @@ def test_imdf_schema_shapefile_import_merges_levels_with_same_name(test_client) 
 def test_odc2026_shapefile_export_from_imdf_schema_import(test_client) -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
-        ids = _write_imdf_schema_shapefiles(root)
+        ids = _write_imdf_schema_shapefiles(root, facility_category="F012a")
         import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
 
     assert import_response.status_code == 201
@@ -2156,7 +2156,7 @@ def test_odc2026_shapefile_export_from_imdf_schema_import(test_client) -> None:
             facility = gpd.read_file(Path(output_dir) / "Demo_Station_1_Facility.shp")
             assert set(facility.columns) == {"id", "category", "floor_id", "name", "source", "geometry"}
             assert facility.iloc[0]["id"] == ids["amenity_id"]
-            assert facility.iloc[0]["category"] == "F001"
+            assert facility.iloc[0]["category"] == "F012a"
             assert facility.iloc[0]["floor_id"] == ids["level_id"]
 
             building = gpd.read_file(Path(output_dir) / "Demo_Station_Building.shp")
@@ -2167,11 +2167,17 @@ def test_odc2026_shapefile_export_from_imdf_schema_import(test_client) -> None:
 
 
 @pytest.mark.phase5
-def test_odc2026_export_builds_facility_from_facility_merge(test_client) -> None:
+def test_odc2026_export_maps_facility_merge_categories_to_f_codes(test_client) -> None:
     inside_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1"
     no_image_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2"
-    fare_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb6"
+    ticket_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb6"
     platform_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb7"
+    baby_toilet_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    baby_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc"
+    children_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbd"
+    escalator_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb8"
+    stairs_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb9"
+    elevator_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbba"
     basement_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3"
     outside_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4"
     unmapped_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5"
@@ -2205,36 +2211,84 @@ def test_odc2026_export_builds_facility_from_facility_merge(test_client) -> None
         ).to_file(root / "Demo_B3_Floor.shp", driver="ESRI Shapefile", index=False)
         gpd.GeoDataFrame(
             {
-                "id": [inside_id, no_image_id, fare_id, platform_id, basement_id, outside_id, unmapped_id],
-                "category": ["toilet", "movement", "Fare adjustment", "home", "toilet", "toilet", "toilet"],
+                "id": [
+                    inside_id,
+                    no_image_id,
+                    ticket_id,
+                    platform_id,
+                    escalator_id,
+                    stairs_id,
+                    elevator_id,
+                    baby_toilet_id,
+                    baby_id,
+                    children_id,
+                    basement_id,
+                    outside_id,
+                    unmapped_id,
+                ],
+                "category": [
+                    "toilet",
+                    "movement",
+                    "Fare adjustment",
+                    "home",
+                    "movement",
+                    "movement",
+                    "movement",
+                    "toilet",
+                    "area",
+                    "toilet",
+                    "toilet",
+                    "toilet",
+                    "toilet",
+                ],
                 "image": [
                     "/marker/male.png",
                     None,
-                    # Shared icon: 切符売り場 and 精算所 differ only by category.
                     "/marker/ticket.png",
-                    # Platform number logo: facility-specific file name.
+                    # Platform logo: no F-code.
                     "/marker/T01_s.svg",
+                    "/marker/escalator.png",
+                    "/marker/stairs_up.png",
+                    "/marker/elevator.png",
+                    # baby.png under toilet → null.
+                    "/marker/baby.png",
+                    # baby.png without toilet → F021.
+                    "/marker/baby.png",
+                    # children.png → null.
+                    "/marker/children.png",
                     "/marker/unisex.png",
                     "/marker/female.png",
                     "/marker/multipurpose.png",
                 ],
-                "floor": ["F1", "F1", "F1", "F1", "KB3", "F1", "F7"],
+                "floor": ["F1"] * 10 + ["KB3", "F1", "F7"],
                 "name": [
                     "Toilet",
                     "Escalator",
                     "Fare adjustment",
                     "Platform 1",
+                    "Escalator",
+                    "Stairs",
+                    "Elevator",
+                    "Baby toilet",
+                    "Nursing room",
+                    "こどもトイレ",
                     "Keiyo toilet",
                     "Outside toilet",
                     "Tower toilet",
                 ],
-                "source": ["1", "1", "1", "1", "1", "1", "1"],
+                "source": ["1"] * 13,
             },
             geometry=[
                 Point(139.7003, 35.6903),
                 Point(139.7004, 35.6904),
                 Point(139.70055, 35.69055),
                 Point(139.70065, 35.69065),
+                Point(139.70025, 35.69025),
+                Point(139.70035, 35.69035),
+                Point(139.70045, 35.69045),
+                Point(139.7005, 35.6902),
+                Point(139.7006, 35.6903),
+                Point(139.7007, 35.6904),
                 # Inside the B3 concourse, far outside the 1F footprint.
                 Point(139.7024, 35.6924),
                 # Outside every level polygon.
@@ -2256,25 +2310,37 @@ def test_odc2026_export_builds_facility_from_facility_merge(test_client) -> None
         report = json.loads(archive.read("export_report.json"))
         assert report["facility_merge_unmapped"] == [{"feature_id": unmapped_id, "floor": "F7"}]
         assert report["facility_merge_outside_building"] == [{"feature_id": outside_id, "floor": "F1"}]
-        assert report["facility_merge_missing_image"] == [{"feature_id": no_image_id, "floor": "F1"}]
-        assert report["facility_merge_missing_category"] == [{"feature_id": no_image_id, "floor": "F1"}]
+        assert "facility_merge_missing_image" not in report
+        assert sorted(report["facility_merge_missing_category"], key=lambda item: item["feature_id"]) == sorted(
+            [
+                {"feature_id": no_image_id, "floor": "F1"},
+                {"feature_id": platform_id, "floor": "F1"},
+                {"feature_id": baby_toilet_id, "floor": "F1"},
+                {"feature_id": children_id, "floor": "F1"},
+            ],
+            key=lambda item: item["feature_id"],
+        )
         with tempfile.TemporaryDirectory() as output_dir:
             archive.extractall(output_dir)
             facility = gpd.read_file(Path(output_dir) / "Demo_Station_1_Facility.shp")
-            assert set(facility.columns) == {"id", "category", "image", "floor_id", "name", "source", "geometry"}
+            assert set(facility.columns) == {"id", "category", "floor_id", "name", "source", "geometry"}
             by_id = {
-                row["id"]: (row["category"], row["image"])
+                row["id"]: row["category"]
                 for _, row in facility.iterrows()
             }
             assert by_id == {
-                # Icon drives the 別表8.3.1 category, exported as English name.
-                inside_id: ("Lavatory(Male)", "/marker/male.png"),
-                # `movement` with no icon cannot be resolved to a category.
-                no_image_id: (None, None),
-                # Source category breaks the shared-icon tie (F103, not F101).
-                fare_id: ("Fare Adjustment", "/marker/ticket.png"),
-                # Facility-specific icon falls back to the source category.
-                platform_id: ("Notes for Map Representation", "/marker/T01_s.svg"),
+                inside_id: "F001",
+                no_image_id: None,
+                # ticket.png is always F101, including fare-adjustment rows.
+                ticket_id: "F101",
+                # Platform logos and unlisted icons export as null.
+                platform_id: None,
+                escalator_id: "F013",
+                stairs_id: "F011",
+                elevator_id: "F012",
+                baby_toilet_id: None,
+                baby_id: "F021",
+                children_id: None,
             }
             assert set(facility["floor_id"]) == {ids["level_id"]}
             assert ids["amenity_id"] not in set(facility["id"])
@@ -2283,9 +2349,46 @@ def test_odc2026_export_builds_facility_from_facility_merge(test_client) -> None
             # falls outside the 1F building outline.
             basement = gpd.read_file(Path(output_dir) / "Demo_Station_B3_Facility.shp")
             assert list(basement["id"]) == [basement_id]
-            assert list(basement["category"]) == ["Lavatory (Unisex)"]
-            assert list(basement["image"]) == ["/marker/unisex.png"]
+            assert list(basement["category"]) == ["F003"]
+            assert "image" not in basement.columns
             assert list(basement["floor_id"]) == [basement_level_id]
+
+
+@pytest.mark.phase5
+def test_odc2026_export_uses_facility_merge_when_present(test_client) -> None:
+    merge_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        ids = _write_imdf_schema_shapefiles(root, facility_category="F012a")
+        gpd.GeoDataFrame(
+            {
+                "id": [merge_id],
+                "category": ["movement"],
+                "image": ["/marker/escalator.png"],
+                "floor": ["F1"],
+                "name": ["Escalator"],
+                "source": ["1"],
+            },
+            geometry=[Point(139.7003, 35.6903)],
+            crs="EPSG:4326",
+        ).to_file(root / "Facility_Merge.shp", driver="ESRI Shapefile", index=False)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"profile": "odc2026", "export_name": "Demo_Station"},
+    )
+
+    assert export_response.status_code == 200
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        with tempfile.TemporaryDirectory() as output_dir:
+            archive.extractall(output_dir)
+            facility = gpd.read_file(Path(output_dir) / "Demo_Station_1_Facility.shp")
+            assert list(facility["id"]) == [merge_id]
+            assert list(facility["category"]) == ["F013"]
+            assert "image" not in facility.columns
 
 
 @pytest.mark.phase5

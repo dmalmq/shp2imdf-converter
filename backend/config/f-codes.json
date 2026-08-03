@@ -1,0 +1,19 @@
+{
+  "default_category": "unspecified",
+  "mappings": {
+    "F001": "Lavatory(Male)",
+    "F002": "Lavatory(Female)",
+    "F003": "Lavatory (Unisex)",
+    "F005": "Multipurpose Lavatory",
+    "F011": "Stairs",
+    "F012": "Elevator",
+    "F013": "Escalator",
+    "F014": "Slope",
+    "F018": "Information",
+    "F021": "Baby",
+    "F024": "Smoking Area",
+    "F031": "Coin Lockers",
+    "F101": "Ticket Office",
+    "F214": "Currency Exchange"
+  }
+}
