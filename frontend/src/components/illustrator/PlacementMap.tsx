@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import type { Feature, FeatureCollection } from "geojson";
 import MapGL, { Layer, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
@@ -17,34 +18,55 @@ import {
 import { Button } from "../ui";
 import { TransformHandles } from "./TransformHandles";
 
+export const FLOOR_TINTS = ["#3b82f6", "#16a34a", "#dc2626", "#9333ea", "#d97706", "#0891b2"];
+
+export type FloorLayer = {
+  label: string;
+  features: Feature[];
+  bounds: [number, number, number, number];
+  color: string;
+};
+
 type Props = {
-  preview: { type: "FeatureCollection"; features: any[] };
-  artworkBounds: [number, number, number, number];
+  floors: FloorLayer[];
   state: PlacementState;
   dispatch: (action: PlacementAction) => void;
   pickingControlPoint: boolean;
   onPickMap: (lngLat: [number, number]) => void;
 };
 
-export function PlacementMap({
-  preview,
-  state,
-  dispatch,
-  pickingControlPoint,
-  onPickMap
-}: Props) {
+/**
+ * Placement map: one tinted GeoJSON source per floor, a floor picker, and
+ * transform handles for the active floor only.
+ */
+export function PlacementMap({ floors, state, dispatch, pickingControlPoint, onPickMap }: Props) {
   const { t } = useUiLanguage();
   const mapRef = useRef<MapRef | null>(null);
   const [ready, setReady] = useState(false);
   const [basemap, setBasemap] = useState<BasemapId>("osm");
 
-  // Interim single-floor rendering: the active floor, resolved from the frame.
-  // Per-floor sources land in the multi-floor map task.
-  const activeFloor = state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
+  const activeFloor =
+    state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
+  const activeLayer = floors.find((f) => f.label === activeFloor?.label) ?? floors[0];
   const activeTransform = activeFloor ? resolvedTransform(state, activeFloor) : null;
-  const placed = useMemo(
-    () => (activeTransform ? transformGeoJson(preview, activeTransform) : preview),
-    [preview, activeTransform]
+
+  const placedByFloor = useMemo(
+    () =>
+      floors.map((floor) => {
+        const floorState = state.floors.find((f) => f.label === floor.label);
+        const transform = floorState ? resolvedTransform(state, floorState) : null;
+        return {
+          label: floor.label,
+          color: floor.color,
+          data: transform
+            ? transformGeoJson(
+                { type: "FeatureCollection", features: floor.features } satisfies FeatureCollection,
+                transform
+              )
+            : ({ type: "FeatureCollection", features: [] } satisfies FeatureCollection)
+        };
+      }),
+    [floors, state]
   );
 
   const controlPointData = useMemo(
@@ -80,30 +102,27 @@ export function PlacementMap({
         onClick={onClick}
         cursor={pickingControlPoint ? "crosshair" : undefined}
       >
-        <Source id="placement-artwork" type="geojson" data={placed}>
-          <Layer
-            id="placement-artwork-fill"
-            type="fill"
-            filter={["==", ["geometry-type"], "Polygon"]}
-            paint={{
-              "fill-color": ["coalesce", ["get", "fill_color"], "#3b82f6"],
-              "fill-opacity": 0.45
-            }}
-          />
-          <Layer
-            id="placement-artwork-line"
-            type="line"
-            paint={{
-              "line-color": [
-                "coalesce",
-                ["get", "stroke_color"],
-                ["get", "fill_color"],
-                "#1d4ed8"
-              ],
-              "line-width": 1
-            }}
-          />
-        </Source>
+        {placedByFloor.map((floor) => (
+          <Source key={floor.label} id={`floor-${floor.label}`} type="geojson" data={floor.data}>
+            <Layer
+              id={`floor-${floor.label}-fill`}
+              type="fill"
+              filter={["==", ["geometry-type"], "Polygon"]}
+              paint={{
+                "fill-color": ["coalesce", ["get", "fill_color"], floor.color],
+                "fill-opacity": 0.45
+              }}
+            />
+            <Layer
+              id={`floor-${floor.label}-line`}
+              type="line"
+              paint={{
+                "line-color": ["coalesce", ["get", "stroke_color"], ["get", "fill_color"], floor.color],
+                "line-width": 1
+              }}
+            />
+          </Source>
+        ))}
 
         <Source id="placement-control-points" type="geojson" data={controlPointData}>
           <Layer
@@ -143,7 +162,7 @@ export function PlacementMap({
           />
         </Source>
 
-        {ready && activeFloor && activeTransform ? (
+        {ready && activeFloor && activeTransform && activeLayer ? (
           <TransformHandles
             transform={activeTransform}
             dispatch={dispatch}
@@ -156,17 +175,33 @@ export function PlacementMap({
         ) : null}
       </MapGL>
 
-      <div className="absolute left-3 top-3 flex gap-1 rounded-[var(--radius-md)] bg-white/90 p-1 shadow">
-        {BASEMAP_ORDER.map((id) => (
-          <Button
-            key={id}
-            size="sm"
-            variant={id === basemap ? "primary" : "secondary"}
-            onClick={() => setBasemap(id)}
-          >
-            {basemapLabel(id, t)}
-          </Button>
-        ))}
+      <div className="absolute left-3 top-3 flex flex-col gap-2">
+        {floors.length > 1 ? (
+          <div className="flex flex-wrap gap-1 rounded-[var(--radius-md)] bg-white/90 p-1 shadow">
+            {floors.map((floor) => (
+              <Button
+                key={floor.label}
+                size="sm"
+                variant={floor.label === state.activeFloorLabel ? "primary" : "secondary"}
+                onClick={() => dispatch({ type: "setActiveFloor", label: floor.label })}
+              >
+                {floor.label}
+              </Button>
+            ))}
+          </div>
+        ) : null}
+        <div className="flex gap-1 rounded-[var(--radius-md)] bg-white/90 p-1 shadow">
+          {BASEMAP_ORDER.map((id) => (
+            <Button
+              key={id}
+              size="sm"
+              variant={id === basemap ? "primary" : "secondary"}
+              onClick={() => setBasemap(id)}
+            >
+              {basemapLabel(id, t)}
+            </Button>
+          ))}
+        </div>
       </div>
     </div>
   );

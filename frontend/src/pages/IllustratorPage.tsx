@@ -1,4 +1,4 @@
-import { useReducer, useState } from "react";
+import { useMemo, useReducer, useState } from "react";
 
 import {
   assignFloors,
@@ -9,10 +9,12 @@ import {
 } from "../api/client";
 import { AssignmentPanel } from "../components/illustrator/AssignmentPanel";
 import { ControlPointList } from "../components/illustrator/ControlPointList";
+import { FLOOR_TINTS, type FloorLayer } from "../components/illustrator/PlacementMap";
 import { PlacementLibrary } from "../components/illustrator/PlacementLibrary";
 import { PlacementMap } from "../components/illustrator/PlacementMap";
 import { TransformPanel } from "../components/illustrator/TransformPanel";
 import { Button, Card } from "../components/ui";
+import { partitionByFloors } from "../lib/svgPreview";
 import {
   placementReducer,
   toFloorPayloads,
@@ -223,6 +225,26 @@ export function IllustratorPage() {
 
   const bounds = preview.artwork_bounds;
 
+  const floorLayers: FloorLayer[] = useMemo(() => {
+    const regions: AssignedRegion[] = assignment.length
+      ? assignment
+      : [{ label: "artwork", box: preview.artwork_bounds, layer_names: null }];
+    const { perFloor } = partitionByFloors(
+      preview.preview,
+      regions.map((region) => ({
+        label: region.label,
+        box: region.box,
+        layerNames: region.layer_names
+      }))
+    );
+    return regions.map((region, index) => ({
+      label: region.label,
+      features: perFloor.get(region.label) ?? [],
+      bounds: region.box,
+      color: FLOOR_TINTS[index % FLOOR_TINTS.length]
+    }));
+  }, [preview, assignment]);
+
   return (
     <div className="flex flex-1 gap-4 p-4">
       <div className="w-80 shrink-0 space-y-4 overflow-auto">
@@ -278,8 +300,7 @@ export function IllustratorPage() {
 
       <div className="min-h-[600px] flex-1 overflow-hidden rounded-[var(--radius-md)] border">
         <PlacementMap
-          preview={preview.preview}
-          artworkBounds={bounds}
+          floors={floorLayers}
           state={state}
           dispatch={dispatch}
           pickingControlPoint={picking}
