@@ -352,3 +352,22 @@ def test_every_prefecture_capital_sits_inside_its_zone_envelope() -> None:
 def test_zone_label_is_human_readable() -> None:
     assert zone_label("EPSG:6677") == "EPSG:6677 — JPR CS IX"
     assert zone_label("EPSG:4326") == "EPSG:4326"
+
+
+# The same four values are asserted in frontend/src/lib/similarity.test.ts.
+# They are what makes the two independent implementations one contract.
+GOLDEN_LNGLAT = [
+    (139.700258000, 35.690921000),
+    (139.700764350, 35.691159486),
+    (139.700618180, 35.691366023),
+    (139.700111829, 35.691127536),
+]
+
+
+@pytest.mark.georef
+def test_golden_fixture_lands_on_the_shared_constants() -> None:
+    placed = affine_transform(Polygon(GOLDEN_ARTWORK), golden_transform().to_affine_matrix())
+    for (east, north), (want_lon, want_lat) in zip(placed.exterior.coords, GOLDEN_LNGLAT):
+        lon, lat = unproject_point(east, north, "EPSG:6677")
+        assert lon == pytest.approx(want_lon, abs=1e-8)
+        assert lat == pytest.approx(want_lat, abs=1e-8)
