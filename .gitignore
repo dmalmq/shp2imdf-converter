@@ -21,6 +21,7 @@ data/session_uploads/
 data/sessions/
 backend/data/session_uploads/
 backend/data/sessions/
+data/placements.db
 
 # Editors and OS
 .DS_Store

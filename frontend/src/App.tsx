@@ -4,6 +4,7 @@ import { ErrorBoundary } from "./components/shared/ErrorBoundary";
 import { SessionExpiredDialog } from "./components/shared/SessionExpiredDialog";
 import { ToastProvider } from "./components/shared/ToastProvider";
 import { AppShell } from "./components/shell/AppShell";
+import { IllustratorPage } from "./pages/IllustratorPage";
 import { ReviewPage } from "./pages/ReviewPage";
 import { UploadPage } from "./pages/UploadPage";
 import { WizardPage } from "./pages/WizardPage";
@@ -18,6 +19,7 @@ export default function App() {
             <Route path="/" element={<UploadPage />} />
             <Route path="/wizard" element={<WizardPage />} />
             <Route path="/review" element={<ReviewPage />} />
+            <Route path="/illustrator" element={<IllustratorPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </AppShell>

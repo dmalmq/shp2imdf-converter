@@ -548,3 +548,85 @@ class ErrorResponse(BaseModel):
 
     detail: str
     code: str
+
+
+class TransformPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    artwork_anchor: list[float] = Field(min_length=2, max_length=2)
+    map_anchor: list[float] = Field(min_length=2, max_length=2)
+    rotation_deg: float = 0.0
+    metres_per_point: float = Field(gt=0)
+    working_crs: str
+
+
+class ExportFormatsPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    geopackage: bool = True
+    shapefile: bool = True
+    qgis: bool = True
+
+
+class IllustratorExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transform: TransformPayload
+    output_crs: str = "EPSG:4326"
+    formats: ExportFormatsPayload = Field(default_factory=ExportFormatsPayload)
+
+
+class IllustratorLayerSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    table: str
+    ai_layer: str
+    role: str
+    feature_count: int
+
+
+class IllustratorPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    conversion_id: str
+    report: dict[str, Any]
+    layers: list[IllustratorLayerSummary] = Field(default_factory=list)
+    artwork_bounds: list[float]
+    preview: dict[str, Any]
+    preview_features: int
+    total_features: int
+    suggested_crs: str
+    suggested_crs_label: str
+
+
+class GeocodeSearchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str
+    language: str
+    results: list[GeocodeResultItem] = Field(default_factory=list)
+
+
+class PlacementRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=120)
+    transform: TransformPayload
+    artwork_bounds: list[float] = Field(min_length=4, max_length=4)
+
+
+class PlacementItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    name: str
+    transform: TransformPayload
+    artwork_bounds: list[float]
+    created_at: str
+    updated_at: str
+
+
+class PlacementListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    placements: list[PlacementItem] = Field(default_factory=list)

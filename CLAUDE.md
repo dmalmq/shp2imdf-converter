@@ -33,6 +33,7 @@ slice of the suite:
 ```bash
 pytest -m phase3     # wizard mapping (mapper, config, generation setup)
 pytest -m phase5     # validation and export (converter, validator, autofix)
+pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
 ```
 
 `phase0` generates test fixtures; `phase1`–`phase6` run foundation → polish.
@@ -49,6 +50,7 @@ pytest -m phase5     # validation and export (converter, validator, autofix)
 | `tools/` | Supporting scripts |
 | `shape_data/`, `data/` | Sample and working shapefile data |
 | `symbology-style.db` | Symbology lookup used during generation |
+| `data/placements.db` | Saved Illustrator placements (SQLite, gitignored) |
 
 ## Notes
 
@@ -58,3 +60,9 @@ pytest -m phase5     # validation and export (converter, validator, autofix)
 - Input shapefiles arrive per-floor from CAD/GIS workflows and are inconsistent by
   nature; detection/classification is heuristic. Prefer widening a heuristic with a new
   fixture over special-casing one dataset.
+- Illustrator placement stores `rotation_deg` against **true north**; the backend subtracts
+  the meridian convergence when building a projected affine. The preview runs in a local ENU
+  frame for the same reason — Web Mercator is not conformal on the ellipsoid and was measured
+  23 cm out. The cross-language golden fixture in `test_illustrator_georeference.py` and
+  `similarity.test.ts` is what keeps the two implementations honest; if you change one, run
+  both.

@@ -557,3 +557,12 @@ def convert_ai_to_geopackage_bundle(ai_bytes: bytes, source_name: str) -> tuple[
         archive.writestr(gpkg_name, result.gpkg_bytes)
         archive.writestr(qgs_name, qgs_xml.encode("utf-8"))
     return buffer.getvalue(), f"{result.stem}.zip", result.report
+
+
+def parse_ai(ai_bytes: bytes, source_name: str) -> _ConversionResult:
+    """Parse an ``.ai``/PDF into vector layers without georeferencing it.
+
+    Exposed so :mod:`backend.src.illustrator_store` can cache the expensive
+    parse and reuse it for both preview and export.
+    """
+    return _convert(ai_bytes, source_name)
