@@ -207,9 +207,14 @@ IX origin 36°N, 139°50′E).
 
 Zone assignment is defined **by prefecture, not geometry**, so the rule is a prefecture →
 zone lookup keyed on the ISO 3166-2 code that `geocoding.py:_iso_3166_2_code` already
-extracts from Nominatim (`JP-13` → IX). Three prefectures span multiple zones — Hokkaido
-(XI/XII/XIII by subprefecture), Nagasaki and Kagoshima (outlying islands) — and fall back
-to nearest-origin among *that prefecture's* zones.
+extracts from Nominatim (`JP-13` → IX). Forty-three prefectures map to exactly one zone.
+Four span several and fall back to nearest-origin among *that prefecture's* zones:
+Hokkaido (XI/XII/XIII by subprefecture), Tokyo (IX plus Ogasawara XIV/XVIII/XIX), Okinawa
+(XV/XVI/XVII by longitude) and Kagoshima (II plus zone I for western islands).
+
+The 47-entry table was validated by projecting each prefectural capital into its assigned
+zone: all 47 fall inside the ±130 km easting design envelope, worst case Tokushima at
++97.8 km.
 
 When the geocoder is unavailable the rule degrades to plain nearest-origin, measured at
 20/21 against reference cities. Its one failure is instructive: Hakodate resolves to X
