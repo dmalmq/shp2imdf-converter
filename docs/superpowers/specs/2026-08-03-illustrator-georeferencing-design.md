@@ -97,9 +97,14 @@ where `(E0, N0)` is `map_anchor` projected into `working_crs`.
 
 ### Why working_crs is separate from output_crs
 
-Rotation is measured from grid north, which is not true north. Meridian convergence in
-JPR zone IX at Tokyo is `γ ≈ (λ - λ0)·sin φ ≈ -0.078°`, roughly 0.4 m across a 300 m
-building. Re-fitting a transform into a different CRS would therefore move geometry.
+Rotation is measured from grid north, which is not true north. Convergence in JPR zone IX
+at Tokyo is `γ = (λ - λ0)·sin φ = -0.0776°`. Re-fitting a transform into a different CRS
+would therefore move geometry — measured at **40.7 cm** across a 300 m building.
+
+**Sign convention, stated explicitly because a rotation sign error is invisible at this
+magnitude:** `γ` as defined above is negative west of the central meridian. The *grid
+bearing of true north* is `-γ`, i.e. `+0.0776°` at Tokyo. `rotation_deg` is measured in
+the grid frame, so implementations must not mix the two.
 
 The pipeline is: fit in `working_crs` → build geometry → reproject geometry to
 `output_crs`. The export CRS control changes only the output file's declared CRS.
@@ -197,9 +202,22 @@ of `SessionManager`.
 
 ### Zone auto-pick
 
-Japan Plane Rectangular CS I–XIX under JGD2011 is EPSG:6669–6687. The zone is chosen by
-nearest zone origin to the anchor. This misfires near zone boundaries, which is why the
-result is a labelled dropdown default and not a silent decision.
+Japan Plane Rectangular CS I–XIX under JGD2011 is EPSG:6669–6687 (verified: 19 CRSs, zone
+IX origin 36°N, 139°50′E).
+
+Zone assignment is defined **by prefecture, not geometry**, so the rule is a prefecture →
+zone lookup keyed on the ISO 3166-2 code that `geocoding.py:_iso_3166_2_code` already
+extracts from Nominatim (`JP-13` → IX). Three prefectures span multiple zones — Hokkaido
+(XI/XII/XIII by subprefecture), Nagasaki and Kagoshima (outlying islands) — and fall back
+to nearest-origin among *that prefecture's* zones.
+
+When the geocoder is unavailable the rule degrades to plain nearest-origin, measured at
+20/21 against reference cities. Its one failure is instructive: Hakodate resolves to X
+instead of XI because zone X's origin is geometrically closer across the Tsugaru Strait,
+while the legal assignment follows the Hokkaido boundary. A `min |easting|` rule was
+tested and rejected at 18/21 — it ignores latitude bands and puts Sapporo in zone X.
+
+The result remains a labelled, user-overridable dropdown default, never a silent decision.
 
 ### Placement storage
 
@@ -289,7 +307,9 @@ Backend (`pytest`):
   X=northing, Y=easting; getting it backwards puts Tokyo in the Pacific.
 - Helmert recovery of synthetic `s`, `θ`; scale-locked one-pair case; residual values;
   degenerate input raises.
-- Zone auto-pick across several Japanese cities.
+- Zone auto-pick: prefecture-code path across all 47 codes; nearest-origin fallback across
+  the 21 reference cities; the Hakodate case asserted as a *known* fallback miss so the
+  prefecture path cannot silently regress to geometry.
 - Preview endpoint returns id, bounds and a decimated collection.
 - Export zip contains `.gpkg`, `.shp`/`.prj`/`.dbf`, `.qgs`; geometry read back from the
   shapefile lands within tolerance; `.prj` names the requested CRS.
@@ -312,7 +332,28 @@ QGIS over imagery. Handle feel is not unit-testable.
 |---|---|
 | Preview/export math drift | Cross-language golden fixture |
 | JPR axis order | Explicit round-trip assertion, not trust in `pyproj` defaults |
-| Wrong zone near a boundary | Labelled dropdown, user-overridable |
+| Wrong zone near a boundary | Prefecture lookup is authoritative; geometric fallback measured 20/21, known to miss Hakodate. Labelled dropdown, user-overridable. |
 | Saved placement applied to a shifted artboard | Bounds comparison warning |
 | Large artwork stalls dragging | Server-side decimated preview |
 | GSI tile availability or terms | Attribution rendered; OSM remains the default basemap |
+
+
+## Verification
+
+Numeric claims in this document were measured against `pyproj` 3.7.1 / `shapely` 2.0.7,
+not asserted from memory.
+
+| Claim | Result |
+|---|---|
+| EPSG:6677 axis order is X=north, Y=east | Confirmed. Default transformer returns `(northing, easting)`; `always_xy=True` swaps it. Shinjuku → N −34.3 km, E −12.0 km from the zone IX origin. |
+| EPSG 6669–6687 = JPR I–XIX | Confirmed, 19 CRSs. |
+| Affine coefficients as written | Exact: anchor error 0.000000000 mm, 300 pt edge → 52.9167 m at 1:500, area ratio 1.000000000000, rotation recovered 30.000000°. |
+| `metres_per_point` for 1:500 | 0.176389. |
+| Convergence at Tokyo, zone IX | 0.0776°, 40.7 cm across 300 m. Formula sign is negative; grid bearing of true north is positive. |
+| Nearest-origin zone rule | 20/21 reference cities; fails Hakodate (X instead of XI). |
+| `min \|easting\|` zone rule | 18/21 — rejected; ignores latitude bands, puts Sapporo in zone X. |
+| GSI + Esri tile endpoints | Live at z17 over Tokyo (19.5 KB / 22.7 KB / 23.2 KB). GSI used; Esri not, on ToS grounds. |
+
+Frontend claims are unmeasured and rest on documented API surface: `maplibre-gl` 4.5
+`MercatorCoordinate`, and the ~1 cm preview drift, which follows from `1/cos φ` varying
+across a 300 m extent at 35.7°N. Both are checked during implementation, not before.
