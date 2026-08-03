@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import json
 import math
+import sqlite3
 import zipfile
 from pathlib import Path
 
@@ -11,9 +13,11 @@ import geopandas as gpd
 import pytest
 
 from backend.src.illustrator_export import (
+    ExportFloor,
     ExportFormats,
     build_georeferenced_bundle,
     build_preview,
+    compute_assignment_summary,
 )
 from backend.src.illustrator_georeference import SimilarityTransform, project_point
 from backend.src.illustrator_importer import parse_ai
@@ -22,6 +26,7 @@ from backend.tests.test_illustrator_import import _build_minimal_ai_pdf
 
 ANCHOR_LON = 139.700258
 ANCHOR_LAT = 35.690921
+COVER_ALL = [-1e9, -1e9, 1e9, 1e9]
 
 
 @pytest.fixture()
@@ -39,6 +44,21 @@ def _transform(cached) -> SimilarityTransform:
         metres_per_point=0.176389,
         working_crs="EPSG:6677",
     )
+
+
+def _transform_at(rotation: float = 0.0, anchor=(ANCHOR_LON, ANCHOR_LAT)) -> SimilarityTransform:
+    return SimilarityTransform(
+        artwork_anchor=(85.0, 80.0),  # fixture artwork bbox centre
+        map_anchor=anchor,
+        rotation_deg=rotation,
+        metres_per_point=0.176389,
+        working_crs="EPSG:6677",
+    )
+
+
+def _one_floor(cached, transform: SimilarityTransform | None = None) -> list[ExportFloor]:
+    """The implicit single floor: one label covering the whole artwork."""
+    return [ExportFloor("artwork", transform or _transform(cached), COVER_ALL, None)]
 
 
 def _iter_coords(geometry):
@@ -97,7 +117,7 @@ def test_preview_layer_summaries_match_the_written_tables(cached) -> None:
 def test_export_places_the_anchor_at_the_requested_location(cached, tmp_path: Path) -> None:
     """The union bbox centre lands on the anchor (its own defining point)."""
     payload, filename = build_georeferenced_bundle(
-        cached, _transform(cached), "EPSG:6677", ExportFormats()
+        cached, _one_floor(cached), "EPSG:6677", ExportFormats()
     )
     assert filename.endswith(".zip")
 
@@ -105,7 +125,7 @@ def test_export_places_the_anchor_at_the_requested_location(cached, tmp_path: Pa
     bounds = None
     first_crs = None
     for spec in cached.written_layers:
-        gdf = gpd.read_file(gpkg, layer=spec["table"])
+        gdf = gpd.read_file(gpkg, layer=f"artwork_{spec['table']}")
         first_crs = first_crs or gdf.crs
         minx, miny, maxx, maxy = gdf.total_bounds
         bounds = (
@@ -126,7 +146,7 @@ def test_export_places_the_anchor_at_the_requested_location(cached, tmp_path: Pa
 @pytest.mark.georef
 def test_export_contains_every_requested_format(cached) -> None:
     payload, _ = build_georeferenced_bundle(
-        cached, _transform(cached), "EPSG:6677", ExportFormats()
+        cached, _one_floor(cached), "EPSG:6677", ExportFormats()
     )
     with zipfile.ZipFile(io.BytesIO(payload)) as archive:
         names = archive.namelist()
@@ -140,7 +160,7 @@ def test_export_contains_every_requested_format(cached) -> None:
 def test_export_honours_format_selection(cached) -> None:
     payload, _ = build_georeferenced_bundle(
         cached,
-        _transform(cached),
+        _one_floor(cached),
         "EPSG:6677",
         ExportFormats(geopackage=True, shapefile=False, qgis=False),
     )
@@ -154,7 +174,7 @@ def test_export_honours_format_selection(cached) -> None:
 @pytest.mark.georef
 def test_prj_declares_the_output_crs(cached) -> None:
     payload, _ = build_georeferenced_bundle(
-        cached, _transform(cached), "EPSG:4326", ExportFormats()
+        cached, _one_floor(cached), "EPSG:4326", ExportFormats()
     )
     with zipfile.ZipFile(io.BytesIO(payload)) as archive:
         prj = next(n for n in archive.namelist() if n.endswith(".prj"))
@@ -165,10 +185,10 @@ def test_prj_declares_the_output_crs(cached) -> None:
 @pytest.mark.georef
 def test_reprojection_to_4326_yields_plausible_lonlat(cached, tmp_path: Path) -> None:
     payload, _ = build_georeferenced_bundle(
-        cached, _transform(cached), "EPSG:4326", ExportFormats(shapefile=False, qgis=False)
+        cached, _one_floor(cached), "EPSG:4326", ExportFormats(shapefile=False, qgis=False)
     )
     gpkg = _extract(payload, ".gpkg", tmp_path / "reproj.gpkg")
-    gdf = gpd.read_file(gpkg, layer=cached.written_layers[0]["table"])
+    gdf = gpd.read_file(gpkg, layer=f"artwork_{cached.written_layers[0]['table']}")
     minx, miny, maxx, maxy = gdf.total_bounds
     assert 139.6 < (minx + maxx) / 2 < 139.8
     assert 35.6 < (miny + maxy) / 2 < 35.8
@@ -183,10 +203,10 @@ def test_rotation_changes_the_footprint_but_not_its_area(cached, tmp_path: Path)
     areas = []
     for index, transform in enumerate((upright, turned)):
         payload, _ = build_georeferenced_bundle(
-            cached, transform, "EPSG:6677", ExportFormats(shapefile=False, qgis=False)
+            cached, _one_floor(cached, transform), "EPSG:6677", ExportFormats(shapefile=False, qgis=False)
         )
         gpkg = _extract(payload, ".gpkg", tmp_path / f"rot{index}.gpkg")
-        gdf = gpd.read_file(gpkg, layer=cached.written_layers[0]["table"])
+        gdf = gpd.read_file(gpkg, layer=f"artwork_{cached.written_layers[0]['table']}")
         areas.append(float(gdf.geometry.area.sum()))
     assert areas[0] == pytest.approx(areas[1], rel=1e-9)
 
@@ -196,4 +216,155 @@ def test_export_rejects_a_non_positive_scale(cached) -> None:
     transform = _transform(cached)
     transform.metres_per_point = 0.0
     with pytest.raises(ValueError):
-        build_georeferenced_bundle(cached, transform, "EPSG:6677", ExportFormats())
+        build_georeferenced_bundle(cached, _one_floor(cached, transform), "EPSG:6677", ExportFormats())
+
+
+# --------------------------------------------------------------------------- #
+# Multi-floor behaviour
+#
+# Fixture geometry (verified): "線路" line bounds [20,20]-[120,140] centroid
+# (70,80); "Fill Layer" polygon bounds [50,50]-[150,110] centroid (100,80).
+# A vertical split at x=85 separates them.
+# --------------------------------------------------------------------------- #
+
+BOX_1F = [0.0, 0.0, 85.0, 200.0]    # the line's side
+BOX_2F = [85.0, 0.0, 200.0, 200.0]  # the polygon's side
+
+
+@pytest.mark.georef
+def test_assignment_summary_counts_centroids_in_boxes(cached) -> None:
+    floors, unassigned = compute_assignment_summary(
+        cached, [ExportFloor("1F", _transform_at(), COVER_ALL, None)]
+    )
+    assert floors[0]["feature_count"] == cached.report["total_features"]
+    assert unassigned == 0
+    assert floors[0]["artwork_bounds"][0] >= 0
+
+
+@pytest.mark.georef
+def test_assignment_summary_counts_unassigned_features(cached) -> None:
+    floors, unassigned = compute_assignment_summary(
+        cached, [ExportFloor("1F", _transform_at(), [0.0, 0.0, 90.0, 200.0], None)]
+    )
+    assert floors[0]["feature_count"] == 1
+    assert unassigned == 1
+
+
+@pytest.mark.georef
+def test_assignment_summary_layer_restriction(cached) -> None:
+    restricted = ExportFloor("1F", _transform_at(), COVER_ALL, ["Fill Layer"])
+    floors, unassigned = compute_assignment_summary(cached, [restricted])
+    assert {row["ai_layer"] for row in floors[0]["layer_counts"]} == {"Fill Layer"}
+    assert unassigned == 1
+
+
+@pytest.mark.georef
+def test_export_materializes_per_floor_tables(cached, tmp_path: Path) -> None:
+    payload, _ = build_georeferenced_bundle(
+        cached,
+        [ExportFloor("1F", _transform_at(), COVER_ALL, None)],
+        "EPSG:6677",
+        ExportFormats(shapefile=False, qgis=False),
+    )
+    gpkg = _extract(payload, ".gpkg", tmp_path / "mf.gpkg")
+    expected = {f"1F_{spec['table']}" for spec in cached.written_layers}
+    for table in expected:
+        gdf = gpd.read_file(gpkg, layer=table)
+        assert (gdf["floor"] == "1F").all()
+    with sqlite3.connect(gpkg) as conn:
+        actual = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert expected <= actual
+
+
+@pytest.mark.georef
+def test_two_floors_split_the_artwork(cached, tmp_path: Path) -> None:
+    payload, _ = build_georeferenced_bundle(
+        cached,
+        [
+            ExportFloor("1F", _transform_at(), BOX_1F, None),
+            ExportFloor("2F", _transform_at(), BOX_2F, None),
+        ],
+        "EPSG:6677",
+        ExportFormats(shapefile=False, qgis=False),
+    )
+    gpkg = _extract(payload, ".gpkg", tmp_path / "split.gpkg")
+    with sqlite3.connect(gpkg) as conn:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "1F_線路__lines" in tables
+    assert "2F_Fill Layer" in tables
+    assert "2F_線路__lines" not in tables
+    assert "1F_Fill Layer" not in tables
+
+
+@pytest.mark.georef
+def test_export_applies_each_floors_own_transform(cached, tmp_path: Path) -> None:
+    shifted = _transform_at(anchor=(139.701, 35.6915))  # well north-east of ANCHOR
+    payload, _ = build_georeferenced_bundle(
+        cached,
+        [
+            ExportFloor("1F", _transform_at(), BOX_1F, None),
+            ExportFloor("2F", shifted, BOX_2F, None),
+        ],
+        "EPSG:6677",
+        ExportFormats(shapefile=False, qgis=False),
+    )
+    gpkg = _extract(payload, ".gpkg", tmp_path / "twoplace.gpkg")
+    line = gpd.read_file(gpkg, layer="1F_線路__lines")
+    polygon = gpd.read_file(gpkg, layer="2F_Fill Layer")
+    assert polygon.total_bounds[0] > line.total_bounds[0]
+    assert polygon.total_bounds[1] > line.total_bounds[1]
+
+
+@pytest.mark.georef
+def test_export_report_counts_floors_and_unassigned(cached) -> None:
+    payload, _ = build_georeferenced_bundle(
+        cached,
+        [ExportFloor("1F", _transform_at(), [0.0, 0.0, 90.0, 200.0], None)],
+        "EPSG:6677",
+        ExportFormats(shapefile=False, qgis=False),
+    )
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        report = json.loads(archive.read("export_report.json").decode("utf-8"))
+    assert report["floors"][0]["label"] == "1F"
+    assert report["floors"][0]["feature_count"] == 1
+    assert report["unassigned_count"] == 1
+    assert any("Fill Layer" in warning for warning in report["warnings"])
+
+
+@pytest.mark.georef
+def test_export_report_warns_for_a_fully_unassigned_layer(cached) -> None:
+    payload, _ = build_georeferenced_bundle(
+        cached,
+        [ExportFloor("1F", _transform_at(), BOX_2F, None)],  # only the polygon's side
+        "EPSG:6677",
+        ExportFormats(shapefile=False, qgis=False),
+    )
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        report = json.loads(archive.read("export_report.json").decode("utf-8"))
+    assert report["unassigned_count"] == 1
+    assert any("線路" in warning for warning in report["warnings"])
+
+
+@pytest.mark.georef
+def test_export_rejects_empty_floors(cached) -> None:
+    with pytest.raises(Exception):
+        build_georeferenced_bundle(cached, [], "EPSG:6677", ExportFormats())
+
+
+@pytest.mark.georef
+def test_qgs_groups_layers_by_floor(cached) -> None:
+    payload, _ = build_georeferenced_bundle(
+        cached,
+        [
+            ExportFloor("1F", _transform_at(), BOX_1F, None),
+            ExportFloor("2F", _transform_at(), BOX_2F, None),
+        ],
+        "EPSG:6677",
+        ExportFormats(shapefile=False),  # geopackage + qgis
+    )
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        xml = archive.read(next(n for n in archive.namelist() if n.endswith(".qgs"))).decode("utf-8")
+    assert xml.count('<layer-tree-group expanded="1" name="1F">') == 1
+    assert xml.count('<layer-tree-group expanded="1" name="2F">') == 1
+    assert "|layername=1F_線路__lines" in xml
+    assert "|layername=2F_Fill Layer" in xml

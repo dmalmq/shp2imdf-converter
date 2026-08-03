@@ -15,15 +15,19 @@ from fastapi.responses import Response
 
 from backend.src.detector import sync_feature_types
 from backend.src.illustrator_export import (
+    ExportFloor,
     ExportFormats,
+    FloorExportError,
     build_georeferenced_bundle,
     build_preview,
+    compute_assignment_summary,
 )
 from backend.src.illustrator_georeference import (
     SimilarityTransform,
     resolve_working_crs,
     zone_label,
 )
+from backend.src.illustrator_importer import _sanitize_layer_name
 from backend.src.illustrator_importer import convert_ai_to_geopackage_bundle, parse_ai
 from backend.src.illustrator_store import ConversionStore
 from backend.src.imdf_reader import read_imdf_zip
@@ -31,8 +35,12 @@ from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
 from backend.src.importer import import_file_blobs
 from backend.src.placements import PlacementStore
 from backend.src.schemas import (
+    AssignFloorSummary,
+    AssignFloorsRequest,
+    AssignFloorsResponse,
     CleanupSummary,
     GeocodeSearchResponse,
+    FloorExportPayload,
     IllustratorExportRequest,
     IllustratorPreviewResponse,
     ImportImdfResponse,
@@ -227,13 +235,71 @@ async def preview_illustrator(
     )
 
 
+_PLACEHOLDER_TRANSFORM = SimilarityTransform(
+    artwork_anchor=(0.0, 0.0),
+    map_anchor=(139.7, 35.7),
+    rotation_deg=0.0,
+    metres_per_point=1.0,
+    working_crs="EPSG:4326",
+)
+
+
+def _transform_from_payload(payload: TransformPayload) -> SimilarityTransform:
+    return SimilarityTransform(
+        artwork_anchor=(payload.artwork_anchor[0], payload.artwork_anchor[1]),
+        map_anchor=(payload.map_anchor[0], payload.map_anchor[1]),
+        rotation_deg=payload.rotation_deg,
+        metres_per_point=payload.metres_per_point,
+        working_crs=payload.working_crs,
+    )
+
+
+@router.post("/convert/illustrator/{conversion_id}/assign", response_model=AssignFloorsResponse)
+async def assign_illustrator_floors(
+    conversion_id: str,
+    request: Request,
+    payload: AssignFloorsRequest,
+) -> AssignFloorsResponse:
+    """Store a floor assignment (boxes plus optional layer restrictions)."""
+    cached = _illustrator_store(request).get(conversion_id)
+    labels = [floor.label for floor in payload.floors]
+    if len(set(labels)) != len(labels):
+        raise ValueError("Floor labels must be unique.")
+    known_layers = {spec["ai_layer"] for spec in cached.written_layers}
+    for floor in payload.floors:
+        if floor.layer_names:
+            unknown = [name for name in floor.layer_names if name not in known_layers]
+            if unknown:
+                raise ValueError(f"Unknown layer name(s): {', '.join(unknown)}")
+
+    floors = [floor.model_dump() for floor in payload.floors]
+    _illustrator_store(request).assign(conversion_id, floors)
+    summaries, unassigned = compute_assignment_summary(
+        cached,
+        [
+            ExportFloor(
+                label=floor["label"],
+                transform=_PLACEHOLDER_TRANSFORM,  # summary only needs the regions
+                region=floor["box"],
+                layer_names=floor["layer_names"],
+            )
+            for floor in floors
+        ],
+    )
+    return AssignFloorsResponse(
+        floors=[AssignFloorSummary(**summary) for summary in summaries],
+        unassigned_count=unassigned,
+        total_features=cached.report["total_features"],
+    )
+
+
 @router.post("/convert/illustrator/{conversion_id}/export")
 async def export_illustrator(
     conversion_id: str,
     request: Request,
     payload: IllustratorExportRequest,
 ) -> Response:
-    """Apply a placement to a cached conversion and return a zipped bundle."""
+    """Apply per-floor placements to a cached conversion and return a zip."""
     if payload.formats.qgis and not payload.formats.geopackage:
         raise ValueError(
             "A QGIS project needs the GeoPackage; enable it or disable the project."
@@ -242,19 +308,50 @@ async def export_illustrator(
         raise ValueError("Select at least one output format.")
 
     cached = _illustrator_store(request).get(conversion_id)
-    transform = SimilarityTransform(
-        artwork_anchor=(
-            payload.transform.artwork_anchor[0],
-            payload.transform.artwork_anchor[1],
-        ),
-        map_anchor=(payload.transform.map_anchor[0], payload.transform.map_anchor[1]),
-        rotation_deg=payload.transform.rotation_deg,
-        metres_per_point=payload.transform.metres_per_point,
-        working_crs=payload.transform.working_crs,
-    )
+    if cached.floors:
+        stored = {floor["label"] for floor in cached.floors}
+        requested = {floor.label for floor in payload.floors}
+        if requested != stored:
+            missing = stored - requested
+            extra = requested - stored
+            detail = []
+            if missing:
+                detail.append(f"missing floor(s): {', '.join(sorted(missing))}")
+            if extra:
+                detail.append(f"unknown floor(s): {', '.join(sorted(extra))}")
+            raise FloorExportError(
+                "Export does not match the stored assignment: " + "; ".join(detail)
+            )
+
+        regions = {floor["label"]: floor for floor in cached.floors}
+        floors = [
+            ExportFloor(
+                label=floor.label,
+                transform=_transform_from_payload(floor.transform),
+                region=regions[floor.label]["box"],
+                layer_names=regions[floor.label]["layer_names"],
+            )
+            for floor in payload.floors
+        ]
+    else:
+        if len(payload.floors) != 1:
+            raise FloorExportError(
+                "This file has no floor assignment; send exactly one floor covering the artwork."
+            )
+        single = payload.floors[0]
+        bounds = build_preview(cached)["artwork_bounds"]
+        floors = [
+            ExportFloor(
+                label=single.label,
+                transform=_transform_from_payload(single.transform),
+                region=bounds,
+                layer_names=None,
+            )
+        ]
+
     zip_bytes, filename = build_georeferenced_bundle(
         cached,
-        transform,
+        floors,
         payload.output_crs,
         ExportFormats(
             geopackage=payload.formats.geopackage,
@@ -309,7 +406,7 @@ def _placement_item(placement) -> PlacementItem:
     return PlacementItem(
         id=placement.id,
         name=placement.name,
-        transform=TransformPayload(**placement.transform),
+        floors=[FloorExportPayload(**floor) for floor in placement.floors],
         artwork_bounds=placement.artwork_bounds,
         created_at=placement.created_at,
         updated_at=placement.updated_at,
@@ -327,7 +424,9 @@ async def list_placements(request: Request) -> PlacementListResponse:
 async def create_placement(request: Request, payload: PlacementRequest) -> PlacementItem:
     return _placement_item(
         _placement_store(request).create(
-            payload.name, payload.transform.model_dump(), payload.artwork_bounds
+            payload.name,
+            [floor.model_dump() for floor in payload.floors],
+            payload.artwork_bounds,
         )
     )
 
@@ -338,7 +437,10 @@ async def update_placement(
 ) -> PlacementItem:
     return _placement_item(
         _placement_store(request).update(
-            placement_id, payload.name, payload.transform.model_dump(), payload.artwork_bounds
+            placement_id,
+            payload.name,
+            [floor.model_dump() for floor in payload.floors],
+            payload.artwork_bounds,
         )
     )
 

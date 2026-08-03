@@ -571,7 +571,7 @@ class ExportFormatsPayload(BaseModel):
 class IllustratorExportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    transform: TransformPayload
+    floors: list[FloorExportPayload] = Field(min_length=1)
     output_crs: str = "EPSG:4326"
     formats: ExportFormatsPayload = Field(default_factory=ExportFormatsPayload)
 
@@ -611,7 +611,7 @@ class PlacementRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=120)
-    transform: TransformPayload
+    floors: list[FloorExportPayload] = Field(min_length=1)
     artwork_bounds: list[float] = Field(min_length=4, max_length=4)
 
 
@@ -620,7 +620,7 @@ class PlacementItem(BaseModel):
 
     id: int
     name: str
-    transform: TransformPayload
+    floors: list[FloorExportPayload]
     artwork_bounds: list[float]
     created_at: str
     updated_at: str
@@ -630,3 +630,49 @@ class PlacementListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     placements: list[PlacementItem] = Field(default_factory=list)
+
+
+class FloorRegionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=40)
+    box: list[float] = Field(min_length=4, max_length=4)
+    layer_names: list[str] | None = None
+
+
+class AssignFloorsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    floors: list[FloorRegionPayload] = Field(min_length=1)
+
+
+class AssignLayerCount(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    table: str
+    ai_layer: str
+    count: int
+
+
+class AssignFloorSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    feature_count: int
+    artwork_bounds: list[float]
+    layer_counts: list[AssignLayerCount] = Field(default_factory=list)
+
+
+class AssignFloorsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    floors: list[AssignFloorSummary] = Field(default_factory=list)
+    unassigned_count: int
+    total_features: int
+
+
+class FloorExportPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    transform: TransformPayload

@@ -871,7 +871,7 @@ export type ExportFormatsPayload = {
 export type PlacementItem = {
   id: number;
   name: string;
-  transform: TransformPayload;
+  floors: { label: string; transform: TransformPayload }[];
   artwork_bounds: [number, number, number, number];
   created_at: string;
   updated_at: string;
@@ -879,7 +879,7 @@ export type PlacementItem = {
 
 export type PlacementRequestBody = {
   name: string;
-  transform: TransformPayload;
+  floors: { label: string; transform: TransformPayload }[];
   artwork_bounds: [number, number, number, number];
 };
 
@@ -893,9 +893,38 @@ export async function previewIllustrator(file: File): Promise<IllustratorPreview
   return handleJson<IllustratorPreviewResponse>(response);
 }
 
+export type AssignFloorSummary = {
+  label: string;
+  feature_count: number;
+  artwork_bounds: [number, number, number, number];
+  layer_counts: { table: string; ai_layer: string; count: number }[];
+};
+
+export type AssignFloorsResponse = {
+  floors: AssignFloorSummary[];
+  unassigned_count: number;
+  total_features: number;
+};
+
+export async function assignFloors(
+  conversionId: string,
+  floors: { label: string; box: [number, number, number, number]; layer_names: string[] | null }[]
+): Promise<AssignFloorsResponse> {
+  const response = await fetch(`/api/convert/illustrator/${conversionId}/assign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ floors })
+  });
+  return handleJson<AssignFloorsResponse>(response);
+}
+
 export async function exportIllustrator(
   conversionId: string,
-  body: { transform: TransformPayload; output_crs: string; formats: ExportFormatsPayload }
+  body: {
+    floors: { label: string; transform: TransformPayload }[];
+    output_crs: string;
+    formats: ExportFormatsPayload;
+  }
 ): Promise<{ blob: Blob; filename: string }> {
   const response = await fetch(`/api/convert/illustrator/${conversionId}/export`, {
     method: "POST",

@@ -23,6 +23,7 @@ from backend.src.illustrator_importer import _ConversionResult
 
 _META_NAME = "conversion.json"
 _GPKG_NAME = "artwork.gpkg"
+_FLOORS_NAME = "floors.json"
 
 
 class ConversionExpiredError(Exception):
@@ -38,6 +39,7 @@ class CachedConversion:
     layer_order: list[str]
     report: dict
     created_at: float
+    floors: list[dict] | None = None
 
     @property
     def gpkg_path(self) -> Path:
@@ -112,8 +114,20 @@ class ConversionStore:
                 removed += 1
         return removed
 
+    def assign(self, conversion_id: str, floors: list[dict]) -> CachedConversion:
+        """Store a floor assignment for a conversion and return it reloaded."""
+        cached = self.get(conversion_id)  # raises ConversionExpiredError for unknown ids
+        (cached.directory / _FLOORS_NAME).write_text(
+            json.dumps(floors, ensure_ascii=False), encoding="utf-8"
+        )
+        return self.get(conversion_id)
+
     def _load(self, meta_path: Path) -> CachedConversion:
         payload = json.loads(meta_path.read_text(encoding="utf-8"))
+        floors_path = meta_path.parent / _FLOORS_NAME
+        floors = None
+        if floors_path.is_file():
+            floors = json.loads(floors_path.read_text(encoding="utf-8"))
         return CachedConversion(
             conversion_id=payload["conversion_id"],
             directory=meta_path.parent,
@@ -122,6 +136,7 @@ class ConversionStore:
             layer_order=payload["layer_order"],
             report=payload["report"],
             created_at=float(payload["created_at"]),
+            floors=floors,
         )
 
     def _is_expired(self, cached: CachedConversion) -> bool:

@@ -41,8 +41,38 @@ export function TransformPanel({ state, dispatch }: Props) {
     }
   };
 
+  const activeFloor = state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
+
   return (
     <div className="space-y-4 text-sm">
+      {state.floors.length > 1 ? (
+        <section>
+          <label className="block text-xs font-medium">{t("Floor", "フロア")}</label>
+          <select
+            className={`mt-1 ${FIELD}`}
+            value={state.activeFloorLabel ?? ""}
+            onChange={(event) => dispatch({ type: "setActiveFloor", label: event.target.value })}
+          >
+            {state.floors.map((floor) => (
+              <option key={floor.label} value={floor.label}>
+                {floor.label}
+                {floor.linked ? "" : t(" (unlinked)", "（非連動）")}
+              </option>
+            ))}
+          </select>
+          {activeFloor && !activeFloor.linked ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="mt-1"
+              onClick={() => dispatch({ type: "relinkFloor", label: activeFloor.label })}
+            >
+              {t("Relink to shared frame", "共通フレームに再リンク")}
+            </Button>
+          ) : null}
+        </section>
+      ) : null}
+
       <section>
         <label className="block text-xs font-medium">{t("Find the building", "建物を検索")}</label>
         <div className="mt-1 flex gap-2">
@@ -71,7 +101,7 @@ export function TransformPanel({ state, dispatch }: Props) {
                   className="w-full px-2 py-1 text-left text-xs hover:bg-black/5"
                   onClick={() =>
                     dispatch({
-                      type: "moveAnchor",
+                      type: "positionBuilding",
                       mapAnchor: [result.longitude, result.latitude]
                     })
                   }
@@ -93,16 +123,16 @@ export function TransformPanel({ state, dispatch }: Props) {
             type="number"
             step="0.1"
             className="w-24 rounded-[var(--radius-md)] border px-2 py-1"
-            value={state.transform.rotationDeg}
+            value={state.frame.rotationDeg}
             onChange={(event) =>
-              dispatch({ type: "rotate", rotationDeg: Number(event.target.value) })
+              dispatch({ type: "rotateFrame", rotationDeg: Number(event.target.value) })
             }
           />
           <span className="text-xs text-[var(--color-text-muted)]">°</span>
           <Button
             size="sm"
             variant="secondary"
-            onClick={() => dispatch({ type: "rotate", rotationDeg: 0 })}
+            onClick={() => dispatch({ type: "rotateFrame", rotationDeg: 0 })}
           >
             {t("Reset", "リセット")}
           </Button>
@@ -120,7 +150,7 @@ export function TransformPanel({ state, dispatch }: Props) {
           ) : null}
         </label>
         <p className="mt-1 text-xs">
-          {state.transform.metresPerPoint.toFixed(6)} {t("m per point", "m/pt")}
+          {state.frame.metresPerPoint.toFixed(6)} {t("m per point", "m/pt")}
         </p>
         <div className="mt-1 flex items-center gap-2">
           <span className="text-xs">1:</span>

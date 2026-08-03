@@ -134,6 +134,16 @@ def _line_renderer() -> str:
     )
 
 
+def _layer_tree_entry(layer_id: str, spec: QgisLayerSpec, gpkg_filename: str) -> str:
+    return (
+        f"<layer-tree-layer expanded=\"0\" providerKey=\"ogr\" checked=\"Qt::Checked\" "
+        f"id=\"{layer_id}\" name={quoteattr(spec.display_name)} "
+        f"source={quoteattr(f'./{gpkg_filename}|layername={spec.table}')}>"
+        "<customproperties><Option/></customproperties>"
+        "</layer-tree-layer>"
+    )
+
+
 def _maplayer(spec: QgisLayerSpec, layer_id: str, gpkg_filename: str, srs_xml: str) -> str:
     is_poly = spec.role == "polygon"
     geometry = "Polygon" if is_poly else "Line"
@@ -159,6 +169,7 @@ def build_qgs_project(
     gpkg_filename: str,
     project_name: str,
     crs: str | None = None,
+    layer_groups: list[tuple[str, list[QgisLayerSpec]]] | None = None,
 ) -> str:
     """Return a ``.qgs`` XML document for ``layers`` (given top-first).
 
@@ -166,22 +177,37 @@ def build_qgs_project(
     the stack / drawn on top), which should mirror the Illustrator layer order.
     ``crs`` names the authority code (e.g. ``"EPSG:6677"``) the project and
     every layer declare; ``None`` keeps the previous ungeoreferenced output.
+    ``layer_groups``, when given, wraps the layers in named ``<layer-tree-group>``
+    elements (one per ``(name, specs)`` pair) instead of a flat tree; the
+    ``<projectlayers>`` block stays flat either way. ``layers`` is ignored when
+    ``layer_groups`` is provided.
     """
     srs_xml = _srs_xml(crs)
-    ids = [f"lyr{i:03d}_{uuid4().hex}" for i in range(len(layers))]
-
-    tree_entries = "".join(
-        f"<layer-tree-layer expanded=\"0\" providerKey=\"ogr\" checked=\"Qt::Checked\" "
-        f"id=\"{lid}\" name={quoteattr(spec.display_name)} "
-        f"source={quoteattr(f'./{gpkg_filename}|layername={spec.table}')}>"
-        "<customproperties><Option/></customproperties>"
-        "</layer-tree-layer>"
-        for lid, spec in zip(ids, layers)
-    )
-    maplayers = "".join(
-        _maplayer(spec, lid, gpkg_filename, srs_xml) for lid, spec in zip(ids, layers)
-    )
-    layerorder = "".join(f"<layer id=\"{lid}\"/>" for lid in ids)
+    if layer_groups is not None:
+        flat = [spec for _name, specs in layer_groups for spec in specs]
+        ids = [f"lyr{i:03d}_{uuid4().hex}" for i in range(len(flat))]
+        id_iter = iter(ids)
+        tree_entries = "".join(
+            f"<layer-tree-group expanded=\"1\" name={quoteattr(group_name)}>"
+            + "".join(
+                _layer_tree_entry(next(id_iter), spec, gpkg_filename) for spec in specs
+            )
+            + "</layer-tree-group>"
+            for group_name, specs in layer_groups
+        )
+        maplayers = "".join(
+            _maplayer(spec, lid, gpkg_filename, srs_xml) for lid, spec in zip(ids, flat)
+        )
+        layerorder = "".join(f"<layer id=\"{lid}\"/>" for lid in ids)
+    else:
+        ids = [f"lyr{i:03d}_{uuid4().hex}" for i in range(len(layers))]
+        tree_entries = "".join(
+            _layer_tree_entry(lid, spec, gpkg_filename) for lid, spec in zip(ids, layers)
+        )
+        maplayers = "".join(
+            _maplayer(spec, lid, gpkg_filename, srs_xml) for lid, spec in zip(ids, layers)
+        )
+        layerorder = "".join(f"<layer id=\"{lid}\"/>" for lid in ids)
 
     return (
         "<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>"

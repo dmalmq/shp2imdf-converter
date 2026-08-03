@@ -15,6 +15,8 @@ type Props = {
 
 export function ControlPointList({ state, dispatch, picking, onTogglePicking }: Props) {
   const { t } = useUiLanguage();
+  const activeFloor = state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
+  const controlPoints = activeFloor?.controlPoints ?? [];
   const fit = currentResiduals(state);
 
   return (
@@ -26,7 +28,7 @@ export function ControlPointList({ state, dispatch, picking, onTogglePicking }: 
         </Button>
       </div>
 
-      {state.controlPoints.length === 0 ? (
+      {controlPoints.length === 0 ? (
         <p className="text-xs text-[var(--color-text-muted)]">
           {t(
             "Optional. Use these when the basemap shows the building.",
@@ -35,7 +37,7 @@ export function ControlPointList({ state, dispatch, picking, onTogglePicking }: 
         </p>
       ) : (
         <ul className="space-y-1">
-          {state.controlPoints.map((point, index) => (
+          {controlPoints.map((point, index) => (
             <li key={point.id} className="flex items-center justify-between text-xs">
               <span>
                 #{index + 1} ({point.artwork[0].toFixed(1)}, {point.artwork[1].toFixed(1)}) pt
@@ -62,7 +64,7 @@ export function ControlPointList({ state, dispatch, picking, onTogglePicking }: 
       <Button
         size="sm"
         className="w-full"
-        disabled={state.controlPoints.length < 2}
+        disabled={controlPoints.length < 2}
         onClick={() => dispatch({ type: "fitControlPoints" })}
       >
         {t("Fit to control points", "基準点に合わせる")}

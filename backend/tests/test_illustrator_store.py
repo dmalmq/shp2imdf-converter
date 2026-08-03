@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import time
 
 import pytest
 
@@ -64,3 +66,56 @@ def test_prune_reports_how_many_it_removed(tmp_path: Path) -> None:
     store.put(parse_ai(payload, "two.ai"))
     assert store.prune() == 2
     assert store.prune() == 0
+
+
+FLOORS = [
+    {"label": "1F", "box": [0.0, 0.0, 200.0, 200.0], "layer_names": None},
+    {"label": "2F", "box": [200.0, 0.0, 400.0, 200.0], "layer_names": ["壁"]},
+]
+
+
+@pytest.mark.georef
+def test_new_conversions_have_no_assignment(store: ConversionStore) -> None:
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+    assert cached.floors is None
+
+
+@pytest.mark.georef
+def test_assign_stores_and_round_trips_floors(store: ConversionStore) -> None:
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+    stored = store.assign(cached.conversion_id, FLOORS)
+    assert stored.floors == FLOORS
+
+    fetched = store.get(cached.conversion_id)
+    assert fetched.floors == FLOORS
+
+
+@pytest.mark.georef
+def test_assign_replaces_a_previous_assignment(store: ConversionStore) -> None:
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+    store.assign(cached.conversion_id, FLOORS)
+    replaced = store.assign(cached.conversion_id, [FLOORS[0]])
+    assert replaced.floors == [FLOORS[0]]
+
+
+@pytest.mark.georef
+def test_assign_to_an_unknown_id_raises(store: ConversionStore) -> None:
+    with pytest.raises(ConversionExpiredError):
+        store.assign("does-not-exist", FLOORS)
+
+
+@pytest.mark.georef
+def test_prune_removes_the_floors_file_too(tmp_path: Path) -> None:
+    store = ConversionStore(root=tmp_path, ttl_seconds=3600, max_entries=10)
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+    store.assign(cached.conversion_id, FLOORS)
+    assert (cached.directory / "floors.json").exists()
+
+    # Age the entry past the TTL deterministically, then prune.
+    meta_path = cached.directory / "conversion.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["created_at"] = time.time() - 7200
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    assert store.prune() == 1
+    assert not cached.directory.exists()
