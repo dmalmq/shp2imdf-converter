@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import time
 
 import pytest
 
@@ -104,8 +106,16 @@ def test_assign_to_an_unknown_id_raises(store: ConversionStore) -> None:
 
 @pytest.mark.georef
 def test_prune_removes_the_floors_file_too(tmp_path: Path) -> None:
-    store = ConversionStore(root=tmp_path, ttl_seconds=-1, max_entries=10)
+    store = ConversionStore(root=tmp_path, ttl_seconds=3600, max_entries=10)
     cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
     store.assign(cached.conversion_id, FLOORS)
+    assert (cached.directory / "floors.json").exists()
+
+    # Age the entry past the TTL deterministically, then prune.
+    meta_path = cached.directory / "conversion.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["created_at"] = time.time() - 7200
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
     assert store.prune() == 1
     assert not cached.directory.exists()
