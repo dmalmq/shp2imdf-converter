@@ -21,6 +21,7 @@ from backend.routers.reference_router import router as reference_router
 from backend.routers.wizard_router import router as wizard_router
 from backend.src.geocoding import GeocodingError, build_geocoder
 from backend.src.illustrator_importer import IllustratorConversionError
+from backend.src.illustrator_store import ConversionExpiredError, ConversionStore
 from backend.src.qgis_export import QgisExportError, QgisUnavailableError
 from backend.src.schemas import ErrorResponse
 from backend.src.session import SessionManager, build_session_backend
@@ -52,13 +53,14 @@ def _load_max_upload_bytes() -> int:
     return int(max_upload_mb * 1024 * 1024)
 
 
-async def _session_cleanup_loop(manager: SessionManager, stop: asyncio.Event) -> None:
+async def _session_cleanup_loop(app: FastAPI, stop: asyncio.Event) -> None:
     while True:
         try:
             await asyncio.wait_for(stop.wait(), timeout=3600)
             break
         except TimeoutError:
-            manager.prune_expired()
+            app.state.session_manager.prune_expired()
+            app.state.illustrator_store.prune()
 
 
 @asynccontextmanager
@@ -70,6 +72,11 @@ async def lifespan(app: FastAPI):
     app.state.filename_keywords_path = Path(__file__).parent / "config" / "filename_keywords.json"
     app.state.unit_categories_path = Path(__file__).parent / "config" / "unit_categories.json"
     app.state.company_mappings_path = Path(__file__).parent / "config" / "company_mappings.json"
+    app.state.illustrator_store = ConversionStore(
+        root=Path(os.getenv("TEMP_DATA_DIR", "./data/tmp")) / "illustrator",
+        ttl_seconds=float(os.getenv("ILLUSTRATOR_CACHE_TTL_MINUTES", "120")) * 60,
+        max_entries=int(os.getenv("ILLUSTRATOR_CACHE_MAX_ENTRIES", "20")),
+    )
     app.state.geocoder = build_geocoder(
         provider=os.getenv("GEOCODER_PROVIDER", "nominatim"),
         base_url=os.getenv("GEOCODER_BASE_URL", "https://nominatim.openstreetmap.org"),
@@ -79,7 +86,7 @@ async def lifespan(app: FastAPI):
         max_cache_entries=int(os.getenv("GEOCODER_CACHE_MAX_ENTRIES", "512")),
     )
     stop_event = asyncio.Event()
-    cleanup_task = asyncio.create_task(_session_cleanup_loop(app.state.session_manager, stop_event))
+    cleanup_task = asyncio.create_task(_session_cleanup_loop(app, stop_event))
     try:
         yield
     finally:
@@ -152,6 +159,12 @@ async def qgis_export_error_handler(_: Request, exc: QgisExportError) -> JSONRes
 async def illustrator_conversion_error_handler(_: Request, exc: IllustratorConversionError) -> JSONResponse:
     payload = ErrorResponse(detail=str(exc), code="ILLUSTRATOR_CONVERSION_FAILED")
     return JSONResponse(status_code=422, content=payload.model_dump())
+
+
+@app.exception_handler(ConversionExpiredError)
+async def conversion_expired_handler(_: Request, exc: ConversionExpiredError) -> JSONResponse:
+    payload = ErrorResponse(detail=str(exc), code="CONVERSION_EXPIRED")
+    return JSONResponse(status_code=404, content=payload.model_dump())
 
 
 @app.exception_handler(RequestValidationError)
