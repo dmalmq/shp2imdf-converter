@@ -66,3 +66,8 @@ pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
   23 cm out. The cross-language golden fixture in `test_illustrator_georeference.py` and
   `similarity.test.ts` is what keeps the two implementations honest; if you change one, run
   both.
+- Illustrator multi-floor placement: assignment is by box on the artwork preview, membership
+  is `centroid ∈ box` plus an optional layer restriction, re-verified server-side at export
+  (the preview filter is display-only). Linked floors share scale/rotation; dragging a floor
+  unlinks it (drag = pin); frame operations touch linked floors only. With one floor the
+  floor stays linked, preserving the single-floor behaviour exactly.
