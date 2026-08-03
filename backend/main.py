@@ -22,6 +22,7 @@ from backend.routers.wizard_router import router as wizard_router
 from backend.src.geocoding import GeocodingError, build_geocoder
 from backend.src.illustrator_importer import IllustratorConversionError
 from backend.src.illustrator_store import ConversionExpiredError, ConversionStore
+from backend.src.placements import DuplicatePlacementError, PlacementStore
 from backend.src.qgis_export import QgisExportError, QgisUnavailableError
 from backend.src.schemas import ErrorResponse
 from backend.src.session import SessionManager, build_session_backend
@@ -76,6 +77,9 @@ async def lifespan(app: FastAPI):
         root=Path(os.getenv("TEMP_DATA_DIR", "./data/tmp")) / "illustrator",
         ttl_seconds=float(os.getenv("ILLUSTRATOR_CACHE_TTL_MINUTES", "120")) * 60,
         max_entries=int(os.getenv("ILLUSTRATOR_CACHE_MAX_ENTRIES", "20")),
+    )
+    app.state.placement_store = PlacementStore(
+        Path(os.getenv("PLACEMENTS_DB", "./data/placements.db"))
     )
     app.state.geocoder = build_geocoder(
         provider=os.getenv("GEOCODER_PROVIDER", "nominatim"),
@@ -165,6 +169,12 @@ async def illustrator_conversion_error_handler(_: Request, exc: IllustratorConve
 async def conversion_expired_handler(_: Request, exc: ConversionExpiredError) -> JSONResponse:
     payload = ErrorResponse(detail=str(exc), code="CONVERSION_EXPIRED")
     return JSONResponse(status_code=404, content=payload.model_dump())
+
+
+@app.exception_handler(DuplicatePlacementError)
+async def duplicate_placement_handler(_: Request, exc: DuplicatePlacementError) -> JSONResponse:
+    payload = ErrorResponse(detail=str(exc), code="PLACEMENT_NAME_TAKEN")
+    return JSONResponse(status_code=409, content=payload.model_dump())
 
 
 @app.exception_handler(RequestValidationError)

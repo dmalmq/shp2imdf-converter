@@ -29,6 +29,7 @@ from backend.src.illustrator_store import ConversionStore
 from backend.src.imdf_reader import read_imdf_zip
 from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
 from backend.src.importer import import_file_blobs
+from backend.src.placements import PlacementStore
 from backend.src.schemas import (
     CleanupSummary,
     GeocodeSearchResponse,
@@ -36,6 +37,10 @@ from backend.src.schemas import (
     IllustratorPreviewResponse,
     ImportImdfResponse,
     ImportResponse,
+    PlacementItem,
+    PlacementListResponse,
+    PlacementRequest,
+    TransformPayload,
 )
 from backend.src.session import SessionManager
 
@@ -294,6 +299,54 @@ async def geocode(
     return GeocodeSearchResponse(
         query=cleaned, language=language, results=[_match_to_schema(m) for m in matches]
     )
+
+
+def _placement_store(request: Request) -> PlacementStore:
+    return request.app.state.placement_store
+
+
+def _placement_item(placement) -> PlacementItem:
+    return PlacementItem(
+        id=placement.id,
+        name=placement.name,
+        transform=TransformPayload(**placement.transform),
+        artwork_bounds=placement.artwork_bounds,
+        created_at=placement.created_at,
+        updated_at=placement.updated_at,
+    )
+
+
+@router.get("/placements", response_model=PlacementListResponse)
+async def list_placements(request: Request) -> PlacementListResponse:
+    return PlacementListResponse(
+        placements=[_placement_item(p) for p in _placement_store(request).list_all()]
+    )
+
+
+@router.post("/placements", response_model=PlacementItem, status_code=201)
+async def create_placement(request: Request, payload: PlacementRequest) -> PlacementItem:
+    return _placement_item(
+        _placement_store(request).create(
+            payload.name, payload.transform.model_dump(), payload.artwork_bounds
+        )
+    )
+
+
+@router.put("/placements/{placement_id}", response_model=PlacementItem)
+async def update_placement(
+    placement_id: int, request: Request, payload: PlacementRequest
+) -> PlacementItem:
+    return _placement_item(
+        _placement_store(request).update(
+            placement_id, payload.name, payload.transform.model_dump(), payload.artwork_bounds
+        )
+    )
+
+
+@router.delete("/placements/{placement_id}", status_code=204)
+async def delete_placement(placement_id: int, request: Request) -> Response:
+    _placement_store(request).delete(placement_id)
+    return Response(status_code=204)
 
 
 @router.post("/import", response_model=ImportResponse, status_code=201)

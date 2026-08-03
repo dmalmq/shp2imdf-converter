@@ -605,3 +605,28 @@ class GeocodeSearchResponse(BaseModel):
     query: str
     language: str
     results: list[GeocodeResultItem] = Field(default_factory=list)
+
+
+class PlacementRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=120)
+    transform: TransformPayload
+    artwork_bounds: list[float] = Field(min_length=4, max_length=4)
+
+
+class PlacementItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    name: str
+    transform: TransformPayload
+    artwork_bounds: list[float]
+    created_at: str
+    updated_at: str
+
+
+class PlacementListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    placements: list[PlacementItem] = Field(default_factory=list)

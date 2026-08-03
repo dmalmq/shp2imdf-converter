@@ -141,3 +141,54 @@ def test_legacy_direct_download_endpoint_still_works(test_client) -> None:
     )
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/zip"
+
+
+PLACEMENT_BODY = {
+    "name": "Placement CRUD Test",
+    "transform": {
+        "artwork_anchor": [250.0, 275.0],
+        "map_anchor": [139.700258, 35.690921],
+        "rotation_deg": 12.5,
+        "metres_per_point": 0.176389,
+        "working_crs": "EPSG:6677",
+    },
+    "artwork_bounds": [0.0, 0.0, 500.0, 550.0],
+}
+
+
+@pytest.mark.georef
+def test_placement_crud_round_trip(test_client) -> None:
+    created = test_client.post("/api/placements", json=PLACEMENT_BODY)
+    assert created.status_code == 201, created.text
+    placement_id = created.json()["id"]
+    try:
+        listed = test_client.get("/api/placements").json()["placements"]
+        assert any(p["id"] == placement_id for p in listed)
+
+        changed = {
+            **PLACEMENT_BODY,
+            "transform": {**PLACEMENT_BODY["transform"], "rotation_deg": -3.0},
+        }
+        updated = test_client.put(f"/api/placements/{placement_id}", json=changed)
+        assert updated.status_code == 200
+        assert updated.json()["transform"]["rotation_deg"] == -3.0
+    finally:
+        assert test_client.delete(f"/api/placements/{placement_id}").status_code == 204
+
+
+@pytest.mark.georef
+def test_duplicate_placement_name_is_409(test_client) -> None:
+    body = {**PLACEMENT_BODY, "name": "Duplicate Name Test"}
+    first = test_client.post("/api/placements", json=body)
+    assert first.status_code == 201
+    try:
+        conflict = test_client.post("/api/placements", json=body)
+        assert conflict.status_code == 409
+        assert conflict.json()["code"] == "PLACEMENT_NAME_TAKEN"
+    finally:
+        test_client.delete(f"/api/placements/{first.json()['id']}")
+
+
+@pytest.mark.georef
+def test_deleting_an_unknown_placement_is_404(test_client) -> None:
+    assert test_client.delete("/api/placements/999999").status_code == 404
