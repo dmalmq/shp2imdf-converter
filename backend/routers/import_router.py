@@ -32,7 +32,7 @@ from backend.src.illustrator_importer import convert_ai_to_geopackage_bundle, pa
 from backend.src.illustrator_store import ConversionStore
 from backend.src.imdf_reader import read_imdf_zip
 from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
-from backend.src.importer import import_file_blobs
+from backend.src.importer import import_file_blobs, read_reference_layers
 from backend.src.placements import PlacementStore
 from backend.src.schemas import (
     AssignFloorSummary,
@@ -48,6 +48,8 @@ from backend.src.schemas import (
     PlacementItem,
     PlacementListResponse,
     PlacementRequest,
+    ReferenceLayerItem,
+    ReferenceLayersResponse,
     TransformPayload,
 )
 from backend.src.session import SessionManager
@@ -205,6 +207,45 @@ async def convert_illustrator(
             # ensure_ascii keeps non-ASCII layer names out of the raw header bytes.
             "X-Conversion-Report": json.dumps(report.to_dict()),
         },
+    )
+
+
+@router.post("/reference-layers", response_model=ReferenceLayersResponse)
+async def upload_reference_layers(
+    request: Request,
+    files: Annotated[
+        list[UploadFile],
+        File(description="Shapefile components, a .zip containing them, or a .gpkg"),
+    ],
+) -> ReferenceLayersResponse:
+    """Read overlay geometry for the placement map.
+
+    Stateless on purpose: the layers are only drawn under the artwork to align
+    it, so the response is the whole contract and nothing is cached or exported.
+    """
+    blobs: list[tuple[str, bytes]] = []
+    total = 0
+    limit = _max_upload_bytes(request)
+    for upload in files:
+        payload = await upload.read()
+        total += len(payload)
+        if total > limit:
+            raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
+        blobs.append((upload.filename or "reference.bin", payload))
+
+    layers = read_reference_layers(blobs)
+    return ReferenceLayersResponse(
+        layers=[
+            ReferenceLayerItem(
+                name=layer.name,
+                crs=layer.crs,
+                feature_count=layer.feature_count,
+                truncated=layer.truncated,
+                warnings=layer.warnings,
+                geojson=layer.geojson,
+            )
+            for layer in layers
+        ]
     )
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 import copy
+import json
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -527,6 +528,89 @@ def _read_geopackage_blob(
             )
 
     return loaded_sources, warnings
+
+
+@dataclass(slots=True)
+class ReferenceLayer:
+    """Display-only overlay geometry, in WGS84, for the placement map."""
+
+    name: str
+    crs: str | None
+    feature_count: int
+    geojson: dict[str, Any]
+    truncated: bool
+    warnings: list[str]
+
+
+# A reference layer is only ever looked at, so it is simplified to roughly a
+# map pixel and capped. Anything finer is payload the browser cannot show.
+_REFERENCE_TOLERANCE_DIVISOR = 2000.0
+_REFERENCE_MAX_FEATURES = 5000
+
+
+def _to_reference_layer(source: LoadedSource) -> ReferenceLayer:
+    frame = source.gdf
+    total = int(len(frame))
+    # Attributes are never displayed; dropping them keeps big DBFs off the wire.
+    frame = frame.loc[frame.geometry.notna() & ~frame.geometry.is_empty, ["geometry"]]
+
+    if len(frame):
+        minx, miny, maxx, maxy = frame.total_bounds
+        diagonal = ((maxx - minx) ** 2 + (maxy - miny) ** 2) ** 0.5
+        tolerance = diagonal / _REFERENCE_TOLERANCE_DIVISOR if diagonal > 0 else 0.0
+        if tolerance > 0:
+            frame = frame.copy()
+            frame["geometry"] = frame.geometry.simplify(tolerance, preserve_topology=True)
+
+    truncated = len(frame) > _REFERENCE_MAX_FEATURES
+    if truncated:
+        frame = frame.iloc[:_REFERENCE_MAX_FEATURES]
+
+    geojson = (
+        json.loads(frame.to_json(na="null"))
+        if len(frame)
+        else {"type": "FeatureCollection", "features": []}
+    )
+    return ReferenceLayer(
+        name=source.stem,
+        crs=source.crs_detected,
+        feature_count=total,
+        geojson=geojson,
+        truncated=truncated,
+        warnings=list(source.warnings),
+    )
+
+
+def read_reference_layers(file_blobs: Sequence[tuple[str, bytes]]) -> list[ReferenceLayer]:
+    """Read shapefiles/GeoPackages into WGS84 GeoJSON for map display only.
+
+    Nothing here enters an export: these layers exist so artwork can be aligned
+    against surveyed geometry the operator already trusts.
+    """
+    if not file_blobs:
+        raise ValueError("No files provided.")
+
+    expanded = _expand_archives(file_blobs)
+    shapefile_groups = _group_shapefile_components(expanded)
+    geopackages = _collect_geopackage_blobs(expanded)
+    if not shapefile_groups and not geopackages:
+        raise ValueError("No shapefile components or GeoPackages found in upload.")
+
+    used_stems = {stem.lower() for stem in shapefile_groups}
+    sources: list[LoadedSource] = []
+    for stem, files in sorted(shapefile_groups.items()):
+        if ".shp" not in files:
+            continue
+        sources.append(_read_shapefile_from_group(stem, files))
+    for package_stem, content in geopackages:
+        package_sources, _package_warnings = _read_geopackage_blob(
+            package_stem, content, used_stems
+        )
+        sources.extend(package_sources)
+
+    if not sources:
+        raise ValueError("No spatial data layers found in upload.")
+    return [_to_reference_layer(source) for source in sources]
 
 
 def import_file_blobs(

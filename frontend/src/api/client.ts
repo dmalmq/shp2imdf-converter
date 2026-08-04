@@ -1,3 +1,5 @@
+import type { Feature } from "geojson";
+
 import { ApiClientError, buildApiClientError } from "./errors";
 
 export type CleanupSummary = {
@@ -952,6 +954,26 @@ export async function geocodeSearch(
   const response = await fetch(`/api/geocode?${params.toString()}`);
   const payload = await handleJson<{ results: GeocodeResultItem[] }>(response);
   return payload.results;
+}
+
+export type ReferenceLayerItem = {
+  name: string;
+  crs: string | null;
+  feature_count: number;
+  truncated: boolean;
+  warnings: string[];
+  geojson: { type: "FeatureCollection"; features: Feature[] };
+};
+
+/** Read shapefile/GeoPackage overlays for the placement map. Never exported. */
+export async function uploadReferenceLayers(files: File[]): Promise<ReferenceLayerItem[]> {
+  const body = new FormData();
+  for (const file of files) {
+    body.append("files", file);
+  }
+  const response = await fetch("/api/reference-layers", { method: "POST", body });
+  const payload = await handleJson<{ layers: ReferenceLayerItem[] }>(response);
+  return payload.layers;
 }
 
 export async function listPlacements(): Promise<PlacementItem[]> {

@@ -2,6 +2,7 @@ import type { Feature, FeatureCollection, Geometry } from "geojson";
 
 import {
   buildSvgPaths,
+  clientToArtworkPoint,
   featureCentroid,
   geometryToPath,
   partitionByFloors
@@ -125,4 +126,43 @@ test("layer restriction excludes matching-position features on other layers", ()
   const { perFloor, unassigned } = partitionByFloors(preview, floors);
   expect(perFloor.get("2F")).toHaveLength(1);
   expect(unassigned).toHaveLength(1);
+});
+
+const SQUARE = [0, 0, 10, 10] as [number, number, number, number];
+
+test("clientToArtworkPoint flips y: screen top maps to artwork maxy", () => {
+  const rect = { left: 0, top: 0, width: 100, height: 100 };
+  // Top of the element -> artwork maxy; bottom -> miny.
+  expect(clientToArtworkPoint(SQUARE, rect, 50, 0)[1]).toBeCloseTo(10, 6);
+  expect(clientToArtworkPoint(SQUARE, rect, 50, 100)[1]).toBeCloseTo(0, 6);
+  // x is not flipped.
+  expect(clientToArtworkPoint(SQUARE, rect, 0, 50)[0]).toBeCloseTo(0, 6);
+  expect(clientToArtworkPoint(SQUARE, rect, 100, 50)[0]).toBeCloseTo(10, 6);
+});
+
+test("clientToArtworkPoint accounts for xMidYMid meet letterboxing", () => {
+  // 10x10 artwork in a 200x100 element: content is 100x100, centered at x 50..150.
+  const rect = { left: 0, top: 0, width: 200, height: 100 };
+  expect(clientToArtworkPoint(SQUARE, rect, 50, 50)[0]).toBeCloseTo(0, 6); // content left edge
+  expect(clientToArtworkPoint(SQUARE, rect, 150, 50)[0]).toBeCloseTo(10, 6); // content right edge
+  expect(clientToArtworkPoint(SQUARE, rect, 50, 0)[1]).toBeCloseTo(10, 6); // content top edge
+});
+
+test("clientToArtworkPoint is offset by the element position", () => {
+  const rect = { left: 386, top: 182, width: 628, height: 256 };
+  // Reproduction of the orientation fixture: 180x180 artwork in a 628x256 box.
+  const bounds = [10, 10, 190, 190] as [number, number, number, number];
+  const scale = Math.min(628 / 180, 256 / 180);
+  const offsetX = 386 + (628 - 180 * scale) / 2;
+  const offsetY = 182 + (256 - 180 * scale) / 2;
+  const [x, y] = clientToArtworkPoint(bounds, rect, offsetX, offsetY);
+  expect(x).toBeCloseTo(10, 6);
+  expect(y).toBeCloseTo(190, 6); // content top-left is artwork maxx/maxy
+});
+
+test("clientToArtworkPoint degrades to the artwork centre on a zero-size viewport", () => {
+  const rect = { left: 0, top: 0, width: 0, height: 0 };
+  const [x, y] = clientToArtworkPoint(SQUARE, rect, 0, 0);
+  expect(x).toBeCloseTo(5, 6);
+  expect(y).toBeCloseTo(5, 6);
 });

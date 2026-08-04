@@ -61,6 +61,44 @@ export function buildSvgPaths(
   };
 }
 
+export type SvgClientRect = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+/**
+ * Map a client (viewport) position to artwork coordinates.
+ *
+ * The artwork SVG renders with the default `preserveAspectRatio="xMidYMid meet"`,
+ * so the artwork is letterboxed inside the element; and artwork coordinates are
+ * PDF points (y-up, bottom-left origin) while SVG user space is y-down, so the
+ * content is flipped vertically. This inverts both effects so a box drawn with
+ * the pointer lands on the artwork where the user sees it.
+ */
+export function clientToArtworkPoint(
+  bounds: [number, number, number, number],
+  rect: SvgClientRect,
+  clientX: number,
+  clientY: number
+): [number, number] {
+  const [minx, miny, maxx, maxy] = bounds;
+  const viewW = maxx - minx;
+  const viewH = maxy - miny;
+  if (!(viewW > 0) || !(viewH > 0) || !(rect.width > 0) || !(rect.height > 0)) {
+    return [(minx + maxx) / 2, (miny + maxy) / 2];
+  }
+  const scale = Math.min(rect.width / viewW, rect.height / viewH);
+  const contentW = viewW * scale;
+  const contentH = viewH * scale;
+  const offsetX = rect.left + (rect.width - contentW) / 2;
+  const offsetY = rect.top + (rect.height - contentH) / 2;
+  const x = minx + (clientX - offsetX) / scale;
+  const y = maxy - (clientY - offsetY) / scale; // y-flip: screen top is artwork maxy
+  return [x, y];
+}
+
 function collectVertices(geometry: Geometry, into: Position[]): void {
   switch (geometry.type) {
     case "Point":

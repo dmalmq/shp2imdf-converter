@@ -1,6 +1,10 @@
 import {
+  DEFAULT_DRAWING_SCALE,
+  DEFAULT_METRES_PER_POINT,
   currentResiduals,
   floorPayloadsToState,
+  initialPlacementHistory,
+  placementHistoryReducer,
   placementReducer,
   resolvedTransform,
   toFloorPayloads,
@@ -21,6 +25,13 @@ function floor(label: string, anchor: [number, number], linked = true): FloorPla
     artworkBounds: label === "1F" ? [0, 0, 170, 160] : [200, 0, 370, 160]
   };
 }
+
+test("the default drawing scale is 1:1000", () => {
+  // Our Illustrator floor plans are authored at 1:1000; a wrong default would
+  // georeference every export at the wrong size.
+  expect(DEFAULT_DRAWING_SCALE).toBe(1000);
+  expect(DEFAULT_METRES_PER_POINT).toBeCloseTo(0.3527777778, 9);
+});
 
 const BASE: PlacementState = {
   frame: { rotationDeg: 0, metresPerPoint: 0.176389, workingCrs: "EPSG:6677" },
@@ -154,6 +165,44 @@ test("toFloorPayloads emits one payload per floor", () => {
   expect(payloads[0].transform.working_crs).toBe("EPSG:6677");
 });
 
+test("resetPlacement installs a whole new floor set, labels and bounds included", () => {
+  // A fresh conversion starts with the single "artwork" floor; assigning floors
+  // in the Illustrator flow replaces it with the real label set.
+  const initial: PlacementState = {
+    ...BASE,
+    floors: [floor("artwork", ANCHOR)],
+    activeFloorLabel: "artwork"
+  };
+  const assigned: PlacementState = {
+    frame: { rotationDeg: 0, metresPerPoint: 0.176389, workingCrs: "EPSG:6677" },
+    activeFloorLabel: "1F",
+    scaleLocked: false,
+    floors: [floor("1F", ANCHOR), floor("2F", ANCHOR)]
+  };
+  const next = placementReducer(initial, { type: "resetPlacement", state: assigned });
+  expect(next.floors.map((f) => f.label)).toEqual(["1F", "2F"]);
+  expect(next.activeFloorLabel).toBe("1F");
+  expect(next.floors[0].artworkBounds).toEqual([0, 0, 170, 160]);
+  // The map draws a floor only when its label resolves to a transform.
+  for (const f of next.floors) {
+    expect(resolvedTransform(next, f).metresPerPoint).toBeCloseTo(0.176389, 9);
+  }
+});
+
+test("applyFloors only updates floors already present, never adds labels", () => {
+  // Contract boundary: applyFloors is the saved-placement merge, keyed by label.
+  // Using it to install a new label set silently drops every floor (and would
+  // leave any added floor without artworkBounds), so the assignment step must
+  // use resetPlacement instead.
+  const initial: PlacementState = {
+    ...BASE,
+    floors: [floor("artwork", ANCHOR)],
+    activeFloorLabel: "artwork"
+  };
+  const next = placementReducer(initial, { type: "applyFloors", floors: toFloorPayloads(BASE) });
+  expect(next.floors.map((f) => f.label)).toEqual(["artwork"]);
+});
+
 test("floorPayloadsToState rebuilds linked floors and the frame", () => {
   const saved = [
     {
@@ -242,4 +291,121 @@ test("fitting control points drives residuals to zero", () => {
   const fit = currentResiduals(state);
   expect(fit).not.toBeNull();
   expect(fit!.rmse).toBeLessThan(0.01);
+});
+
+test("a whole drag collapses into one undo step", () => {
+  // A drag dispatches one action per animation frame; undo must not step
+  // through frames.
+  let history = initialPlacementHistory(BASE);
+  for (const lat of [35.7, 35.71, 35.72, 35.73]) {
+    history = placementHistoryReducer(history, {
+      type: "dragFloor",
+      label: "1F",
+      mapAnchor: [139.72, lat]
+    });
+  }
+  expect(history.past).toHaveLength(1);
+  expect(history.present.floors[0].mapAnchor).toEqual([139.72, 35.73]);
+
+  history = placementHistoryReducer(history, { type: "undo" });
+  expect(history.present.floors[0].mapAnchor).toEqual(ANCHOR);
+});
+
+test("releasing the drag starts a new undo step for the next one", () => {
+  let history = initialPlacementHistory(BASE);
+  history = placementHistoryReducer(history, {
+    type: "dragFloor",
+    label: "1F",
+    mapAnchor: [139.72, 35.7]
+  });
+  history = placementHistoryReducer(history, { type: "endGesture" });
+  history = placementHistoryReducer(history, {
+    type: "dragFloor",
+    label: "1F",
+    mapAnchor: [139.73, 35.71]
+  });
+  expect(history.past).toHaveLength(2);
+
+  history = placementHistoryReducer(history, { type: "undo" });
+  expect(history.present.floors[0].mapAnchor).toEqual([139.72, 35.7]);
+});
+
+test("redo replays an undone step and new work clears the redo stack", () => {
+  let history = initialPlacementHistory(BASE);
+  history = placementHistoryReducer(history, { type: "rotateFrame", rotationDeg: 30 });
+  history = placementHistoryReducer(history, { type: "undo" });
+  expect(history.present.frame.rotationDeg).toBe(0);
+
+  history = placementHistoryReducer(history, { type: "redo" });
+  expect(history.present.frame.rotationDeg).toBe(30);
+
+  history = placementHistoryReducer(history, { type: "undo" });
+  history = placementHistoryReducer(history, { type: "setDrawingScale", denominator: 500 });
+  expect(history.future).toHaveLength(0);
+});
+
+test("undo and redo at the ends of the history are no-ops", () => {
+  const history = initialPlacementHistory(BASE);
+  expect(placementHistoryReducer(history, { type: "undo" })).toBe(history);
+  expect(placementHistoryReducer(history, { type: "redo" })).toBe(history);
+});
+
+test("a rejected action does not consume an undo step", () => {
+  // Locked scale rejects scaleFrame; undo must not become a no-op instead of
+  // reverting the lock.
+  let history = initialPlacementHistory(BASE);
+  history = placementHistoryReducer(history, { type: "setDrawingScale", denominator: 500 });
+  const locked = history;
+  history = placementHistoryReducer(history, { type: "scaleFrame", metresPerPoint: 9 });
+  expect(history).toBe(locked);
+});
+
+test("choosing a floor is not an undo step", () => {
+  let history = initialPlacementHistory(BASE);
+  history = placementHistoryReducer(history, { type: "setActiveFloor", label: "2F" });
+  expect(history.past).toHaveLength(0);
+  expect(history.present.activeFloorLabel).toBe("2F");
+});
+
+test("a new assignment clears the history", () => {
+  let history = initialPlacementHistory(BASE);
+  history = placementHistoryReducer(history, { type: "rotateFrame", rotationDeg: 30 });
+  const fresh: PlacementState = { ...BASE, floors: [floor("1F", ANCHOR)] };
+  history = placementHistoryReducer(history, { type: "resetPlacement", state: fresh });
+  expect(history.past).toHaveLength(0);
+  expect(history.future).toHaveLength(0);
+  expect(placementHistoryReducer(history, { type: "undo" })).toBe(history);
+});
+
+test("separate gesture types are separate undo steps", () => {
+  let history = initialPlacementHistory(BASE);
+  history = placementHistoryReducer(history, { type: "rotateFrame", rotationDeg: 10 });
+  history = placementHistoryReducer(history, { type: "scaleFrame", metresPerPoint: 0.4 });
+  expect(history.past).toHaveLength(2);
+  history = placementHistoryReducer(history, { type: "undo" });
+  expect(history.present.frame.metresPerPoint).toBeCloseTo(0.176389, 9);
+  expect(history.present.frame.rotationDeg).toBe(10);
+});
+
+test("the auto-located baseline is the floor of the history, not an undo step", () => {
+  // Undo after the initial locate must not fling the plan back to a default
+  // anchor the user never chose.
+  let history = initialPlacementHistory(BASE);
+  history = placementHistoryReducer(history, {
+    type: "positionBuilding",
+    mapAnchor: [139.734, 35.606],
+    baseline: true
+  });
+  expect(history.past).toHaveLength(0);
+  expect(history.present.floors[0].mapAnchor).toEqual([139.734, 35.606]);
+  expect(placementHistoryReducer(history, { type: "undo" })).toBe(history);
+
+  // A location the user picks afterwards is a normal, undoable edit.
+  history = placementHistoryReducer(history, {
+    type: "positionBuilding",
+    mapAnchor: [139.7, 35.69]
+  });
+  expect(history.past).toHaveLength(1);
+  history = placementHistoryReducer(history, { type: "undo" });
+  expect(history.present.floors[0].mapAnchor).toEqual([139.734, 35.606]);
 });

@@ -130,6 +130,98 @@ export function transformGeoJson(
   };
 }
 
+/** One artwork point placed on the map. */
+export function artworkToLngLat(
+  transform: SimilarityTransform,
+  x: number,
+  y: number
+): [number, number] {
+  const [east, north] = applyMatrix(toEnuMatrix(transform), x, y);
+  return enuToLngLat(east, north, transform.mapAnchor[0], transform.mapAnchor[1]);
+}
+
+export type GizmoCorner = {
+  /** Artwork-space corner, named as it appears before any rotation. */
+  key: "sw" | "se" | "ne" | "nw";
+  artwork: [number, number];
+  lngLat: [number, number];
+  cursor: string;
+};
+
+export type GizmoFrame = {
+  /** Closed outline of the artwork bounds, rotated onto the map. */
+  ring: [number, number][];
+  corners: GizmoCorner[];
+  /** Handle on a stem past the artwork's top edge. */
+  rotate: { artwork: [number, number]; lngLat: [number, number] };
+};
+
+/** Length of the rotation stem as a share of artwork height. */
+const ROTATE_STEM = 0.12;
+
+/**
+ * On-map geometry of the transform gizmo: the artwork's bounding box, its four
+ * scale corners and the rotation handle, all placed through `transform`.
+ *
+ * Everything is derived in artwork space first, so the gizmo rotates and scales
+ * with the artwork instead of being an unrelated screen-space overlay.
+ */
+export function gizmoFrame(
+  transform: SimilarityTransform,
+  bounds: [number, number, number, number]
+): GizmoFrame {
+  const [minX, minY, maxX, maxY] = bounds;
+  const place = (x: number, y: number) => artworkToLngLat(transform, x, y);
+  const cornerSpecs: { key: GizmoCorner["key"]; artwork: [number, number]; cursor: string }[] = [
+    { key: "sw", artwork: [minX, minY], cursor: "nesw-resize" },
+    { key: "se", artwork: [maxX, minY], cursor: "nwse-resize" },
+    { key: "ne", artwork: [maxX, maxY], cursor: "nesw-resize" },
+    { key: "nw", artwork: [minX, maxY], cursor: "nwse-resize" }
+  ];
+  const corners: GizmoCorner[] = cornerSpecs.map((corner) => ({
+    ...corner,
+    lngLat: place(corner.artwork[0], corner.artwork[1])
+  }));
+  const rotateArtwork: [number, number] = [
+    (minX + maxX) / 2,
+    maxY + Math.max(maxY - minY, 1) * ROTATE_STEM
+  ];
+  return {
+    ring: [
+      place(minX, minY),
+      place(maxX, minY),
+      place(maxX, maxY),
+      place(minX, maxY),
+      place(minX, minY)
+    ],
+    corners,
+    rotate: { artwork: rotateArtwork, lngLat: place(rotateArtwork[0], rotateArtwork[1]) }
+  };
+}
+
+/**
+ * Rotation that points `artworkHandle` at a map bearing.
+ *
+ * `toEnuMatrix` maps artwork (dx,dy) to a bearing of `angleOf(dx,dy) - rotation`
+ * (rotation is CCW from true north), so aiming the handle at `bearingDeg` means
+ * rotation = handleAngle - bearing. Without this the handle would mirror the
+ * pointer instead of following it.
+ */
+export function rotationForHandle(
+  artworkHandle: [number, number],
+  artworkAnchor: [number, number],
+  bearingDeg: number
+): number {
+  const dx = artworkHandle[0] - artworkAnchor[0];
+  const dy = artworkHandle[1] - artworkAnchor[1];
+  if (dx === 0 && dy === 0) {
+    throw new SimilarityError("The rotation handle must not sit on the anchor.");
+  }
+  const handleAngle = (Math.atan2(dx, dy) * 180) / Math.PI;
+  const rotation = handleAngle - bearingDeg;
+  return ((rotation + 540) % 360) - 180;
+}
+
 /**
  * Least-squares similarity fit. `enuPoints` are ENU metres about the current
  * anchor; convert map clicks with {@link lngLatToEnu} first.

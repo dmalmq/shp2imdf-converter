@@ -9,17 +9,26 @@ import {
 } from "../api/client";
 import { AssignmentPanel } from "../components/illustrator/AssignmentPanel";
 import { ControlPointList } from "../components/illustrator/ControlPointList";
-import { FLOOR_TINTS, type FloorLayer } from "../components/illustrator/PlacementMap";
+import {
+  FLOOR_TINTS,
+  type FloorLayer,
+  type ReferenceLayer
+} from "../components/illustrator/PlacementMap";
 import { PlacementLibrary } from "../components/illustrator/PlacementLibrary";
 import { PlacementMap } from "../components/illustrator/PlacementMap";
+import { ReferenceLayerList } from "../components/illustrator/ReferenceLayerList";
 import { TransformPanel } from "../components/illustrator/TransformPanel";
 import { Button, Card } from "../components/ui";
+import { siteNameFromFilename } from "../lib/siteName";
 import { partitionByFloors } from "../lib/svgPreview";
 import {
-  placementReducer,
+  DEFAULT_METRES_PER_POINT,
+  initialPlacementHistory,
+  placementHistoryReducer,
   toFloorPayloads,
   type PlacementState
 } from "../hooks/useIllustratorPlacement";
+import { usePlacementShortcuts } from "../hooks/usePlacementShortcuts";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 
 const CRS_CHOICES = (suggested: string, suggestedLabel: string) => [
@@ -42,7 +51,11 @@ function initialStateFromAssignment(
     : [{ label: "artwork", box: preview.artwork_bounds, layer_names: null }];
   const first = regions[0];
   return {
-    frame: { rotationDeg: 0, metresPerPoint: 0.176389, workingCrs: preview.suggested_crs },
+    frame: {
+      rotationDeg: 0,
+      metresPerPoint: DEFAULT_METRES_PER_POINT,
+      workingCrs: preview.suggested_crs
+    },
     activeFloorLabel: first.label,
     scaleLocked: false,
     floors: regions.map((region) => ({
@@ -60,7 +73,7 @@ function initialStateFromAssignment(
 }
 
 const DEFAULT_STATE: PlacementState = {
-  frame: { rotationDeg: 0, metresPerPoint: 0.176389, workingCrs: "EPSG:6677" },
+  frame: { rotationDeg: 0, metresPerPoint: DEFAULT_METRES_PER_POINT, workingCrs: "EPSG:6677" },
   activeFloorLabel: "artwork",
   scaleLocked: false,
   floors: [
@@ -89,7 +102,53 @@ export function IllustratorPage() {
     shapefile: true,
     qgis: true
   });
-  const [state, dispatch] = useReducer(placementReducer, DEFAULT_STATE);
+  const [history, dispatch] = useReducer(
+    placementHistoryReducer,
+    DEFAULT_STATE,
+    initialPlacementHistory
+  );
+  const state = history.present;
+  const [recenterTo, setRecenterTo] = useState<[number, number] | null>(null);
+  const [referenceLayers, setReferenceLayers] = useState<ReferenceLayer[]>([]);
+
+  // Only on the placement view: the upload and assignment screens have their own
+  // keyboard behaviour and no floor to nudge.
+  usePlacementShortcuts({
+    state,
+    dispatch,
+    enabled: Boolean(preview) && assignment !== null,
+    onEscape: () => setPicking(false)
+  });
+
+  // Computed unconditionally so the hook order is stable across the early
+  // returns below (a conditional hook here crashes the placement view).
+  const bounds: [number, number, number, number] =
+    preview?.artwork_bounds ?? ([0, 0, 100, 100] as [number, number, number, number]);
+
+  // Drawings are named after the building (e.g. 0307_大井町.ai), so the panel can
+  // search for it and open the map on the right place instead of a city centre.
+  const siteName = siteNameFromFilename(preview?.report?.source_name ?? "");
+
+  const floorLayers: FloorLayer[] = useMemo(() => {
+    if (!preview) return [];
+    const regions: AssignedRegion[] = (assignment ?? []).length
+      ? (assignment as AssignedRegion[])
+      : [{ label: "artwork", box: preview.artwork_bounds, layer_names: null }];
+    const { perFloor } = partitionByFloors(
+      preview.preview,
+      regions.map((region) => ({
+        label: region.label,
+        box: region.box,
+        layerNames: region.layer_names
+      }))
+    );
+    return regions.map((region, index) => ({
+      label: region.label,
+      features: perFloor.get(region.label) ?? [],
+      bounds: region.box,
+      color: FLOOR_TINTS[index % FLOOR_TINTS.length]
+    }));
+  }, [preview, assignment]);
 
   const convert = async (file: File) => {
     setLoading(true);
@@ -98,10 +157,11 @@ export function IllustratorPage() {
       const response = await previewIllustrator(file);
       setPreview(response);
       setAssignment(null);
+      setRecenterTo(null);
       setLastFile(file);
       setOutputCrs(response.suggested_crs);
-      dispatch({ type: "applyFloors", floors: toFloorPayloads(initialStateFromAssignment(response, [])) });
-      dispatch({ type: "unlockScale" });
+      // The state carries scaleLocked: false already, so no unlockScale follow-up.
+      dispatch({ type: "resetPlacement", state: initialStateFromAssignment(response, []) });
     } catch {
       setError(
         t(
@@ -184,7 +244,7 @@ export function IllustratorPage() {
   if (assignment === null) {
     return (
       <div className="flex flex-1 items-start justify-center px-4 py-10">
-        <Card padding="lg" className="w-full max-w-2xl">
+        <Card padding="lg" className="w-full max-w-4xl">
           <h1 className="text-lg font-semibold">
             {t("Assign floors", "フロアを割り当て")}
           </h1>
@@ -203,10 +263,9 @@ export function IllustratorPage() {
                 await assignFloors(preview.conversion_id, regions);
                 setAssignment(regions);
                 dispatch({
-                  type: "applyFloors",
-                  floors: toFloorPayloads(initialStateFromAssignment(preview, regions))
+                  type: "resetPlacement",
+                  state: initialStateFromAssignment(preview, regions)
                 });
-                dispatch({ type: "unlockScale" });
               } catch {
                 setError(
                   t(
@@ -223,33 +282,18 @@ export function IllustratorPage() {
     );
   }
 
-  const bounds = preview.artwork_bounds;
-
-  const floorLayers: FloorLayer[] = useMemo(() => {
-    const regions: AssignedRegion[] = assignment.length
-      ? assignment
-      : [{ label: "artwork", box: preview.artwork_bounds, layer_names: null }];
-    const { perFloor } = partitionByFloors(
-      preview.preview,
-      regions.map((region) => ({
-        label: region.label,
-        box: region.box,
-        layerNames: region.layer_names
-      }))
-    );
-    return regions.map((region, index) => ({
-      label: region.label,
-      features: perFloor.get(region.label) ?? [],
-      bounds: region.box,
-      color: FLOOR_TINTS[index % FLOOR_TINTS.length]
-    }));
-  }, [preview, assignment]);
-
   return (
     <div className="flex flex-1 gap-4 p-4">
       <div className="w-80 shrink-0 space-y-4 overflow-auto">
         <Card padding="md">
-          <TransformPanel state={state} dispatch={dispatch} />
+          <TransformPanel
+            state={state}
+            dispatch={dispatch}
+            siteName={siteName}
+            onLocate={setRecenterTo}
+            canUndo={history.past.length > 0}
+            canRedo={history.future.length > 0}
+          />
         </Card>
         <Card padding="md">
           <ControlPointList
@@ -261,6 +305,9 @@ export function IllustratorPage() {
         </Card>
         <Card padding="md">
           <PlacementLibrary state={state} dispatch={dispatch} artworkBounds={bounds} />
+        </Card>
+        <Card padding="md">
+          <ReferenceLayerList layers={referenceLayers} onChange={setReferenceLayers} />
         </Card>
         <Card padding="md">
           <span className="text-xs font-medium">{t("Export", "書き出し")}</span>
@@ -303,6 +350,8 @@ export function IllustratorPage() {
           floors={floorLayers}
           state={state}
           dispatch={dispatch}
+          recenterTo={recenterTo}
+          referenceLayers={referenceLayers}
           pickingControlPoint={picking}
           onPickMap={(lngLat) => {
             dispatch({

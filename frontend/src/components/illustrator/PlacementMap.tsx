@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Feature, FeatureCollection } from "geojson";
 import MapGL, { Layer, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
 
@@ -8,7 +8,7 @@ import {
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
-import { transformGeoJson } from "../../lib/similarity";
+import { gizmoFrame, transformGeoJson } from "../../lib/similarity";
 import {
   BASEMAP_ORDER,
   BASEMAP_STYLES,
@@ -27,19 +27,41 @@ export type FloorLayer = {
   color: string;
 };
 
+/** Existing GIS data drawn under the artwork purely to align against. */
+export type ReferenceLayer = {
+  name: string;
+  data: FeatureCollection;
+  color: string;
+  visible: boolean;
+  featureCount: number;
+  truncated: boolean;
+};
+
 type Props = {
   floors: FloorLayer[];
   state: PlacementState;
   dispatch: (action: PlacementAction) => void;
   pickingControlPoint: boolean;
   onPickMap: (lngLat: [number, number]) => void;
+  /** Fly here when it changes; set by an address search, never by dragging. */
+  recenterTo?: [number, number] | null;
+  referenceLayers?: ReferenceLayer[];
 };
 
 /**
- * Placement map: one tinted GeoJSON source per floor, a floor picker, and
- * transform handles for the active floor only.
+ * Placement map: the selected floor over ghosts of the others, optional
+ * reference overlays beneath both, a floor picker, and transform handles for
+ * the active floor only.
  */
-export function PlacementMap({ floors, state, dispatch, pickingControlPoint, onPickMap }: Props) {
+export function PlacementMap({
+  floors,
+  state,
+  dispatch,
+  pickingControlPoint,
+  onPickMap,
+  recenterTo,
+  referenceLayers = []
+}: Props) {
   const { t } = useUiLanguage();
   const mapRef = useRef<MapRef | null>(null);
   const [ready, setReady] = useState(false);
@@ -50,6 +72,16 @@ export function PlacementMap({ floors, state, dispatch, pickingControlPoint, onP
   const activeLayer = floors.find((f) => f.label === activeFloor?.label) ?? floors[0];
   const activeTransform = activeFloor ? resolvedTransform(state, activeFloor) : null;
 
+  // initialViewState only applies on mount, so a search result would otherwise
+  // move the artwork off-screen while the camera stayed put.
+  useEffect(() => {
+    if (!ready || !recenterTo) return;
+    mapRef.current?.easeTo({ center: recenterTo, duration: 600 });
+  }, [ready, recenterTo]);
+
+  // The selected floor is drawn in full; the others stay as a faint ghost
+  // underneath, so stacked plans can be aligned against each other without
+  // competing for attention with the floor the handles act on.
   const placedByFloor = useMemo(
     () =>
       floors.map((floor) => {
@@ -67,6 +99,27 @@ export function PlacementMap({ floors, state, dispatch, pickingControlPoint, onP
         };
       }),
     [floors, state]
+  );
+
+  const activeLabel = activeFloor?.label ?? null;
+  const ghostFloors = placedByFloor.filter((floor) => floor.label !== activeLabel);
+  const placedActive = placedByFloor.find((floor) => floor.label === activeLabel) ?? null;
+
+  // Reference layers are added after the artwork layers already exist, so they
+  // would otherwise be appended on top of it. Anchor them below the bottom-most
+  // artwork layer instead.
+  const bottomArtworkLayerId = ghostFloors.length
+    ? `floor-${ghostFloors[0].label}-ghost-fill`
+    : placedActive
+      ? `floor-${placedActive.label}-fill`
+      : undefined;
+
+  const gizmo = useMemo(
+    () =>
+      activeFloor && activeTransform
+        ? gizmoFrame(activeTransform, activeFloor.artworkBounds)
+        : null,
+    [activeFloor, activeTransform]
   );
 
   const controlPointData = useMemo(
@@ -102,27 +155,98 @@ export function PlacementMap({ floors, state, dispatch, pickingControlPoint, onP
         onClick={onClick}
         cursor={pickingControlPoint ? "crosshair" : undefined}
       >
-        {placedByFloor.map((floor) => (
-          <Source key={floor.label} id={`floor-${floor.label}`} type="geojson" data={floor.data}>
+        {/* Reference data sits under everything the user is placing. */}
+        {referenceLayers
+          .filter((layer) => layer.visible)
+          .map((layer) => (
+            <Source
+              key={`reference-${layer.name}`}
+              id={`reference-${layer.name}`}
+              type="geojson"
+              data={layer.data}
+            >
+              <Layer
+                id={`reference-${layer.name}-fill`}
+                type="fill"
+                beforeId={bottomArtworkLayerId}
+                filter={["==", ["geometry-type"], "Polygon"]}
+                paint={{ "fill-color": layer.color, "fill-opacity": 0.08 }}
+              />
+              <Layer
+                id={`reference-${layer.name}-line`}
+                type="line"
+                beforeId={bottomArtworkLayerId}
+                paint={{
+                  "line-color": layer.color,
+                  "line-width": 1.2,
+                  "line-opacity": 0.9,
+                  // Dashed reads as "reference", never as artwork being placed.
+                  "line-dasharray": [2, 1]
+                }}
+              />
+              <Layer
+                id={`reference-${layer.name}-point`}
+                type="circle"
+                beforeId={bottomArtworkLayerId}
+                filter={["==", ["geometry-type"], "Point"]}
+                paint={{ "circle-radius": 3, "circle-color": layer.color }}
+              />
+            </Source>
+          ))}
+
+        {/* Ghosts first so the active floor always draws on top of them. */}
+        {ghostFloors.map((floor) => (
+          <Source
+            key={`ghost-${floor.label}`}
+            id={`floor-${floor.label}`}
+            type="geojson"
+            data={floor.data}
+          >
             <Layer
-              id={`floor-${floor.label}-fill`}
+              id={`floor-${floor.label}-ghost-fill`}
+              type="fill"
+              filter={["==", ["geometry-type"], "Polygon"]}
+              paint={{ "fill-color": floor.color, "fill-opacity": 0.06 }}
+            />
+            <Layer
+              id={`floor-${floor.label}-ghost-line`}
+              type="line"
+              paint={{ "line-color": floor.color, "line-opacity": 0.35, "line-width": 0.5 }}
+            />
+          </Source>
+        ))}
+
+        {placedActive ? (
+          <Source
+            key={placedActive.label}
+            id={`floor-${placedActive.label}`}
+            type="geojson"
+            data={placedActive.data}
+          >
+            <Layer
+              id={`floor-${placedActive.label}-fill`}
               type="fill"
               filter={["==", ["geometry-type"], "Polygon"]}
               paint={{
-                "fill-color": ["coalesce", ["get", "fill_color"], floor.color],
+                "fill-color": ["coalesce", ["get", "fill_color"], placedActive.color],
                 "fill-opacity": 0.45
               }}
             />
             <Layer
-              id={`floor-${floor.label}-line`}
+              id={`floor-${placedActive.label}-line`}
               type="line"
               paint={{
-                "line-color": ["coalesce", ["get", "stroke_color"], ["get", "fill_color"], floor.color],
+                "line-color": [
+                  "coalesce",
+                  ["get", "stroke_color"],
+                  ["get", "fill_color"],
+                  placedActive.color
+                ],
                 "line-width": 1
               }}
             />
           </Source>
-        ))}
+        ) : null}
 
         <Source id="placement-control-points" type="geojson" data={controlPointData}>
           <Layer
@@ -137,40 +261,43 @@ export function PlacementMap({ floors, state, dispatch, pickingControlPoint, onP
           />
         </Source>
 
-        <Source
-          id="placement-handles"
-          type="geojson"
-          data={{ type: "FeatureCollection", features: [] }}
-        >
-          <Layer
-            id="placement-handle-circles"
-            type="circle"
-            paint={{
-              "circle-radius": 8,
-              "circle-color": [
-                "match",
-                ["get", "role"],
-                "anchor",
-                "#2563eb",
-                "rotate",
-                "#16a34a",
-                "#dc2626"
-              ],
-              "circle-stroke-color": "#ffffff",
-              "circle-stroke-width": 2
+        {/* Bounding box of the active floor: shows what the handles act on. */}
+        {gizmo ? (
+          <Source
+            id="placement-outline"
+            type="geojson"
+            data={{
+              type: "Feature",
+              properties: {},
+              geometry: { type: "LineString", coordinates: gizmo.ring }
             }}
-          />
-        </Source>
+          >
+            <Layer
+              id="placement-outline-line"
+              type="line"
+              paint={{
+                "line-color": "#334155",
+                "line-width": 1,
+                "line-opacity": 0.8,
+                "line-dasharray": [3, 2]
+              }}
+            />
+          </Source>
+        ) : null}
 
-        {ready && activeFloor && activeTransform && activeLayer ? (
+        {ready && activeFloor && activeTransform && activeLayer && gizmo ? (
           <TransformHandles
             transform={activeTransform}
+            frame={gizmo}
             dispatch={dispatch}
             map={mapRef.current}
-            artworkBounds={activeFloor.artworkBounds}
             floorLabel={activeFloor.label}
             linked={activeFloor.linked}
             scaleLocked={state.scaleLocked}
+            bodyLayerIds={[
+              `floor-${activeFloor.label}-fill`,
+              `floor-${activeFloor.label}-line`
+            ]}
           />
         ) : null}
       </MapGL>

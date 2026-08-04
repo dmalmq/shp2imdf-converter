@@ -671,6 +671,25 @@ class AssignFloorsResponse(BaseModel):
     total_features: int
 
 
+class ReferenceLayerItem(BaseModel):
+    """A shapefile/GeoPackage layer served as WGS84 GeoJSON for map display."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    crs: str | None = None
+    feature_count: int
+    truncated: bool = False
+    warnings: list[str] = Field(default_factory=list)
+    geojson: dict[str, Any]
+
+
+class ReferenceLayersResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    layers: list[ReferenceLayerItem] = Field(default_factory=list)
+
+
 class FloorExportPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

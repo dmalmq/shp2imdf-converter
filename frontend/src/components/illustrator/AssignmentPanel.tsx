@@ -2,7 +2,12 @@ import { useMemo, useRef, useState } from "react";
 import type { FeatureCollection } from "geojson";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { buildSvgPaths, partitionByFloors, type PartitionFloor } from "../../lib/svgPreview";
+import {
+  buildSvgPaths,
+  clientToArtworkPoint,
+  partitionByFloors,
+  type PartitionFloor
+} from "../../lib/svgPreview";
 import { Button } from "../ui";
 
 type Props = {
@@ -44,14 +49,20 @@ export function AssignmentPanel({ preview, artworkBounds, layerSummaries, onAssi
     [preview, artworkBounds]
   );
 
+  const [minx, miny, maxx, maxy] = artworkBounds;
+  // Artwork coordinates are PDF points (y-up, bottom-left origin); SVG user
+  // space is y-down. Flip the content group so the artwork displays right way
+  // up; pointer mapping inverts the same flip (see clientToArtworkPoint).
+  const flipTransform = `translate(0 ${miny + maxy}) scale(1 -1)`;
+  // Visible selection origin while dragging; sized relative to the artboard so
+  // it stays legible on both large (station) and small artworks.
+  const markerRadius = Math.max(1, (maxx - minx) / 100);
+
   const toArtworkPoint = (event: React.PointerEvent<SVGSVGElement>): [number, number] => {
     const svg = svgRef.current;
-    if (!svg) return [0, 0];
+    if (!svg) return [minx, maxy];
     const rect = svg.getBoundingClientRect();
-    const [minx, miny] = [artworkBounds[0], artworkBounds[1]];
-    const scaleX = (artworkBounds[2] - artworkBounds[0]) / rect.width;
-    const scaleY = (artworkBounds[3] - artworkBounds[1]) / rect.height;
-    return [minx + (event.clientX - rect.left) * scaleX, miny + (event.clientY - rect.top) * scaleY];
+    return clientToArtworkPoint(artworkBounds, rect, event.clientX, event.clientY);
   };
 
   const onPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
@@ -119,46 +130,56 @@ export function AssignmentPanel({ preview, artworkBounds, layerSummaries, onAssi
         <svg
           ref={svgRef}
           viewBox={viewBox}
-          className="h-64 w-full"
+          className="h-[60vh] min-h-[420px] w-full touch-none"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
         >
-          {paths.map((path, index) => (
-            <path
-              key={index}
-              d={path.d}
-              fill={path.role === "polygon" ? (path.fill ?? "#cbd5e1") : "none"}
-              stroke={path.role === "line" ? (path.stroke ?? "#64748b") : "#64748b"}
-              strokeWidth={path.role === "line" ? 0.5 : 0.25}
-              fillOpacity={path.role === "polygon" ? 0.6 : 1}
-            />
-          ))}
-          {drafts.map((draft) => (
-            <rect
-              key={draft.label}
-              x={draft.box[0]}
-              y={draft.box[1]}
-              width={draft.box[2] - draft.box[0]}
-              height={draft.box[3] - draft.box[1]}
-              fill={draft.color}
-              fillOpacity={0.15}
-              stroke={draft.color}
-              strokeWidth={1}
-            />
-          ))}
-          {drawing ? (
-            <rect
-              x={Math.min(drawing.start[0], drawing.current[0])}
-              y={Math.min(drawing.start[1], drawing.current[1])}
-              width={Math.abs(drawing.current[0] - drawing.start[0])}
-              height={Math.abs(drawing.current[1] - drawing.start[1])}
-              fill="#2563eb"
-              fillOpacity={0.15}
-              stroke="#2563eb"
-              strokeDasharray="4 2"
-            />
-          ) : null}
+          <g transform={flipTransform}>
+            {paths.map((path, index) => (
+              <path
+                key={index}
+                d={path.d}
+                fill={path.role === "polygon" ? (path.fill ?? "#cbd5e1") : "none"}
+                stroke={path.role === "line" ? (path.stroke ?? "#64748b") : "#64748b"}
+                strokeWidth={path.role === "line" ? 0.5 : 0.25}
+                fillOpacity={path.role === "polygon" ? 0.6 : 1}
+              />
+            ))}
+            {drafts.map((draft) => (
+              <rect
+                key={draft.label}
+                x={draft.box[0]}
+                y={draft.box[1]}
+                width={draft.box[2] - draft.box[0]}
+                height={draft.box[3] - draft.box[1]}
+                fill={draft.color}
+                fillOpacity={0.15}
+                stroke={draft.color}
+                strokeWidth={1}
+              />
+            ))}
+            {drawing ? (
+              <>
+                <circle
+                  cx={drawing.start[0]}
+                  cy={drawing.start[1]}
+                  r={markerRadius}
+                  fill="#2563eb"
+                />
+                <rect
+                  x={Math.min(drawing.start[0], drawing.current[0])}
+                  y={Math.min(drawing.start[1], drawing.current[1])}
+                  width={Math.abs(drawing.current[0] - drawing.start[0])}
+                  height={Math.abs(drawing.current[1] - drawing.start[1])}
+                  fill="#2563eb"
+                  fillOpacity={0.15}
+                  stroke="#2563eb"
+                  strokeDasharray="4 2"
+                />
+              </>
+            ) : null}
+          </g>
         </svg>
       </div>
 

@@ -34,7 +34,10 @@ test("tile templates use xyz placeholders", () => {
   for (const id of BASEMAP_ORDER) {
     const sources = Object.values(BASEMAP_STYLES[id].sources) as { tiles?: string[] }[];
     for (const source of sources) {
-      expect(source.tiles?.[0]).toMatch(/\{z\}\/\{x\}\/\{y\}/);
+      // All three placeholders present; Esri uses {z}/{y}/{x}, the others {z}/{x}/{y}.
+      expect(source.tiles?.[0]).toMatch(/\{z\}/);
+      expect(source.tiles?.[0]).toMatch(/\{x\}/);
+      expect(source.tiles?.[0]).toMatch(/\{y\}/);
     }
   }
 });
@@ -44,4 +47,6 @@ test("labels are bilingual", () => {
   const ja = (_a: string, b: string) => b;
   expect(basemapLabel("gsi-photo", en)).toBe("Aerial (GSI)");
   expect(basemapLabel("gsi-photo", ja)).toBe("写真（地理院）");
+  expect(basemapLabel("esri", en)).toBe("Satellite (Esri)");
+  expect(basemapLabel("esri", ja)).toBe("衛星写真（Esri）");
 });

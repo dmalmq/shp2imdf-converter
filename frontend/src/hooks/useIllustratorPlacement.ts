@@ -10,6 +10,12 @@ import {
   type SimilarityTransform
 } from "../lib/similarity";
 
+/** Our Illustrator floor plans are authored at 1:1000. */
+export const DEFAULT_DRAWING_SCALE = 1000;
+
+/** Ground metres per PDF point at {@link DEFAULT_DRAWING_SCALE}. */
+export const DEFAULT_METRES_PER_POINT = metresPerPointForScale(DEFAULT_DRAWING_SCALE);
+
 export type ControlPoint = {
   id: string;
   artwork: [number, number];
@@ -38,7 +44,11 @@ export type PlacementState = {
 };
 
 export type PlacementAction =
-  | { type: "positionBuilding"; mapAnchor: [number, number] }
+  /**
+   * `baseline` marks the initial placement (located from the file name), which
+   * becomes the state undo returns to rather than an undoable edit of its own.
+   */
+  | { type: "positionBuilding"; mapAnchor: [number, number]; baseline?: boolean }
   | { type: "dragFloor"; label: string; mapAnchor: [number, number] }
   | { type: "rotateFrame"; rotationDeg: number }
   | { type: "scaleFrame"; metresPerPoint: number }
@@ -52,7 +62,13 @@ export type PlacementAction =
   | { type: "addControlPoint"; point: ControlPoint }
   | { type: "removeControlPoint"; id: string }
   | { type: "fitControlPoints" }
-  | { type: "applyFloors"; floors: { label: string; transform: TransformPayload }[] };
+  | { type: "applyFloors"; floors: { label: string; transform: TransformPayload }[] }
+  /** Install a whole new floor set (new file or new assignment), labels included. */
+  | { type: "resetPlacement"; state: PlacementState }
+  /** Closes the current drag so the next one is a separate undo step. */
+  | { type: "endGesture" }
+  | { type: "undo" }
+  | { type: "redo" };
 
 function normaliseRotation(degrees: number): number {
   const wrapped = ((degrees + 180) % 360) - 180;
@@ -324,9 +340,103 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
     case "applyFloors":
       return floorPayloadsToState(action.floors, state);
 
+    // Replaces labels, artwork bounds and anchors wholesale. applyFloors cannot
+    // do this: it merges transforms into the floors already in state by label,
+    // so a new label set (e.g. 1F/2F/3F over the initial "artwork") is dropped.
+    case "resetPlacement":
+      return action.state;
+
     default:
       return state;
   }
+}
+
+/**
+ * Undo history around {@link placementReducer}.
+ *
+ * A drag emits an action per animation frame, so those are coalesced: while a
+ * gesture stays open, the newest state replaces the present instead of pushing
+ * a new entry, and the gizmo closes the gesture on release. Ctrl+Z therefore
+ * undoes a whole drag, not one frame of it.
+ */
+export type PlacementHistory = {
+  present: PlacementState;
+  past: PlacementState[];
+  future: PlacementState[];
+  /** Action type of the drag currently collapsing into one entry. */
+  openGesture: string | null;
+};
+
+/** Actions a drag repeats; consecutive ones share a single undo entry. */
+const CONTINUOUS_ACTIONS: Record<string, true> = {
+  dragFloor: true,
+  rotateFrame: true,
+  scaleFrame: true
+};
+
+/** Selection, not a change to the placement: never an undo step. */
+const NON_HISTORIC_ACTIONS: Record<string, true> = { setActiveFloor: true };
+
+const HISTORY_LIMIT = 50;
+
+export function initialPlacementHistory(present: PlacementState): PlacementHistory {
+  return { present, past: [], future: [], openGesture: null };
+}
+
+export function placementHistoryReducer(
+  history: PlacementHistory,
+  action: PlacementAction
+): PlacementHistory {
+  switch (action.type) {
+    case "undo": {
+      const previous = history.past[history.past.length - 1];
+      if (!previous) return history;
+      return {
+        present: previous,
+        past: history.past.slice(0, -1),
+        future: [history.present, ...history.future],
+        openGesture: null
+      };
+    }
+    case "redo": {
+      const next = history.future[0];
+      if (!next) return history;
+      return {
+        present: next,
+        past: [...history.past, history.present],
+        future: history.future.slice(1),
+        openGesture: null
+      };
+    }
+    case "endGesture":
+      return history.openGesture ? { ...history, openGesture: null } : history;
+    case "resetPlacement":
+      // A new drawing or assignment; undoing into the previous one is nonsense.
+      return initialPlacementHistory(action.state);
+    case "positionBuilding":
+      // The auto-located starting position is where undo should bottom out, not
+      // a step that can be undone back to an arbitrary default.
+      if (action.baseline) {
+        return initialPlacementHistory(placementReducer(history.present, action));
+      }
+      break;
+    default:
+      break;
+  }
+
+  const present = placementReducer(history.present, action);
+  // Rejected actions (locked scale, unknown floor) must not consume history.
+  if (present === history.present) return history;
+  if (NON_HISTORIC_ACTIONS[action.type]) return { ...history, present };
+  if (CONTINUOUS_ACTIONS[action.type] && history.openGesture === action.type) {
+    return { ...history, present };
+  }
+  return {
+    present,
+    past: [...history.past, history.present].slice(-HISTORY_LIMIT),
+    future: [],
+    openGesture: CONTINUOUS_ACTIONS[action.type] ? action.type : null
+  };
 }
 
 /** Residuals of the active floor's control points, or null below the minimum. */

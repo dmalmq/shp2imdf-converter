@@ -1,10 +1,13 @@
 import {
   applyMatrix,
+  artworkToLngLat,
   enuToLngLat,
   fitHelmert,
+  gizmoFrame,
   lngLatToEnu,
   metresPerPointForScale,
   residuals,
+  rotationForHandle,
   toEnuMatrix,
   transformGeoJson,
   type SimilarityTransform
@@ -213,4 +216,66 @@ test("residuals are zero for an exact fit and large for a bad point", () => {
   const bad = residuals(truth, artwork, broken);
   expect(bad.rmse).toBeGreaterThan(1);
   expect(Math.max(...bad.perPoint)).toBeGreaterThan(1);
+});
+
+const UNROTATED: SimilarityTransform = {
+  artworkAnchor: [50, 50],
+  mapAnchor: [139.7671, 35.6812],
+  rotationDeg: 0,
+  metresPerPoint: 0.352778,
+  workingCrs: "EPSG:6677"
+};
+const BOX: [number, number, number, number] = [0, 0, 100, 100];
+
+/** Bearing of an artwork point about the anchor, CCW-from-north degrees. */
+function bearingOf(transform: SimilarityTransform, point: [number, number]): number {
+  const [lng, lat] = artworkToLngLat(transform, point[0], point[1]);
+  const [east, north] = lngLatToEnu(lng, lat, transform.mapAnchor[0], transform.mapAnchor[1]);
+  return (Math.atan2(east, north) * 180) / Math.PI;
+}
+
+test("the gizmo outline closes on the artwork bounds", () => {
+  const frame = gizmoFrame(UNROTATED, BOX);
+  expect(frame.ring).toHaveLength(5);
+  expect(frame.ring[0]).toEqual(frame.ring[4]);
+  expect(frame.corners.map((corner) => corner.key)).toEqual(["sw", "se", "ne", "nw"]);
+});
+
+test("unrotated artwork puts its corners at the expected compass positions", () => {
+  const frame = gizmoFrame(UNROTATED, BOX);
+  const at = (key: string) => frame.corners.find((corner) => corner.key === key)!.lngLat;
+  // y-up artwork: "ne" is further north and east than "sw".
+  expect(at("ne")[0]).toBeGreaterThan(at("sw")[0]);
+  expect(at("ne")[1]).toBeGreaterThan(at("sw")[1]);
+  // The rotation handle sits beyond the top edge.
+  expect(frame.rotate.lngLat[1]).toBeGreaterThan(at("ne")[1]);
+});
+
+test("the rotation handle follows the pointer instead of mirroring it", () => {
+  // Aiming the handle east must rotate the frame so the handle really lands east.
+  const frame = gizmoFrame(UNROTATED, BOX);
+  for (const target of [0, 45, 90, -90, 150, -179]) {
+    const rotationDeg = rotationForHandle(frame.rotate.artwork, UNROTATED.artworkAnchor, target);
+    const rotated: SimilarityTransform = { ...UNROTATED, rotationDeg };
+    expect(bearingOf(rotated, frame.rotate.artwork)).toBeCloseTo(target, 6);
+  }
+});
+
+test("rotation stays inside (-180, 180]", () => {
+  for (const target of [0, 90, 179, -179, 270, -270]) {
+    const rotationDeg = rotationForHandle([50, 150], [50, 50], target);
+    expect(rotationDeg).toBeGreaterThan(-180);
+    expect(rotationDeg).toBeLessThanOrEqual(180);
+  }
+});
+
+test("a rotation handle on the anchor is rejected", () => {
+  expect(() => rotationForHandle([50, 50], [50, 50], 0)).toThrow();
+});
+
+test("the gizmo frame rotates with the artwork", () => {
+  const rotated: SimilarityTransform = { ...UNROTATED, rotationDeg: 90 };
+  const frame = gizmoFrame(rotated, BOX);
+  // 90 deg CCW from north sends the artwork's +y axis due west.
+  expect(bearingOf(rotated, frame.rotate.artwork)).toBeCloseTo(-90, 6);
 });
