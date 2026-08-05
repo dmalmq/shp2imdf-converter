@@ -2,7 +2,7 @@ import { chromium } from "@playwright/test";
 import path from "path";
 import fs from "fs";
 
-const BASE = "http://localhost:5173";
+const BASE = "http://localhost:5310";
 const FIXTURES = path.resolve("backend/tests/fixtures/tokyo_station");
 const SHOTS = path.resolve("screenshots");
 

@@ -1,4 +1,4 @@
-$backend = Start-Process pwsh -ArgumentList "-NoExit", "-Command", "uvicorn backend.main:app --reload" -PassThru
+$backend = Start-Process pwsh -ArgumentList "-NoExit", "-Command", "uvicorn backend.main:app --reload --port 8310" -PassThru
 $frontend = Start-Process pwsh -ArgumentList "-NoExit", "-Command", "cd frontend; npm run dev" -PassThru
 
 Write-Host "Backend PID: $($backend.Id)  |  Frontend PID: $($frontend.Id)"

@@ -107,23 +107,23 @@ cp .env.example .env
 cd frontend && npm ci && cd ..
 
 # Run backend (terminal 1)
-uvicorn backend.main:app --reload
+uvicorn backend.main:app --reload --port 8310
 
 # Run frontend (terminal 2)
 cd frontend && npm run dev
 ```
 
-Open `http://localhost:5173`.
+Open `http://localhost:5310`.
 
 ### Shared Windows PC
 
 ```bash
 copy .env.example .env
 cd frontend && npm ci && npm run build && cd ..
-uvicorn backend.main:app --host 0.0.0.0 --port 8000
+uvicorn backend.main:app --host 0.0.0.0 --port 8310
 ```
 
-Colleagues can access `http://<pc-hostname>:8000`.
+Colleagues can access `http://<pc-hostname>:8310`.
 
 ---
 

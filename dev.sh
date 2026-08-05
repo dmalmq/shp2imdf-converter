@@ -5,7 +5,7 @@ set -e
 
 cd "$(dirname "$0")"
 
-uvicorn backend.main:app --reload &
+uvicorn backend.main:app --reload --port 8310 &
 BACKEND_PID=$!
 
 (cd frontend && npm run dev) &

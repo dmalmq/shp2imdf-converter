@@ -101,7 +101,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SHP to IMDF Converter API", lifespan=lifespan)
 
-cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173")
+cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5310")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[item.strip() for item in cors_origins.split(",") if item.strip()],

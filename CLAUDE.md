@@ -13,14 +13,22 @@ client install. See `README.md` for the product overview.
 ```
 
 ```bash
-uvicorn backend.main:app --reload    # backend only
-cd frontend && npm run dev           # frontend only
+uvicorn backend.main:app --reload --port 8310   # backend only
+cd frontend && npm run dev                       # frontend only
 pytest                               # testpaths = backend/tests
 cd frontend && npx vitest            # frontend unit tests
 npx playwright test                  # e2e
 node audit-ui.mjs                    # UI audit helper
 node audit-review.mjs                # review-screen audit helper
 ```
+
+**Ports: frontend 5310, backend 8310** — deliberately off the framework defaults,
+because this machine runs other projects and Vite's 5173 / FastAPI's 8000 collide
+with any other Vite or uvicorn app. The two must stay in step: `frontend/vite.config.ts`
+sets the dev-server port AND proxies `/api` to the backend port, `dev.ps1`/`dev.sh` pass
+`--port` to uvicorn, and `CORS_ALLOWED_ORIGINS` must name the frontend port or the
+browser blocks every API call. `HOST`/`PORT` in `.env.example` are documentation of what
+to pass on the command line, not settings the app reads — there is no `uvicorn.run()`.
 
 `dev.ps1` spawns two `pwsh` windows and kills both on exit — if a port is still held
 after a crash, check for orphaned uvicorn/node processes.
