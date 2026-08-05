@@ -23,7 +23,7 @@ export const FLOOR_TINTS = ["#3b82f6", "#16a34a", "#dc2626", "#9333ea", "#d97706
 export type FloorLayer = {
   label: string;
   features: Feature[];
-  bounds: [number, number, number, number] | null;
+  bounds: [number, number, number, number];
   color: string;
 };
 

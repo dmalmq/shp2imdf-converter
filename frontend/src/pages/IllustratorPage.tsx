@@ -4,11 +4,13 @@ import {
   assignFloors,
   exportIllustrator,
   previewIllustrator,
+  type AssignFloorsResponse,
   type ExportFormatsPayload,
   type IllustratorPreviewResponse
 } from "../api/client";
 import { AssignmentPanel } from "../components/illustrator/AssignmentPanel";
 import { ControlPointList } from "../components/illustrator/ControlPointList";
+import { PageAssignmentPanel } from "../components/illustrator/PageAssignmentPanel";
 import {
   FLOOR_TINTS,
   type FloorLayer,
@@ -20,7 +22,7 @@ import { ReferenceLayerList } from "../components/illustrator/ReferenceLayerList
 import { TransformPanel } from "../components/illustrator/TransformPanel";
 import { Button, Card } from "../components/ui";
 import { siteNameFromFilename } from "../lib/siteName";
-import { partitionByFloors } from "../lib/svgPreview";
+import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
 import {
   DEFAULT_METRES_PER_POINT,
   initialPlacementHistory,
@@ -43,14 +45,59 @@ type AssignedRegion = {
   layer_names: string[] | null;
 };
 
+/** Union of the given pages' content bounds, or null when none are known. */
+function pageUnionBounds(
+  preview: IllustratorPreviewResponse,
+  pages: number[] | null
+): [number, number, number, number] | null {
+  if (!pages || pages.length === 0) return null;
+  let union: [number, number, number, number] | null = null;
+  for (const page of preview.pages) {
+    if (!pages.includes(page.index)) continue;
+    const [minx, miny, maxx, maxy] = page.bounds;
+    union = union
+      ? [
+          Math.min(union[0], minx),
+          Math.min(union[1], miny),
+          Math.max(union[2], maxx),
+          Math.max(union[3], maxy)
+        ]
+      : [minx, miny, maxx, maxy];
+  }
+  return union;
+}
+
+/**
+ * Each floor's placement bounds: the server's per-floor artwork bounds when
+ * the assign summary has them (exact for page floors, tighter than the drawn
+ * box for box floors), else the drawn box, else the union of the region's
+ * pages, else the whole artwork.
+ */
+function boundsFor(
+  preview: IllustratorPreviewResponse,
+  region: AssignedRegion,
+  summary?: AssignFloorsResponse
+): [number, number, number, number] {
+  return (
+    summary?.floors.find((floor) => floor.label === region.label)?.artwork_bounds ??
+    region.box ??
+    pageUnionBounds(preview, region.pages) ??
+    preview.artwork_bounds
+  );
+}
+
 function initialStateFromAssignment(
   preview: IllustratorPreviewResponse,
-  assignment: AssignedRegion[]
+  assignment: AssignedRegion[],
+  summary?: AssignFloorsResponse
 ): PlacementState {
   const regions: AssignedRegion[] = assignment.length
     ? assignment
     : [{ label: "artwork", box: preview.artwork_bounds, pages: null, layer_names: null }];
   const first = regions[0];
+  // The server already computed each floor's bounds from the geometry it
+  // matched, which is exact for page floors (no box) and tighter than the
+  // drawn box for box floors.
   return {
     frame: {
       rotationDeg: 0,
@@ -60,19 +107,14 @@ function initialStateFromAssignment(
     activeFloorLabel: first.label,
     scaleLocked: false,
     floors: regions.map((region) => {
-      // A null box claims the whole artwork, so placement bounds default to
-      // the artwork bounds (matches the server's "no spatial restriction").
-      const regionBounds = region.box ?? preview.artwork_bounds;
+      const bounds = boundsFor(preview, region, summary);
       return {
         label: region.label,
         linked: true,
-        artworkAnchor: [
-          (regionBounds[0] + regionBounds[2]) / 2,
-          (regionBounds[1] + regionBounds[3]) / 2
-        ],
+        artworkAnchor: [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2],
         mapAnchor: [139.7671, 35.6812],
         controlPoints: [],
-        artworkBounds: regionBounds
+        artworkBounds: bounds
       };
     })
   };
@@ -145,14 +187,14 @@ export function IllustratorPage() {
       regions.map((region) => ({
         label: region.label,
         box: region.box,
-        pages: null,
+        pages: region.pages,
         layerNames: region.layer_names
       }))
     );
     return regions.map((region, index) => ({
       label: region.label,
       features: perFloor.get(region.label) ?? [],
-      bounds: region.box,
+      bounds: boundsFor(preview, region),
       color: FLOOR_TINTS[index % FLOOR_TINTS.length]
     }));
   }, [preview, assignment]);
@@ -249,41 +291,53 @@ export function IllustratorPage() {
   }
 
   if (assignment === null) {
+    const commitAssignment = async (floors: PartitionFloor[]) => {
+      const regions: AssignedRegion[] = floors.map((floor) => ({
+        label: floor.label,
+        box: floor.box,
+        pages: floor.pages,
+        layer_names: floor.layerNames
+      }));
+      try {
+        const summary = await assignFloors(preview.conversion_id, regions);
+        setAssignment(regions);
+        dispatch({
+          type: "resetPlacement",
+          state: initialStateFromAssignment(preview, regions, summary)
+        });
+      } catch {
+        setError(
+          t(
+            "Could not save the floor assignment.",
+            "フロア割り当てを保存できませんでした。"
+          )
+        );
+      }
+    };
+
     return (
       <div className="flex flex-1 items-start justify-center px-4 py-10">
         <Card padding="lg" className="w-full max-w-4xl">
           <h1 className="text-lg font-semibold">
             {t("Assign floors", "フロアを割り当て")}
           </h1>
-          <AssignmentPanel
-            preview={preview.preview}
-            artworkBounds={preview.artwork_bounds}
-            layerSummaries={preview.layers}
-            onSkip={() => setAssignment([])}
-            onAssigned={async (floors) => {
-              const regions: AssignedRegion[] = floors.map((floor) => ({
-                label: floor.label,
-                box: floor.box,
-                pages: floor.pages,
-                layer_names: floor.layerNames
-              }));
-              try {
-                await assignFloors(preview.conversion_id, regions);
-                setAssignment(regions);
-                dispatch({
-                  type: "resetPlacement",
-                  state: initialStateFromAssignment(preview, regions)
-                });
-              } catch {
-                setError(
-                  t(
-                    "Could not save the floor assignment.",
-                    "フロア割り当てを保存できませんでした。"
-                  )
-                );
-              }
-            }}
-          />
+          {preview.pages.length > 1 ? (
+            <PageAssignmentPanel
+              preview={preview.preview}
+              pages={preview.pages}
+              layerSummaries={preview.layers}
+              onSkip={() => setAssignment([])}
+              onAssigned={commitAssignment}
+            />
+          ) : (
+            <AssignmentPanel
+              preview={preview.preview}
+              artworkBounds={preview.artwork_bounds}
+              layerSummaries={preview.layers}
+              onSkip={() => setAssignment([])}
+              onAssigned={commitAssignment}
+            />
+          )}
           {error ? <p className="mt-2 text-xs text-[var(--color-error)]">{error}</p> : null}
         </Card>
       </div>
