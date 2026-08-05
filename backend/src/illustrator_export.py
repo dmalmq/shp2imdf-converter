@@ -16,6 +16,7 @@ from io import BytesIO
 from pathlib import Path
 
 import geopandas as gpd
+import pandas as pd
 
 from backend.src.illustrator_georeference import SimilarityTransform
 from backend.src.illustrator_importer import _order_layers, _sanitize_layer_name
@@ -31,12 +32,17 @@ class FloorExportError(RuntimeError):
 
 @dataclass(slots=True)
 class ExportFloor:
-    """One floor of an export: a region in artwork points plus its placement."""
+    """One floor of an export: optional filters in artwork space plus a placement.
+
+    Every filter is independent and ``None`` means "no restriction on this
+    dimension", so an all-``None`` floor claims the whole artwork.
+    """
 
     label: str
     transform: SimilarityTransform
-    region: list[float]
-    layer_names: list[str] | None
+    region: list[float] | None = None
+    layer_names: list[str] | None = None
+    pages: list[int] | None = None
 
 
 @dataclass(slots=True)
@@ -46,18 +52,23 @@ class ExportFormats:
     qgis: bool = True
 
 
-def _centroid_inside(geometry, region: list[float]) -> bool:
-    if geometry is None or geometry.is_empty:
-        return False
-    minx, miny, maxx, maxy = region
-    cx, cy = geometry.centroid.x, geometry.centroid.y
-    return minx <= cx <= maxx and miny <= cy <= maxy
+def _floor_mask(frame: gpd.GeoDataFrame, floor: ExportFloor) -> pd.Series:
+    """Membership mask: page AND layer AND centroid-in-box, each optional.
 
-
-def _matches_floor(row, region: list[float], layer_names: list[str] | None) -> bool:
-    if not _centroid_inside(row.geometry, region):
-        return False
-    return layer_names is None or row["ai_layer"] in layer_names
+    Composed vectorized so a page-only floor costs no row-wise iteration.
+    ``between`` is inclusive and an empty geometry yields a NaN centroid that
+    compares false, matching the row-wise rule this replaces.
+    """
+    mask = pd.Series(True, index=frame.index, dtype=bool)
+    if floor.pages is not None:
+        mask &= frame["page"].isin(floor.pages)
+    if floor.layer_names is not None:
+        mask &= frame["ai_layer"].isin(floor.layer_names)
+    if floor.region is not None:
+        minx, miny, maxx, maxy = floor.region
+        centroids = frame.geometry.centroid
+        mask &= centroids.x.between(minx, maxx) & centroids.y.between(miny, maxy)
+    return mask
 
 
 def _report_row(report_floors: list[dict], label: str, table: str, count: int) -> None:
@@ -257,9 +268,7 @@ def build_georeferenced_bundle(
             remaining = gdf
             layer_assigned = 0
             for floor in floors:
-                mask = remaining.apply(
-                    _matches_floor, axis=1, region=floor.region, layer_names=floor.layer_names
-                )
+                mask = _floor_mask(remaining, floor)
                 subset = remaining[mask]
                 remaining = remaining[~mask]
                 if subset.empty:
@@ -346,9 +355,7 @@ def compute_assignment_summary(
             continue
         remaining = gdf
         for floor in floors:
-            mask = remaining.apply(
-                _matches_floor, axis=1, region=floor.region, layer_names=floor.layer_names
-            )
+            mask = _floor_mask(remaining, floor)
             subset = remaining[mask]
             remaining = remaining[~mask]
             if subset.empty:

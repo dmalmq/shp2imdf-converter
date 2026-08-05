@@ -406,6 +406,105 @@ def test_preview_features_carry_their_page(multipage_cached) -> None:
 
 
 @pytest.mark.georef
+def test_page_only_floor_takes_that_whole_page(multipage_cached) -> None:
+    floors, unassigned = compute_assignment_summary(
+        multipage_cached,
+        [ExportFloor("1F", _transform_at(), pages=[1])],
+    )
+    assert floors[0]["feature_count"] == 1
+    assert unassigned == 2
+
+
+@pytest.mark.georef
+def test_two_pages_merge_under_one_label(multipage_cached) -> None:
+    floors, unassigned = compute_assignment_summary(
+        multipage_cached,
+        [ExportFloor("1F", _transform_at(), pages=[1, 3])],
+    )
+    assert len(floors) == 1
+    assert floors[0]["feature_count"] == 2
+    assert unassigned == 1
+
+
+@pytest.mark.georef
+def test_excluded_page_is_counted_as_unassigned(multipage_cached) -> None:
+    floors, unassigned = compute_assignment_summary(
+        multipage_cached,
+        [
+            ExportFloor("1F", _transform_at(), pages=[1]),
+            ExportFloor("2F", _transform_at(), pages=[2]),
+        ],
+    )
+    assert {f["label"] for f in floors} == {"1F", "2F"}
+    assert unassigned == 1  # page 3 claimed by nobody
+
+
+@pytest.mark.georef
+def test_page_and_box_combine(multipage_cached) -> None:
+    """The drill-in case: a box scoped to one page."""
+    inside, _ = compute_assignment_summary(
+        multipage_cached,
+        [ExportFloor("1F", _transform_at(), region=[0, 0, 200, 200], pages=[1])],
+    )
+    assert inside[0]["feature_count"] == 1
+
+    outside, unassigned = compute_assignment_summary(
+        multipage_cached,
+        [ExportFloor("1F", _transform_at(), region=[300, 300, 400, 400], pages=[1])],
+    )
+    assert outside == []
+    assert unassigned == 3
+
+
+@pytest.mark.georef
+def test_page_and_layer_restriction_combine(multipage_cached) -> None:
+    matched, _ = compute_assignment_summary(
+        multipage_cached,
+        [ExportFloor("1F", _transform_at(), layer_names=["Fill Layer"], pages=[2])],
+    )
+    assert matched[0]["feature_count"] == 1
+
+    missed, unassigned = compute_assignment_summary(
+        multipage_cached,
+        [ExportFloor("1F", _transform_at(), layer_names=["no such layer"], pages=[2])],
+    )
+    assert missed == []
+    assert unassigned == 3
+
+
+@pytest.mark.georef
+def test_all_null_floor_claims_everything(multipage_cached) -> None:
+    """The implicit whole-artwork floor: no page, box or layer restriction."""
+    floors, unassigned = compute_assignment_summary(
+        multipage_cached, [ExportFloor("artwork", _transform_at())]
+    )
+    assert floors[0]["feature_count"] == 3
+    assert unassigned == 0
+
+
+@pytest.mark.georef
+def test_export_applies_each_page_floors_own_transform(
+    multipage_cached, tmp_path: Path
+) -> None:
+    payload, _ = build_georeferenced_bundle(
+        multipage_cached,
+        [
+            ExportFloor("1F", _transform_at(anchor=(ANCHOR_LON, ANCHOR_LAT)), pages=[1]),
+            ExportFloor("2F", _transform_at(anchor=(ANCHOR_LON + 0.01, ANCHOR_LAT)), pages=[2]),
+        ],
+        "EPSG:4326",
+        ExportFormats(shapefile=False, qgis=False),
+    )
+    gpkg = _extract(payload, ".gpkg", tmp_path / "pages.gpkg")
+    first = gpd.read_file(gpkg, layer="1F_Fill Layer")
+    second = gpd.read_file(gpkg, layer="2F_Fill Layer")
+    assert (first["floor"] == "1F").all()
+    assert (second["floor"] == "2F").all()
+    # Same artwork coordinates, different map anchors -> different longitudes.
+    assert second.geometry.iloc[0].centroid.x > first.geometry.iloc[0].centroid.x
+
+
+@pytest.mark.georef
 def test_preview_of_a_single_page_file_lists_one_page(cached) -> None:
     preview = build_preview(cached)
     assert [p["index"] for p in preview["pages"]] == [1]
