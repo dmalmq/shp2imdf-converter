@@ -90,12 +90,14 @@ In `frontend/src/pages/IllustratorPage.tsx`, replace line 348:
 and replace line 349 (the sidebar column):
 
 ```tsx
-      <div className="flex w-80 shrink-0 flex-col gap-4 overflow-hidden">
+      <div className="flex w-80 shrink-0 flex-col gap-4 overflow-auto">
 ```
 
-`overflow-hidden` on the column is deliberate: after Task 5 the tab panel is the
-one scrolling region inside it. Until then the column clips, which is expected
-mid-plan and resolved by Task 5.
+`overflow-auto` here, not `overflow-hidden`: this task must leave a usable app.
+With a bounded parent the column now genuinely scrolls internally — already a
+large improvement over scrolling the whole document, and the Export button stays
+reachable. Task 5 switches this to `overflow-hidden` once the tab panel owns the
+one scroll region.
 
 Replace line 410 (the map wrapper) — `min-h-[600px]` would force overflow on a
 short viewport, which is exactly what this task removes:
@@ -1090,4 +1092,4 @@ Non-goals held: no transform maths, export output, or backend file is touched; t
 
 **Type consistency:** `TabDefinition` and `tabPanelProps(idPrefix, id, active)` are defined in Task 2 and used with that exact signature in Task 5. `ScaleAndFitPanel`'s four props match `ControlPointList`'s existing `picking` / `onTogglePicking` pair. `ExportPanel` takes `ExportFormatsPayload` — the same type `IllustratorPage` already holds in `formats`.
 
-**Known sequencing:** Task 3's fifth test asserts a Task 4 outcome and is written `test.skip` in Task 3, un-skipped in Task 4 Step 3. This is deliberate — the assertion belongs with the other `TransformPanel` tests rather than in a separate file — and both tasks name it, so it cannot be silently lost. Task 1 leaves the sidebar column clipping until Task 5 gives the panel its scroll region; Task 1 Step 2 says so explicitly.
+**Known sequencing:** Task 3's fifth test asserts a Task 4 outcome and is written `test.skip` in Task 3, un-skipped in Task 4 Step 3. This is deliberate — the assertion belongs with the other `TransformPanel` tests rather than in a separate file — and both tasks name it, so it cannot be silently lost. Every task leaves a shippable app: Task 1 gives the column `overflow-auto` so it scrolls internally and the Export button stays reachable, and Task 5 tightens that to `overflow-hidden` only once the tab panel owns the single scroll region.
