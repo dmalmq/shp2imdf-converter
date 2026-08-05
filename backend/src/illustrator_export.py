@@ -19,7 +19,7 @@ import geopandas as gpd
 import pandas as pd
 
 from backend.src.illustrator_georeference import SimilarityTransform
-from backend.src.illustrator_importer import _order_layers, _sanitize_layer_name
+from backend.src.illustrator_importer import _sanitize_layer_name
 from backend.src.illustrator_qgis import QgisLayerSpec, build_qgs_project
 from backend.src.illustrator_store import CachedConversion
 
@@ -81,13 +81,40 @@ def _report_row(report_floors: list[dict], label: str, table: str, count: int) -
 
 
 def _group_by_floor(
-    specs: list[tuple[str, QgisLayerSpec]],
+    specs: list[tuple[str, str, QgisLayerSpec]],
+    floor_order: list[str],
+    layer_order: list[str],
 ) -> list[tuple[str, list[QgisLayerSpec]]]:
+    """One group per floor: floors in request order, layers in Illustrator order.
+
+    Grouping by consecutive run emits one group per ``(layer, floor)`` pair
+    instead. The export loop is layer-major, so a layer present on several
+    floors contributes a non-adjacent entry for each and no two neighbours share
+    a floor — a station drawing with 8 layers over 4 floors produced 32
+    single-layer groups rather than 4.
+
+    Floors come from ``floor_order`` rather than first appearance, so the tree
+    lists them the way the user ordered them even when the first layer happens
+    to miss the first floor. Within a floor, ``layer_order`` is the Illustrator
+    stack (top-first) and lines sit above polygons, matching ``_order_layers``
+    in the importer — the QGIS tree is draw order, so alphabetical would render
+    the artwork's stacking wrong.
+    """
+    rank = {name: index for index, name in enumerate(layer_order)}
+    fallback = len(rank)
+    by_floor: dict[str, list[tuple[int, int, QgisLayerSpec]]] = {}
+    for floor_label, ai_layer, spec in specs:
+        by_floor.setdefault(floor_label, []).append(
+            (rank.get(ai_layer, fallback), 0 if spec.role == "line" else 1, spec)
+        )
+
     groups: list[tuple[str, list[QgisLayerSpec]]] = []
-    for label, spec in specs:
-        if not groups or groups[-1][0] != label:
-            groups.append((label, []))
-        groups[-1][1].append(spec)
+    for label in floor_order:
+        entries = by_floor.get(label)
+        if not entries:
+            continue
+        entries.sort(key=lambda entry: (entry[0], entry[1]))
+        groups.append((label, [spec for _rank, _role, spec in entries]))
     return groups
 
 
@@ -259,7 +286,9 @@ def build_georeferenced_bundle(
         shapefile_dir.mkdir()
 
         report_floors: list[dict] = []
-        qgs_specs: list[tuple[str, QgisLayerSpec]] = []
+        # (floor label, ai layer, spec) — the ai layer is what lets the QGIS tree
+        # be ordered by the Illustrator stack rather than by table name.
+        qgs_specs: list[tuple[str, str, QgisLayerSpec]] = []
         warnings: list[str] = []
         unassigned_total = 0
         wrote_any = False
@@ -298,6 +327,7 @@ def build_georeferenced_bundle(
                 qgs_specs.append(
                     (
                         floor.label,
+                        spec["ai_layer"],
                         QgisLayerSpec(
                             table=table,
                             display_name=f"{floor.label} / {spec['ai_layer']}",
@@ -335,7 +365,11 @@ def build_georeferenced_bundle(
                         gpkg_filename=gpkg_name,
                         project_name=stem,
                         crs=output_crs,
-                        layer_groups=_group_by_floor(qgs_specs),
+                        layer_groups=_group_by_floor(
+                            qgs_specs,
+                            [floor.label for floor in floors],
+                            cached.layer_order,
+                        ),
                     ).encode("utf-8"),
                 )
             if formats.shapefile:

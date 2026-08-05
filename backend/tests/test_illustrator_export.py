@@ -6,6 +6,7 @@ import io
 import json
 import math
 import sqlite3
+import re
 import zipfile
 from pathlib import Path
 
@@ -537,3 +538,151 @@ def test_preview_of_a_cache_without_page_metadata_lists_one_page(cached) -> None
     pages = build_preview(cached)["pages"]
     assert [p["index"] for p in pages] == [1]
     assert pages[0]["bounds"] == build_preview(cached)["artwork_bounds"]
+
+
+# --------------------------------------------------------------------------- #
+# QGIS layer tree: one group per floor, layers in Illustrator stack order
+# --------------------------------------------------------------------------- #
+
+def _build_two_layer_two_page_pdf() -> bytes:
+    """Two pages, each carrying BOTH layers, so every layer spans every floor.
+
+    This is the ordinary case for a station drawing and the one the previous
+    fixtures could not express: `BOX_1F`/`BOX_2F` are disjoint, so each layer
+    landed on exactly one floor and the per-(layer, floor) grouping bug stayed
+    invisible.
+
+    The OCG stack is `[zzz, aaa]` (zzz on top) while alphabetical order is the
+    reverse, so the layer ordering inside a group is observable.
+    """
+    def content() -> bytes:
+        return (
+            b"/OC /MC0 BDC\n0 1 1 0 k\n10 10 60 60 re\nf\nEMC\n"
+            b"/OC /MC1 BDC\n1 1 0 0 k\n90 90 60 60 re\nf\nEMC\n"
+        )
+
+    objects: list[bytes | None] = [
+        b"<< /Type /Catalog /Pages 2 0 R "
+        b"/OCProperties << /OCGs [3 0 R 4 0 R] /D << /Order [3 0 R 4 0 R] >> >> >>",
+        None,
+        b"<< /Type /OCG /Name (zzz) >>",
+        b"<< /Type /OCG /Name (aaa) >>",
+    ]
+    page_ids: list[int] = []
+    for _ in range(2):
+        stream = content()
+        page_id = len(objects) + 1
+        stream_id = len(objects) + 2
+        objects.append(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+            b"/Resources << /Properties << /MC0 3 0 R /MC1 4 0 R >> >> /Contents "
+            + str(stream_id).encode() + b" 0 R >>"
+        )
+        objects.append(
+            b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"endstream"
+        )
+        page_ids.append(page_id)
+    kids = b" ".join(f"{i} 0 R".encode() for i in page_ids)
+    objects[1] = b"<< /Type /Pages /Kids [" + kids + b"] /Count 2 >>"
+
+    out = bytearray(b"%PDF-1.6\n")
+    offsets = [0]
+    for i, body in enumerate(objects, start=1):
+        assert body is not None
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref_pos = len(out)
+    n = len(objects) + 1
+    out += f"xref\n0 {n}\n".encode() + b"0000000000 65535 f \n"
+    for off in offsets[1:]:
+        out += f"{off:010d} 00000 n \n".encode()
+    out += f"trailer\n<< /Size {n} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+@pytest.fixture()
+def shared_layer_cached(tmp_path: Path):
+    store = ConversionStore(root=tmp_path / "shared", ttl_seconds=3600, max_entries=5)
+    return store.put(parse_ai(_build_two_layer_two_page_pdf(), "shared.ai"))
+
+
+def _qgs_of(payload: bytes) -> str:
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        return archive.read(
+            next(n for n in archive.namelist() if n.endswith(".qgs"))
+        ).decode("utf-8")
+
+
+def _page_floors() -> list[ExportFloor]:
+    return [
+        ExportFloor("1F", _transform_at(), pages=[1]),
+        ExportFloor("2F", _transform_at(), pages=[2]),
+    ]
+
+
+@pytest.mark.georef
+def test_qgs_emits_one_group_per_floor_when_layers_span_floors(shared_layer_cached) -> None:
+    """A layer on several floors must not split the tree into per-layer groups.
+
+    The export loop is layer-major, so each floor recurs non-adjacently; grouping
+    by consecutive run produced one single-layer group per (layer, floor) pair.
+    """
+    payload, _ = build_georeferenced_bundle(
+        shared_layer_cached, _page_floors(), "EPSG:6677", ExportFormats(shapefile=False)
+    )
+    xml = _qgs_of(payload)
+    assert xml.count("<layer-tree-group ") == 2
+    assert xml.count('name="1F">') == 1
+    assert xml.count('name="2F">') == 1
+
+
+@pytest.mark.georef
+def test_qgs_group_holds_every_layer_of_its_floor(shared_layer_cached) -> None:
+    groups = re.findall(
+        r'<layer-tree-group expanded="1" name="(\w+)">(.*?)</layer-tree-group>',
+        _qgs_of(
+            build_georeferenced_bundle(
+                shared_layer_cached, _page_floors(), "EPSG:6677",
+                ExportFormats(shapefile=False),
+            )[0]
+        ),
+        re.DOTALL,
+    )
+    assert [name for name, _ in groups] == ["1F", "2F"]
+    for _name, body in groups:
+        assert body.count("<layer-tree-layer") == 2
+
+
+@pytest.mark.georef
+def test_qgs_orders_layers_within_a_group_by_the_illustrator_stack(
+    shared_layer_cached,
+) -> None:
+    """`zzz` is top of the OCG stack, so it must precede `aaa` despite sorting later."""
+    assert shared_layer_cached.layer_order == ["zzz", "aaa"]
+    xml = _qgs_of(
+        build_georeferenced_bundle(
+            shared_layer_cached, _page_floors(), "EPSG:6677",
+            ExportFormats(shapefile=False),
+        )[0]
+    )
+    first_group = re.search(
+        r'name="1F">(.*?)</layer-tree-group>', xml, re.DOTALL
+    ).group(1)
+    names = re.findall(r'name="1F / (\w+)"', first_group)
+    assert names == ["zzz", "aaa"]
+
+
+@pytest.mark.georef
+def test_qgs_group_order_follows_the_requested_floor_order(shared_layer_cached) -> None:
+    """Floor order is the request order, not whichever floor a layer first hit."""
+    reversed_floors = [
+        ExportFloor("2F", _transform_at(), pages=[2]),
+        ExportFloor("1F", _transform_at(), pages=[1]),
+    ]
+    xml = _qgs_of(
+        build_georeferenced_bundle(
+            shared_layer_cached, reversed_floors, "EPSG:6677",
+            ExportFormats(shapefile=False),
+        )[0]
+    )
+    assert re.findall(r'<layer-tree-group expanded="1" name="(\w+)">', xml) == ["2F", "1F"]
