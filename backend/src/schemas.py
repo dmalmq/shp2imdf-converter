@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 from typing import Any
 from typing import Literal
 
@@ -585,12 +586,26 @@ class IllustratorLayerSummary(BaseModel):
     feature_count: int
 
 
+class IllustratorPagePreview(BaseModel):
+    """One page of the source document, for the floor-assignment grid."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: int
+    bounds: list[float] = Field(min_length=4, max_length=4)
+    width_pt: float
+    height_pt: float
+    feature_count: int
+    preview_feature_count: int
+
+
 class IllustratorPreviewResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     conversion_id: str
     report: dict[str, Any]
     layers: list[IllustratorLayerSummary] = Field(default_factory=list)
+    pages: list[IllustratorPagePreview] = Field(default_factory=list)
     artwork_bounds: list[float]
     preview: dict[str, Any]
     preview_features: int
@@ -632,11 +647,17 @@ class PlacementListResponse(BaseModel):
     placements: list[PlacementItem] = Field(default_factory=list)
 
 
+_ArtworkBox = Annotated[list[float], Field(min_length=4, max_length=4)]
+
+
 class FloorRegionPayload(BaseModel):
+    """One floor's filters in artwork space; ``None`` means "no restriction"."""
+
     model_config = ConfigDict(extra="forbid")
 
     label: str = Field(min_length=1, max_length=40)
-    box: list[float] = Field(min_length=4, max_length=4)
+    box: _ArtworkBox | None = None
+    pages: list[int] | None = None
     layer_names: list[str] | None = None
 
 

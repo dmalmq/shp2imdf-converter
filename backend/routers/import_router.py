@@ -267,6 +267,7 @@ async def preview_illustrator(
         conversion_id=cached.conversion_id,
         report=cached.report,
         layers=preview["layers"],
+        pages=preview["pages"],
         artwork_bounds=preview["artwork_bounds"],
         preview=preview["preview"],
         preview_features=preview["preview_features"],
@@ -307,11 +308,19 @@ async def assign_illustrator_floors(
     if len(set(labels)) != len(labels):
         raise ValueError("Floor labels must be unique.")
     known_layers = {spec["ai_layer"] for spec in cached.written_layers}
+    page_count = int(cached.report.get("page_count") or 1)
     for floor in payload.floors:
         if floor.layer_names:
             unknown = [name for name in floor.layer_names if name not in known_layers]
             if unknown:
                 raise ValueError(f"Unknown layer name(s): {', '.join(unknown)}")
+        if floor.pages:
+            out_of_range = sorted({p for p in floor.pages if p < 1 or p > page_count})
+            if out_of_range:
+                raise ValueError(
+                    f"Page number(s) outside 1..{page_count}: "
+                    + ", ".join(str(p) for p in out_of_range)
+                )
 
     floors = [floor.model_dump() for floor in payload.floors]
     _illustrator_store(request).assign(conversion_id, floors)
@@ -320,9 +329,10 @@ async def assign_illustrator_floors(
         [
             ExportFloor(
                 label=floor["label"],
-                transform=_PLACEHOLDER_TRANSFORM,  # summary only needs the regions
-                region=floor["box"],
-                layer_names=floor["layer_names"],
+                transform=_PLACEHOLDER_TRANSFORM,  # summary only needs the filters
+                region=floor.get("box"),
+                layer_names=floor.get("layer_names"),
+                pages=floor.get("pages"),
             )
             for floor in floors
         ],
@@ -369,8 +379,9 @@ async def export_illustrator(
             ExportFloor(
                 label=floor.label,
                 transform=_transform_from_payload(floor.transform),
-                region=regions[floor.label]["box"],
-                layer_names=regions[floor.label]["layer_names"],
+                region=regions[floor.label].get("box"),
+                layer_names=regions[floor.label].get("layer_names"),
+                pages=regions[floor.label].get("pages"),
             )
             for floor in payload.floors
         ]

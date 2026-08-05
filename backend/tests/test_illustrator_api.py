@@ -8,13 +8,23 @@ import zipfile
 import pytest
 
 from backend.src.geocoding import GeocodeAddressParts, GeocodeMatch
-from backend.tests.test_illustrator_import import _build_minimal_ai_pdf
+from backend.tests.test_illustrator_import import (
+    _build_minimal_ai_pdf,
+    _build_multipage_ai_pdf,
+)
 
 
 def _preview(test_client):
     return test_client.post(
         "/api/convert/illustrator/preview",
         files=[("file", ("sample.ai", _build_minimal_ai_pdf(), "application/postscript"))],
+    )
+
+
+def _preview_multipage(test_client):
+    return test_client.post(
+        "/api/convert/illustrator/preview",
+        files=[("file", ("three.ai", _build_multipage_ai_pdf(), "application/postscript"))],
     )
 
 
@@ -306,3 +316,111 @@ def test_export_without_assignment_still_works_single_floor(test_client) -> None
     assert any(n.endswith(".gpkg") for n in names)
     assert any(n.endswith(".qgs") for n in names)
     assert "export_report.json" in names
+
+
+@pytest.mark.georef
+def test_preview_returns_page_metadata(test_client) -> None:
+    response = _preview_multipage(test_client)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["report"]["page_count"] == 3
+    assert [p["index"] for p in body["pages"]] == [1, 2, 3]
+    assert body["pages"][2]["width_pt"] == 400.0
+
+
+@pytest.mark.georef
+def test_preview_of_a_single_page_file_reports_one_page(test_client) -> None:
+    body = _preview(test_client).json()
+    assert [p["index"] for p in body["pages"]] == [1]
+
+
+@pytest.mark.georef
+def test_assign_accepts_page_floors(test_client) -> None:
+    payload = _preview_multipage(test_client).json()
+    response = test_client.post(
+        f"/api/convert/illustrator/{payload['conversion_id']}/assign",
+        json={
+            "floors": [
+                {"label": "1F", "pages": [1], "box": None, "layer_names": None},
+                {"label": "2F", "pages": [2, 3], "box": None, "layer_names": None},
+            ]
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert {floor["label"]: floor["feature_count"] for floor in data["floors"]} == {
+        "1F": 1,
+        "2F": 2,
+    }
+    assert data["unassigned_count"] == 0
+
+
+@pytest.mark.georef
+def test_assign_rejects_a_page_number_out_of_range(test_client) -> None:
+    payload = _preview_multipage(test_client).json()
+    response = test_client.post(
+        f"/api/convert/illustrator/{payload['conversion_id']}/assign",
+        json={"floors": [{"label": "9F", "pages": [4], "box": None, "layer_names": None}]},
+    )
+    assert response.status_code == 400, response.text
+
+
+@pytest.mark.georef
+def test_assign_still_accepts_a_box_only_floor(test_client) -> None:
+    """Backward compatibility: a payload with no `pages` key at all."""
+    payload = _preview(test_client).json()
+    response = test_client.post(
+        f"/api/convert/illustrator/{payload['conversion_id']}/assign",
+        json={"floors": [{"label": "1F", "box": [0, 0, 200, 200], "layer_names": None}]},
+    )
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.georef
+def test_export_after_a_page_assignment(test_client) -> None:
+    payload = _preview_multipage(test_client).json()
+    conversion_id = payload["conversion_id"]
+    assigned = test_client.post(
+        f"/api/convert/illustrator/{conversion_id}/assign",
+        json={
+            "floors": [
+                {"label": "1F", "pages": [1], "box": None, "layer_names": None},
+                {"label": "2F", "pages": [2], "box": None, "layer_names": None},
+            ]
+        },
+    )
+    assert assigned.status_code == 200, assigned.text
+    transform = {
+        "artwork_anchor": [100.0, 80.0],
+        "map_anchor": [139.7671, 35.6812],
+        "rotation_deg": 0.0,
+        "metres_per_point": 0.176389,
+        "working_crs": "EPSG:6677",
+    }
+    response = test_client.post(
+        f"/api/convert/illustrator/{conversion_id}/export",
+        json={
+            "floors": [
+                {"label": "1F", "transform": transform},
+                {"label": "2F", "transform": transform},
+            ],
+            "output_crs": "EPSG:4326",
+            "formats": {"geopackage": True, "shapefile": False, "qgis": False},
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert any(name.endswith(".gpkg") for name in archive.namelist())
+
+
+@pytest.mark.georef
+def test_floors_json_round_trips_pages_with_a_null_box(tmp_path) -> None:
+    from backend.src.illustrator_importer import parse_ai
+    from backend.src.illustrator_store import ConversionStore
+
+    store = ConversionStore(root=tmp_path, ttl_seconds=3600, max_entries=5)
+    cached = store.put(parse_ai(_build_multipage_ai_pdf(), "three.ai"))
+    floors = [{"label": "1F", "box": None, "pages": [1, 2], "layer_names": None}]
+    assert store.assign(cached.conversion_id, floors).floors == floors
+    assert store.get(cached.conversion_id).floors == floors
