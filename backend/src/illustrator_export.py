@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import tempfile
 import zipfile
+from collections import Counter
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -80,10 +81,14 @@ def _group_by_floor(
 
 
 def _read_layers(cached: CachedConversion) -> list[tuple[dict[str, str], gpd.GeoDataFrame]]:
-    return [
-        (spec, gpd.read_file(cached.gpkg_path, layer=spec["table"]))
-        for spec in cached.written_layers
-    ]
+    layers: list[tuple[dict[str, str], gpd.GeoDataFrame]] = []
+    for spec in cached.written_layers:
+        gdf = gpd.read_file(cached.gpkg_path, layer=spec["table"])
+        if "page" not in gdf.columns:
+            # Conversions cached before per-page tagging were single-page.
+            gdf["page"] = 1
+        layers.append((spec, gdf))
+    return layers
 
 
 def _diagonal_of(geometry) -> float:
@@ -91,6 +96,61 @@ def _diagonal_of(geometry) -> float:
         return 0.0
     minx, miny, maxx, maxy = geometry.bounds
     return ((maxx - minx) ** 2 + (maxy - miny) ** 2) ** 0.5
+
+
+def _extend_bounds(
+    current: tuple[float, float, float, float] | None, incoming
+) -> tuple[float, float, float, float]:
+    minx, miny, maxx, maxy = (float(v) for v in incoming)
+    if current is None:
+        return (minx, miny, maxx, maxy)
+    return (
+        min(current[0], minx),
+        min(current[1], miny),
+        max(current[2], maxx),
+        max(current[3], maxy),
+    )
+
+
+def _page_previews(
+    cached: CachedConversion,
+    artwork_bounds: tuple[float, float, float, float],
+    page_bounds: dict[int, tuple[float, float, float, float]],
+    page_totals: Counter,
+    page_preview: Counter,
+) -> list[dict]:
+    """One entry per document page, including pages holding no geometry.
+
+    The report's page list is the authority for which pages exist, so a cover
+    sheet or a text-only page still gets a card in the assignment grid.
+    """
+    metas = cached.report.get("pages") or [
+        # Cached before per-page tagging: one page spanning the whole artwork.
+        {
+            "index": 1,
+            "width_pt": float(artwork_bounds[2]),
+            "height_pt": float(artwork_bounds[3]),
+        }
+    ]
+    previews: list[dict] = []
+    for meta in metas:
+        index = int(meta["index"])
+        width = float(meta["width_pt"])
+        height = float(meta["height_pt"])
+        found = page_bounds.get(index)
+        previews.append(
+            {
+                "index": index,
+                # An empty page has no geometry bounds; fall back to the sheet
+                # so the grid thumbnail still has a usable viewBox.
+                "bounds": [float(v) for v in (found or (0.0, 0.0, width, height))],
+                "width_pt": width,
+                "height_pt": height,
+                "feature_count": int(page_totals.get(index, 0)),
+                "preview_feature_count": int(page_preview.get(index, 0)),
+            }
+        )
+    return previews
 
 
 def build_preview(
@@ -123,11 +183,21 @@ def build_preview(
     features: list[dict] = []
     total = 0
     summaries: list[dict] = []
+    # Per-page rollups. Pages are normalized to their own MediaBox origin, so
+    # the union bounds are roughly the largest page and one global decimation
+    # tolerance is already page-scale.
+    page_bounds: dict[int, tuple[float, float, float, float]] = {}
+    page_totals: Counter = Counter()
+    page_preview: Counter = Counter()
     for spec, gdf in layers:
         total += len(gdf)
         summaries.append({**spec, "feature_count": int(len(gdf))})
         if gdf.empty:
             continue
+        for page, chunk in gdf.groupby("page", sort=True):
+            page = int(page)
+            page_totals[page] += len(chunk)
+            page_bounds[page] = _extend_bounds(page_bounds.get(page), chunk.total_bounds)
         simplified = gdf.copy()
         if tolerance > 0:
             simplified["geometry"] = simplified.geometry.simplify(
@@ -136,10 +206,13 @@ def build_preview(
             simplified = simplified[simplified.geometry.apply(_diagonal_of) >= tolerance]
         if simplified.empty:
             continue
+        for page, chunk in simplified.groupby("page", sort=True):
+            page_preview[int(page)] += len(chunk)
         features.extend(json.loads(simplified.to_json(na="null"))["features"])
 
     return {
         "artwork_bounds": [float(value) for value in bounds],
+        "pages": _page_previews(cached, bounds, page_bounds, page_totals, page_preview),
         "preview": {"type": "FeatureCollection", "features": features},
         "preview_features": len(features),
         "total_features": int(total),

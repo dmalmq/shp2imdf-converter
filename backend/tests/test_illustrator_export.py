@@ -22,7 +22,10 @@ from backend.src.illustrator_export import (
 from backend.src.illustrator_georeference import SimilarityTransform, project_point
 from backend.src.illustrator_importer import parse_ai
 from backend.src.illustrator_store import ConversionStore
-from backend.tests.test_illustrator_import import _build_minimal_ai_pdf
+from backend.tests.test_illustrator_import import (
+    _build_minimal_ai_pdf,
+    _build_multipage_ai_pdf,
+)
 
 ANCHOR_LON = 139.700258
 ANCHOR_LAT = 35.690921
@@ -33,6 +36,12 @@ COVER_ALL = [-1e9, -1e9, 1e9, 1e9]
 def cached(tmp_path: Path):
     store = ConversionStore(root=tmp_path, ttl_seconds=3600, max_entries=5)
     return store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+
+
+@pytest.fixture()
+def multipage_cached(tmp_path: Path):
+    store = ConversionStore(root=tmp_path / "mp", ttl_seconds=3600, max_entries=5)
+    return store.put(parse_ai(_build_multipage_ai_pdf(), "three.ai"))
 
 
 def _transform(cached) -> SimilarityTransform:
@@ -368,3 +377,64 @@ def test_qgs_groups_layers_by_floor(cached) -> None:
     assert xml.count('<layer-tree-group expanded="1" name="2F">') == 1
     assert "|layername=1F_線路__lines" in xml
     assert "|layername=2F_Fill Layer" in xml
+
+
+@pytest.mark.georef
+def test_preview_lists_every_page_with_its_sheet_size(multipage_cached) -> None:
+    pages = build_preview(multipage_cached)["pages"]
+    assert [p["index"] for p in pages] == [1, 2, 3]
+    assert [(p["width_pt"], p["height_pt"]) for p in pages] == [
+        (200.0, 200.0),
+        (200.0, 200.0),
+        (400.0, 400.0),
+    ]
+
+
+@pytest.mark.georef
+def test_preview_reports_per_page_bounds_and_counts(multipage_cached) -> None:
+    pages = build_preview(multipage_cached)["pages"]
+    for page in pages:
+        assert page["feature_count"] == 1
+        # All three rectangles normalize to the same artwork coordinates.
+        assert [round(v, 3) for v in page["bounds"]] == [50.0, 50.0, 150.0, 110.0]
+
+
+@pytest.mark.georef
+def test_preview_features_carry_their_page(multipage_cached) -> None:
+    preview = build_preview(multipage_cached)["preview"]
+    assert sorted(f["properties"]["page"] for f in preview["features"]) == [1, 2, 3]
+
+
+@pytest.mark.georef
+def test_preview_of_a_single_page_file_lists_one_page(cached) -> None:
+    preview = build_preview(cached)
+    assert [p["index"] for p in preview["pages"]] == [1]
+    assert preview["pages"][0]["feature_count"] == preview["total_features"]
+    assert preview["pages"][0]["bounds"] == preview["artwork_bounds"]
+
+
+@pytest.mark.georef
+def test_read_layers_backfills_page_for_older_caches(cached) -> None:
+    """A conversion cached before per-page tagging is treated as single-page.
+
+    Simulates the old cache by dropping the column from the GeoPackage on disk,
+    which is what an entry written by the previous version actually looks like.
+    """
+    from backend.src.illustrator_export import _read_layers
+
+    with sqlite3.connect(cached.gpkg_path) as conn:
+        for spec in cached.written_layers:
+            conn.execute(f'ALTER TABLE "{spec["table"]}" DROP COLUMN page')
+
+    for _spec, gdf in _read_layers(cached):
+        assert "page" in gdf.columns
+        assert set(gdf["page"]) == {1}
+
+
+@pytest.mark.georef
+def test_preview_of_a_cache_without_page_metadata_lists_one_page(cached) -> None:
+    """An old cache has no report['pages'] either; the grid still gets a page."""
+    cached.report.pop("pages", None)
+    pages = build_preview(cached)["pages"]
+    assert [p["index"] for p in pages] == [1]
+    assert pages[0]["bounds"] == build_preview(cached)["artwork_bounds"]
