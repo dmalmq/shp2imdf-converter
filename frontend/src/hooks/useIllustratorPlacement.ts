@@ -52,6 +52,9 @@ export type PlacementAction =
   | { type: "dragFloor"; label: string; mapAnchor: [number, number] }
   | { type: "rotateFrame"; rotationDeg: number }
   | { type: "scaleFrame"; metresPerPoint: number }
+  /** Per-floor transforms, used once a floor has been moved out of the frame. */
+  | { type: "rotateFloor"; label: string; rotationDeg: number }
+  | { type: "scaleFloor"; label: string; metresPerPoint: number }
   | { type: "setDrawingScale"; denominator: number }
   | { type: "calibrateDistance"; artworkDistance: number; realMetres: number }
   | { type: "unlockScale" }
@@ -190,8 +193,38 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
         ...state,
         floors: state.floors.map((f) =>
           f.label === action.label
-            ? { ...f, mapAnchor: action.mapAnchor, linked: single ? f.linked : false }
+            ? single || !f.linked
+              ? { ...f, mapAnchor: action.mapAnchor }
+              : {
+                  ...f,
+                  mapAnchor: action.mapAnchor,
+                  linked: false,
+                  // Freeze the frame values into the floor now, so later frame
+                  // operations cannot drag an independently-placed floor along.
+                  rotationDeg: state.frame.rotationDeg,
+                  metresPerPoint: state.frame.metresPerPoint
+                }
             : f
+        )
+      };
+    }
+
+    case "rotateFloor": {
+      const rotationDeg = normaliseRotation(action.rotationDeg);
+      return {
+        ...state,
+        floors: state.floors.map((f) =>
+          f.label === action.label ? { ...f, rotationDeg } : f
+        )
+      };
+    }
+
+    case "scaleFloor": {
+      if (!(action.metresPerPoint > 0)) return state;
+      return {
+        ...state,
+        floors: state.floors.map((f) =>
+          f.label === action.label ? { ...f, metresPerPoint: action.metresPerPoint } : f
         )
       };
     }
@@ -371,8 +404,16 @@ export type PlacementHistory = {
 const CONTINUOUS_ACTIONS: Record<string, true> = {
   dragFloor: true,
   rotateFrame: true,
-  scaleFrame: true
+  scaleFrame: true,
+  rotateFloor: true,
+  scaleFloor: true
 };
+
+/** Key the coalescing by floor too: 1F then 2F are two steps, not one. */
+function gestureKey(action: PlacementAction): string | null {
+  if (!CONTINUOUS_ACTIONS[action.type]) return null;
+  return "label" in action ? `${action.type}:${action.label}` : action.type;
+}
 
 /** Selection, not a change to the placement: never an undo step. */
 const NON_HISTORIC_ACTIONS: Record<string, true> = { setActiveFloor: true };
@@ -428,14 +469,15 @@ export function placementHistoryReducer(
   // Rejected actions (locked scale, unknown floor) must not consume history.
   if (present === history.present) return history;
   if (NON_HISTORIC_ACTIONS[action.type]) return { ...history, present };
-  if (CONTINUOUS_ACTIONS[action.type] && history.openGesture === action.type) {
+  const key = gestureKey(action);
+  if (key && history.openGesture === key) {
     return { ...history, present };
   }
   return {
     present,
     past: [...history.past, history.present].slice(-HISTORY_LIMIT),
     future: [],
-    openGesture: CONTINUOUS_ACTIONS[action.type] ? action.type : null
+    openGesture: key
   };
 }
 

@@ -76,6 +76,38 @@ test("dragging a floor unlinks it and leaves others alone", () => {
   expect(next.floors[1].mapAnchor).toEqual(dragged);
   expect(next.floors[0].mapAnchor).toEqual(ANCHOR);
   expect(next.floors[0].linked).toBe(true);
+  // Freezing the frame values means a later frame rotation cannot drag the
+  // independently placed floor along.
+  expect(next.floors[1].rotationDeg).toBe(0);
+  expect(next.floors[1].metresPerPoint).toBeCloseTo(0.176389, 9);
+});
+
+test("a dragged floor keeps its own transform through later frame changes", () => {
+  let state = placementReducer(BASE, {
+    type: "dragFloor",
+    label: "2F",
+    mapAnchor: [139.72, 35.71]
+  });
+  state = placementReducer(state, { type: "rotateFrame", rotationDeg: 90 });
+  const own = resolvedTransform(state, state.floors[1]);
+  expect(own.rotationDeg).toBe(0); // not 90: the frame's rotation must not leak in
+  expect(own.metresPerPoint).toBeCloseTo(0.176389, 9);
+});
+
+test("rotateFloor and scaleFloor only touch their own floor", () => {
+  let state = placementReducer(BASE, { type: "dragFloor", label: "2F", mapAnchor: [139.72, 35.71] });
+  state = placementReducer(state, { type: "rotateFloor", label: "2F", rotationDeg: 40 });
+  state = placementReducer(state, { type: "scaleFloor", label: "2F", metresPerPoint: 0.5 });
+  expect(state.floors[1].rotationDeg).toBe(40);
+  expect(state.floors[1].metresPerPoint).toBe(0.5);
+  // 1F stays on the frame.
+  expect(state.floors[0].rotationDeg).toBeUndefined();
+  expect(resolvedTransform(state, state.floors[0]).rotationDeg).toBe(0);
+});
+
+test("a non-positive per-floor scale is rejected", () => {
+  const state = placementReducer(BASE, { type: "scaleFloor", label: "2F", metresPerPoint: -1 });
+  expect(state).toBe(BASE);
 });
 
 test("frame operations ignore unlinked floors", () => {
@@ -385,6 +417,27 @@ test("separate gesture types are separate undo steps", () => {
   history = placementHistoryReducer(history, { type: "undo" });
   expect(history.present.frame.metresPerPoint).toBeCloseTo(0.176389, 9);
   expect(history.present.frame.rotationDeg).toBe(10);
+});
+
+test("dragging different floors makes separate undo steps even without a release", () => {
+  let history = initialPlacementHistory(BASE);
+  history = placementHistoryReducer(history, {
+    type: "dragFloor",
+    label: "1F",
+    mapAnchor: [139.72, 35.7]
+  });
+  history = placementHistoryReducer(history, {
+    type: "dragFloor",
+    label: "2F",
+    mapAnchor: [139.72, 35.71]
+  });
+  expect(history.past).toHaveLength(2);
+  history = placementHistoryReducer(history, { type: "undo" });
+  // Step 2 undone: 2F is back, 1F's drag (step 1) is still present.
+  expect(history.present.floors[1].mapAnchor).toEqual(ANCHOR);
+  expect(history.present.floors[0].mapAnchor).toEqual([139.72, 35.7]);
+  history = placementHistoryReducer(history, { type: "undo" });
+  expect(history.present.floors[0].mapAnchor).toEqual(ANCHOR);
 });
 
 test("the auto-located baseline is the floor of the history, not an undo step", () => {

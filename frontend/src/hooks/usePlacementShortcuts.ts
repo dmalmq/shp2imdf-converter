@@ -74,9 +74,9 @@ export function usePlacementShortcuts({ state, dispatch, enabled, onEscape }: Op
       const [lng, lat] = active.mapAnchor;
       const [east, north] = lngLatToEnu(lng, lat, lng, lat);
       const moved = enuToLngLat(east + offset[0] * step, north + offset[1] * step, lng, lat);
-      // positionBuilding keeps a linked floor in the shared frame (and the
-      // handles visible); a dragFloor here would unlink it with no way back.
-      dispatch({ type: "positionBuilding", mapAnchor: moved });
+      // Moving a floor moves just it, so stacked plans can be nudged into
+      // alignment without dragging the whole building.
+      dispatch({ type: "dragFloor", label: active.label, mapAnchor: moved });
     };
 
     window.addEventListener("keydown", onKeyDown);

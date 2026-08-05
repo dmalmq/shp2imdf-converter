@@ -5,6 +5,7 @@ import { geocodeSearch, type GeocodeResultItem } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
   DEFAULT_DRAWING_SCALE,
+  resolvedTransform,
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
@@ -92,6 +93,9 @@ export function TransformPanel({
   }, [siteName]);
 
   const activeFloor = state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
+  // An unlinked floor owns its rotation/scale; the panel must show and edit
+  // those instead of the frame's.
+  const activeTransform = activeFloor ? resolvedTransform(state, activeFloor) : null;
 
   return (
     <div className="space-y-4 text-sm">
@@ -117,8 +121,8 @@ export function TransformPanel({
       </section>
       <p className="-mt-2 text-xs text-[var(--color-text-muted)]">
         {t(
-          "Drag the plan to move it, corners to scale, the top handle to rotate. Ctrl+Z / Ctrl+Shift+Z, arrows nudge 1 m (Shift 10 m).",
-          "図面をドラッグで移動、四隅で拡大縮小、上のハンドルで回転。Ctrl+Z / Ctrl+Shift+Z、矢印キーで1m移動（Shiftで10m）。"
+          "Drag a floor to move just it (Alt: move the whole building). Corners scale, top handle rotates. Ctrl+Z / Ctrl+Shift+Z, arrows nudge 1 m (Shift 10 m).",
+          "ドラッグでそのフロアのみ移動（Altで建物全体）。四隅で拡大縮小、上のハンドルで回転。Ctrl+Z / Ctrl+Shift+Z、矢印キーで1m移動（Shiftで10m）。"
         )}
       </p>
       {state.floors.length > 1 ? (
@@ -203,22 +207,35 @@ export function TransformPanel({
       <section>
         <label className="block text-xs font-medium">
           {t("Rotation (from true north)", "回転（真北基準）")}
+          {activeFloor && !activeFloor.linked ? (
+            <span className="text-[var(--color-text-muted)]">{t(" (this floor)", "（この階）")}</span>
+          ) : null}
         </label>
         <div className="mt-1 flex items-center gap-2">
           <input
             type="number"
             step="0.1"
             className="w-24 rounded-[var(--radius-md)] border px-2 py-1"
-            value={state.frame.rotationDeg}
-            onChange={(event) =>
-              dispatch({ type: "rotateFrame", rotationDeg: Number(event.target.value) })
-            }
+            value={activeTransform?.rotationDeg ?? state.frame.rotationDeg}
+            onChange={(event) => {
+              const rotationDeg = Number(event.target.value);
+              if (activeFloor?.linked) {
+                dispatch({ type: "rotateFrame", rotationDeg });
+              } else if (activeFloor) {
+                dispatch({ type: "rotateFloor", label: activeFloor.label, rotationDeg });
+              }
+            }}
           />
           <span className="text-xs text-[var(--color-text-muted)]">°</span>
           <Button
             size="sm"
             variant="secondary"
-            onClick={() => dispatch({ type: "rotateFrame", rotationDeg: 0 })}
+            onClick={() =>
+              activeFloor?.linked
+                ? dispatch({ type: "rotateFrame", rotationDeg: 0 })
+                : activeFloor &&
+                  dispatch({ type: "rotateFloor", label: activeFloor.label, rotationDeg: 0 })
+            }
           >
             {t("Reset", "リセット")}
           </Button>
@@ -236,7 +253,8 @@ export function TransformPanel({
           ) : null}
         </label>
         <p className="mt-1 text-xs">
-          {state.frame.metresPerPoint.toFixed(6)} {t("m per point", "m/pt")}
+          {(activeTransform?.metresPerPoint ?? state.frame.metresPerPoint).toFixed(6)}{" "}
+          {t("m per point", "m/pt")}
         </p>
         <div className="mt-1 flex items-center gap-2">
           <span className="text-xs">1:</span>

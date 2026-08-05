@@ -98,17 +98,17 @@ export function TransformHandles({
         originLng,
         originLat
       );
-      // A linked floor carries the building: moving it must move the shared
-      // frame, otherwise the floor unlinks and its scale/rotate handles vanish.
-      // Alt+drag is the deliberate per-floor escape hatch.
+      // Moving a floor moves just it, so plans can be stacked independently;
+      // Alt+drag carries the whole linked building instead. The floor's own
+      // rotation/scale are frozen in when it unlinks, and its handles stay.
       if (grab.perFloor) {
+        latest.current.dispatch({ type: "positionBuilding", mapAnchor: moved });
+      } else {
         latest.current.dispatch({
           type: "dragFloor",
           label: latest.current.floorLabel,
           mapAnchor: moved
         });
-      } else {
-        latest.current.dispatch({ type: "positionBuilding", mapAnchor: moved });
       }
     };
 
@@ -185,10 +185,18 @@ export function TransformHandles({
       corner.artwork[1] - current.artworkAnchor[1]
     );
     if (reach <= 0) return;
-    latest.current.dispatch({
-      type: "scaleFrame",
-      metresPerPoint: Math.hypot(east, north) / reach
-    });
+    const metresPerPoint = Math.hypot(east, north) / reach;
+    // Linked floors scale the shared frame (the whole stack); an unlinked floor
+    // scales itself, keeping the others untouched.
+    if (latest.current.linked) {
+      latest.current.dispatch({ type: "scaleFrame", metresPerPoint });
+    } else {
+      latest.current.dispatch({
+        type: "scaleFloor",
+        label: latest.current.floorLabel,
+        metresPerPoint
+      });
+    }
   };
 
   const onRotateDrag = (event: MarkerDragEvent) => {
@@ -199,14 +207,22 @@ export function TransformHandles({
       bearingTo(event)
     );
     const rotationDeg = shiftHeld.current ? Math.round(raw / 15) * 15 : raw;
-    latest.current.dispatch({ type: "rotateFrame", rotationDeg });
+    if (latest.current.linked) {
+      latest.current.dispatch({ type: "rotateFrame", rotationDeg });
+    } else {
+      latest.current.dispatch({
+        type: "rotateFloor",
+        label: latest.current.floorLabel,
+        rotationDeg
+      });
+    }
   };
 
   const endGesture = () => dispatch({ type: "endGesture" });
 
   return (
     <>
-      {linked && !scaleLocked
+      {!scaleLocked
         ? frame.corners.map((corner) => (
             <Marker
               key={corner.key}
@@ -228,24 +244,22 @@ export function TransformHandles({
           ))
         : null}
 
-      {linked ? (
-        <Marker
-          longitude={frame.rotate.lngLat[0]}
-          latitude={frame.rotate.lngLat[1]}
-          anchor="center"
-          draggable
-          onDrag={onRotateDrag}
-          onDragEnd={endGesture}
+      <Marker
+        longitude={frame.rotate.lngLat[0]}
+        latitude={frame.rotate.lngLat[1]}
+        anchor="center"
+        draggable
+        onDrag={onRotateDrag}
+        onDragEnd={endGesture}
+      >
+        <div
+          className={HANDLE_ROUND}
+          style={{ cursor: "grab" }}
+          title="Drag to rotate (hold Shift to snap to 15°)"
         >
-          <div
-            className={HANDLE_ROUND}
-            style={{ cursor: "grab" }}
-            title="Drag to rotate (hold Shift to snap to 15°)"
-          >
-            <RotateCw size={13} strokeWidth={2.5} className="text-slate-700" />
-          </div>
-        </Marker>
-      ) : null}
+          <RotateCw size={13} strokeWidth={2.5} className="text-slate-700" />
+        </div>
+      </Marker>
     </>
   );
 }
