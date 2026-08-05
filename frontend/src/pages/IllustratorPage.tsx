@@ -38,7 +38,8 @@ const CRS_CHOICES = (suggested: string, suggestedLabel: string) => [
 
 type AssignedRegion = {
   label: string;
-  box: [number, number, number, number];
+  box: [number, number, number, number] | null;
+  pages: number[] | null;
   layer_names: string[] | null;
 };
 
@@ -48,7 +49,7 @@ function initialStateFromAssignment(
 ): PlacementState {
   const regions: AssignedRegion[] = assignment.length
     ? assignment
-    : [{ label: "artwork", box: preview.artwork_bounds, layer_names: null }];
+    : [{ label: "artwork", box: preview.artwork_bounds, pages: null, layer_names: null }];
   const first = regions[0];
   return {
     frame: {
@@ -58,17 +59,22 @@ function initialStateFromAssignment(
     },
     activeFloorLabel: first.label,
     scaleLocked: false,
-    floors: regions.map((region) => ({
-      label: region.label,
-      linked: true,
-      artworkAnchor: [
-        (region.box[0] + region.box[2]) / 2,
-        (region.box[1] + region.box[3]) / 2
-      ],
-      mapAnchor: [139.7671, 35.6812],
-      controlPoints: [],
-      artworkBounds: region.box
-    }))
+    floors: regions.map((region) => {
+      // A null box claims the whole artwork, so placement bounds default to
+      // the artwork bounds (matches the server's "no spatial restriction").
+      const regionBounds = region.box ?? preview.artwork_bounds;
+      return {
+        label: region.label,
+        linked: true,
+        artworkAnchor: [
+          (regionBounds[0] + regionBounds[2]) / 2,
+          (regionBounds[1] + regionBounds[3]) / 2
+        ],
+        mapAnchor: [139.7671, 35.6812],
+        controlPoints: [],
+        artworkBounds: regionBounds
+      };
+    })
   };
 }
 
@@ -133,12 +139,13 @@ export function IllustratorPage() {
     if (!preview) return [];
     const regions: AssignedRegion[] = (assignment ?? []).length
       ? (assignment as AssignedRegion[])
-      : [{ label: "artwork", box: preview.artwork_bounds, layer_names: null }];
+      : [{ label: "artwork", box: preview.artwork_bounds, pages: null, layer_names: null }];
     const { perFloor } = partitionByFloors(
       preview.preview,
       regions.map((region) => ({
         label: region.label,
         box: region.box,
+        pages: null,
         layerNames: region.layer_names
       }))
     );
@@ -257,6 +264,7 @@ export function IllustratorPage() {
               const regions: AssignedRegion[] = floors.map((floor) => ({
                 label: floor.label,
                 box: floor.box,
+                pages: floor.pages,
                 layer_names: floor.layerNames
               }));
               try {

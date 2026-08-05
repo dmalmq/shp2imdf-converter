@@ -5,7 +5,8 @@ import {
   clientToArtworkPoint,
   featureCentroid,
   geometryToPath,
-  partitionByFloors
+  partitionByFloors,
+  splitByPage
 } from "./svgPreview";
 
 const POLYGON: Geometry = {
@@ -103,8 +104,8 @@ test("partitionByFloors assigns by centroid and layer restriction", () => {
     ]
   };
   const floors = [
-    { label: "1F", box: [0, 0, 20, 20] as [number, number, number, number], layerNames: null },
-    { label: "2F", box: [20, 0, 40, 20] as [number, number, number, number], layerNames: ["柱"] }
+    { label: "1F", box: [0, 0, 20, 20] as [number, number, number, number], pages: null, layerNames: null },
+    { label: "2F", box: [20, 0, 40, 20] as [number, number, number, number], pages: null, layerNames: ["柱"] }
   ];
   const { perFloor, unassigned } = partitionByFloors(preview, floors);
   expect(perFloor.get("1F")).toHaveLength(1);
@@ -121,7 +122,7 @@ test("layer restriction excludes matching-position features on other layers", ()
     ]
   };
   const floors = [
-    { label: "2F", box: [20, 0, 40, 20] as [number, number, number, number], layerNames: ["柱"] }
+    { label: "2F", box: [20, 0, 40, 20] as [number, number, number, number], pages: null, layerNames: ["柱"] }
   ];
   const { perFloor, unassigned } = partitionByFloors(preview, floors);
   expect(perFloor.get("2F")).toHaveLength(1);
@@ -165,4 +166,90 @@ test("clientToArtworkPoint degrades to the artwork centre on a zero-size viewpor
   const [x, y] = clientToArtworkPoint(SQUARE, rect, 0, 0);
   expect(x).toBeCloseTo(5, 6);
   expect(y).toBeCloseTo(5, 6);
+});
+
+function pageFeature(page: number, x: number, y: number, layer = "Fill Layer") {
+  return {
+    type: "Feature" as const,
+    properties: { page, ai_layer: layer, role: "polygon" },
+    geometry: {
+      type: "Polygon" as const,
+      coordinates: [
+        [
+          [x, y],
+          [x + 10, y],
+          [x + 10, y + 10],
+          [x, y + 10],
+          [x, y]
+        ]
+      ]
+    }
+  };
+}
+
+function threePagePreview() {
+  return {
+    type: "FeatureCollection" as const,
+    features: [pageFeature(1, 0, 0), pageFeature(2, 0, 0), pageFeature(3, 50, 50)]
+  };
+}
+
+test("splitByPage groups features by page in ascending order", () => {
+  const byPage = splitByPage(threePagePreview());
+  expect([...byPage.keys()]).toEqual([1, 2, 3]);
+  expect(byPage.get(1)!.features).toHaveLength(1);
+  expect(byPage.get(1)!.type).toBe("FeatureCollection");
+});
+
+test("splitByPage treats a feature with no page property as page 1", () => {
+  const preview = {
+    type: "FeatureCollection" as const,
+    features: [{ ...pageFeature(1, 0, 0), properties: { ai_layer: "Fill Layer" } }]
+  };
+  expect([...splitByPage(preview).keys()]).toEqual([1]);
+});
+
+test("partitionByFloors assigns by page when no box is given", () => {
+  const { perFloor, unassigned } = partitionByFloors(threePagePreview(), [
+    { label: "1F", box: null, pages: [1], layerNames: null }
+  ]);
+  expect(perFloor.get("1F")).toHaveLength(1);
+  expect(unassigned).toHaveLength(2);
+});
+
+test("partitionByFloors merges several pages under one label", () => {
+  const { perFloor, unassigned } = partitionByFloors(threePagePreview(), [
+    { label: "1F", box: null, pages: [1, 3], layerNames: null }
+  ]);
+  expect(perFloor.get("1F")).toHaveLength(2);
+  expect(unassigned).toHaveLength(1);
+});
+
+test("partitionByFloors intersects page with box", () => {
+  const floors = [
+    { label: "1F", box: [40, 40, 80, 80] as [number, number, number, number], pages: [3], layerNames: null }
+  ];
+  expect(partitionByFloors(threePagePreview(), floors).perFloor.get("1F")).toHaveLength(1);
+
+  const wrongPage = [{ ...floors[0], pages: [1] }];
+  expect(partitionByFloors(threePagePreview(), wrongPage).perFloor.get("1F")).toHaveLength(0);
+});
+
+test("partitionByFloors intersects page with layer restriction", () => {
+  const preview = {
+    type: "FeatureCollection" as const,
+    features: [pageFeature(1, 0, 0, "walls"), pageFeature(1, 0, 0, "tracks")]
+  };
+  const { perFloor } = partitionByFloors(preview, [
+    { label: "1F", box: null, pages: [1], layerNames: ["walls"] }
+  ]);
+  expect(perFloor.get("1F")).toHaveLength(1);
+});
+
+test("a floor with no page, box or layer restriction claims everything", () => {
+  const { perFloor, unassigned } = partitionByFloors(threePagePreview(), [
+    { label: "artwork", box: null, pages: null, layerNames: null }
+  ]);
+  expect(perFloor.get("artwork")).toHaveLength(3);
+  expect(unassigned).toHaveLength(0);
 });

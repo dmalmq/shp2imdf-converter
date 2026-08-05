@@ -100,7 +100,12 @@ export function AssignmentPanel({ preview, artworkBounds, layerSummaries, onAssi
     () =>
       partitionByFloors(
         preview,
-        drafts.map((d) => ({ label: d.label, box: d.box, layerNames: d.layerNames }))
+        drafts.map((d) => ({
+          label: d.label,
+          box: d.box,
+          pages: null,
+          layerNames: d.layerNames
+        }))
       ),
     [preview, drafts]
   );
@@ -250,7 +255,12 @@ export function AssignmentPanel({ preview, artworkBounds, layerSummaries, onAssi
           disabled={drafts.length === 0}
           onClick={() =>
             onAssigned(
-              drafts.map((d) => ({ label: d.label, box: d.box, layerNames: d.layerNames }))
+              drafts.map((d) => ({
+                label: d.label,
+                box: d.box,
+                pages: null,
+                layerNames: d.layerNames
+              }))
             )
           }
         >

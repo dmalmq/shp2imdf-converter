@@ -3,8 +3,9 @@
  *
  * The preview is a decimated GeoJSON FeatureCollection in artwork points. It is
  * rendered to SVG for the assignment panel, and partitioned by the same
- * centroid-in-box rule the server applies at export. The partition here is
- * display-only: the server re-verifies membership from full-fidelity geometry.
+ * page/layer/centroid-in-box rule the server applies at export. The partition
+ * here is display-only: the server re-verifies membership from full-fidelity
+ * geometry.
  */
 
 import type { Feature, FeatureCollection, Geometry, Position } from "geojson";
@@ -13,7 +14,10 @@ export type SvgPath = { d: string; fill: string | null; stroke: string | null; r
 
 export type PartitionFloor = {
   label: string;
-  box: [number, number, number, number];
+  /** Artwork-space box, or null for no spatial restriction. */
+  box: [number, number, number, number] | null;
+  /** 1-based page numbers, or null for no page restriction. */
+  pages: number[] | null;
   layerNames: string[] | null;
 };
 
@@ -59,6 +63,30 @@ export function buildSvgPaths(
       role: (feature.properties?.role as string | undefined) ?? "polygon"
     }))
   };
+}
+
+/**
+ * Split a preview into one FeatureCollection per page, keyed by page number.
+ *
+ * Pages are normalized to their own MediaBox origin by the importer, so every
+ * page's geometry overlaps in artwork space and only this split separates them.
+ */
+export function splitByPage(preview: Preview): Map<number, FeatureCollection> {
+  const buckets = new Map<number, Feature[]>();
+  for (const feature of preview.features) {
+    const page = Number(feature.properties?.page ?? 1);
+    const bucket = buckets.get(page);
+    if (bucket) bucket.push(feature);
+    else buckets.set(page, [feature]);
+  }
+  return new Map(
+    [...buckets.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([page, features]) => [
+        page,
+        { type: "FeatureCollection", features } as FeatureCollection
+      ])
+  );
 }
 
 export type SvgClientRect = {
@@ -145,10 +173,17 @@ export function partitionByFloors(
   for (const feature of preview.features) {
     const [cx, cy] = featureCentroid(feature);
     const layer = feature.properties?.ai_layer as string | undefined;
+    const page = Number(feature.properties?.page ?? 1);
+    // Same conjunction as the server's _floor_mask, in the same order:
+    // each filter is optional and null means "no restriction".
     const match = floors.find((floor) => {
-      const [minx, miny, maxx, maxy] = floor.box;
-      if (!(minx <= cx && cx <= maxx && miny <= cy && cy <= maxy)) return false;
-      return floor.layerNames === null || floor.layerNames.includes(layer ?? "");
+      if (floor.pages !== null && !floor.pages.includes(page)) return false;
+      if (floor.layerNames !== null && !floor.layerNames.includes(layer ?? "")) return false;
+      if (floor.box !== null) {
+        const [minx, miny, maxx, maxy] = floor.box;
+        if (!(minx <= cx && cx <= maxx && miny <= cy && cy <= maxy)) return false;
+      }
+      return true;
     });
     if (match) {
       perFloor.get(match.label)!.push(feature);

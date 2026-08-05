@@ -433,6 +433,7 @@ function uploadImportFiles(
 export type IllustratorConversionReport = {
   source_name: string;
   page_count: number;
+  pages: { index: number; width_pt: number; height_pt: number }[];
   total_features: number;
   layers: Record<string, { polygon: number; line: number }>;
   warnings: string[];
@@ -844,10 +845,20 @@ export type IllustratorLayerSummary = {
   feature_count: number;
 };
 
+export type IllustratorPagePreview = {
+  index: number;
+  bounds: [number, number, number, number];
+  width_pt: number;
+  height_pt: number;
+  feature_count: number;
+  preview_feature_count: number;
+};
+
 export type IllustratorPreviewResponse = {
   conversion_id: string;
   report: IllustratorConversionReport;
   layers: IllustratorLayerSummary[];
+  pages: IllustratorPagePreview[];
   artwork_bounds: [number, number, number, number];
   preview: { type: "FeatureCollection"; features: any[] };
   preview_features: number;
@@ -910,7 +921,12 @@ export type AssignFloorsResponse = {
 
 export async function assignFloors(
   conversionId: string,
-  floors: { label: string; box: [number, number, number, number]; layer_names: string[] | null }[]
+  floors: {
+    label: string;
+    box: [number, number, number, number] | null;
+    pages: number[] | null;
+    layer_names: string[] | null;
+  }[]
 ): Promise<AssignFloorsResponse> {
   const response = await fetch(`/api/convert/illustrator/${conversionId}/assign`, {
     method: "POST",
