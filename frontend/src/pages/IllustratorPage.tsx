@@ -345,8 +345,8 @@ export function IllustratorPage() {
   }
 
   return (
-    <div className="flex flex-1 gap-4 p-4">
-      <div className="w-80 shrink-0 space-y-4 overflow-auto">
+    <div className="flex min-h-0 flex-1 gap-4 overflow-hidden p-4">
+      <div className="flex w-80 shrink-0 flex-col gap-4 overflow-auto">
         <Card padding="md">
           <TransformPanel
             state={state}
@@ -407,7 +407,7 @@ export function IllustratorPage() {
         </Card>
       </div>
 
-      <div className="min-h-[600px] flex-1 overflow-hidden rounded-[var(--radius-md)] border">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-[var(--radius-md)] border">
         <PlacementMap
           floors={floorLayers}
           state={state}

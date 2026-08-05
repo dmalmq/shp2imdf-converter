@@ -31,7 +31,7 @@ export function AppShell({ children }: Props) {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-[var(--color-surface-muted)]">
+    <div className="flex h-screen flex-col bg-[var(--color-surface-muted)]">
       {/* ─── Top navigation bar ─── */}
       <header className="sticky top-0 z-30 flex h-12 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 shadow-[var(--shadow-sm)]">
         {/* Left: App name */}
@@ -67,7 +67,10 @@ export function AppShell({ children }: Props) {
       </header>
 
       {/* ─── Page content ─── */}
-      <div className="flex-1">
+      {/* min-h-0 lets a bounded child own the remaining height; overflow-auto
+          keeps every other route scrolling inside the wrapper exactly as the
+          document scrolled before, rather than clipping. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto">
         {children}
       </div>
     </div>
