@@ -184,8 +184,10 @@ POST /api/convert/illustrator/{conversion_id}/assign
 
 New validation, joining the existing unique-label and known-layer checks
 (`import_router.py:306-314`): every page index must be within
-`1..report.page_count`, else 422. All-null floors stay legal — that is the
-existing implicit whole-artwork floor.
+`1..report.page_count`, else the same `ValueError` path the duplicate-label and
+unknown-layer checks already use — which this app surfaces as **400**, as
+`test_assign_rejects_duplicate_labels` asserts. All-null floors stay legal —
+that is the existing implicit whole-artwork floor.
 
 The export endpoint's stored-vs-requested label check
 (`import_router.py:352-366`) is unaffected; floors are matched by label and
@@ -245,8 +247,8 @@ geometry it caught.
 
 | Case | Behaviour |
 |---|---|
-| Page index outside `1..page_count` | 422 |
-| Duplicate floor labels after merging | Cannot occur — merging is by name; the existing 422 still guards the API |
+| Page index outside `1..page_count` | 400, via the existing `ValueError` path |
+| Duplicate floor labels after merging | Cannot occur — merging is by name; the existing 400 still guards the API, and the grid disables "Done" when a box floor collides with a page floor |
 | Every page excluded | "Done" disabled with a hint; the API would otherwise receive an empty floor list, which `AssignFloorsRequest` already rejects |
 | Page with zero features named as a floor | Allowed; the floor reports `feature_count: 0` in the assign summary |
 | Unequal page sizes | Warning banner, export proceeds |
@@ -276,7 +278,7 @@ co-registered and the unequal-sheet paths:
   page counted in `unassigned_count` and `export_report.json`.
 - Two page floors export with their own transforms, as the existing two-box
   test already asserts for boxes.
-- 422 on an out-of-range page index.
+- 400 on an out-of-range page index.
 - A box-only assignment (no `pages`) still exports identically — the
   backward-compatibility path.
 - `floors.json` round-trips `pages` with a null `box`.
