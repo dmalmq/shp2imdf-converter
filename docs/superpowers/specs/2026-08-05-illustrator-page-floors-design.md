@@ -111,8 +111,8 @@ floor is `{pages: [n], box: null}`; a box drawn while drilled into page `n` is
 |---|---|
 | `backend/src/illustrator_importer.py` | `_RecorderDevice` overrides `begin_page` to increment a 1-based page counter; `_PathRecord` gains `page: int`; `_records_to_rows` writes it as a column; `ConversionReport` gains `pages: [{index, width_pt, height_pt}]` from each `page.mediabox` |
 | `backend/src/illustrator_export.py` | `build_preview` returns `pages[]`; `ExportFloor.region` becomes optional and gains `pages`; membership generalises to the three-predicate chain; `_read_layers` backfills a missing `page` column |
-| `backend/src/schemas.py` | New `IllustratorPagePreview`; `IllustratorPreviewResponse.pages`; `FloorRegionPayload.box` optional plus `pages` |
-| `backend/routers/import_router.py` | `assign_illustrator_floors` validates page indices and passes `pages` through to `ExportFloor`; `export_illustrator` passes `pages` from the stored assignment |
+| `backend/src/schemas.py` | New `IllustratorPagePreview`; `IllustratorPreviewResponse.pages`; `FloorRegionPayload.box` becomes `list[float] \| None = None`, keeping its 4-element length constraint when present, plus `pages: list[int] \| None = None` |
+| `backend/routers/import_router.py` | `assign_illustrator_floors` validates page indices, and its `ExportFloor` construction (`:321-326`) passes `pages` and tolerates `region=None` now that `box` is optional; `export_illustrator` passes `pages` from the stored assignment |
 
 `_write_geopackage` (`illustrator_importer.py:410-446`) is untouched beyond the
 extra row key — grouping stays `(layer, role)` and table names do not change.
