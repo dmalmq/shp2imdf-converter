@@ -313,6 +313,9 @@ export function PlacementMap({
                   size="sm"
                   variant={floor.label === state.activeFloorLabel ? "primary" : "secondary"}
                   onClick={() => dispatch({ type: "setActiveFloor", label: floor.label })}
+                  aria-label={
+                    linked ? undefined : `${floor.label} ${t("(unlinked)", "（非連動）")}`
+                  }
                   title={
                     linked
                       ? floor.label

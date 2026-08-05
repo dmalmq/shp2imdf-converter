@@ -67,6 +67,24 @@ test("relinking dispatches relinkFloor for the active floor", () => {
   expect(seen).toEqual([{ type: "relinkFloor", label: "2F" }]);
 });
 
+test("no relink button while the active floor is linked, even if another floor is unlinked", () => {
+  render(
+    <TransformPanel
+      state={stateWith(
+        [
+          { label: "1F", linked: true },
+          { label: "2F", linked: false }
+        ],
+        "1F"
+      )}
+      dispatch={() => {}}
+    />
+  );
+  // Relink acts on the ACTIVE floor only; an unlinked sibling changes nothing
+  // about it, so the action must stay hidden (and cost 0px).
+  expect(screen.queryByRole("button", { name: /relink/i })).toBeNull();
+});
+
 test("the interaction hint is one line, with the detail behind a control", () => {
   render(<TransformPanel state={THREE_LINKED} dispatch={() => {}} />);
   // The short form is always visible.
