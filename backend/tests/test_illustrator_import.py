@@ -65,6 +65,76 @@ def _build_minimal_ai_pdf() -> bytes:
     return bytes(out)
 
 
+def _build_multipage_ai_pdf() -> bytes:
+    """A three-page PDF-based Illustrator file, one red rectangle per page.
+
+    All three rectangles normalize to the same artwork coordinates, so only the
+    `page` column distinguishes them:
+
+    | Page | MediaBox            | Rect at    | Normalizes to |
+    |------|---------------------|------------|---------------|
+    | 1    | [0 0 200 200]       | (50, 50)   | (50, 50)      |
+    | 2    | [100 100 300 300]   | (150, 150) | (50, 50)      |
+    | 3    | [0 0 400 400]       | (50, 50)   | (50, 50)      |
+
+    Page 2 proves an offset MediaBox is normalized away (equal-size pages stay
+    co-registered); page 3 is a larger sheet, for the unequal-size warning.
+    """
+    def content(x: int, y: int) -> bytes:
+        return (
+            b"/OC /MC0 BDC\n"
+            b"0 1 1 0 k\n"                      # CMYK red -> #FF0000
+            + f"{x} {y} 100 60 re\n".encode()   # 100x60 rectangle
+            + b"f\n"
+            b"EMC\n"
+        )
+
+    pages = [
+        (b"[0 0 200 200]", content(50, 50)),
+        (b"[100 100 300 300]", content(150, 150)),
+        (b"[0 0 400 400]", content(50, 50)),
+    ]
+
+    objects: list[bytes | None] = [
+        b"<< /Type /Catalog /Pages 2 0 R "
+        b"/OCProperties << /OCGs [3 0 R] /D << /Order [3 0 R] >> >> >>",
+        None,  # /Pages, filled in once the page object ids are known
+        b"<< /Type /OCG /Name (Fill Layer) >>",
+    ]
+    page_ids: list[int] = []
+    for mediabox, stream in pages:
+        page_id = len(objects) + 1
+        stream_id = len(objects) + 2
+        objects.append(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox " + mediabox
+            + b" /Resources << /Properties << /MC0 3 0 R >> >> /Contents "
+            + str(stream_id).encode() + b" 0 R >>"
+        )
+        objects.append(
+            b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"endstream"
+        )
+        page_ids.append(page_id)
+    kids = b" ".join(f"{i} 0 R".encode() for i in page_ids)
+    objects[1] = (
+        b"<< /Type /Pages /Kids [" + kids + b"] /Count " + str(len(pages)).encode() + b" >>"
+    )
+
+    out = bytearray(b"%PDF-1.6\n")
+    offsets = [0]
+    for i, body in enumerate(objects, start=1):
+        assert body is not None
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref_pos = len(out)
+    n = len(objects) + 1
+    out += f"xref\n0 {n}\n".encode()
+    out += b"0000000000 65535 f \n"
+    for off in offsets[1:]:
+        out += f"{off:010d} 00000 n \n".encode()
+    out += f"trailer\n<< /Size {n} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode()
+    return bytes(out)
+
+
 @pytest.fixture()
 def gpkg_bytes() -> bytes:
     b, name, report = convert_ai_to_geopackage(_build_minimal_ai_pdf(), "sample.ai")
@@ -230,3 +300,40 @@ def test_convert_endpoint_rejects_non_pdf(test_client) -> None:
         files=[("file", ("bad.ai", b"not a pdf", "application/postscript"))],
     )
     assert resp.status_code == 400
+
+
+@pytest.mark.georef
+def test_multipage_report_records_each_page_size() -> None:
+    _gpkg, _name, report = convert_ai_to_geopackage(_build_multipage_ai_pdf(), "three.ai")
+    assert report.page_count == 3
+    assert report.pages == [
+        {"index": 1, "width_pt": 200.0, "height_pt": 200.0},
+        {"index": 2, "width_pt": 200.0, "height_pt": 200.0},
+        {"index": 3, "width_pt": 400.0, "height_pt": 400.0},
+    ]
+    assert report.to_dict()["pages"] == report.pages
+
+
+@pytest.mark.georef
+def test_multipage_rows_carry_their_page_number() -> None:
+    gpkg, _name, report = convert_ai_to_geopackage(_build_multipage_ai_pdf(), "three.ai")
+    assert report.total_features == 3
+    gdf = _read_layer(gpkg, "Fill Layer")
+    assert sorted(int(p) for p in gdf["page"]) == [1, 2, 3]
+
+
+@pytest.mark.georef
+def test_multipage_geometry_stacks_so_only_page_separates_it() -> None:
+    """Every page normalizes to its own MediaBox origin, so all three coincide."""
+    gpkg, _name, _report = convert_ai_to_geopackage(_build_multipage_ai_pdf(), "three.ai")
+    gdf = _read_layer(gpkg, "Fill Layer")
+    assert {tuple(round(v, 3) for v in geom.bounds) for geom in gdf.geometry} == {
+        (50.0, 50.0, 150.0, 110.0)
+    }
+
+
+@pytest.mark.georef
+def test_single_page_file_still_reports_one_page() -> None:
+    _gpkg, _name, report = convert_ai_to_geopackage(_build_minimal_ai_pdf(), "sample.ai")
+    assert report.page_count == 1
+    assert report.pages == [{"index": 1, "width_pt": 200.0, "height_pt": 200.0}]

@@ -59,6 +59,9 @@ class ConversionReport:
 
     source_name: str
     page_count: int = 0
+    # One entry per page: {"index": 1-based, "width_pt": ..., "height_pt": ...}.
+    # Sizes are the visual extent, so a /Rotate 90 page reports them swapped.
+    pages: list[dict[str, float]] = field(default_factory=list)
     layers: dict[str, dict[str, int]] = field(default_factory=dict)
     total_features: int = 0
     warnings: list[str] = field(default_factory=list)
@@ -73,6 +76,7 @@ class ConversionReport:
         return {
             "source_name": self.source_name,
             "page_count": self.page_count,
+            "pages": self.pages,
             "total_features": self.total_features,
             "layers": self.layers,
             "layer_order": self.layer_order,
@@ -82,8 +86,9 @@ class ConversionReport:
 
 @dataclass(slots=True)
 class _PathRecord:
-    """A single painted path, resolved to its layer, geometry role and color."""
+    """A single painted path, resolved to its page, layer, role and color."""
 
+    page: int  # 1-based PDF page the path was painted on
     layer: str
     role: str  # "polygon" or "line"
     subpaths: list[list[tuple[float, float]]]
@@ -281,7 +286,17 @@ class _RecorderDevice(PDFDevice):
         super().__init__(rsrcmgr)
         self.records: list[_PathRecord] = []
         self.ctm: tuple = (1, 0, 0, 1, 0, 0)
+        self.page_no = 0
         self._mc_stack: list[str | None] = []
+
+    def begin_page(self, page: Any, ctm: tuple) -> None:
+        # pdfminer calls this once per page, in order, before that page's
+        # content stream — so a simple counter is the page number. Reset the
+        # marked-content stack too: a page with unbalanced BDC/EMC must not
+        # leak its active layer into the next page.
+        super().begin_page(page, ctm)
+        self.page_no += 1
+        self._mc_stack.clear()
 
     def set_ctm(self, ctm: tuple) -> None:
         self.ctm = ctm
@@ -308,6 +323,7 @@ class _RecorderDevice(PDFDevice):
         if fill:
             self.records.append(
                 _PathRecord(
+                    page=self.page_no,
                     layer=layer,
                     role="polygon",
                     subpaths=subpaths,
@@ -320,6 +336,7 @@ class _RecorderDevice(PDFDevice):
         elif stroke:
             self.records.append(
                 _PathRecord(
+                    page=self.page_no,
                     layer=layer,
                     role="line",
                     subpaths=subpaths,
@@ -394,6 +411,7 @@ def _records_to_rows(records: list[_PathRecord], report: ConversionReport) -> tu
             continue
         rows.append(
             {
+                "page": rec.page,
                 "ai_layer": rec.layer,
                 "role": rec.role,
                 "fill_color": rec.fill_color,
@@ -512,6 +530,19 @@ def _convert(ai_bytes: bytes, source_name: str) -> _ConversionResult:
         document = PDFDocument(parser)
         for page in PDFPage.create_pages(document):
             report.page_count += 1
+            x0, y0, x1, y1 = page.mediabox
+            width, height = abs(x1 - x0), abs(y1 - y0)
+            if page.rotate in (90, 270):
+                # pdfminer folds /Rotate into the base CTM, so the visual
+                # extent is the MediaBox with its axes swapped.
+                width, height = height, width
+            report.pages.append(
+                {
+                    "index": report.page_count,
+                    "width_pt": round(width, 4),
+                    "height_pt": round(height, 4),
+                }
+            )
             interpreter.process_page(page)
         layer_order = _extract_layer_order(document)
     except IllustratorConversionError:
