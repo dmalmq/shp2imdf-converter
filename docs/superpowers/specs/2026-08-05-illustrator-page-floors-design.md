@@ -20,11 +20,19 @@ in the codebase. It reaches the client as
 `IllustratorConversionReport.page_count` (`frontend/src/api/client.ts:435`) and
 is never rendered.
 
-The useful consequence of that same normalization: pages of equal size keep
-their artwork's relative position, so one-floor-per-page documents are already
-co-registered. Placing one floor places them all, which the existing
-linked-floor model (`useIllustratorPlacement.ts:100-127`) already handles.
-This is an assignment problem, not a georeferencing problem.
+The useful consequence of that same normalization: artwork keeps its offset from
+its own sheet's lower-left corner, so pages of equal size stay co-registered.
+One-floor-per-page documents therefore need no georeferencing work — placing one
+floor places them all, which the existing linked-floor model
+(`useIllustratorPlacement.ts:100-127`) already handles. This is an assignment
+problem, not a georeferencing problem.
+
+Verified by probe against `pdfminer` before this spec was planned: a 3-page PDF
+whose second page carries an offset `MediaBox` of `[100 100 300 300]` with its
+artwork drawn at `(150, 150)` lands at `(50, 50)` — pixel-identical to page 1's
+artwork at `(50, 50)` on a `[0 0 200 200]` sheet. `begin_page` fires exactly once
+per page, in order, before that page's paths, which is what makes the
+`_RecorderDevice` page counter below correct.
 
 ## Goals
 
@@ -54,7 +62,7 @@ This is an assignment problem, not a georeferencing problem.
 | Assign screen for N pages | Grid of page cards with editable floor names; a card drills into the existing `AssignmentPanel` scoped to that page |
 | Page → floor cardinality | The floor name is the grouping key: two pages given the same name merge into one floor |
 | Excluding a page | Explicit "not a floor plan" toggle; excluded features land in the existing unassigned count and `export_report.json` |
-| Unequal page sizes | Detected and warned in the grid; no geometry is moved. Floors start linked and stacked; the existing drag-to-unlink handles the odd sheet out |
+| Unequal page sizes | Detected and warned in the grid; no geometry is moved. Because artwork is anchored to each sheet's lower-left corner, visually centred plans on differently sized sheets land offset by half the size difference. Floors start linked and stacked; the existing drag-to-unlink handles the odd sheet out |
 | Data model | One `page` column on the existing GeoPackage rows; the floor record gains `pages`. Table grouping stays `(layer, role)` |
 | Membership authority | Unchanged — the server re-computes from full-fidelity geometry at export; the client filter is display-only |
 | Floor bounds for placement | Taken from the assign response's per-floor `artwork_bounds`, which `compute_assignment_summary` already derives from matched geometry |
@@ -246,11 +254,21 @@ geometry it caught.
 
 ## Testing
 
-Backend, driven by a new two-page fixture PDF whose second page has a
-deliberately different `MediaBox`:
+Backend, driven by a new three-page fixture PDF built the same way as
+`_build_minimal_ai_pdf` (`test_illustrator_import.py:22-65`). The page shapes are
+the ones the probe already exercised, chosen so one fixture covers both the
+co-registered and the unequal-sheet paths:
 
-- `page_count == 2` and `pages[]` metadata (index, size) correct.
-- Rows carry the right page; page-1 and page-2 geometry are separable.
+| Page | `MediaBox` | Artwork at | Normalizes to | Covers |
+|---|---|---|---|---|
+| 1 | `[0 0 200 200]` | `(50, 50)` | `(50, 50)` | baseline |
+| 2 | `[100 100 300 300]` | `(150, 150)` | `(50, 50)` | offset origin, same size → co-registered |
+| 3 | `[0 0 400 400]` | `(50, 50)` | `(50, 50)` | same origin, larger sheet → unequal-size warning |
+
+- `page_count == 3` and `pages[]` metadata (index, size) correct, including the
+  differing size on page 3.
+- Rows carry the right page; each page's geometry is separable despite all three
+  normalizing to the same coordinates.
 - `build_preview` returns per-page bounds and per-page feature counts, and
   preview features carry `properties.page`.
 - Membership: page-only floor takes that whole page; page + layer restriction;
@@ -289,7 +307,7 @@ one table set per floor with the pages separated.
 
 | Risk | Mitigation |
 |---|---|
-| Pages of unequal size land offset and the user does not notice | Explicit banner plus per-card sheet size; the offset is also visible on the placement map |
+| Pages of unequal size land offset and the user does not notice | Explicit banner plus per-card sheet size; the offset is lower-left-anchored, so it is proportional to the sheet size difference and plainly visible on both the thumbnail and the placement map |
 | Vectorizing `_matches_floor` changes box-edge or empty-geometry semantics | `between` is inclusive and NaN compares false, matching the current guards; the existing straddle and restriction tests are the check |
 | A cached conversion from before the change is reused | `_read_layers` backfills `page = 1`; cache entries are short-lived and evicted (`test_illustrator_store.py`) |
 | Many pages make the grid unwieldy | Cards are thumbnails in a wrapping grid; page order is fixed, so scanning is linear |
