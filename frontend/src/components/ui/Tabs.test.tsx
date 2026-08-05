@@ -78,6 +78,15 @@ test("arrow keys move between tabs and wrap around", () => {
   expect(screen.getByRole("tab", { name: "Export" })).toHaveAttribute("aria-selected", "true");
 });
 
+test("arrow keys move focus to the newly selected tab (automatic activation)", () => {
+  render(<Harness />);
+  const strip = screen.getByRole("tablist");
+  // aria-selected alone already passes without focus moving, so assert on the
+  // actual focused element.
+  fireEvent.keyDown(strip, { key: "ArrowRight" });
+  expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Reference" }));
+});
+
 test("Home and End jump to the first and last tab", () => {
   render(<Harness />);
   const strip = screen.getByRole("tablist");

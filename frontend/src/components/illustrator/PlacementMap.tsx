@@ -312,6 +312,10 @@ export function PlacementMap({
                   key={floor.label}
                   size="sm"
                   variant={floor.label === state.activeFloorLabel ? "primary" : "secondary"}
+                  // The deleted dropdown announced its current value; the
+                  // pills are the only floor control now, so the active one
+                  // must expose the state, not just the colour.
+                  aria-pressed={floor.label === state.activeFloorLabel}
                   onClick={() => dispatch({ type: "setActiveFloor", label: floor.label })}
                   aria-label={
                     linked ? undefined : `${floor.label} ${t("(unlinked)", "（非連動）")}`

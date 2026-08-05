@@ -5,10 +5,10 @@ export type TabDefinition = {
   label: string;
 };
 
-type Props = {
-  tabs: TabDefinition[];
-  active: string;
-  onChange: (id: string) => void;
+type Props<T extends string> = {
+  tabs: { id: T; label: string }[];
+  active: T;
+  onChange: (id: T) => void;
   /** Prefix for the generated id / aria-controls pair. */
   idPrefix: string;
   className?: string;
@@ -35,9 +35,15 @@ export function tabPanelProps(idPrefix: string, id: string, active: boolean) {
 
 /**
  * Tab strip following the ARIA tabs pattern: one tab stop for the whole strip,
- * with arrow keys moving between tabs (roving tabindex).
+ * with arrow keys moving selection and focus together (automatic activation).
  */
-export function Tabs({ tabs, active, onChange, idPrefix, className = "" }: Props) {
+export function Tabs<T extends string>({
+  tabs,
+  active,
+  onChange,
+  idPrefix,
+  className = ""
+}: Props<T>) {
   const activeIndex = Math.max(
     0,
     tabs.findIndex((tab) => tab.id === active)
@@ -52,7 +58,13 @@ export function Tabs({ tabs, active, onChange, idPrefix, className = "" }: Props
     else if (event.key === "End") next = last;
     if (next === null) return;
     event.preventDefault();
-    onChange(tabs[next].id);
+    const nextId = tabs[next].id;
+    onChange(nextId);
+    // Automatic activation: focus follows the newly selected tab. Every tab
+    // button is always mounted, so it is in the DOM and can take focus
+    // synchronously; without this the focus ring would stay on the tab that
+    // just became tabIndex={-1}.
+    document.getElementById(tabId(idPrefix, nextId))?.focus();
   };
 
   return (

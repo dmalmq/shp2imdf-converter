@@ -49,3 +49,27 @@ test("an unlinked floor carries the unlinked marker in its accessible name", () 
   // Linked pills keep their plain label as the name — no aria-label noise.
   expect(screen.getByRole("button", { name: "1F" })).toBeInTheDocument();
 });
+
+test("the pill for the active floor announces its pressed state", () => {
+  render(
+    <PlacementMap
+      floors={LAYERS}
+      state={stateWith(
+        [
+          { label: "1F", linked: true },
+          { label: "2F", linked: false }
+        ],
+        "1F"
+      )}
+      dispatch={() => {}}
+      pickingControlPoint={false}
+      onPickMap={() => {}}
+    />
+  );
+  // The deleted dropdown announced its current value; the pills are the only
+  // floor control now, so the active one must be exposed as a state, not as
+  // a purely visual colour change. Asserted via the accessible state, not an
+  // attribute string.
+  expect(screen.getByRole("button", { name: "1F", pressed: true })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /unlinked/i, pressed: false })).toBeInTheDocument();
+});

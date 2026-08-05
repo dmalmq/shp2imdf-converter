@@ -9,7 +9,6 @@ import {
   type IllustratorPreviewResponse
 } from "../api/client";
 import { AssignmentPanel } from "../components/illustrator/AssignmentPanel";
-import { ExportPanel } from "../components/illustrator/ExportPanel";
 import { PageAssignmentPanel } from "../components/illustrator/PageAssignmentPanel";
 import {
   FLOOR_TINTS,
@@ -17,10 +16,8 @@ import {
   type ReferenceLayer
 } from "../components/illustrator/PlacementMap";
 import { PlacementMap } from "../components/illustrator/PlacementMap";
-import { ReferenceLayerList } from "../components/illustrator/ReferenceLayerList";
-import { ScaleAndFitPanel } from "../components/illustrator/ScaleAndFitPanel";
-import { TransformPanel } from "../components/illustrator/TransformPanel";
-import { Button, Card, Tabs, tabPanelProps } from "../components/ui";
+import { PlacementSidebar, type PlacementTab } from "../components/illustrator/PlacementSidebar";
+import { Button, Card } from "../components/ui";
 import { siteNameFromFilename } from "../lib/siteName";
 import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
 import {
@@ -32,11 +29,6 @@ import {
 } from "../hooks/useIllustratorPlacement";
 import { usePlacementShortcuts } from "../hooks/usePlacementShortcuts";
 import { useUiLanguage } from "../hooks/useUiLanguage";
-
-const CRS_CHOICES = (suggested: string, suggestedLabel: string) => [
-  { value: suggested, label: suggestedLabel },
-  { value: "EPSG:4326", label: "EPSG:4326 — WGS84 lon/lat" }
-];
 
 type AssignedRegion = {
   label: string;
@@ -158,7 +150,7 @@ export function IllustratorPage() {
   const state = history.present;
   const [recenterTo, setRecenterTo] = useState<[number, number] | null>(null);
   const [referenceLayers, setReferenceLayers] = useState<ReferenceLayer[]>([]);
-  const [placementTab, setPlacementTab] = useState("fit");
+  const [placementTab, setPlacementTab] = useState<PlacementTab>("fit");
 
   // Only on the placement view: the upload and assignment screens have their own
   // keyboard behaviour and no floor to nudge.
@@ -347,65 +339,31 @@ export function IllustratorPage() {
 
   return (
     <div className="flex min-h-0 flex-1 gap-4 overflow-hidden p-4">
-      <div className="flex w-80 shrink-0 flex-col gap-4 overflow-hidden">
-        <Card padding="md" className="shrink-0">
-          <TransformPanel
-            state={state}
-            dispatch={dispatch}
-            siteName={siteName}
-            onLocate={setRecenterTo}
-            canUndo={history.past.length > 0}
-            canRedo={history.future.length > 0}
-          />
-        </Card>
-
-        {/* One card holds the strip and the panels — a card inside a card is
-            never right. The panel area takes the remaining height and is the
-            only scrolling region in this column, so no amount of content can
-            push the page again. */}
-        <Card padding="md" className="flex min-h-0 flex-1 flex-col">
-          <Tabs
-            tabs={[
-              { id: "fit", label: t("Scale & fit", "縮尺と調整") },
-              { id: "reference", label: t("Reference", "参照") },
-              { id: "export", label: t("Export", "書き出し") }
-            ]}
-            active={placementTab}
-            onChange={setPlacementTab}
-            idPrefix="placement"
-            className="shrink-0"
-          />
-          <div className="min-h-0 flex-1 overflow-auto pt-3">
-            <div {...tabPanelProps("placement", "fit", placementTab === "fit")}>
-              <ScaleAndFitPanel
-                state={state}
-                dispatch={dispatch}
-                picking={picking}
-                onTogglePicking={() => setPicking((value) => !value)}
-              />
-            </div>
-            <div {...tabPanelProps("placement", "reference", placementTab === "reference")}>
-              <ReferenceLayerList layers={referenceLayers} onChange={setReferenceLayers} />
-            </div>
-            <div {...tabPanelProps("placement", "export", placementTab === "export")}>
-              <ExportPanel
-                state={state}
-                dispatch={dispatch}
-                artworkBounds={bounds}
-                crsChoices={CRS_CHOICES(preview.suggested_crs, preview.suggested_crs_label)}
-                outputCrs={outputCrs}
-                onOutputCrsChange={setOutputCrs}
-                formats={formats}
-                onFormatsChange={setFormats}
-                onExport={() => void download()}
-                previewFeatures={preview.preview_features}
-                totalFeatures={preview.total_features}
-                error={error}
-              />
-            </div>
-          </div>
-        </Card>
-      </div>
+      <PlacementSidebar
+        state={state}
+        dispatch={dispatch}
+        siteName={siteName}
+        onLocate={setRecenterTo}
+        canUndo={history.past.length > 0}
+        canRedo={history.future.length > 0}
+        tab={placementTab}
+        onTabChange={setPlacementTab}
+        picking={picking}
+        onTogglePicking={() => setPicking((value) => !value)}
+        referenceLayers={referenceLayers}
+        onReferenceLayersChange={setReferenceLayers}
+        bounds={bounds}
+        suggestedCrs={preview.suggested_crs}
+        suggestedCrsLabel={preview.suggested_crs_label}
+        outputCrs={outputCrs}
+        onOutputCrsChange={setOutputCrs}
+        formats={formats}
+        onFormatsChange={setFormats}
+        onExport={() => void download()}
+        previewFeatures={preview.preview_features}
+        totalFeatures={preview.total_features}
+        error={error}
+      />
 
       <div className="min-h-0 flex-1 overflow-hidden rounded-[var(--radius-md)] border">
         <PlacementMap
