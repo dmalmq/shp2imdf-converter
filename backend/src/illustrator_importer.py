@@ -280,7 +280,7 @@ def _build_line(subpaths: list[list[tuple[float, float]]]) -> Any:
 # --------------------------------------------------------------------------- #
 
 class _RecorderDevice(PDFDevice):
-    """Records painted paths, tagging each with the active Optional-Content layer."""
+    """Records painted paths, tagging each with the active Optional-Content layer and its 1-based PDF page."""
 
     def __init__(self, rsrcmgr: PDFResourceManager) -> None:
         super().__init__(rsrcmgr)

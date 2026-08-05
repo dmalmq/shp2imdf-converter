@@ -2,6 +2,7 @@ import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 import { PageAssignmentPanel, buildFloors, duplicateLabels } from "./PageAssignmentPanel";
+import { AssignmentPanel } from "./AssignmentPanel";
 import type { IllustratorPagePreview } from "../../api/client";
 import type { PartitionFloor } from "../../lib/svgPreview";
 
@@ -37,7 +38,11 @@ function feature(pageNo: number) {
   };
 }
 
-function renderPanel(pages: IllustratorPagePreview[], onAssigned = () => {}) {
+function renderPanel(
+  pages: IllustratorPagePreview[],
+  onAssigned = () => {},
+  initialBoxesByPage?: Map<number, PartitionFloor[]>
+) {
   const preview = {
     type: "FeatureCollection" as const,
     features: pages.map((p) => feature(p.index))
@@ -47,6 +52,7 @@ function renderPanel(pages: IllustratorPagePreview[], onAssigned = () => {}) {
       preview={preview}
       pages={pages}
       layerSummaries={[{ table: "Fill Layer", ai_layer: "Fill Layer", role: "polygon", feature_count: 1 }]}
+      initialBoxesByPage={initialBoxesByPage}
       onAssigned={onAssigned}
       onSkip={() => {}}
     />
@@ -159,5 +165,81 @@ test("Done assigning emits one floor per page", () => {
 
 test("Done assigning is disabled when every page is excluded", () => {
   renderPanel([page(1, { feature_count: 0 }), page(2, { feature_count: 0 })]);
+  expect(screen.getByRole("button", { name: /done assigning/i })).toBeDisabled();
+});
+
+test("buildFloors emits a whole-page floor again for a page whose boxes were removed", () => {
+  const cards = [
+    { index: 1, label: "1F", excluded: false },
+    { index: 2, label: "2F", excluded: false }
+  ];
+  const boxes: PartitionFloor[] = [
+    { label: "1F-north", box: [0, 0, 100, 200], pages: [1], layerNames: null }
+  ];
+  // While the page is split, its boxes stand in for the whole-page floor.
+  expect(buildFloors(cards, new Map([[1, boxes]]))).toEqual([
+    ...boxes,
+    { label: "2F", box: null, pages: [2], layerNames: null }
+  ]);
+  // After Remove boxes deletes the map entry, the page is a whole-page floor again.
+  expect(buildFloors(cards, new Map())).toEqual([
+    { label: "1F", box: null, pages: [1], layerNames: null },
+    { label: "2F", box: null, pages: [2], layerNames: null }
+  ]);
+});
+
+test("a page with boxes shows a Remove boxes control that re-enables the floor-name input", () => {
+  const boxes: PartitionFloor[] = [
+    { label: "1F-north", box: [0, 0, 100, 200], pages: [1], layerNames: null }
+  ];
+  renderPanel([page(1), page(2)], () => {}, new Map([[1, boxes]]));
+  expect(screen.getByLabelText("Floor name for page 1")).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: /remove boxes/i }));
+  expect(screen.getByLabelText("Floor name for page 1")).toBeEnabled();
+  expect(screen.queryByRole("button", { name: /remove boxes/i })).toBeNull();
+  // Both cards are on the normal whole-page path again.
+  expect(screen.getAllByRole("button", { name: /split this page/i })).toHaveLength(2);
+});
+
+test("AssignmentPanel seeds drafts from initialDrafts, and starts blank without it", () => {
+  const preview = {
+    type: "FeatureCollection" as const,
+    features: [feature(1)]
+  };
+  const layerSummaries = [
+    { table: "Fill Layer", ai_layer: "Fill Layer", role: "polygon", feature_count: 1 }
+  ];
+  const seeded: PartitionFloor[] = [
+    { label: "1F-north", box: [0, 0, 100, 200], pages: [1], layerNames: null },
+    { label: "1F-south", box: [0, 0, 100, 200], pages: [1], layerNames: null }
+  ];
+  const { unmount } = render(
+    <AssignmentPanel
+      preview={preview}
+      artworkBounds={[0, 0, 200, 200]}
+      layerSummaries={layerSummaries}
+      initialDrafts={seeded}
+      onAssigned={() => {}}
+      onSkip={() => {}}
+    />
+  );
+  expect(screen.getByDisplayValue("1F-north")).toBeInTheDocument();
+  expect(screen.getByDisplayValue("1F-south")).toBeInTheDocument();
+  // The feature-count row is present; the polygon's centroid (5,5) lies in the
+  // first box, so that row reports the single preview feature.
+  expect(screen.getByText("features: 1")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /done assigning/i })).toBeEnabled();
+  unmount();
+
+  render(
+    <AssignmentPanel
+      preview={preview}
+      artworkBounds={[0, 0, 200, 200]}
+      layerSummaries={layerSummaries}
+      onAssigned={() => {}}
+      onSkip={() => {}}
+    />
+  );
+  expect(screen.queryByDisplayValue("1F-north")).toBeNull();
   expect(screen.getByRole("button", { name: /done assigning/i })).toBeDisabled();
 });

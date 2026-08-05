@@ -20,6 +20,12 @@ type Props = {
   page?: number | null;
   /** Renders a back button when set (drill-in mode). */
   onCancel?: () => void;
+  /**
+   * Boxes this page already has (re-entering "Edit boxes…" after a split).
+   * Seeded into drafts on mount, coloured from BOX_COLORS by index like a
+   * freshly drawn set. Omitted or empty starts from a blank canvas.
+   */
+  initialDrafts?: PartitionFloor[];
 };
 
 const BOX_COLORS = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#d97706", "#0891b2"];
@@ -46,10 +52,23 @@ export function AssignmentPanel({
   onAssigned,
   onSkip,
   page = null,
-  onCancel
+  onCancel,
+  initialDrafts
 }: Props) {
   const { t } = useUiLanguage();
-  const [drafts, setDrafts] = useState<DraftFloor[]>([]);
+  const [drafts, setDrafts] = useState<DraftFloor[]>(() => {
+    const seeded: DraftFloor[] = [];
+    for (const floor of initialDrafts ?? []) {
+      if (floor.box === null) continue; // a seeded draft always has a concrete box
+      seeded.push({
+        label: floor.label,
+        box: floor.box,
+        layerNames: floor.layerNames,
+        color: BOX_COLORS[seeded.length % BOX_COLORS.length]
+      });
+    }
+    return seeded;
+  });
   const [drawing, setDrawing] = useState<{
     start: [number, number];
     current: [number, number];

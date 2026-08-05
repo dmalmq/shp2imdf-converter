@@ -239,10 +239,11 @@ def build_georeferenced_bundle(
 ) -> tuple[bytes, str]:
     """Apply each floor's placement, reproject and zip the outputs.
 
-    Membership is re-computed from the full-fidelity geometry by
-    ``centroid ∈ region`` (plus the layer restriction). Features in no floor
-    are dropped and reported in ``export_report.json``. Tables are named
-    ``{floor}_{layer}``; the ``floor`` attribute records membership.
+    Membership is re-computed from the full-fidelity geometry by the page,
+    layer and ``centroid ∈ region`` filters, each optional (``None`` means no
+    restriction). Features in no floor are dropped and reported in
+    ``export_report.json``. Tables are named ``{floor}_{layer}``; the
+    ``floor`` attribute records membership.
     """
     if not floors:
         raise FloorExportError("At least one floor is required for export.")

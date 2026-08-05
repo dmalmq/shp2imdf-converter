@@ -64,6 +64,12 @@ Built for indoor mapping professionals who receive per-floor shapefiles from CAD
 
 ---
 
+## Illustrator export attributes
+
+Every feature written by the Illustrator (`.ai`) export — to the GeoPackage and the per-floor shapefiles — carries these attributes: `page` (the 1-based source PDF page), `ai_layer`, `role`, `fill_color`, `stroke_color`, `line_width`, `dashed`, and `floor` (the assigned floor label). The `page` column is written on every export, including single-page files where it is always `1`.
+
+---
+
 ## Stack
 
 ### Backend

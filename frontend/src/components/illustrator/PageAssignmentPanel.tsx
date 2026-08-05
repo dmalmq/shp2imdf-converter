@@ -13,6 +13,11 @@ type Props = {
   layerSummaries: { table: string; ai_layer: string; role: string; feature_count: number }[];
   onAssigned: (floors: PartitionFloor[]) => void;
   onSkip: () => void;
+  /**
+   * Test seam: start the grid with pages that already have boxes. Omitted —
+   * the only in-app call path — behaves exactly as before (empty map).
+   */
+  initialBoxesByPage?: Map<number, PartitionFloor[]>;
 };
 
 export type PageCard = {
@@ -85,7 +90,8 @@ export function PageAssignmentPanel({
   pages,
   layerSummaries,
   onAssigned,
-  onSkip
+  onSkip,
+  initialBoxesByPage
 }: Props) {
   const { t } = useUiLanguage();
   const byPage = useMemo(() => splitByPage(preview), [preview]);
@@ -97,7 +103,9 @@ export function PageAssignmentPanel({
       excluded: page.feature_count === 0
     }))
   );
-  const [boxesByPage, setBoxesByPage] = useState<Map<number, PartitionFloor[]>>(new Map());
+  const [boxesByPage, setBoxesByPage] = useState<Map<number, PartitionFloor[]>>(
+    () => initialBoxesByPage ?? new Map()
+  );
   const [splitting, setSplitting] = useState<number | null>(null);
 
   const sizesDiffer = useMemo(
@@ -128,6 +136,7 @@ export function PageAssignmentPanel({
         artworkBounds={page?.bounds ?? [0, 0, 100, 100]}
         layerSummaries={layerSummaries}
         page={splitting}
+        initialDrafts={boxesByPage.get(splitting) ?? []}
         onCancel={() => setSplitting(null)}
         onSkip={() => setSplitting(null)}
         onAssigned={(boxes) => {
@@ -245,16 +254,33 @@ export function PageAssignmentPanel({
                   />
                   {t("Not a floor plan", "平面図ではない")}
                 </label>
-                <button
-                  type="button"
-                  className="text-xs underline"
-                  disabled={card.excluded}
-                  onClick={() => setSplitting(page.index)}
-                >
-                  {boxes.length > 0
-                    ? t("Edit boxes…", "範囲を編集…")
-                    : t("Split this page…", "このページを分割…")}
-                </button>
+                <div className="flex items-center gap-2">
+                  {boxes.length > 0 ? (
+                    <button
+                      type="button"
+                      className="text-xs text-[var(--color-error)] underline"
+                      onClick={() =>
+                        setBoxesByPage((prev) => {
+                          const next = new Map(prev);
+                          next.delete(page.index);
+                          return next;
+                        })
+                      }
+                    >
+                      {t("Remove boxes", "範囲を削除")}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="text-xs underline"
+                    disabled={card.excluded}
+                    onClick={() => setSplitting(page.index)}
+                  >
+                    {boxes.length > 0
+                      ? t("Edit boxes…", "範囲を編集…")
+                      : t("Split this page…", "このページを分割…")}
+                  </button>
+                </div>
               </div>
             </div>
           );
