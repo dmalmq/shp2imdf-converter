@@ -41,6 +41,7 @@ export function TransformPanel({
   const [denominator, setDenominator] = useState(String(DEFAULT_DRAWING_SCALE));
   const [artworkDistance, setArtworkDistance] = useState("");
   const [realMetres, setRealMetres] = useState("");
+  const [helpOpen, setHelpOpen] = useState(false);
   const searchedFor = useRef<string | null>(null);
 
   const runSearch = async (term: string): Promise<GeocodeResultItem[]> => {
@@ -118,39 +119,39 @@ export function TransformPanel({
           <Redo2 size={13} className="mr-1" />
           {t("Redo", "やり直す")}
         </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="ml-auto"
+          aria-label={t("Keyboard and mouse help", "キーボードとマウスの操作")}
+          aria-expanded={helpOpen}
+          onClick={() => setHelpOpen((open) => !open)}
+        >
+          ?
+        </Button>
       </section>
       <p className="-mt-2 text-xs text-[var(--color-text-muted)]">
         {t(
-          "Drag a floor to move just it (Alt: move the whole building). Corners scale, top handle rotates. Ctrl+Z / Ctrl+Shift+Z, arrows nudge 1 m (Shift 10 m).",
-          "ドラッグでそのフロアのみ移動（Altで建物全体）。四隅で拡大縮小、上のハンドルで回転。Ctrl+Z / Ctrl+Shift+Z、矢印キーで1m移動（Shiftで10m）。"
+          "Drag a floor to move it. Corners scale, top handle rotates.",
+          "ドラッグでフロアを移動。四隅で拡大縮小、上のハンドルで回転。"
         )}
       </p>
-      {state.floors.length > 1 ? (
-        <section>
-          <label className="block text-xs font-medium">{t("Floor", "フロア")}</label>
-          <select
-            className={`mt-1 ${FIELD}`}
-            value={state.activeFloorLabel ?? ""}
-            onChange={(event) => dispatch({ type: "setActiveFloor", label: event.target.value })}
-          >
-            {state.floors.map((floor) => (
-              <option key={floor.label} value={floor.label}>
-                {floor.label}
-                {floor.linked ? "" : t(" (unlinked)", "（非連動）")}
-              </option>
-            ))}
-          </select>
-          {activeFloor && !activeFloor.linked ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              className="mt-1"
-              onClick={() => dispatch({ type: "relinkFloor", label: activeFloor.label })}
-            >
-              {t("Relink to shared frame", "共通フレームに再リンク")}
-            </Button>
-          ) : null}
-        </section>
+      {helpOpen ? (
+        <p className="-mt-2 rounded-[var(--radius-md)] bg-[var(--color-surface-muted)] p-2 text-xs text-[var(--color-text-secondary)]">
+          {t(
+            "Alt+drag moves the whole building. Ctrl+Z / Ctrl+Shift+Z undo and redo. Arrow keys nudge 1 m, Shift+arrows 10 m. Hold Shift while rotating to snap to 15°.",
+            "Alt＋ドラッグで建物全体を移動。Ctrl+Z / Ctrl+Shift+Z で元に戻す・やり直す。矢印キーで1m、Shift＋矢印で10m移動。回転中に Shift で15度刻み。"
+          )}
+        </p>
+      ) : null}
+      {activeFloor && !activeFloor.linked ? (
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => dispatch({ type: "relinkFloor", label: activeFloor.label })}
+        >
+          {t("Relink to shared frame", "共通フレームに再リンク")}
+        </Button>
       ) : null}
 
       <section>
@@ -240,9 +241,6 @@ export function TransformPanel({
             {t("Reset", "リセット")}
           </Button>
         </div>
-        <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-          {t("Hold Shift while dragging to snap to 15°.", "ドラッグ中に Shift で15度刻み。")}
-        </p>
       </section>
 
       <section>

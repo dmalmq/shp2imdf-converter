@@ -305,16 +305,32 @@ export function PlacementMap({
       <div className="absolute left-3 top-3 flex flex-col gap-2">
         {floors.length > 1 ? (
           <div className="flex flex-wrap gap-1 rounded-[var(--radius-md)] bg-white/90 p-1 shadow">
-            {floors.map((floor) => (
-              <Button
-                key={floor.label}
-                size="sm"
-                variant={floor.label === state.activeFloorLabel ? "primary" : "secondary"}
-                onClick={() => dispatch({ type: "setActiveFloor", label: floor.label })}
-              >
-                {floor.label}
-              </Button>
-            ))}
+            {floors.map((floor) => {
+              const linked = state.floors.find((f) => f.label === floor.label)?.linked ?? true;
+              return (
+                <Button
+                  key={floor.label}
+                  size="sm"
+                  variant={floor.label === state.activeFloorLabel ? "primary" : "secondary"}
+                  onClick={() => dispatch({ type: "setActiveFloor", label: floor.label })}
+                  title={
+                    linked
+                      ? floor.label
+                      : `${floor.label} ${t("(unlinked)", "（非連動）")}`
+                  }
+                >
+                  {/* A dot, not colour alone, so the state survives a
+                      colour-vision deficiency. */}
+                  {linked ? null : (
+                    <span
+                      aria-hidden="true"
+                      className="mr-1 inline-block h-1 w-1 rounded-full bg-current"
+                    />
+                  )}
+                  {floor.label}
+                </Button>
+              );
+            })}
           </div>
         ) : null}
         <div className="flex gap-1 rounded-[var(--radius-md)] bg-white/90 p-1 shadow">
