@@ -8,6 +8,7 @@ import {
   type ExportFormatsPayload,
   type IllustratorPreviewResponse
 } from "../api/client";
+import { isApiClientError, isBackendUnreachableError, toErrorMessage } from "../api/errors";
 import { AssignmentPanel } from "../components/illustrator/AssignmentPanel";
 import { PageAssignmentPanel } from "../components/illustrator/PageAssignmentPanel";
 import {
@@ -192,6 +193,20 @@ export function IllustratorPage() {
     }));
   }, [preview, assignment]);
 
+  /**
+   * The API explains its own failures far better than this screen can guess, so
+   * prefer its message and keep the local string as the last resort. An
+   * unreachable backend is the one case worth rewording: it used to surface as
+   * "re-save the .ai", which blames a file that is fine.
+   */
+  const describeFailure = (error: unknown, fallback: string): string =>
+    isBackendUnreachableError(error)
+      ? t(
+          "Could not reach the converter. The server may be down or restarting - check it is running, then try again.",
+          "コンバーターに接続できません。サーバーが停止または再起動中の可能性があります。稼働状況を確認してから、もう一度お試しください。"
+        )
+      : toErrorMessage(error, fallback);
+
   const convert = async (file: File) => {
     setLoading(true);
     setError(null);
@@ -204,11 +219,14 @@ export function IllustratorPage() {
       setOutputCrs(response.suggested_crs);
       // The state carries scaleLocked: false already, so no unlockScale follow-up.
       dispatch({ type: "resetPlacement", state: initialStateFromAssignment(response, []) });
-    } catch {
+    } catch (error) {
       setError(
-        t(
-          "Could not read that file. Re-save the .ai with 'Create PDF Compatible File' enabled.",
-          "ファイルを読み込めません。「PDF互換ファイルを作成」を有効にして保存し直してください。"
+        describeFailure(
+          error,
+          t(
+            "Could not read that file. Re-save the .ai with 'Create PDF Compatible File' enabled.",
+            "ファイルを読み込めません。「PDF互換ファイルを作成」を有効にして保存し直してください。"
+          )
         )
       );
     } finally {
@@ -233,15 +251,25 @@ export function IllustratorPage() {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      // The cache may have expired; the browser still holds the file.
+    } catch (error) {
+      // Only the API knows whether the cached conversion really expired; the
+      // browser still holds the file, so that case can silently re-convert.
+      const expired = isApiClientError(error) && error.code === "CONVERSION_EXPIRED";
       setError(
-        t(
-          "The conversion expired. Convert the file again.",
-          "変換の有効期限が切れました。もう一度変換してください。"
-        )
+        expired
+          ? t(
+              "The conversion expired. Convert the file again.",
+              "変換の有効期限が切れました。もう一度変換してください。"
+            )
+          : describeFailure(
+              error,
+              t("Could not export the files.", "ファイルを書き出せませんでした。")
+            )
       );
-      if (lastFile) void convert(lastFile);
+      // Retrying against a backend that is down fails again and replaces this
+      // message with a complaint about the file, which is how a stopped server
+      // ends up looking like a corrupt .ai.
+      if (expired && lastFile) void convert(lastFile);
     }
   };
 
@@ -298,11 +326,11 @@ export function IllustratorPage() {
           type: "resetPlacement",
           state: initialStateFromAssignment(preview, regions, summary)
         });
-      } catch {
+      } catch (error) {
         setError(
-          t(
-            "Could not save the floor assignment.",
-            "フロア割り当てを保存できませんでした。"
+          describeFailure(
+            error,
+            t("Could not save the floor assignment.", "フロア割り当てを保存できませんでした。")
           )
         );
       }
