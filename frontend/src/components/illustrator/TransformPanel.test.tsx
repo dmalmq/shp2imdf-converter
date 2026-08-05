@@ -96,7 +96,7 @@ test("the interaction hint is one line, with the detail behind a control", () =>
   expect(screen.getByText(/arrow keys nudge/i)).toBeInTheDocument();
 });
 
-test.skip("the scale controls are no longer in this panel", () => {
+test("the scale controls are no longer in this panel", () => {
   render(<TransformPanel state={THREE_LINKED} dispatch={() => {}} />);
   // Scale moved to the Scale & fit tab panel.
   expect(screen.queryByText(/m per point/i)).toBeNull();

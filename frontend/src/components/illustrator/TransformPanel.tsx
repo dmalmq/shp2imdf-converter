@@ -4,7 +4,6 @@ import { Redo2, Undo2 } from "lucide-react";
 import { geocodeSearch, type GeocodeResultItem } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
-  DEFAULT_DRAWING_SCALE,
   resolvedTransform,
   type PlacementAction,
   type PlacementState
@@ -38,9 +37,6 @@ export function TransformPanel({
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [autoLocated, setAutoLocated] = useState(false);
-  const [denominator, setDenominator] = useState(String(DEFAULT_DRAWING_SCALE));
-  const [artworkDistance, setArtworkDistance] = useState("");
-  const [realMetres, setRealMetres] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
   const searchedFor = useRef<string | null>(null);
 
@@ -241,74 +237,6 @@ export function TransformPanel({
             {t("Reset", "リセット")}
           </Button>
         </div>
-      </section>
-
-      <section>
-        <label className="block text-xs font-medium">
-          {t("Scale", "縮尺")}{" "}
-          {state.scaleLocked ? (
-            <span className="text-[var(--color-success)]">{t("(locked)", "（固定）")}</span>
-          ) : null}
-        </label>
-        <p className="mt-1 text-xs">
-          {(activeTransform?.metresPerPoint ?? state.frame.metresPerPoint).toFixed(6)}{" "}
-          {t("m per point", "m/pt")}
-        </p>
-        <div className="mt-1 flex items-center gap-2">
-          <span className="text-xs">1:</span>
-          <input
-            type="number"
-            className="w-24 rounded-[var(--radius-md)] border px-2 py-1"
-            value={denominator}
-            onChange={(event) => setDenominator(event.target.value)}
-          />
-          <Button
-            size="sm"
-            onClick={() => dispatch({ type: "setDrawingScale", denominator: Number(denominator) })}
-          >
-            {t("Apply", "適用")}
-          </Button>
-        </div>
-        <div className="mt-2 flex items-center gap-2">
-          <input
-            type="number"
-            className="w-20 rounded-[var(--radius-md)] border px-2 py-1"
-            placeholder="pt"
-            value={artworkDistance}
-            onChange={(event) => setArtworkDistance(event.target.value)}
-          />
-          <span className="text-xs">=</span>
-          <input
-            type="number"
-            className="w-20 rounded-[var(--radius-md)] border px-2 py-1"
-            placeholder="m"
-            value={realMetres}
-            onChange={(event) => setRealMetres(event.target.value)}
-          />
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() =>
-              dispatch({
-                type: "calibrateDistance",
-                artworkDistance: Number(artworkDistance),
-                realMetres: Number(realMetres)
-              })
-            }
-          >
-            {t("Calibrate", "校正")}
-          </Button>
-        </div>
-        {state.scaleLocked ? (
-          <Button
-            size="sm"
-            variant="secondary"
-            className="mt-2"
-            onClick={() => dispatch({ type: "unlockScale" })}
-          >
-            {t("Unlock scale", "縮尺の固定を解除")}
-          </Button>
-        ) : null}
       </section>
     </div>
   );
