@@ -14,6 +14,7 @@ import pytest
 
 from backend.src.illustrator_importer import (
     IllustratorConversionError,
+    _build_polygon,
     convert_ai_to_geopackage,
     convert_ai_to_geopackage_bundle,
 )
@@ -337,3 +338,117 @@ def test_single_page_file_still_reports_one_page() -> None:
     _gpkg, _name, report = convert_ai_to_geopackage(_build_minimal_ai_pdf(), "sample.ai")
     assert report.page_count == 1
     assert report.pages == [{"index": 1, "width_pt": 200.0, "height_pt": 200.0}]
+
+
+# --------------------------------------------------------------------------- #
+# Polygon assembly: overlapping and nested subpaths within one painted path
+# --------------------------------------------------------------------------- #
+
+_L_BAR_VERTICAL = [(60, 60), (150, 60), (150, 360), (60, 360), (60, 60)]
+_L_BAR_HORIZONTAL = [(60, 60), (360, 60), (360, 150), (60, 150), (60, 60)]
+_SQUARE_OUTER = [(0, 0), (100, 0), (100, 100), (0, 100), (0, 0)]
+_SQUARE_INNER = [(30, 30), (70, 30), (70, 70), (30, 70), (30, 30)]
+
+
+@pytest.mark.georef
+def test_overlapping_subpaths_union_into_one_polygon() -> None:
+    """A PDF fill paints overlapping subpaths as their union, never a collection.
+
+    Two rectangles forming an L is ordinary Illustrator output. Assembling them
+    into a MultiPolygon would be invalid (members overlap), and repairing that
+    yields a GeometryCollection, which has no `coordinates` and crashes the
+    placement map's transform.
+    """
+    geom = _build_polygon([_L_BAR_VERTICAL, _L_BAR_HORIZONTAL])
+    assert geom is not None
+    assert geom.geom_type in {"Polygon", "MultiPolygon"}
+    assert geom.is_valid
+    # Union, not the naive 54000 that double-counts the shared corner.
+    assert geom.area == pytest.approx(45900.0)
+
+
+@pytest.mark.georef
+def test_nested_subpath_becomes_a_hole() -> None:
+    """A concentric ring is a hole, not a reason to drop the whole path.
+
+    Depth by sampled point misclassifies this: the outer ring's representative
+    point sits inside the inner ring, so both rings read as holes, no ring is
+    left as an outer, and the entire feature silently disappears.
+    """
+    geom = _build_polygon([_SQUARE_OUTER, _SQUARE_INNER])
+    assert geom is not None
+    assert geom.geom_type == "Polygon"
+    assert geom.is_valid
+    assert geom.area == pytest.approx(8400.0)  # 10000 outer - 1600 hole
+    assert len(geom.interiors) == 1
+
+
+@pytest.mark.georef
+def test_disjoint_subpaths_stay_a_multipolygon() -> None:
+    """Regression guard: separate rings still produce separate parts."""
+    far = [(500, 500), (600, 500), (600, 600), (500, 600), (500, 500)]
+    geom = _build_polygon([_SQUARE_OUTER, far])
+    assert geom is not None
+    assert geom.geom_type == "MultiPolygon"
+    assert len(geom.geoms) == 2
+    assert geom.area == pytest.approx(20000.0)
+
+
+@pytest.mark.georef
+def test_hole_touching_the_outer_edge_still_becomes_a_hole() -> None:
+    """A hole sharing an edge with its outer ring is contained, not overlapping."""
+    flush = [(0, 30), (50, 30), (50, 70), (0, 70), (0, 30)]
+    geom = _build_polygon([_SQUARE_OUTER, flush])
+    assert geom is not None
+    assert geom.geom_type == "Polygon"
+    assert geom.is_valid
+    assert geom.area == pytest.approx(8000.0)  # 10000 - 2000
+
+
+def _build_overlapping_subpath_pdf() -> bytes:
+    """One page, one filled path whose two subpaths overlap into an L."""
+    content = (
+        b"/OC /MC0 BDC\n"
+        b"0 1 1 0 k\n"
+        b"60 60 90 300 re\n"     # vertical bar
+        b"60 60 300 90 re\n"     # horizontal bar, overlapping the corner
+        b"f\n"
+        b"EMC\n"
+    )
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R "
+        b"/OCProperties << /OCGs [5 0 R] /D << /Order [5 0 R] >> >> >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 400] "
+        b"/Resources << /Properties << /MC0 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length " + str(len(content)).encode() + b" >>\nstream\n" + content + b"endstream",
+        b"<< /Type /OCG /Name (Fill Layer) >>",
+    ]
+    out = bytearray(b"%PDF-1.6\n")
+    offsets = [0]
+    for i, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref_pos = len(out)
+    n = len(objects) + 1
+    out += f"xref\n0 {n}\n".encode()
+    out += b"0000000000 65535 f \n"
+    for off in offsets[1:]:
+        out += f"{off:010d} 00000 n \n".encode()
+    out += f"trailer\n<< /Size {n} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+@pytest.mark.georef
+def test_overlapping_subpaths_survive_a_real_conversion() -> None:
+    """End to end: the L reaches the GeoPackage as usable polygonal geometry."""
+    gpkg, _name, report = convert_ai_to_geopackage(
+        _build_overlapping_subpath_pdf(), "overlap.ai"
+    )
+    assert report.total_features == 1
+    assert report.warnings == []  # nothing dropped as empty
+    gdf = _read_layer(gpkg, "Fill Layer")
+    assert len(gdf) == 1
+    geom = gdf.geometry.iloc[0]
+    assert geom.geom_type in {"Polygon", "MultiPolygon"}
+    assert geom.area == pytest.approx(45900.0)

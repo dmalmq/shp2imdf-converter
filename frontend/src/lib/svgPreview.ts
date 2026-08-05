@@ -44,6 +44,10 @@ export function geometryToPath(geometry: Geometry | null): string {
       const [x, y] = geometry.coordinates;
       return `M${x},${y}l0.5,0.5L${x + 0.5},${y - 0.5}z`;
     }
+    case "GeometryCollection":
+      // Degenerate artwork can arrive as a collection; render every member
+      // rather than silently painting nothing.
+      return geometry.geometries.map(geometryToPath).join("");
     default:
       return "";
   }

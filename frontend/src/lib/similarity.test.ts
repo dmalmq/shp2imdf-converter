@@ -279,3 +279,44 @@ test("the gizmo frame rotates with the artwork", () => {
   // 90 deg CCW from north sends the artwork's +y axis due west.
   expect(bearingOf(rotated, frame.rotate.artwork)).toBeCloseTo(-90, 6);
 });
+
+test("transformGeoJson walks a GeometryCollection instead of crashing on it", () => {
+  // The importer can emit a GeometryCollection for degenerate artwork; a
+  // collection has `geometries`, not `coordinates`, so a naive walk reads
+  // undefined[0] and takes the whole placement screen down.
+  const collection = {
+    type: "FeatureCollection" as const,
+    features: [
+      {
+        type: "Feature",
+        properties: { ai_layer: "floor" },
+        geometry: {
+          type: "GeometryCollection",
+          geometries: [
+            { type: "Polygon", coordinates: [GOLDEN_ARTWORK] },
+            { type: "LineString", coordinates: [GOLDEN_ARTWORK[0], GOLDEN_ARTWORK[1]] }
+          ]
+        }
+      }
+    ]
+  };
+
+  const placed = transformGeoJson(collection, GOLDEN);
+  const geometry = placed.features[0].geometry;
+  expect(geometry.type).toBe("GeometryCollection");
+  expect(geometry.geometries).toHaveLength(2);
+  // Each member is transformed, matching the golden constants.
+  const ring = geometry.geometries[0].coordinates[0];
+  expect(ring[0][0]).toBeCloseTo(GOLDEN_LNGLAT[0][0], 6);
+  expect(ring[0][1]).toBeCloseTo(GOLDEN_LNGLAT[0][1], 6);
+  expect(geometry.geometries[1].coordinates[1][0]).toBeCloseTo(GOLDEN_LNGLAT[1][0], 6);
+});
+
+test("transformGeoJson leaves a geometry with no coordinates untouched", () => {
+  const collection = {
+    type: "FeatureCollection" as const,
+    features: [{ type: "Feature", properties: {}, geometry: null }]
+  };
+  expect(() => transformGeoJson(collection, GOLDEN)).not.toThrow();
+  expect(transformGeoJson(collection, GOLDEN).features[0].geometry).toBeNull();
+});

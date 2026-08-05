@@ -36,7 +36,8 @@ from pdfminer.pdftypes import dict_value, list_value, resolve1
 from pdfminer.psparser import PSLiteral, literal_name
 from pdfminer.utils import apply_matrix_pt
 from shapely import make_valid
-from shapely.geometry import LineString, MultiLineString, MultiPolygon, Polygon
+from shapely.geometry import LineString, MultiLineString, Polygon
+from shapely.ops import unary_union
 
 from backend.src.illustrator_qgis import QgisLayerSpec, build_qgs_project
 
@@ -238,30 +239,63 @@ def _build_polygon(subpaths: list[list[tuple[float, float]]]) -> Any:
         return None
 
     # A ring nested inside an odd number of other rings is a hole; assign each
-    # hole to the smallest ring that contains it.
+    # hole to the tightest ring that encloses it.
+    #
+    # Nesting is tested with whole geometry (`covers`), never a sampled point: a
+    # concentric ring encloses the outer ring's representative point too, so
+    # point sampling reads both rings as holes, leaves no outer, and silently
+    # drops the whole path.
     rings.sort(key=lambda p: p.area, reverse=True)
-    depth = [sum(1 for j, o in enumerate(rings) if j != i and o.contains(p.representative_point()))
-             for i, p in enumerate(rings)]
-    outers = [(i, rings[i]) for i in range(len(rings)) if depth[i] % 2 == 0]
-    polygons: list[Polygon] = []
-    for oi, outer in outers:
-        holes = []
-        for i, ring in enumerate(rings):
-            if depth[i] % 2 == 1 and outer.contains(ring.representative_point()):
-                # tightest container among outers is this one?
-                container = min(
-                    (o for _, o in outers if o.contains(ring.representative_point())),
-                    key=lambda o: o.area,
-                    default=None,
-                )
-                if container is outer:
-                    holes.append(list(ring.exterior.coords))
-        polygons.append(Polygon(list(outer.exterior.coords), holes))
+    depth = [
+        sum(1 for j, other in enumerate(rings) if j != i and other.covers(ring))
+        for i, ring in enumerate(rings)
+    ]
+    outers = [rings[i] for i in range(len(rings)) if depth[i] % 2 == 0]
+    hole_owner: dict[int, Polygon] = {}
+    for i, ring in enumerate(rings):
+        if depth[i] % 2 == 0:
+            continue
+        enclosing = [outer for outer in outers if outer.covers(ring)]
+        if enclosing:
+            hole_owner[i] = min(enclosing, key=lambda o: o.area)
+    # Subtract each hole rather than building Polygon(shell, holes): a hole flush
+    # with its shell's edge makes that construction invalid, and repairing it
+    # fills the hole straight back in. Difference also splits the shell correctly
+    # when a hole spans it end to end.
+    polygons = []
+    for outer in outers:
+        area = outer
+        for i, owner in hole_owner.items():
+            if owner is outer:
+                area = area.difference(rings[i])
+        if not area.is_empty and area.area > 0:
+            polygons.append(area)
     if not polygons:
         return None
-    geom = polygons[0] if len(polygons) == 1 else MultiPolygon(polygons)
-    geom = make_valid(geom)
-    return geom if not geom.is_empty else None
+    # Overlapping subpaths are legal inside one filled path — nonzero winding
+    # fills their union. A MultiPolygon of overlapping members is invalid, and
+    # repairing that yields a GeometryCollection, so union them instead.
+    return _polygonal_only(make_valid(unary_union(polygons)))
+
+
+def _polygonal_only(geom: Any) -> Any:
+    """Reduce ``geom`` to its polygonal area, or ``None`` if it has none.
+
+    Callers must never receive a GeometryCollection: it carries no
+    ``coordinates``, so the GeoJSON preview painter renders nothing and the
+    placement transform raises. ``make_valid`` can still emit stray lines or
+    points beside the polygons for degenerate input such as zero-width slivers
+    or rings that only touch, so those parts are dropped here.
+    """
+    if geom is None or geom.is_empty:
+        return None
+    if geom.geom_type in ("Polygon", "MultiPolygon"):
+        return geom if geom.area > 0 else None
+    parts = [p for p in getattr(geom, "geoms", []) if p.geom_type in ("Polygon", "MultiPolygon")]
+    if not parts:
+        return None
+    merged = unary_union(parts)
+    return merged if not merged.is_empty and merged.area > 0 else None
 
 
 def _build_line(subpaths: list[list[tuple[float, float]]]) -> Any:

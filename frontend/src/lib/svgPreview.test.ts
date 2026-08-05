@@ -253,3 +253,16 @@ test("a floor with no page, box or layer restriction claims everything", () => {
   expect(perFloor.get("artwork")).toHaveLength(3);
   expect(unassigned).toHaveLength(0);
 });
+
+test("geometryToPath renders every member of a GeometryCollection", () => {
+  const collection = {
+    type: "GeometryCollection" as const,
+    geometries: [
+      { type: "Polygon" as const, coordinates: [[[0, 0], [10, 0], [10, 10], [0, 0]]] },
+      { type: "LineString" as const, coordinates: [[20, 20], [30, 30]] }
+    ]
+  };
+  const d = geometryToPath(collection);
+  expect(d).toContain("M0,0L10,0L10,10L0,0Z");
+  expect(d).toContain("M20,20L30,30");
+});

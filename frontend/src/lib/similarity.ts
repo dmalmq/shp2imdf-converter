@@ -16,6 +16,8 @@
  * when it converts to its projected grid.
  */
 
+import type { Geometry, Position } from "geojson";
+
 const MM_PER_INCH = 25.4;
 const POINTS_PER_INCH = 72;
 const WGS84_A = 6378137.0;
@@ -105,7 +107,8 @@ export function applyMatrix(matrix: AffineMatrix, x: number, y: number): [number
   return [matrix[0] * x + matrix[1] * y + matrix[4], matrix[2] * x + matrix[3] * y + matrix[5]];
 }
 
-type GeoJsonCollection = { type: "FeatureCollection"; features: any[] };
+type GeoJsonFeature = { type: "Feature"; geometry: Geometry | null; properties: unknown };
+type GeoJsonCollection = { type: "FeatureCollection"; features: GeoJsonFeature[] };
 
 /** Place an artwork-space FeatureCollection onto the map as lon/lat. */
 export function transformGeoJson(
@@ -114,18 +117,39 @@ export function transformGeoJson(
 ): GeoJsonCollection {
   const matrix = toEnuMatrix(transform);
   const [anchorLon, anchorLat] = transform.mapAnchor;
-  const move = (coords: any): any => {
-    if (typeof coords[0] === "number") {
-      const [east, north] = applyMatrix(matrix, coords[0], coords[1]);
-      return enuToLngLat(east, north, anchorLon, anchorLat);
+  const movePosition = (position: Position): Position => {
+    const [east, north] = applyMatrix(matrix, position[0], position[1]);
+    return enuToLngLat(east, north, anchorLon, anchorLat);
+  };
+  // Switch per geometry type rather than walking `coordinates` blindly: a
+  // GeometryCollection carries `geometries` instead, and reading its absent
+  // `coordinates` throws on undefined[0], taking the whole placement map down.
+  const moveGeometry = (geometry: Geometry): Geometry => {
+    switch (geometry.type) {
+      case "GeometryCollection":
+        return { ...geometry, geometries: geometry.geometries.map(moveGeometry) };
+      case "Point":
+        return { ...geometry, coordinates: movePosition(geometry.coordinates) };
+      case "MultiPoint":
+        return { ...geometry, coordinates: geometry.coordinates.map(movePosition) };
+      case "LineString":
+        return { ...geometry, coordinates: geometry.coordinates.map(movePosition) };
+      case "MultiLineString":
+        return { ...geometry, coordinates: geometry.coordinates.map((l) => l.map(movePosition)) };
+      case "Polygon":
+        return { ...geometry, coordinates: geometry.coordinates.map((r) => r.map(movePosition)) };
+      case "MultiPolygon":
+        return {
+          ...geometry,
+          coordinates: geometry.coordinates.map((p) => p.map((r) => r.map(movePosition)))
+        };
     }
-    return coords.map(move);
   };
   return {
     type: "FeatureCollection",
     features: collection.features.map((feature) => ({
       ...feature,
-      geometry: { ...feature.geometry, coordinates: move(feature.geometry.coordinates) }
+      geometry: feature.geometry ? moveGeometry(feature.geometry) : feature.geometry
     }))
   };
 }
