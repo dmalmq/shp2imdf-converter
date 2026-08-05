@@ -417,8 +417,7 @@ def test_preview_of_a_single_page_file_lists_one_page(cached) -> None:
     preview = build_preview(cached)
     assert [p["index"] for p in preview["pages"]] == [1]
     assert preview["pages"][0]["feature_count"] == preview["total_features"]
-    # The existing top-level fields are unchanged.
-    assert preview["artwork_bounds"] == build_preview(cached)["artwork_bounds"]
+    assert preview["pages"][0]["bounds"] == preview["artwork_bounds"]
 
 
 @pytest.mark.georef
@@ -864,7 +863,7 @@ def test_preview_returns_page_metadata(test_client) -> None:
 
 
 @pytest.mark.georef
-def test_preview_of_a_single_page_file_lists_one_page(test_client) -> None:
+def test_preview_of_a_single_page_file_reports_one_page(test_client) -> None:
     body = _preview(test_client).json()
     assert [p["index"] for p in body["pages"]] == [1]
 
@@ -1102,6 +1101,7 @@ git commit -m "feat: expose pages in the preview and accept page floors on assig
 
 **Files:**
 - Modify: `frontend/src/lib/svgPreview.ts:14-18` (`PartitionFloor`), `:138-160` (`partitionByFloors`), `frontend/src/api/client.ts:433-439`, `:840-857`, `:911-921`
+- Modify (one property each, to keep the build green): `frontend/src/components/illustrator/AssignmentPanel.tsx:103`, `frontend/src/pages/IllustratorPage.tsx:137-144`
 - Test: `frontend/src/lib/svgPreview.test.ts`
 
 **Interfaces:**
@@ -1354,15 +1354,56 @@ export async function assignFloors(
 ): Promise<AssignFloorsResponse> {
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 5: Keep the existing call sites compiling**
 
-Run: `cd frontend && npx vitest run src/lib/svgPreview.test.ts`
-Expected: PASS — the seven new tests plus the pre-existing `partitionByFloors` tests. The two pre-existing partition tests will still fail to typecheck until Task 6 and 7 update their callers; that is expected, and `npx vitest run` only executes this file. Fix the two pre-existing test fixtures in this file now by adding `pages: null` to their floor literals.
+Widening `PartitionFloor` breaks every existing literal, so patch them in this
+task rather than leaving the repo un-typecheckable until Task 7. Three places
+need `pages: null` added — the correct value for all of them, since none is
+page-scoped yet:
 
-- [ ] **Step 6: Commit**
+1. `frontend/src/lib/svgPreview.test.ts` — the two pre-existing
+   `partitionByFloors` fixtures (the tests named
+   `partitionByFloors assigns by centroid and layer restriction` and
+   `layer restriction excludes matching-position features on other layers`).
+2. `frontend/src/components/illustrator/AssignmentPanel.tsx:103` — inside the
+   `drafts.map(...)` passed to `partitionByFloors`:
+
+```typescript
+        drafts.map((d) => ({
+          label: d.label,
+          box: d.box,
+          pages: null,
+          layerNames: d.layerNames
+        }))
+```
+
+3. `frontend/src/pages/IllustratorPage.tsx:137-144` — inside the `regions.map(...)`
+   passed to `partitionByFloors` in the `floorLayers` memo. Read the memo first
+   and add only the one property:
+
+```typescript
+      regions.map((region) => ({
+        label: region.label,
+        box: region.box,
+        pages: null,
+        layerNames: region.layer_names
+      }))
+```
+
+Task 6 replaces the `AssignmentPanel` value with its `pageTag`, and Task 7
+replaces the `IllustratorPage` value with `region.pages`. Leaving them `null`
+here preserves today's behaviour exactly.
+
+- [ ] **Step 6: Run the tests and typecheck to verify they pass**
+
+Run: `cd frontend && npx tsc -b && npx vitest run src/lib/svgPreview.test.ts`
+Expected: PASS — no type errors anywhere in the project, the seven new tests
+green, and the pre-existing `partitionByFloors` tests still green.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add frontend/src/lib/svgPreview.ts frontend/src/lib/svgPreview.test.ts frontend/src/api/client.ts
+git add frontend/src/lib/svgPreview.ts frontend/src/lib/svgPreview.test.ts frontend/src/api/client.ts frontend/src/components/illustrator/AssignmentPanel.tsx frontend/src/pages/IllustratorPage.tsx
 git commit -m "feat: split preview features by page and match the server's floor rule"
 ```
 
@@ -2222,4 +2263,4 @@ Non-goals confirmed absent: no auto-alignment of unequal pages, no per-page expo
 
 **Type consistency:** `PartitionFloor` carries `{label, box, pages, layerNames}` in Tasks 5, 6, 7 identically. `AssignedRegion` carries the snake_case `{label, box, pages, layer_names}` and is converted at the single boundary in Task 7's `commitAssignment`. `ExportFloor` field order `(label, transform, region, layer_names, pages)` is fixed in Task 3 and used with that order in Task 4. `build_preview`'s `pages` entry keys match `IllustratorPagePreview` (Task 2 ↔ Task 4) and `IllustratorPagePreview` in `client.ts` (Task 5).
 
-**Known follow-through inside the plan:** Task 5 Step 5 notes that the two pre-existing `partitionByFloors` fixtures in `svgPreview.test.ts` need `pages: null` added, and Task 7 Step 4 catches any remaining call site via `tsc -b`. Task 4 Step 1 tells the implementer to reuse whatever `conversion_id` helper `test_illustrator_api.py` already defines rather than adding a second one — that is the only place this plan defers to existing code it does not quote.
+**Every commit typechecks.** Widening `PartitionFloor` in Task 5 breaks three existing literals, so Task 5 Step 5 patches all three with `pages: null` — the value that preserves today's behaviour — rather than leaving `tsc -b` red until Task 7. Tasks 6 and 7 then replace those nulls with the real page tags. Task 5 Step 6 and Task 7 Step 4 both run `tsc -b`, so a missed call site fails at the task that introduced it, not three tasks later.
