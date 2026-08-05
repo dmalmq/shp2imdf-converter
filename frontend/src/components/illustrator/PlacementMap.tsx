@@ -66,6 +66,7 @@ export function PlacementMap({
   const mapRef = useRef<MapRef | null>(null);
   const [ready, setReady] = useState(false);
   const [basemap, setBasemap] = useState<BasemapId>("osm");
+  const [onlyActiveFloor, setOnlyActiveFloor] = useState(false);
 
   const activeFloor =
     state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
@@ -102,7 +103,13 @@ export function PlacementMap({
   );
 
   const activeLabel = activeFloor?.label ?? null;
-  const ghostFloors = placedByFloor.filter((floor) => floor.label !== activeLabel);
+  // Ghosts help align a floor AGAINST its neighbours, but compete for attention
+  // when the job is just positioning one. Off by default so the shared-frame
+  // workflow is unchanged; the flag lives here because PlacementMap stays
+  // mounted, so isolation survives stepping through floors.
+  const ghostFloors = onlyActiveFloor
+    ? []
+    : placedByFloor.filter((floor) => floor.label !== activeLabel);
   const placedActive = placedByFloor.find((floor) => floor.label === activeLabel) ?? null;
 
   // Reference layers are added after the artwork layers already exist, so they
@@ -338,6 +345,22 @@ export function PlacementMap({
                 </Button>
               );
             })}
+            {/* Isolating the selected floor sits with the floor pills rather
+                than in the sidebar: it is a view option reached for while
+                watching the map, exactly like the basemap switcher below. */}
+            <span aria-hidden="true" className="mx-1 w-px self-stretch bg-[var(--color-border)]" />
+            <Button
+              size="sm"
+              variant={onlyActiveFloor ? "primary" : "secondary"}
+              aria-pressed={onlyActiveFloor}
+              onClick={() => setOnlyActiveFloor((only) => !only)}
+              title={t(
+                "Hide the other floors while aligning this one",
+                "この階を合わせる間、他の階を隠す"
+              )}
+            >
+              {t("Only this floor", "この階のみ")}
+            </Button>
           </div>
         ) : null}
         <div className="flex gap-1 rounded-[var(--radius-md)] bg-white/90 p-1 shadow">

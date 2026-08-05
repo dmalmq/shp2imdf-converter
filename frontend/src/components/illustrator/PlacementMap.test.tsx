@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import { PlacementMap, type FloorLayer } from "./PlacementMap";
 import { DEFAULT_METRES_PER_POINT, type PlacementState } from "../../hooks/useIllustratorPlacement";
@@ -72,4 +72,47 @@ test("the pill for the active floor announces its pressed state", () => {
   // attribute string.
   expect(screen.getByRole("button", { name: "1F", pressed: true })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /unlinked/i, pressed: false })).toBeInTheDocument();
+});
+
+const ONE_LAYER: FloorLayer[] = [
+  { label: "1F", features: [], bounds: [0, 0, 1, 1], color: "#3b82f6" }
+];
+
+function renderMap(layers: FloorLayer[], floors: { label: string; linked: boolean }[]) {
+  render(
+    <PlacementMap
+      floors={layers}
+      state={stateWith(floors, floors[0].label)}
+      dispatch={() => {}}
+      pickingControlPoint={false}
+      onPickMap={() => {}}
+    />
+  );
+}
+
+
+test("the isolate toggle starts off, so ghost floors stay visible by default", () => {
+  renderMap(LAYERS, [
+    { label: "1F", linked: true },
+    { label: "2F", linked: true }
+  ]);
+  expect(
+    screen.getByRole("button", { name: /only this floor/i, pressed: false })
+  ).toBeInTheDocument();
+});
+
+test("clicking the isolate toggle flips its pressed state", () => {
+  renderMap(LAYERS, [
+    { label: "1F", linked: true },
+    { label: "2F", linked: true }
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /only this floor/i }));
+  expect(
+    screen.getByRole("button", { name: /only this floor/i, pressed: true })
+  ).toBeInTheDocument();
+});
+
+test("no isolate toggle with a single floor — there are no ghosts to hide", () => {
+  renderMap(ONE_LAYER, [{ label: "1F", linked: true }]);
+  expect(screen.queryByRole("button", { name: /only this floor/i })).toBeNull();
 });
