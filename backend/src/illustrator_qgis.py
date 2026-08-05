@@ -209,9 +209,26 @@ def build_qgs_project(
         )
         layerorder = "".join(f"<layer id=\"{lid}\"/>" for lid in ids)
 
+    # QGIS reads <projectCrs> only when projections are switched on in the legacy
+    # <properties> block. Without it the CRS below is parsed and then silently
+    # discarded, and the project opens with no CRS - which is why every export had
+    # to have its CRS set by hand. Established by loading the generated file in
+    # QGIS 3.42 via PyQGIS: with the flag at 1 the project reports EPSG:6677, with
+    # it at 0, or with <properties> absent, it reports an empty authid. Nothing
+    # else from QGIS's much larger <properties> block is needed, and no
+    # <mapcanvas>/<destinationsrs> is needed either.
+    #
+    # Flag stays off without a CRS, so the ungeoreferenced artwork-space output
+    # keeps declaring an unknown CRS rather than claiming a bogus one.
+    properties = (
+        "<properties><SpatialRefSys>"
+        f"<ProjectionsEnabled type=\"int\">{'1' if crs else '0'}</ProjectionsEnabled>"
+        "</SpatialRefSys></properties>"
+    )
     return (
         "<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>"
         f"<qgis version=\"3.34.0\" projectname={quoteattr(project_name)}>"
+        f"{properties}"
         f"<projectCrs>{srs_xml}</projectCrs>"
         f"<layer-tree-group>{tree_entries}<custom-order enabled=\"0\"/></layer-tree-group>"
         f"<projectlayers>{maplayers}</projectlayers>"

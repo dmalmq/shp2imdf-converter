@@ -79,3 +79,10 @@ pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
   (the preview filter is display-only). Linked floors share scale/rotation; dragging a floor
   unlinks it (drag = pin); frame operations touch linked floors only. With one floor the
   floor stays linked, preserving the single-floor behaviour exactly.
+- Generated `.qgs` projects need **both** `<projectCrs>` and
+  `<properties><SpatialRefSys><ProjectionsEnabled type="int">1</...>`. QGIS parses the
+  first and then discards it unless the second says projections are on, so a project can
+  name the right CRS in its XML and still open with none — which is what shipped until it
+  was caught by loading the output in QGIS rather than by reading it. String assertions
+  cannot see this class of bug: `test_illustrator_qgis_crs.py` ends with a test that runs
+  the real PyQGIS (auto-skipped when QGIS is absent), and that is the one worth trusting.
