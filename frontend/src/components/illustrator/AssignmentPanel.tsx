@@ -16,6 +16,10 @@ type Props = {
   layerSummaries: { table: string; ai_layer: string; role: string; feature_count: number }[];
   onAssigned: (floors: PartitionFloor[]) => void;
   onSkip: () => void;
+  /** When drilling into one page of a multi-page file, tag boxes with it. */
+  page?: number | null;
+  /** Renders a back button when set (drill-in mode). */
+  onCancel?: () => void;
 };
 
 const BOX_COLORS = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#d97706", "#0891b2"];
@@ -35,7 +39,15 @@ type DraftFloor = {
  * for the counts shown; the server re-verifies it from full geometry at
  * export, so a box hugging a feature edge may count differently later.
  */
-export function AssignmentPanel({ preview, artworkBounds, layerSummaries, onAssigned, onSkip }: Props) {
+export function AssignmentPanel({
+  preview,
+  artworkBounds,
+  layerSummaries,
+  onAssigned,
+  onSkip,
+  page = null,
+  onCancel
+}: Props) {
   const { t } = useUiLanguage();
   const [drafts, setDrafts] = useState<DraftFloor[]>([]);
   const [drawing, setDrawing] = useState<{
@@ -43,6 +55,9 @@ export function AssignmentPanel({ preview, artworkBounds, layerSummaries, onAssi
     current: [number, number];
   } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+
+  // Null outside drill-in mode, so a single-page file keeps sending null pages.
+  const pageTag = useMemo(() => (page == null ? null : [page]), [page]);
 
   const { viewBox, paths } = useMemo(
     () => buildSvgPaths(preview, artworkBounds),
@@ -103,11 +118,11 @@ export function AssignmentPanel({ preview, artworkBounds, layerSummaries, onAssi
         drafts.map((d) => ({
           label: d.label,
           box: d.box,
-          pages: null,
+          pages: pageTag,
           layerNames: d.layerNames
         }))
       ),
-    [preview, drafts]
+    [preview, drafts, pageTag]
   );
 
   const toggleLayer = (index: number, layer: string) => {
@@ -247,9 +262,15 @@ export function AssignmentPanel({ preview, artworkBounds, layerSummaries, onAssi
       </p>
 
       <div className="flex gap-2">
-        <Button variant="secondary" onClick={onSkip}>
-          {t("Skip — one floor for everything", "スキップ — 全図形を1フロアに")}
-        </Button>
+        {onCancel ? (
+          <Button variant="secondary" onClick={onCancel}>
+            {t("Back to pages", "ページ一覧へ戻る")}
+          </Button>
+        ) : (
+          <Button variant="secondary" onClick={onSkip}>
+            {t("Skip — one floor for everything", "スキップ — 全図形を1フロアに")}
+          </Button>
+        )}
         <Button
           className="ml-auto"
           disabled={drafts.length === 0}
@@ -258,7 +279,7 @@ export function AssignmentPanel({ preview, artworkBounds, layerSummaries, onAssi
               drafts.map((d) => ({
                 label: d.label,
                 box: d.box,
-                pages: null,
+                pages: pageTag,
                 layerNames: d.layerNames
               }))
             )
