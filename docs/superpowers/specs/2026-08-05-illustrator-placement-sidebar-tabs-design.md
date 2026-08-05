@@ -210,11 +210,19 @@ of the placement step:
 - Focus ring reusing the existing convention —
   `focus-visible:ring-2 focus-visible:ring-offset-1` with
   `--color-primary`, matching `Button.tsx:36`.
-- Panels are mounted one at a time. The inactive panels hold no state that
-  must survive switching: control points, reference layers and saved
-  placements all live in `IllustratorPage`/reducer state, not in panel-local
-  state. The one exception is the building-search query, which is in
-  `TransformPanel` and stays pinned, so it is unaffected.
+- **All three panels stay mounted; the inactive ones are `hidden`.** Unmounting
+  on switch would lose real state, verified by reading each panel:
+  `TransformPanel`'s scale block holds `denominator`, `artworkDistance` and
+  `realMetres` (`TransformPanel.tsx:41-43`) so a typed `1:500` would reset;
+  `PlacementLibrary` holds a typed `name` plus a fetched `placements` list and
+  fetches on mount (`PlacementLibrary.tsx:39-54`), so every visit to Export
+  would refetch and discard a half-typed building name;
+  `ReferenceLayerList` holds `loading` and `error` (`:24-25`), so an upload
+  failure message would vanish mid-read. `hidden` keeps the ARIA contract
+  correct — a hidden panel is out of the accessibility tree, so only the active
+  one is exposed — and the cost is a handful of inputs rendering off-screen.
+  Fetching the placement list once on arrival rather than per tab visit is also
+  the better behaviour.
 
 ### Visual treatment
 
@@ -282,4 +290,4 @@ Regression: `npx tsc -b` clean, the full `vitest` suite green, and
 | Deleting the floor `<select>` loses the unlinked signal | Explicitly replaced by the pill marker plus the retained relink button; called out as a required part of the change, not a follow-up |
 | Tabs hide a control the user actually needs mid-drag | The pinned set was chosen by the user naming their own hot controls, and scale was moved out at their request. If it proves wrong, the pinned/tabbed boundary is a single list to edit, not a restructure |
 | Three tab labels may not fit a 320px column | Labels are short and `text-xs`; measured in the browser during implementation, and the bilingual Japanese labels are shorter still. If English overflows, `Scale & fit` shortens to `Fit` |
-| Panel remount loses in-progress input | Audited: no panel holds local state that matters; the one text input that does (building search) stays pinned |
+| Panel remount loses in-progress input | Real, and the reason panels stay mounted behind `hidden` rather than unmounting: all three hold local state that a switch would discard (typed drawing scale and calibrate pair, typed placement name, upload error), and `PlacementLibrary` would refetch on every visit |
