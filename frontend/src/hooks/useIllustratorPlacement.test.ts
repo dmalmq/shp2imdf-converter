@@ -4,6 +4,7 @@ import {
   currentResiduals,
   floorPayloadsToState,
   initialPlacementHistory,
+  placedBoundsWgs84,
   placementHistoryReducer,
   placementReducer,
   resolvedTransform,
@@ -461,4 +462,99 @@ test("the auto-located baseline is the floor of the history, not an undo step", 
   expect(history.past).toHaveLength(1);
   history = placementHistoryReducer(history, { type: "undo" });
   expect(history.present.floors[0].mapAnchor).toEqual([139.734, 35.606]);
+});
+
+// The golden fixture: the same transform constants
+// backend/tests/test_illustrator_georeference.py asserts against, so the box
+// here is cross-language pinned rather than self-referential.
+const GOLDEN_PLACEMENT: PlacementState = {
+  frame: { rotationDeg: 30, metresPerPoint: 0.176389, workingCrs: "EPSG:6677" },
+  activeFloorLabel: "1F",
+  scaleLocked: false,
+  floors: [
+    {
+      label: "1F",
+      linked: true,
+      artworkAnchor: [100, 200],
+      mapAnchor: ANCHOR,
+      controlPoints: [],
+      artworkBounds: [100, 200, 400, 350]
+    }
+  ]
+};
+
+test("placedBoundsWgs84 places the artwork bounds on the golden constants", () => {
+  const box = placedBoundsWgs84(GOLDEN_PLACEMENT, [
+    { label: "1F", bounds: GOLDEN_PLACEMENT.floors[0].artworkBounds }
+  ]);
+  expect(box).not.toBeNull();
+  // The union of the four golden corners; the backend asserts the same corners
+  // in test_illustrator_georeference.py.
+  const [minLon, minLat, maxLon, maxLat] = box as [number, number, number, number];
+  expect(minLon).toBeCloseTo(139.700111829, 6);
+  expect(minLat).toBeCloseTo(35.690921, 6);
+  expect(maxLon).toBeCloseTo(139.70076435, 6);
+  expect(maxLat).toBeCloseTo(35.691366023, 6);
+});
+
+test("a rotated floor's box covers all four rotated corners", () => {
+  // Rotation turns the axis-aligned artwork box into a rotated footprint: at
+  // 45deg the west edge belongs to the NW corner and the east edge to the SE
+  // corner. A two-corner shortcut (say SW+NE) bounds east by [0, 112.25] m and
+  // misses both, shrinking the trim window by about 12 m per side.
+  const rotated: PlacementState = {
+    frame: { rotationDeg: 45, metresPerPoint: 0.176389, workingCrs: "EPSG:6677" },
+    activeFloorLabel: "1F",
+    scaleLocked: false,
+    floors: [
+      {
+        label: "1F",
+        linked: true,
+        artworkAnchor: [100, 200],
+        mapAnchor: ANCHOR,
+        controlPoints: [],
+        artworkBounds: [0, 0, 1000, 100]
+      }
+    ]
+  };
+  const box = placedBoundsWgs84(rotated, [{ label: "1F", bounds: [0, 0, 1000, 100] }]);
+  expect(box).not.toBeNull();
+  const [minLon, minLat, maxLon, maxLat] = box as [number, number, number, number];
+  expect(minLon).toBeCloseTo(139.700258, 9);
+  expect(minLat).toBeCloseTo(35.690583761, 9);
+  expect(maxLon).toBeCloseTo(139.701773767, 9);
+  expect(maxLat).toBeCloseTo(35.691820304, 9);
+});
+
+test("placedBoundsWgs84 unions floors that land in different places", () => {
+  // 1F carries the rotated golden box; 2F is unlinked with its own rotation 0,
+  // so it pokes west and south of 1F. The union needs both: minLon/minLat come
+  // from 2F alone, maxLon/maxLat from 1F alone.
+  const second: FloorPlacement = {
+    ...floor("2F", ANCHOR),
+    linked: false,
+    rotationDeg: 0,
+    metresPerPoint: 0.176389
+  };
+  const multi: PlacementState = {
+    frame: { rotationDeg: 30, metresPerPoint: 0.176389, workingCrs: "EPSG:6677" },
+    activeFloorLabel: "1F",
+    scaleLocked: false,
+    floors: [GOLDEN_PLACEMENT.floors[0], second]
+  };
+  const box = placedBoundsWgs84(multi, [
+    { label: "1F", bounds: [100, 200, 400, 350] },
+    { label: "2F", bounds: [200, 0, 370, 160] }
+  ]);
+  expect(box).not.toBeNull();
+  const [minLon, minLat, maxLon, maxLat] = box as [number, number, number, number];
+  expect(minLon).toBeCloseTo(139.700092357, 9);
+  expect(minLat).toBeCloseTo(35.690793819, 9);
+  expect(maxLon).toBeCloseTo(139.700764299, 9);
+  expect(maxLat).toBeCloseTo(35.69136598, 9);
+});
+
+test("placedBoundsWgs84 returns null when no floor has a usable transform", () => {
+  expect(placedBoundsWgs84(BASE, [{ label: "nope", bounds: [0, 0, 10, 10] }])).toBeNull();
+  expect(placedBoundsWgs84(BASE, [])).toBeNull();
 });

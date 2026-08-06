@@ -33,6 +33,8 @@ type Props = {
   onTogglePicking: () => void;
   referenceLayers: ReferenceLayer[];
   onReferenceLayersChange: (layers: ReferenceLayer[]) => void;
+  /** WGS84 box of the placed artwork; reference uploads are trimmed to ~1 km. */
+  focusBounds?: [number, number, number, number] | null;
   bounds: [number, number, number, number];
   suggestedCrs: string;
   suggestedCrsLabel: string;
@@ -66,6 +68,7 @@ export function PlacementSidebar({
   onTogglePicking,
   referenceLayers,
   onReferenceLayersChange,
+  focusBounds,
   bounds,
   suggestedCrs,
   suggestedCrsLabel,
@@ -119,7 +122,11 @@ export function PlacementSidebar({
             />
           </div>
           <div {...tabPanelProps("placement", "reference", tab === "reference")}>
-            <ReferenceLayerList layers={referenceLayers} onChange={onReferenceLayersChange} />
+            <ReferenceLayerList
+              layers={referenceLayers}
+              onChange={onReferenceLayersChange}
+              focusBounds={focusBounds}
+            />
           </div>
           <div {...tabPanelProps("placement", "export", tab === "export")}>
             <ExportPanel

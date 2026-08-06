@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import math
 import zipfile
 from pathlib import Path
 
@@ -59,6 +60,37 @@ def _footprints(count: int, spacing_m: float, *, rounded: bool = True) -> list[P
         )
         for i in range(count)
     ]
+
+
+def _wgs84_shapefile(
+    tmp_path: Path, coords: list[tuple[float, float]], name: str = "stations"
+) -> list[tuple[str, bytes]]:
+    """Loose shapefile components already in EPSG:4326, one small square per (lon, lat).
+
+    Writing the fixture in WGS84 keeps the assertions in the same frame as the
+    focus box, so the 1 km margin can be computed and checked exactly.
+    """
+    gdf = gpd.GeoDataFrame(
+        {
+            "geometry": [
+                Polygon(
+                    [
+                        (lon, lat),
+                        (lon + 0.0002, lat),
+                        (lon + 0.0002, lat + 0.0002),
+                        (lon, lat + 0.0002),
+                    ]
+                )
+                for lon, lat in coords
+            ]
+        },
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+    directory = tmp_path / name
+    directory.mkdir(parents=True, exist_ok=True)
+    gdf.to_file(directory / f"{name}.shp")
+    return [(path.name, path.read_bytes()) for path in directory.iterdir()]
 
 
 def _regional_shapefile(
@@ -186,3 +218,102 @@ def test_endpoint_rejects_a_non_spatial_upload(test_client) -> None:
         files=[("files", ("notes.txt", b"not spatial data", "text/plain"))],
     )
     assert response.status_code == 400
+
+
+def test_focus_keeps_nearby_features_while_feature_count_reports_the_source_total(tmp_path: Path) -> None:
+    """A focus box trims the payload but not the count the UI shows as "N of M"."""
+    blobs = _wgs84_shapefile(
+        tmp_path, [(140.0, 35.0), (140.005, 35.0), (140.05, 35.0)], name="focus"
+    )
+
+    layer = read_reference_layers(blobs, focus=(140.0, 35.0, 140.0, 35.0))[0]
+
+    # ~450 m and ~4.6 km east: the first survives the 1 km margin, the second does not.
+    assert len(layer.geojson["features"]) == 2
+    assert layer.feature_count == 3
+
+
+def test_without_focus_every_feature_is_kept_exactly_as_before(tmp_path: Path) -> None:
+    """No focus box means no spatial trim: the old behaviour, byte for byte."""
+    blobs = _wgs84_shapefile(tmp_path, [(140.0, 35.0), (140.05, 35.0), (141.0, 36.0)], name="nofocus")
+
+    layer = read_reference_layers(blobs)[0]
+
+    assert layer.feature_count == 3
+    assert layer.truncated is False
+    assert len(layer.geojson["features"]) == 3
+    assert layer.warnings == []
+
+
+def test_features_just_outside_the_focus_box_survive_the_margin(tmp_path: Path) -> None:
+    """The box is a hint about where the artwork sits; the 1 km margin is the
+    real filter, so features just beyond the box edge are still kept.
+    """
+    blobs = _wgs84_shapefile(tmp_path, [(140.0, 35.0), (140.02, 35.0), (140.03, 35.0)], name="margin")
+
+    layer = read_reference_layers(blobs, focus=(139.99, 34.99, 140.01, 35.01))[0]
+
+    # 140.02 is ~910 m east of the box edge (within the margin), 140.03 is ~1.8 km (beyond).
+    assert len(layer.geojson["features"]) == 2
+    assert layer.feature_count == 3
+
+
+def test_focus_matching_nothing_returns_an_empty_layer_with_a_warning(tmp_path: Path) -> None:
+    """An empty result is a fact to tell the operator about, not a volume cap."""
+    blobs = _wgs84_shapefile(tmp_path, [(140.0, 35.0)], name="nowhere")
+
+    layer = read_reference_layers(blobs, focus=(141.0, 36.0, 141.0, 36.0))[0]
+
+    assert layer.geojson["features"] == []
+    assert layer.feature_count == 1
+    assert layer.truncated is False
+    assert "nowhere: no features within 1 km of the artwork." in layer.warnings
+
+
+def test_focus_margin_is_computed_per_axis(tmp_path: Path) -> None:
+    """A longitude-only offset between the latitude figure and the cosine-corrected
+    degree distance must still be inside the margin.
+
+    At 35N the degree lengths differ by ~20%, so reusing the latitude constant
+    for longitude would drop this feature: the offset is beyond 1000/111320
+    degrees of longitude but within 1000/(111320 * cos(35)) of it.
+    """
+    mid_lat = 35.0
+    dlat = 1000.0 / 111_320.0
+    dlon = 1000.0 / (111_320.0 * math.cos(math.radians(mid_lat)))
+    offset = (dlat + dlon) / 2.0
+    assert dlat < offset < dlon
+
+    blobs = _wgs84_shapefile(tmp_path, [(140.0, mid_lat), (140.0 + offset, mid_lat)], name="axis")
+
+    layer = read_reference_layers(blobs, focus=(140.0, mid_lat, 140.0, mid_lat))[0]
+
+    assert len(layer.geojson["features"]) == 2
+    assert layer.feature_count == 2
+
+
+def test_endpoint_ignores_a_malformed_focus_bounds(test_client, tmp_path: Path) -> None:
+    """A bad hint is an optimisation that never gets to break an upload."""
+    blobs = _wgs84_shapefile(tmp_path, [(140.0, 35.0), (140.05, 35.0)], name="malformed")
+    files = [("files", (name, content, "application/octet-stream")) for name, content in blobs]
+
+    for bad in ("not,a,box", "1,2", "1,2,3", "140,35,140,nope", "140,35,140,NaN"):
+        response = test_client.post("/api/reference-layers", files=files, data={"focus_bounds": bad})
+        assert response.status_code == 200, (bad, response.text)
+        layer = response.json()["layers"][0]
+        assert layer["feature_count"] == 2
+        assert len(layer["geojson"]["features"]) == 2
+
+
+def test_endpoint_honors_a_valid_focus_bounds(test_client, tmp_path: Path) -> None:
+    """The parsed box must actually reach the reader, or the feature is dead at the API."""
+    blobs = _wgs84_shapefile(tmp_path, [(140.0, 35.0), (140.05, 35.0)], name="valid")
+    files = [("files", (name, content, "application/octet-stream")) for name, content in blobs]
+
+    response = test_client.post(
+        "/api/reference-layers", files=files, data={"focus_bounds": "140.0,35.0,140.0,35.0"}
+    )
+    assert response.status_code == 200, response.text
+    layer = response.json()["layers"][0]
+    assert layer["feature_count"] == 2
+    assert len(layer["geojson"]["features"]) == 1

@@ -24,6 +24,7 @@ import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
 import {
   DEFAULT_METRES_PER_POINT,
   initialPlacementHistory,
+  placedBoundsWgs84,
   placementHistoryReducer,
   toFloorPayloads,
   type PlacementState
@@ -192,6 +193,18 @@ export function IllustratorPage() {
       color: FLOOR_TINTS[index % FLOOR_TINTS.length]
     }));
   }, [preview, assignment]);
+
+  // Reference uploads are trimmed to ~1 km around the placed artwork; the box
+  // comes from the same transforms that place the floors on the map, so the
+  // trim follows every drag, rotate and scale.
+  const focusBounds = useMemo(
+    () =>
+      placedBoundsWgs84(
+        state,
+        floorLayers.map((floor) => ({ label: floor.label, bounds: floor.bounds }))
+      ),
+    [state, floorLayers]
+  );
 
   /**
    * The API explains its own failures far better than this screen can guess, so
@@ -380,6 +393,7 @@ export function IllustratorPage() {
         onTogglePicking={() => setPicking((value) => !value)}
         referenceLayers={referenceLayers}
         onReferenceLayersChange={setReferenceLayers}
+        focusBounds={focusBounds}
         bounds={bounds}
         suggestedCrs={preview.suggested_crs}
         suggestedCrsLabel={preview.suggested_crs_label}

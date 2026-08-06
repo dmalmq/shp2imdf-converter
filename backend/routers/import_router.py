@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from io import BytesIO
 import json
+import math
 from pathlib import Path
 import shutil
 from typing import Annotated
 from urllib.parse import quote
 import zipfile
 
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import Response
 
 from backend.src.detector import sync_feature_types
@@ -210,6 +211,27 @@ async def convert_illustrator(
     )
 
 
+def _parse_focus_bounds(raw: str | None) -> tuple[float, float, float, float] | None:
+    """Parse a ``"minLon,minLat,maxLon,maxLat"`` hint into a WGS84 box.
+
+    The hint is an optimisation, not a contract: anything that does not parse
+    (wrong field count, non-numeric, NaN or infinite) is ignored so a bad hint
+    can never block an upload.
+    """
+    if not raw:
+        return None
+    parts = raw.split(",")
+    if len(parts) != 4:
+        return None
+    try:
+        min_lon, min_lat, max_lon, max_lat = (float(part) for part in parts)
+    except ValueError:
+        return None
+    if not all(math.isfinite(value) for value in (min_lon, min_lat, max_lon, max_lat)):
+        return None
+    return (min_lon, min_lat, max_lon, max_lat)
+
+
 @router.post("/reference-layers", response_model=ReferenceLayersResponse)
 async def upload_reference_layers(
     request: Request,
@@ -217,11 +239,14 @@ async def upload_reference_layers(
         list[UploadFile],
         File(description="Shapefile components, a .zip containing them, or a .gpkg"),
     ],
+    focus_bounds: Annotated[str | None, Form()] = None,
 ) -> ReferenceLayersResponse:
     """Read overlay geometry for the placement map.
 
     Stateless on purpose: the layers are only drawn under the artwork to align
     it, so the response is the whole contract and nothing is cached or exported.
+
+    ``focus_bounds`` optionally pins the trim to the placed artwork's box.
     """
     blobs: list[tuple[str, bytes]] = []
     total = 0
@@ -233,7 +258,7 @@ async def upload_reference_layers(
             raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
         blobs.append((upload.filename or "reference.bin", payload))
 
-    layers = read_reference_layers(blobs)
+    layers = read_reference_layers(blobs, focus=_parse_focus_bounds(focus_bounds))
     return ReferenceLayersResponse(
         layers=[
             ReferenceLayerItem(

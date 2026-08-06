@@ -7,6 +7,7 @@ import copy
 import json
 from dataclasses import dataclass
 from io import BytesIO
+import math
 from pathlib import Path
 import re
 import tempfile
@@ -17,10 +18,11 @@ import zipfile
 import fiona
 import geopandas as gpd
 import pandas as pd
-from pyproj import CRS
+from pyproj import CRS, Transformer
 from shapely import get_num_coordinates, make_valid
 from shapely.geometry import GeometryCollection, MultiLineString, MultiPoint, MultiPolygon, Polygon, mapping, shape
 from shapely.geometry.polygon import orient
+import pyogrio
 
 from backend.src.detector import detect_files, load_keyword_map
 from backend.src.schemas import CleanupSummary, ImportedFile
@@ -59,6 +61,9 @@ class LoadedSource:
     gdf: gpd.GeoDataFrame
     warnings: list[str]
     crs_detected: str | None
+    # Features in the file itself. The bbox pushdown can leave ``gdf`` with a
+    # subset, so the display layer counts against the file, not the read.
+    source_feature_count: int | None = None
 
 
 def _expand_archives(file_blobs: Sequence[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
@@ -454,7 +459,11 @@ def _reproject_to_wgs84(
     return gdf, warnings, crs_detected
 
 
-def _read_shapefile_from_group(stem: str, grouped_files: dict[str, bytes]) -> LoadedSource:
+def _read_shapefile_from_group(
+    stem: str,
+    grouped_files: dict[str, bytes],
+    focus_bbox_4326: tuple[float, float, float, float] | None = None,
+) -> LoadedSource:
     warnings: list[str] = []
     required = {".shp", ".dbf", ".shx"}
     missing_required = sorted(required - set(grouped_files))
@@ -468,7 +477,26 @@ def _read_shapefile_from_group(stem: str, grouped_files: dict[str, bytes]) -> Lo
         for extension, content in grouped_files.items():
             (directory / f"{stem}{extension}").write_bytes(content)
         shapefile_path = directory / f"{stem}.shp"
-        gdf = gpd.read_file(shapefile_path)
+        # GDAL can filter in the file's own CRS, so the reader never materialises
+        # the distant features the focus trim is about to drop anyway. Reading
+        # the header via pyogrio also yields the file's full feature count for
+        # the display total, which a bbox read would otherwise lose. If the
+        # probe itself fails the read below is the one that decides the fate of
+        # the upload; the count then falls back to the read frame's length.
+        try:
+            info = pyogrio.read_info(shapefile_path)
+        except Exception:
+            info = None
+        if info is not None:
+            bbox = _focus_bbox_in_crs(focus_bbox_4326, info["crs"])
+            source_feature_count = info["features"]
+        else:
+            bbox = None
+            source_feature_count = None
+        if bbox is None:
+            gdf = gpd.read_file(shapefile_path)
+        else:
+            gdf = gpd.read_file(shapefile_path, bbox=bbox)
 
     gdf, crs_warnings, crs_detected = _reproject_to_wgs84(gdf)
     warnings.extend(crs_warnings)
@@ -479,13 +507,38 @@ def _read_shapefile_from_group(stem: str, grouped_files: dict[str, bytes]) -> Lo
         gdf=gdf,
         warnings=warnings,
         crs_detected=crs_detected,
+        source_feature_count=source_feature_count,
     )
+
+
+def _focus_bbox_in_crs(
+    bbox_4326: tuple[float, float, float, float] | None,
+    layer_crs: Any,
+) -> tuple[float, float, float, float] | None:
+    """Reproject the WGS84 focus box into a layer's own CRS.
+
+    Returns None when the CRS is unknown or the conversion fails, which means
+    "skip the pushdown and read the whole layer" - the exact WGS84 filter in
+    ``_to_reference_layer`` still applies afterwards. The pushdown is an
+    optimisation, never something an upload may fail over.
+    """
+    if bbox_4326 is None or layer_crs is None:
+        return None
+    try:
+        parsed = CRS.from_user_input(layer_crs)
+        transformer = Transformer.from_crs("EPSG:4326", parsed, always_xy=True)
+        # transform_bounds densifies the box edges; transforming the four corners
+        # alone can silently pull curved edges inside the filter window.
+        return transformer.transform_bounds(*bbox_4326)
+    except Exception:
+        return None
 
 
 def _read_geopackage_blob(
     package_stem: str,
     content: bytes,
     used_stems: set[str],
+    focus_bbox_4326: tuple[float, float, float, float] | None = None,
 ) -> tuple[list[LoadedSource], list[str]]:
     loaded_sources: list[LoadedSource] = []
     warnings: list[str] = []
@@ -502,6 +555,8 @@ def _read_geopackage_blob(
         for layer_name in layers:
             with fiona.open(package_path, layer=layer_name) as collection:
                 geometry_type = str(collection.schema.get("geometry") or "").strip()
+                layer_crs = collection.crs
+                source_feature_count = len(collection)
 
             if not geometry_type or geometry_type.lower() == "none":
                 warnings.append(f"{package_stem}: skipped non-spatial GeoPackage layer '{layer_name}'.")
@@ -511,7 +566,11 @@ def _read_geopackage_blob(
                 f"{package_stem}__{_sanitize_layer_name(layer_name)}",
                 used_stems,
             )
-            gdf = gpd.read_file(package_path, layer=layer_name)
+            bbox = _focus_bbox_in_crs(focus_bbox_4326, layer_crs)
+            if bbox is None:
+                gdf = gpd.read_file(package_path, layer=layer_name)
+            else:
+                gdf = gpd.read_file(package_path, layer=layer_name, bbox=bbox)
             gdf, layer_warnings, crs_detected = _reproject_to_wgs84(
                 gdf,
                 missing_crs_warning=f"{package_stem}: layer '{layer_name}' is missing CRS metadata.",
@@ -524,6 +583,7 @@ def _read_geopackage_blob(
                     gdf=gdf,
                     warnings=layer_warnings,
                     crs_detected=crs_detected,
+                    source_feature_count=source_feature_count,
                 )
             )
 
@@ -564,12 +624,58 @@ _METRES_PER_DEGREE = 111_132.0
 _REFERENCE_MAX_VERTICES = 250_000
 _REFERENCE_MAX_FEATURES = 20_000
 
+# Reference data exists so artwork can be aligned against surveyed geometry the
+# operator already trusts. Only what sits near that artwork is ever looked at;
+# the rest of a regional extract is payload nobody sees, so a focus box plus
+# this margin is the working set. 1 km is comfortably beyond the visible buffer
+# around any placed drawing while still shrinking a 159 km station extract to
+# a tiny slice.
+_REFERENCE_FOCUS_MARGIN_METRES = 1000.0
 
-def _to_reference_layer(source: LoadedSource) -> ReferenceLayer:
+
+def _expand_focus_box(focus: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    """Grow a WGS84 box by the alignment margin, one degree length per axis.
+
+    Longitude degrees shrink with latitude (at 35N they are ~20% shorter than
+    latitude degrees), so the two axes cannot share one metres-per-degree
+    figure. ``transform_bounds`` in the readers later densifies these edges
+    again, so the box can afford to be a little coarse here.
+    """
+    min_lon, min_lat, max_lon, max_lat = focus
+    mid_lat = (min_lat + max_lat) / 2.0
+    dlat = _REFERENCE_FOCUS_MARGIN_METRES / 111_320.0
+    cos_mid_lat = math.cos(math.radians(mid_lat))
+    if cos_mid_lat > 0.01:
+        dlon = _REFERENCE_FOCUS_MARGIN_METRES / (111_320.0 * cos_mid_lat)
+    else:
+        # A box hugging a pole sits where longitude degrees collapse to zero
+        # length; dividing by a near-zero cosine would blow the margin up to
+        # nonsense, so widen the box the whole way around instead.
+        dlon = 180.0
+    return (min_lon - dlon, min_lat - dlat, max_lon + dlon, max_lat + dlat)
+
+
+def _to_reference_layer(
+    source: LoadedSource,
+    focus_bbox_4326: tuple[float, float, float, float] | None = None,
+) -> ReferenceLayer:
     frame = source.gdf
-    total = int(len(frame))
+    # The display total is the whole file, not the slice the bbox pushdown
+    # materialised, so the UI can honestly say "N of M".
+    total = (
+        source.source_feature_count
+        if source.source_feature_count is not None
+        else int(len(frame))
+    )
     # Attributes are never displayed; dropping them keeps big DBFs off the wire.
     frame = frame.loc[frame.geometry.notna() & ~frame.geometry.is_empty, ["geometry"]]
+
+    # Spatial trim comes before the simplify and cap steps so the 1 km working
+    # set is guaranteed no matter what the readers below did. ``cx`` filters
+    # through the geometry's spatial index.
+    if focus_bbox_4326 is not None:
+        min_lon, min_lat, max_lon, max_lat = focus_bbox_4326
+        frame = frame.cx[min_lon:max_lon, min_lat:max_lat]
 
     if len(frame):
         frame = frame.copy()
@@ -589,6 +695,12 @@ def _to_reference_layer(source: LoadedSource) -> ReferenceLayer:
     if truncated:
         frame = frame.iloc[:kept]
 
+    warnings = list(source.warnings)
+    if focus_bbox_4326 is not None and not len(frame):
+        # The operator pointed at a spot where this layer has nothing, and an
+        # empty overlay looks like a failed upload. Say so instead.
+        warnings.append(f"{source.stem}: no features within 1 km of the artwork.")
+
     geojson = (
         json.loads(frame.to_json(na="null"))
         if len(frame)
@@ -600,15 +712,23 @@ def _to_reference_layer(source: LoadedSource) -> ReferenceLayer:
         feature_count=total,
         geojson=geojson,
         truncated=truncated,
-        warnings=list(source.warnings),
+        warnings=warnings,
     )
 
 
-def read_reference_layers(file_blobs: Sequence[tuple[str, bytes]]) -> list[ReferenceLayer]:
+def read_reference_layers(
+    file_blobs: Sequence[tuple[str, bytes]],
+    *,
+    focus: tuple[float, float, float, float] | None = None,
+) -> list[ReferenceLayer]:
     """Read shapefiles/GeoPackages into WGS84 GeoJSON for map display only.
 
     Nothing here enters an export: these layers exist so artwork can be aligned
     against surveyed geometry the operator already trusts.
+
+    ``focus`` is the WGS84 ``(minLon, minLat, maxLon, maxLat)`` box of the
+    placed artwork; it narrows each layer to the features within a 1 km margin
+    of that box. Without it every feature is returned, exactly as before.
     """
     if not file_blobs:
         raise ValueError("No files provided.")
@@ -619,21 +739,22 @@ def read_reference_layers(file_blobs: Sequence[tuple[str, bytes]]) -> list[Refer
     if not shapefile_groups and not geopackages:
         raise ValueError("No shapefile components or GeoPackages found in upload.")
 
+    focus_bbox_4326 = _expand_focus_box(focus) if focus is not None else None
     used_stems = {stem.lower() for stem in shapefile_groups}
     sources: list[LoadedSource] = []
     for stem, files in sorted(shapefile_groups.items()):
         if ".shp" not in files:
             continue
-        sources.append(_read_shapefile_from_group(stem, files))
+        sources.append(_read_shapefile_from_group(stem, files, focus_bbox_4326=focus_bbox_4326))
     for package_stem, content in geopackages:
         package_sources, _package_warnings = _read_geopackage_blob(
-            package_stem, content, used_stems
+            package_stem, content, used_stems, focus_bbox_4326=focus_bbox_4326
         )
         sources.extend(package_sources)
 
     if not sources:
         raise ValueError("No spatial data layers found in upload.")
-    return [_to_reference_layer(source) for source in sources]
+    return [_to_reference_layer(source, focus_bbox_4326=focus_bbox_4326) for source in sources]
 
 
 def import_file_blobs(

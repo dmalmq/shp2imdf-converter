@@ -7,6 +7,7 @@ import {
   lngLatToEnu,
   metresPerPointForScale,
   residuals,
+  transformGeoJson,
   type SimilarityTransform
 } from "../lib/similarity";
 
@@ -494,6 +495,58 @@ export function currentResiduals(
     active.controlPoints.map((p) => p.artwork),
     enu
   );
+}
+
+/**
+ * Union of every floor's placed artwork bounds as a WGS84 lon/lat box: the
+ * area of interest for reference-layer trimming.
+ *
+ * All four artwork corners go through {@link transformGeoJson}, never a
+ * two-corner shortcut: rotation means the axis-aligned artwork box becomes a
+ * rotated footprint on the ground, and two corners can leave the other two
+ * outside the union. The artwork -> lon/lat maths stays in the similarity
+ * module exactly once, pinned by the cross-language golden fixture.
+ */
+export function placedBoundsWgs84(
+  state: PlacementState,
+  floors: { label: string; bounds: [number, number, number, number] }[]
+): [number, number, number, number] | null {
+  let union: [number, number, number, number] | null = null;
+  for (const floor of floors) {
+    const placement = state.floors.find((f) => f.label === floor.label);
+    if (!placement) continue;
+    const [minX, minY, maxX, maxY] = floor.bounds;
+    const corners = {
+      type: "FeatureCollection" as const,
+      features: [
+        [minX, minY],
+        [maxX, minY],
+        [maxX, maxY],
+        [minX, maxY]
+      ].map(([x, y]) => ({
+        type: "Feature" as const,
+        properties: null,
+        geometry: { type: "Point" as const, coordinates: [x, y] }
+      }))
+    };
+    const placed = transformGeoJson(corners, resolvedTransform(state, placement));
+    for (const feature of placed.features) {
+      // transformGeoJson moves Point coordinates in place, so every feature
+      // here stays the Point we constructed above.
+      const geometry = feature.geometry;
+      if (geometry?.type !== "Point") continue;
+      const [lon, lat] = geometry.coordinates;
+      union = union
+        ? [
+            Math.min(union[0], lon),
+            Math.min(union[1], lat),
+            Math.max(union[2], lon),
+            Math.max(union[3], lat)
+          ]
+        : [lon, lat, lon, lat];
+    }
+  }
+  return union;
 }
 
 export function useIllustratorPlacement(initial: PlacementState) {

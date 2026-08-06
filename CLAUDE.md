@@ -93,3 +93,8 @@ pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
   tolerance and every 1.2 m footprint collapsed to a triangle. Fixtures here need small
   features spread over a wide area — a single building hides this entirely, since extent
   and feature size are then the same number.
+  Regional extracts are also trimmed spatially: the placement screen sends the placed
+  artwork's WGS84 box as `focus_bounds`, and the reader keeps only what falls within
+  `_REFERENCE_FOCUS_MARGIN_METRES` (1 km) of it, pushing that box down into GDAL so
+  distant features are never even read. Omitting the field keeps the untrimmed
+  behaviour, so the endpoint stays usable on its own.

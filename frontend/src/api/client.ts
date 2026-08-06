@@ -981,11 +981,23 @@ export type ReferenceLayerItem = {
   geojson: { type: "FeatureCollection"; features: Feature[] };
 };
 
-/** Read shapefile/GeoPackage overlays for the placement map. Never exported. */
-export async function uploadReferenceLayers(files: File[]): Promise<ReferenceLayerItem[]> {
+/**
+ * Read shapefile/GeoPackage overlays for the placement map.
+ *
+ * `focusBounds` (WGS84 minLon,minLat,maxLon,maxLat) asks the backend to keep
+ * only features within 1 km of it, so a regional extract does not ship its
+ * full 12k-1.5M features to the browser.
+ */
+export async function uploadReferenceLayers(
+  files: File[],
+  focusBounds?: [number, number, number, number] | null
+): Promise<ReferenceLayerItem[]> {
   const body = new FormData();
   for (const file of files) {
     body.append("files", file);
+  }
+  if (focusBounds) {
+    body.append("focus_bounds", focusBounds.join(","));
   }
   const response = await fetch("/api/reference-layers", { method: "POST", body });
   const payload = await handleJson<{ layers: ReferenceLayerItem[] }>(response);
