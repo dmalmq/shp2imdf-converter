@@ -18,7 +18,7 @@ import fiona
 import geopandas as gpd
 import pandas as pd
 from pyproj import CRS
-from shapely import make_valid
+from shapely import get_num_coordinates, make_valid
 from shapely.geometry import GeometryCollection, MultiLineString, MultiPoint, MultiPolygon, Polygon, mapping, shape
 from shapely.geometry.polygon import orient
 
@@ -542,10 +542,27 @@ class ReferenceLayer:
     warnings: list[str]
 
 
-# A reference layer is only ever looked at, so it is simplified to roughly a
-# map pixel and capped. Anything finer is payload the browser cannot show.
-_REFERENCE_TOLERANCE_DIVISOR = 2000.0
-_REFERENCE_MAX_FEATURES = 5000
+# A reference layer is only ever looked at - but it is looked at while artwork is
+# being aligned onto it, so its vertices must not move perceptibly. The tolerance
+# is therefore a fixed ground distance, an order of magnitude inside the ~23 cm
+# this project already treats as a significant positional error (see CLAUDE.md).
+#
+# It used to be the dataset's own diagonal / 2000, reaching for "roughly a map
+# pixel". That only holds while the data fills the screen. A regional extract -
+# the Chiba branch station data is 159 km across - yielded a 79.5 m tolerance,
+# 66x the median 1.2 m footprint in the same file, so every building collapsed
+# into the triangle preserve_topology keeps alive. Extent is not a property of
+# the shapes being drawn; it only says how far apart they are.
+_REFERENCE_TOLERANCE_METRES = 0.05
+# Latitude degrees are the longer ones, so converting through them leaves the
+# effective tolerance in longitude slightly finer - erring toward fidelity.
+_METRES_PER_DEGREE = 111_132.0
+
+# Volume guards. Vertices drive payload and render cost, so they are what the
+# budget counts; the feature cap additionally bounds per-feature JSON overhead,
+# which is what actually hurts when a file holds a million two-point lines.
+_REFERENCE_MAX_VERTICES = 250_000
+_REFERENCE_MAX_FEATURES = 20_000
 
 
 def _to_reference_layer(source: LoadedSource) -> ReferenceLayer:
@@ -555,16 +572,22 @@ def _to_reference_layer(source: LoadedSource) -> ReferenceLayer:
     frame = frame.loc[frame.geometry.notna() & ~frame.geometry.is_empty, ["geometry"]]
 
     if len(frame):
-        minx, miny, maxx, maxy = frame.total_bounds
-        diagonal = ((maxx - minx) ** 2 + (maxy - miny) ** 2) ** 0.5
-        tolerance = diagonal / _REFERENCE_TOLERANCE_DIVISOR if diagonal > 0 else 0.0
-        if tolerance > 0:
-            frame = frame.copy()
-            frame["geometry"] = frame.geometry.simplify(tolerance, preserve_topology=True)
+        frame = frame.copy()
+        frame["geometry"] = frame.geometry.simplify(
+            _REFERENCE_TOLERANCE_METRES / _METRES_PER_DEGREE, preserve_topology=True
+        )
 
-    truncated = len(frame) > _REFERENCE_MAX_FEATURES
+    kept = min(len(frame), _REFERENCE_MAX_FEATURES)
+    if len(frame):
+        # Spend the budget on whole features in order, so a file of small
+        # footprints arrives complete and only a genuinely huge one is cut. One
+        # feature always survives, even if it alone blows the budget: showing the
+        # operator something to align against beats showing an empty layer.
+        running = get_num_coordinates(frame.geometry.to_numpy()).cumsum()
+        kept = max(1, min(kept, int((running <= _REFERENCE_MAX_VERTICES).sum())))
+    truncated = kept < len(frame)
     if truncated:
-        frame = frame.iloc[:_REFERENCE_MAX_FEATURES]
+        frame = frame.iloc[:kept]
 
     geojson = (
         json.loads(frame.to_json(na="null"))

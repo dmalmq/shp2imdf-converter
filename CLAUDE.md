@@ -86,3 +86,10 @@ pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
   was caught by loading the output in QGIS rather than by reading it. String assertions
   cannot see this class of bug: `test_illustrator_qgis_crs.py` ends with a test that runs
   the real PyQGIS (auto-skipped when QGIS is absent), and that is the one worth trusting.
+- Reference overlays are decimated for the browser, but the tolerance is a fixed ground
+  distance (`_REFERENCE_TOLERANCE_METRES`, 5 cm) because artwork gets aligned against
+  them. It was once the dataset's own extent / 2000, which is fine for a one-building
+  file and catastrophic for a regional extract: a 159 km station dataset produced a 79.5 m
+  tolerance and every 1.2 m footprint collapsed to a triangle. Fixtures here need small
+  features spread over a wide area — a single building hides this entirely, since extent
+  and feature size are then the same number.
