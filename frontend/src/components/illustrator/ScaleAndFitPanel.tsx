@@ -4,6 +4,7 @@ import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
   DEFAULT_DRAWING_SCALE,
   resolvedTransform,
+  type AdjustmentMode,
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
@@ -13,7 +14,10 @@ import { ControlPointList } from "./ControlPointList";
 type Props = {
   state: PlacementState;
   dispatch: (action: PlacementAction) => void;
-  picking: boolean;
+  /** Pair-picking stage, forwarded to the control-point list. */
+  pickStage: "artwork" | "map" | null;
+  /** What fits and scale operations act on. */
+  mode: AdjustmentMode;
   onTogglePicking: () => void;
 };
 
@@ -21,7 +25,7 @@ type Props = {
  * Everything that derives the transform numerically: the drawing scale, the
  * measured-distance calibration, and the control points that fit both at once.
  */
-export function ScaleAndFitPanel({ state, dispatch, picking, onTogglePicking }: Props) {
+export function ScaleAndFitPanel({ state, dispatch, pickStage, mode, onTogglePicking }: Props) {
   const { t } = useUiLanguage();
   const [denominator, setDenominator] = useState(String(DEFAULT_DRAWING_SCALE));
   const [artworkDistance, setArtworkDistance] = useState("");
@@ -104,7 +108,8 @@ export function ScaleAndFitPanel({ state, dispatch, picking, onTogglePicking }: 
       <ControlPointList
         state={state}
         dispatch={dispatch}
-        picking={picking}
+        pickStage={pickStage}
+        mode={mode}
         onTogglePicking={onTogglePicking}
       />
     </div>

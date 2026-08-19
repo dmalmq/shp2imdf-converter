@@ -164,6 +164,67 @@ export function artworkToLngLat(
   return enuToLngLat(east, north, transform.mapAnchor[0], transform.mapAnchor[1]);
 }
 
+/**
+ * Inverse of {@link artworkToLngLat}: a map position back into artwork points.
+ * The forward map is s·R(θ) about the artwork anchor, so the inverse is
+ * R(−θ)/s about the map anchor. Control-point picking uses this to read a
+ * click on the placed plan as the artwork coordinate the user meant.
+ */
+export function artworkFromLngLat(
+  transform: SimilarityTransform,
+  lngLat: [number, number]
+): [number, number] {
+  const [east, north] = lngLatToEnu(lngLat[0], lngLat[1], transform.mapAnchor[0], transform.mapAnchor[1]);
+  const theta = (transform.rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
+  const s = transform.metresPerPoint;
+  return [
+    transform.artworkAnchor[0] + (cos * east + sin * north) / s,
+    transform.artworkAnchor[1] + (-sin * east + cos * north) / s
+  ];
+}
+
+/**
+ * Closest candidate to `point` within `tolerance` (same units, screen pixels
+ * at the call site), or null when none are near. A candidate exactly at the
+ * tolerance still counts.
+ */
+export function nearestVertex(
+  candidates: [number, number][],
+  point: [number, number],
+  tolerance: number
+): [number, number] | null {
+  let best: [number, number] | null = null;
+  let bestDistance = tolerance;
+  for (const candidate of candidates) {
+    const distance = Math.hypot(candidate[0] - point[0], candidate[1] - point[1]);
+    if (distance <= bestDistance) {
+      bestDistance = distance;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+/** Every vertex of a geometry, flattened across rings and parts. */
+export function geometryPositions(geometry: Geometry): Position[] {
+  switch (geometry.type) {
+    case "Point":
+      return [geometry.coordinates];
+    case "MultiPoint":
+    case "LineString":
+      return geometry.coordinates;
+    case "MultiLineString":
+    case "Polygon":
+      return geometry.coordinates.flat();
+    case "MultiPolygon":
+      return geometry.coordinates.flat(2);
+    case "GeometryCollection":
+      return geometry.geometries.flatMap(geometryPositions);
+  }
+}
+
 export type GizmoCorner = {
   /** Artwork-space corner, named as it appears before any rotation. */
   key: "sw" | "se" | "ne" | "nw";

@@ -41,7 +41,8 @@ test("an unlinked floor carries the unlinked marker in its accessible name", () 
         "1F"
       )}
       dispatch={() => {}}
-      pickingControlPoint={false}
+      pickStage={null}
+      onPickArtwork={() => {}}
       onPickMap={() => {}}
     />
   );
@@ -66,7 +67,8 @@ test("the pill for the active floor announces its pressed state", () => {
         "1F"
       )}
       dispatch={() => {}}
-      pickingControlPoint={false}
+      pickStage={null}
+      onPickArtwork={() => {}}
       onPickMap={() => {}}
     />
   );
@@ -90,7 +92,8 @@ function renderMap(layers: FloorLayer[], floors: { label: string; linked: boolea
       floors={layers}
       state={stateWith(floors, floors[0].label)}
       dispatch={() => {}}
-      pickingControlPoint={false}
+      pickStage={null}
+      onPickArtwork={() => {}}
       onPickMap={() => {}}
     />
   );
@@ -138,7 +141,8 @@ test("the Group/Individual switch reflects the mode and reports changes", () => 
       dispatch={() => {}}
       mode="group"
       onModeChange={(mode) => seen.push(mode)}
-      pickingControlPoint={false}
+      pickStage={null}
+      onPickArtwork={() => {}}
       onPickMap={() => {}}
     />
   );

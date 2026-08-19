@@ -1,11 +1,14 @@
 import {
   applyMatrix,
+  artworkFromLngLat,
   artworkToLngLat,
   enuToLngLat,
   fitHelmert,
   gizmoFrame,
   lngLatToEnu,
+  geometryPositions,
   metresPerPointForScale,
+  nearestVertex,
   residuals,
   rotationForHandle,
   toEnuMatrix,
@@ -319,4 +322,60 @@ test("transformGeoJson leaves a geometry with no coordinates untouched", () => {
   };
   expect(() => transformGeoJson(collection, GOLDEN)).not.toThrow();
   expect(transformGeoJson(collection, GOLDEN).features[0].geometry).toBeNull();
+});
+
+test("artworkFromLngLat inverts artworkToLngLat under rotation and scale", () => {
+  for (const point of GOLDEN_ARTWORK) {
+    const lngLat = artworkToLngLat(GOLDEN, point[0], point[1]);
+    const back = artworkFromLngLat(GOLDEN, lngLat);
+    expect(back[0]).toBeCloseTo(point[0], 6);
+    expect(back[1]).toBeCloseTo(point[1], 6);
+  }
+});
+
+test("nearestVertex picks the closest candidate inside the tolerance", () => {
+  const candidates: [number, number][] = [
+    [100, 100],
+    [108, 102],
+    [300, 300]
+  ];
+  // (105, 101) is 3.2 px from (108, 102) and 5.1 px from (100, 100).
+  expect(nearestVertex(candidates, [105, 101], 10)).toEqual([108, 102]);
+});
+
+test("nearestVertex returns null beyond the tolerance and hits exactly at it", () => {
+  expect(nearestVertex([[100, 100]], [200, 200], 12)).toBeNull();
+  expect(nearestVertex([[100, 100]], [110, 100], 10)).toEqual([100, 100]);
+});
+
+test("geometryPositions flattens vertices across geometry kinds", () => {
+  expect(
+    geometryPositions({
+      type: "Polygon",
+      coordinates: [
+        [
+          [0, 0],
+          [10, 0],
+          [0, 0]
+        ]
+      ]
+    })
+  ).toEqual([
+    [0, 0],
+    [10, 0],
+    [0, 0]
+  ]);
+  expect(
+    geometryPositions({
+      type: "GeometryCollection",
+      geometries: [
+        { type: "Point", coordinates: [5, 6] },
+        { type: "LineString", coordinates: [[1, 1], [2, 2]] }
+      ]
+    })
+  ).toEqual([
+    [5, 6],
+    [1, 1],
+    [2, 2]
+  ]);
 });

@@ -2,11 +2,13 @@ import { useReducer } from "react";
 
 import type { TransformPayload } from "../api/client";
 import {
+  applyMatrix,
   enuToLngLat,
   fitHelmert,
   lngLatToEnu,
   metresPerPointForScale,
   residuals,
+  toEnuMatrix,
   transformGeoJson,
   type SimilarityTransform
 } from "../lib/similarity";
@@ -72,7 +74,7 @@ export type PlacementAction =
   | { type: "setWorkingCrs"; workingCrs: string }
   | { type: "addControlPoint"; point: ControlPoint }
   | { type: "removeControlPoint"; id: string }
-  | { type: "fitControlPoints" }
+  | { type: "fitControlPoints"; mode: AdjustmentMode }
   | { type: "applyFloors"; floors: { label: string; transform: TransformPayload }[] }
   /** Install a whole new floor set (new file or new assignment), labels included. */
   | { type: "resetPlacement"; state: PlacementState }
@@ -343,18 +345,35 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
       if (!active || active.controlPoints.length < 2) return state;
       const [lon0, lat0] = active.mapAnchor;
       const enu = active.controlPoints.map((p) => lngLatToEnu(p.map[0], p.map[1], lon0, lat0));
+      // Group mode fits the shared frame — but only while the active floor is
+      // linked: fitting the frame cannot move an unlinked floor, so the points
+      // picked on it must own its transform instead.
+      const frameFit = action.mode === "group" && active.linked;
       const fitted = fitHelmert(
         active.controlPoints.map((p) => p.artwork),
         enu,
         state.frame.workingCrs,
-        active.linked && state.scaleLocked ? state.frame.metresPerPoint : undefined
+        frameFit && state.scaleLocked ? state.frame.metresPerPoint : undefined
       );
-      const [lon, lat] = enuToLngLat(fitted.mapAnchor[0], fitted.mapAnchor[1], lon0, lat0);
-      const single = state.floors.length === 1;
-      if (single) {
-        // One floor: the fit applies through the frame and the floor stays
-        // linked, preserving the single-floor behaviour.
-        return {
+      if (frameFit) {
+        // The frame takes the fitted rotation and scale; the active floor's
+        // anchor is set to where ITS artwork anchor lands under the fit (not
+        // the fitted centroid anchor), then every linked floor follows by
+        // derivation. Nothing unlinks.
+        // toEnuMatrix yields ENU relative to the fitted anchor; add it back
+        // to land in the absolute ENU frame about (lon0, lat0).
+        const rel = applyMatrix(
+          toEnuMatrix(fitted),
+          active.artworkAnchor[0],
+          active.artworkAnchor[1]
+        );
+        const [lon, lat] = enuToLngLat(
+          fitted.mapAnchor[0] + rel[0],
+          fitted.mapAnchor[1] + rel[1],
+          lon0,
+          lat0
+        );
+        return recomputeLinked({
           ...state,
           frame: {
             ...state.frame,
@@ -366,11 +385,12 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
           floors: state.floors.map((f) =>
             f.label === active.label ? { ...f, mapAnchor: [lon, lat] } : f
           )
-        };
+        });
       }
-      // Multi-floor: the fit owns this floor's full transform, including its
-      // own anchor; keeping the region-centroid anchor would make residuals
-      // wrong. The floor unlinks so the frame never fights the fit.
+      // Individual fit: the fit owns this floor's full transform, including
+      // its own anchor; keeping the region-centroid anchor would make
+      // residuals wrong. The floor unlinks so the frame never fights the fit.
+      const [lon, lat] = enuToLngLat(fitted.mapAnchor[0], fitted.mapAnchor[1], lon0, lat0);
       return {
         ...state,
         floors: state.floors.map((f) =>

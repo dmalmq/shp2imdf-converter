@@ -40,6 +40,13 @@ type AssignedRegion = {
   layer_names: string[] | null;
 };
 
+/** Pair-picking session: pin a point on the plan, then its map correspondence. */
+type PickSession = {
+  stage: "artwork" | "map";
+  /** The artwork point waiting for its map correspondence. */
+  pendingArtwork: [number, number] | null;
+};
+
 /** Union of the given pages' content bounds, or null when none are known. */
 function pageUnionBounds(
   preview: IllustratorPreviewResponse,
@@ -138,7 +145,7 @@ export function IllustratorPage() {
   const [lastFile, setLastFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [picking, setPicking] = useState(false);
+  const [pickSession, setPickSession] = useState<PickSession | null>(null);
   const [outputCrs, setOutputCrs] = useState("EPSG:4326");
   const [formats, setFormats] = useState<ExportFormatsPayload>({
     geopackage: true,
@@ -166,7 +173,7 @@ export function IllustratorPage() {
     dispatch,
     mode: adjustmentMode,
     enabled: Boolean(preview) && assignment !== null,
-    onEscape: () => setPicking(false)
+    onEscape: () => setPickSession(null)
   });
 
   // Computed unconditionally so the hook order is stable across the early
@@ -396,8 +403,12 @@ export function IllustratorPage() {
         canRedo={history.future.length > 0}
         tab={placementTab}
         onTabChange={setPlacementTab}
-        picking={picking}
-        onTogglePicking={() => setPicking((value) => !value)}
+        pickStage={pickSession?.stage ?? null}
+        onTogglePicking={() =>
+          setPickSession((session) =>
+            session ? null : { stage: "artwork", pendingArtwork: null }
+          )
+        }
         referenceLayers={referenceLayers}
         onReferenceLayersChange={setReferenceLayers}
         focusBounds={focusBounds}
@@ -423,18 +434,33 @@ export function IllustratorPage() {
           onModeChange={setAdjustmentMode}
           recenterTo={recenterTo}
           referenceLayers={referenceLayers}
-          pickingControlPoint={picking}
+          pickStage={pickSession?.stage ?? null}
+          pendingArtwork={pickSession?.pendingArtwork ?? null}
+          onPickArtwork={(pt) => setPickSession({ stage: "map", pendingArtwork: pt })}
           onPickMap={(lngLat) => {
+            const active =
+              state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
+            if (!active || !pickSession?.pendingArtwork) return;
             dispatch({
               type: "addControlPoint",
               point: {
                 id: `${Date.now()}`,
-                artwork:
-                  state.floors.find((f) => f.label === state.activeFloorLabel)?.artworkAnchor ?? [0, 0],
+                artwork: pickSession.pendingArtwork,
                 map: lngLat
               }
             });
-            setPicking(false);
+            const count = active.controlPoints.length + 1;
+            if (count >= 2) {
+              // Two exact pairs determine the transform: fit immediately (one
+              // undo step) instead of making the user reach for the button.
+              if (count === 2) {
+                dispatch({ type: "fitControlPoints", mode: adjustmentMode });
+              }
+              setPickSession(null);
+            } else {
+              // Straight on to the second pair.
+              setPickSession({ stage: "artwork", pendingArtwork: null });
+            }
           }}
         />
       </div>

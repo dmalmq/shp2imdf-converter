@@ -47,7 +47,7 @@ function SidebarHarness() {
       canRedo={false}
       tab={tab}
       onTabChange={setTab}
-      picking={false}
+      pickStage={null}
       onTogglePicking={() => {}}
       referenceLayers={[]}
       onReferenceLayersChange={() => {}}

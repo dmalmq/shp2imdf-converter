@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Feature, FeatureCollection } from "geojson";
-import MapGL, { Layer, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
+import MapGL, {
+  Layer,
+  Marker,
+  type MapLayerMouseEvent,
+  type MapRef,
+  Source
+} from "react-map-gl/maplibre";
+import type { Map as MaplibreMap } from "maplibre-gl";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
@@ -9,7 +16,14 @@ import {
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
-import { gizmoFrame, transformGeoJson } from "../../lib/similarity";
+import {
+  artworkFromLngLat,
+  artworkToLngLat,
+  geometryPositions,
+  gizmoFrame,
+  nearestVertex,
+  transformGeoJson
+} from "../../lib/similarity";
 import {
   BASEMAP_ORDER,
   BASEMAP_STYLES,
@@ -20,6 +34,44 @@ import { Button } from "../ui";
 import { TransformHandles } from "./TransformHandles";
 
 export const FLOOR_TINTS = ["#3b82f6", "#16a34a", "#dc2626", "#9333ea", "#d97706", "#0891b2"];
+
+/** Snap radius for control-point picking, in screen pixels. */
+const SNAP_PX = 12;
+
+/**
+ * Nearest rendered vertex of the given layers to a screen point, as lngLat, or
+ * null when nothing renders within the tolerance. Vertices are compared in
+ * screen space, so the tolerance means pixels regardless of zoom.
+ */
+function nearestRenderedVertex(
+  instance: MaplibreMap,
+  layerIds: string[],
+  point: { x: number; y: number },
+  tolerancePx: number
+): [number, number] | null {
+  const layers = layerIds.filter((id) => instance.getLayer(id));
+  if (!layers.length) return null;
+  const features = instance.queryRenderedFeatures(
+    [
+      [point.x - tolerancePx, point.y - tolerancePx],
+      [point.x + tolerancePx, point.y + tolerancePx]
+    ],
+    { layers }
+  );
+  const lngLats: [number, number][] = [];
+  const screenPts: [number, number][] = [];
+  for (const feature of features) {
+    if (!feature.geometry) continue;
+    for (const coord of geometryPositions(feature.geometry)) {
+      const screen = instance.project(coord as [number, number]);
+      lngLats.push([coord[0], coord[1]]);
+      screenPts.push([screen.x, screen.y]);
+    }
+  }
+  const hit = nearestVertex(screenPts, [point.x, point.y], tolerancePx);
+  // nearestVertex returns the same tuple reference, so indexOf finds the pair.
+  return hit ? lngLats[screenPts.indexOf(hit)] : null;
+}
 
 export type FloorLayer = {
   label: string;
@@ -45,7 +97,11 @@ type Props = {
   /** What drags and handles act on: the whole linked group or the active floor. */
   mode: AdjustmentMode;
   onModeChange: (mode: AdjustmentMode) => void;
-  pickingControlPoint: boolean;
+  /** Pair-picking stage; null when no control-point pair is being picked. */
+  pickStage: "artwork" | "map" | null;
+  /** The pinned artwork half of the in-progress pair, awaiting its map click. */
+  pendingArtwork?: [number, number] | null;
+  onPickArtwork: (pt: [number, number]) => void;
   onPickMap: (lngLat: [number, number]) => void;
   /** Fly here when it changes; set by an address search, never by dragging. */
   recenterTo?: [number, number] | null;
@@ -63,7 +119,9 @@ export function PlacementMap({
   dispatch,
   mode,
   onModeChange,
-  pickingControlPoint,
+  pickStage,
+  pendingArtwork = null,
+  onPickArtwork,
   onPickMap,
   recenterTo,
   referenceLayers = []
@@ -148,9 +206,46 @@ export function PlacementMap({
   );
 
   const onClick = (event: MapLayerMouseEvent) => {
-    if (!pickingControlPoint) return;
-    onPickMap([event.lngLat.lng, event.lngLat.lat]);
+    if (!pickStage) return;
+    const instance = mapRef.current?.getMap();
+    if (pickStage === "artwork") {
+      // Pin an artwork point: the click must land on the active floor's plan.
+      if (!instance || !activeFloor || !activeTransform) return;
+      const bodyIds = [
+        `floor-${activeFloor.label}-fill`,
+        `floor-${activeFloor.label}-line`
+      ];
+      const snapped = nearestRenderedVertex(instance, bodyIds, event.point, SNAP_PX);
+      if (!snapped) {
+        const layers = bodyIds.filter((id) => instance.getLayer(id));
+        const onPlan =
+          layers.length > 0 &&
+          instance.queryRenderedFeatures([event.point.x, event.point.y], { layers }).length > 0;
+        if (!onPlan) return;
+      }
+      const lngLat = snapped ?? [event.lngLat.lng, event.lngLat.lat];
+      onPickArtwork(artworkFromLngLat(activeTransform, lngLat));
+      return;
+    }
+    // Map side: snap to a reference-layer vertex when one is near.
+    const referenceIds = referenceLayers
+      .filter((layer) => layer.visible)
+      .flatMap((layer) => [
+        `reference-${layer.name}-fill`,
+        `reference-${layer.name}-line`,
+        `reference-${layer.name}-point`
+      ]);
+    const snapped = instance
+      ? nearestRenderedVertex(instance, referenceIds, event.point, SNAP_PX)
+      : null;
+    onPickMap(snapped ?? [event.lngLat.lng, event.lngLat.lat]);
   };
+
+  // The pinned artwork half of the pair follows the active floor's transform.
+  const pendingMarkerLngLat =
+    pickStage === "map" && pendingArtwork && activeTransform
+      ? artworkToLngLat(activeTransform, pendingArtwork[0], pendingArtwork[1])
+      : null;
 
   return (
     <div className="relative h-full w-full">
@@ -166,7 +261,7 @@ export function PlacementMap({
         style={{ width: "100%", height: "100%" }}
         onLoad={() => setReady(true)}
         onClick={onClick}
-        cursor={pickingControlPoint ? "crosshair" : undefined}
+        cursor={pickStage ? "crosshair" : undefined}
       >
         {/* Reference data sits under everything the user is placing. */}
         {referenceLayers
@@ -259,6 +354,16 @@ export function PlacementMap({
               }}
             />
           </Source>
+        ) : null}
+
+        {pendingMarkerLngLat ? (
+          <Marker
+            longitude={pendingMarkerLngLat[0]}
+            latitude={pendingMarkerLngLat[1]}
+            anchor="center"
+          >
+            <div className="h-3 w-3 rounded-full border-2 border-amber-500 bg-white shadow" />
+          </Marker>
         ) : null}
 
         <Source id="placement-control-points" type="geojson" data={controlPointData}>

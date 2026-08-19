@@ -31,7 +31,8 @@ type Props = {
   /** Active tab id; the three panels stay mounted, hidden when inactive. */
   tab: PlacementTab;
   onTabChange: (tab: PlacementTab) => void;
-  picking: boolean;
+  /** Pair-picking stage, forwarded to the fit panel. */
+  pickStage: "artwork" | "map" | null;
   onTogglePicking: () => void;
   referenceLayers: ReferenceLayer[];
   onReferenceLayersChange: (layers: ReferenceLayer[]) => void;
@@ -67,7 +68,7 @@ export function PlacementSidebar({
   canRedo,
   tab,
   onTabChange,
-  picking,
+  pickStage,
   onTogglePicking,
   referenceLayers,
   onReferenceLayersChange,
@@ -121,7 +122,8 @@ export function PlacementSidebar({
             <ScaleAndFitPanel
               state={state}
               dispatch={dispatch}
-              picking={picking}
+              pickStage={pickStage}
+              mode={mode}
               onTogglePicking={onTogglePicking}
             />
           </div>

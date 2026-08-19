@@ -1,6 +1,7 @@
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
   currentResiduals,
+  type AdjustmentMode,
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
@@ -9,11 +10,14 @@ import { Button } from "../ui";
 type Props = {
   state: PlacementState;
   dispatch: (action: PlacementAction) => void;
-  picking: boolean;
+  /** Pair-picking stage: pin the artwork point, then its map correspondence. */
+  pickStage: "artwork" | "map" | null;
+  /** What the fit acts on: the shared frame or the active floor. */
+  mode: AdjustmentMode;
   onTogglePicking: () => void;
 };
 
-export function ControlPointList({ state, dispatch, picking, onTogglePicking }: Props) {
+export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePicking }: Props) {
   const { t } = useUiLanguage();
   const activeFloor = state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
   const controlPoints = activeFloor?.controlPoints ?? [];
@@ -23,16 +27,20 @@ export function ControlPointList({ state, dispatch, picking, onTogglePicking }: 
     <div className="space-y-2 text-sm">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium">{t("Control points", "基準点")}</span>
-        <Button size="sm" variant={picking ? "primary" : "secondary"} onClick={onTogglePicking}>
-          {picking ? t("Click the map...", "地図をクリック...") : t("Add point", "点を追加")}
+        <Button size="sm" variant={pickStage ? "primary" : "secondary"} onClick={onTogglePicking}>
+          {pickStage === "artwork"
+            ? t("Click a point on the plan...", "図面上の点をクリック...")
+            : pickStage === "map"
+              ? t("Click the same point on the map...", "地図上の同じ点をクリック...")
+              : t("Add point", "点を追加")}
         </Button>
       </div>
 
       {controlPoints.length === 0 ? (
         <p className="text-xs text-[var(--color-text-muted)]">
           {t(
-            "Optional. Use these when the basemap shows the building.",
-            "任意。地図に建物が表示されている場合に使用します。"
+            "Optional. Pick two points on the plan and the same two on the map or a reference layer — position, rotation and scale then fit themselves.",
+            "任意。図面上の2点と、地図または参照レイヤー上の同じ2点を選ぶと、位置・回転・縮尺が自動で合います。"
           )}
         </p>
       ) : (
@@ -65,7 +73,7 @@ export function ControlPointList({ state, dispatch, picking, onTogglePicking }: 
         size="sm"
         className="w-full"
         disabled={controlPoints.length < 2}
-        onClick={() => dispatch({ type: "fitControlPoints" })}
+        onClick={() => dispatch({ type: "fitControlPoints", mode })}
       >
         {t("Fit to control points", "基準点に合わせる")}
       </Button>

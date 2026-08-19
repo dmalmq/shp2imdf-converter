@@ -344,10 +344,62 @@ test("fitting control points drives residuals to zero", () => {
     type: "addControlPoint",
     point: { id: "b", artwork: [500, 0], map: [139.701, 35.6903] }
   });
-  state = placementReducer(state, { type: "fitControlPoints" });
+  state = placementReducer(state, { type: "fitControlPoints", mode: "individual" });
   const fit = currentResiduals(state);
   expect(fit).not.toBeNull();
   expect(fit!.rmse).toBeLessThan(0.01);
+});
+
+// Two pairs: artwork (0,0) and (100,0); the second map point 50 m due NORTH of
+// the first, so the fit must recover a 90° rotation and 0.5 m per point.
+function twoPairState(): PlacementState {
+  const north: [number, number] = enuToLngLat(0, 50, ANCHOR[0], ANCHOR[1]);
+  let state = placementReducer(BASE, {
+    type: "addControlPoint",
+    point: { id: "a", artwork: [0, 0], map: ANCHOR }
+  });
+  state = placementReducer(state, {
+    type: "addControlPoint",
+    point: { id: "b", artwork: [100, 0], map: north }
+  });
+  return state;
+}
+
+test("a group-mode fit drives the frame and keeps every floor linked", () => {
+  const state = placementReducer(twoPairState(), { type: "fitControlPoints", mode: "group" });
+  expect(state.frame.rotationDeg).toBeCloseTo(90, 6);
+  expect(state.frame.metresPerPoint).toBeCloseTo(0.5, 9);
+  expect(state.floors.map((f) => f.linked)).toEqual([true, true]);
+  // The anchor shift places 1F's own artwork anchor exactly under the fit.
+  const fit = currentResiduals(state);
+  expect(fit!.rmse).toBeLessThan(0.01);
+});
+
+test("a group-mode fit respects the locked scale", () => {
+  let state = placementReducer(twoPairState(), { type: "setDrawingScale", denominator: 500 });
+  state = placementReducer(state, { type: "fitControlPoints", mode: "group" });
+  expect(state.frame.metresPerPoint).toBeCloseTo(0.1763888888, 9);
+  expect(state.frame.rotationDeg).toBeCloseTo(90, 6);
+  expect(state.floors[0].linked).toBe(true);
+});
+
+test("an individual-mode fit unlinks the active floor and owns its transform", () => {
+  const state = placementReducer(twoPairState(), { type: "fitControlPoints", mode: "individual" });
+  const fitted = state.floors[0];
+  expect(fitted.linked).toBe(false);
+  expect(fitted.rotationDeg).toBeCloseTo(90, 6);
+  expect(fitted.metresPerPoint).toBeCloseTo(0.5, 9);
+  expect(state.floors[1].linked).toBe(true);
+});
+
+test("group mode still fits an unlinked active floor individually", () => {
+  // The frame cannot move an unlinked floor, so points picked on it must own
+  // its transform even in group mode.
+  let state = placementReducer(twoPairState(), { type: "unlockFloor", label: "1F" });
+  state = placementReducer(state, { type: "fitControlPoints", mode: "group" });
+  expect(state.floors[0].linked).toBe(false);
+  expect(state.floors[0].rotationDeg).toBeCloseTo(90, 6);
+  expect(state.frame.rotationDeg).toBe(0);
 });
 
 test("a whole drag collapses into one undo step", () => {
