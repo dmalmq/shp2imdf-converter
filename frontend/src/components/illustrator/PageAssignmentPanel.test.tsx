@@ -141,6 +141,11 @@ test("the size warning appears only when sheet sizes differ", () => {
   expect(screen.queryByTestId("page-size-warning")).toBeNull();
 });
 
+test("sub-point MediaBox noise does not trigger the size warning", () => {
+  renderPanel([page(1, { width_pt: 1190.9999, height_pt: 841.9998 }), page(2, { width_pt: 1191.0001, height_pt: 842.0002 })]);
+  expect(screen.queryByTestId("page-size-warning")).toBeNull();
+});
+
 test("differing sheet sizes warn that floors may need individual positioning", () => {
   renderPanel([page(1), page(2, { width_pt: 400, height_pt: 400 })]);
   expect(screen.getByTestId("page-size-warning")).toBeInTheDocument();

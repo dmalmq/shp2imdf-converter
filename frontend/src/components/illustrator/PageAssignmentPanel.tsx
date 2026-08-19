@@ -109,7 +109,11 @@ export function PageAssignmentPanel({
   const [splitting, setSplitting] = useState<number | null>(null);
 
   const sizesDiffer = useMemo(
-    () => new Set(pages.map((page) => `${page.width_pt}x${page.height_pt}`)).size > 1,
+    // Compare at the displayed precision: MediaBox floats carry sub-point
+    // noise (e.g. 1190.9999 vs 1191.0001) that renders as the same size.
+    () =>
+      new Set(pages.map((page) => `${Math.round(page.width_pt)}x${Math.round(page.height_pt)}`))
+        .size > 1,
     [pages]
   );
   const floors = useMemo(() => buildFloors(cards, boxesByPage), [cards, boxesByPage]);
