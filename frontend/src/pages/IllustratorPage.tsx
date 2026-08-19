@@ -27,6 +27,7 @@ import {
   placedBoundsWgs84,
   placementHistoryReducer,
   toFloorPayloads,
+  type AdjustmentMode,
   type PlacementState
 } from "../hooks/useIllustratorPlacement";
 import { usePlacementShortcuts } from "../hooks/usePlacementShortcuts";
@@ -153,12 +154,17 @@ export function IllustratorPage() {
   const [recenterTo, setRecenterTo] = useState<[number, number] | null>(null);
   const [referenceLayers, setReferenceLayers] = useState<ReferenceLayer[]>([]);
   const [placementTab, setPlacementTab] = useState<PlacementTab>("fit");
+  // Floors start grouped: the whole building is aligned first, then the user
+  // switches to individual mode for final per-floor nudges. UI-level only —
+  // never an undo step.
+  const [adjustmentMode, setAdjustmentMode] = useState<AdjustmentMode>("group");
 
   // Only on the placement view: the upload and assignment screens have their own
   // keyboard behaviour and no floor to nudge.
   usePlacementShortcuts({
     state,
     dispatch,
+    mode: adjustmentMode,
     enabled: Boolean(preview) && assignment !== null,
     onEscape: () => setPicking(false)
   });
@@ -383,6 +389,7 @@ export function IllustratorPage() {
       <PlacementSidebar
         state={state}
         dispatch={dispatch}
+        mode={adjustmentMode}
         siteName={siteName}
         onLocate={setRecenterTo}
         canUndo={history.past.length > 0}
@@ -412,6 +419,8 @@ export function IllustratorPage() {
           floors={floorLayers}
           state={state}
           dispatch={dispatch}
+          mode={adjustmentMode}
+          onModeChange={setAdjustmentMode}
           recenterTo={recenterTo}
           referenceLayers={referenceLayers}
           pickingControlPoint={picking}

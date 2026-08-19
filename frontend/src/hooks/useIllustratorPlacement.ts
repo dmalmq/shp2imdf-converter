@@ -44,6 +44,13 @@ export type PlacementState = {
   scaleLocked: boolean;
 };
 
+/**
+ * Which floors placement gestures act on: the whole linked group, or the
+ * active floor alone. UI-level only — never part of the undoable state, the
+ * export payload, or a saved placement.
+ */
+export type AdjustmentMode = "group" | "individual";
+
 export type PlacementAction =
   /**
    * `baseline` marks the initial placement (located from the file name), which
@@ -215,7 +222,13 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
       return {
         ...state,
         floors: state.floors.map((f) =>
-          f.label === action.label ? { ...f, rotationDeg } : f
+          f.label === action.label
+            ? f.linked
+              ? // Detach with the frame values frozen in, so later frame
+                // operations cannot drag an independently-placed floor along.
+                { ...f, linked: false, rotationDeg, metresPerPoint: state.frame.metresPerPoint }
+              : { ...f, rotationDeg }
+            : f
         )
       };
     }
@@ -225,7 +238,11 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
       return {
         ...state,
         floors: state.floors.map((f) =>
-          f.label === action.label ? { ...f, metresPerPoint: action.metresPerPoint } : f
+          f.label === action.label
+            ? f.linked
+              ? { ...f, linked: false, rotationDeg: state.frame.rotationDeg, metresPerPoint: action.metresPerPoint }
+              : { ...f, metresPerPoint: action.metresPerPoint }
+            : f
         )
       };
     }

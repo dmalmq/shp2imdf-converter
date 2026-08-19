@@ -30,6 +30,8 @@ const LAYERS: FloorLayer[] = [
 test("an unlinked floor carries the unlinked marker in its accessible name", () => {
   render(
     <PlacementMap
+      mode="group"
+      onModeChange={() => {}}
       floors={LAYERS}
       state={stateWith(
         [
@@ -53,6 +55,8 @@ test("an unlinked floor carries the unlinked marker in its accessible name", () 
 test("the pill for the active floor announces its pressed state", () => {
   render(
     <PlacementMap
+      mode="group"
+      onModeChange={() => {}}
       floors={LAYERS}
       state={stateWith(
         [
@@ -81,6 +85,8 @@ const ONE_LAYER: FloorLayer[] = [
 function renderMap(layers: FloorLayer[], floors: { label: string; linked: boolean }[]) {
   render(
     <PlacementMap
+      mode="group"
+      onModeChange={() => {}}
       floors={layers}
       state={stateWith(floors, floors[0].label)}
       dispatch={() => {}}
@@ -115,4 +121,35 @@ test("clicking the isolate toggle flips its pressed state", () => {
 test("no isolate toggle with a single floor — there are no ghosts to hide", () => {
   renderMap(ONE_LAYER, [{ label: "1F", linked: true }]);
   expect(screen.queryByRole("button", { name: /only this floor/i })).toBeNull();
+});
+
+test("the Group/Individual switch reflects the mode and reports changes", () => {
+  const seen: string[] = [];
+  render(
+    <PlacementMap
+      floors={LAYERS}
+      state={stateWith(
+        [
+          { label: "1F", linked: true },
+          { label: "2F", linked: true }
+        ],
+        "1F"
+      )}
+      dispatch={() => {}}
+      mode="group"
+      onModeChange={(mode) => seen.push(mode)}
+      pickingControlPoint={false}
+      onPickMap={() => {}}
+    />
+  );
+  // Group is the default posture: the building aligns as one first.
+  expect(screen.getByRole("button", { name: "Group", pressed: true })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Individual", pressed: false })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Individual" }));
+  expect(seen).toEqual(["individual"]);
+});
+
+test("no mode switch with a single floor — there is nothing to group", () => {
+  renderMap(ONE_LAYER, [{ label: "1F", linked: true }]);
+  expect(screen.queryByRole("button", { name: "Individual" })).toBeNull();
 });

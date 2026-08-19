@@ -1,7 +1,7 @@
 import type { Dispatch } from "react";
 
 import type { ExportFormatsPayload } from "../../api/client";
-import type { PlacementAction, PlacementState } from "../../hooks/useIllustratorPlacement";
+import type { AdjustmentMode, PlacementAction, PlacementState } from "../../hooks/useIllustratorPlacement";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { Card, Tabs, tabPanelProps } from "../ui";
 import { ExportPanel } from "./ExportPanel";
@@ -20,6 +20,8 @@ const CRS_CHOICES = (suggested: string, suggestedLabel: string) => [
 type Props = {
   state: PlacementState;
   dispatch: Dispatch<PlacementAction>;
+  /** What placement gestures act on; forwarded to the transform panel. */
+  mode: AdjustmentMode;
   /** Building name from the drawing's file name; searched once to pre-locate. */
   siteName: string;
   /** Reports a chosen location so the map camera can follow it. */
@@ -58,6 +60,7 @@ type Props = {
 export function PlacementSidebar({
   state,
   dispatch,
+  mode,
   siteName,
   onLocate,
   canUndo,
@@ -89,6 +92,7 @@ export function PlacementSidebar({
         <TransformPanel
           state={state}
           dispatch={dispatch}
+          mode={mode}
           siteName={siteName}
           onLocate={onLocate}
           canUndo={canUndo}

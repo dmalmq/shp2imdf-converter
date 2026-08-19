@@ -1,17 +1,19 @@
 import { useEffect } from "react";
 
 import { enuToLngLat, lngLatToEnu } from "../lib/similarity";
-import type { PlacementAction, PlacementState } from "./useIllustratorPlacement";
+import type { AdjustmentMode, PlacementAction, PlacementState } from "./useIllustratorPlacement";
 
 type Options = {
   state: PlacementState;
   dispatch: (action: PlacementAction) => void;
+  /** What the arrows move: the whole linked group or the active floor. */
+  mode: AdjustmentMode;
   /** False while the upload/assignment screens are showing. */
   enabled: boolean;
   onEscape?: () => void;
 };
 
-/** Metres an arrow key moves the active floor; Shift multiplies it. */
+/** Metres an arrow key moves the placement; Shift multiplies it. */
 const NUDGE_METRES = 1;
 const NUDGE_COARSE = 10;
 
@@ -33,12 +35,13 @@ function isTextEntry(target: EventTarget | null): boolean {
 /**
  * Keyboard control for artwork placement.
  *
- * Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z (or Ctrl+Y) redoes, arrows nudge the
- * active floor by a metre (Shift: ten), and Escape leaves control-point picking.
- * A whole drag is one undo step, so Ctrl+Z reverts the gesture the user just
- * made rather than one animation frame of it.
+ * Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z (or Ctrl+Y) redoes, arrows nudge by a
+ * metre (Shift: ten) — the whole group in group mode, the active floor in
+ * individual mode — and Escape leaves control-point picking. A whole drag is
+ * one undo step, so Ctrl+Z reverts the gesture the user just made rather than
+ * one animation frame of it.
  */
-export function usePlacementShortcuts({ state, dispatch, enabled, onEscape }: Options): void {
+export function usePlacementShortcuts({ state, dispatch, mode, enabled, onEscape }: Options): void {
   useEffect(() => {
     if (!enabled) return undefined;
 
@@ -74,12 +77,16 @@ export function usePlacementShortcuts({ state, dispatch, enabled, onEscape }: Op
       const [lng, lat] = active.mapAnchor;
       const [east, north] = lngLatToEnu(lng, lat, lng, lat);
       const moved = enuToLngLat(east + offset[0] * step, north + offset[1] * step, lng, lat);
-      // Moving a floor moves just it, so stacked plans can be nudged into
-      // alignment without dragging the whole building.
-      dispatch({ type: "dragFloor", label: active.label, mapAnchor: moved });
+      // Group mode nudges the whole linked stack; individual mode nudges the
+      // active floor alone (the first nudge unlinks it from the frame).
+      if (mode === "individual") {
+        dispatch({ type: "dragFloor", label: active.label, mapAnchor: moved });
+      } else {
+        dispatch({ type: "positionBuilding", mapAnchor: moved });
+      }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [state, dispatch, enabled, onEscape]);
+  }, [state, dispatch, mode, enabled, onEscape]);
 }

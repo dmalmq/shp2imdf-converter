@@ -2,7 +2,11 @@ import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 import { TransformPanel } from "./TransformPanel";
-import { DEFAULT_METRES_PER_POINT, type PlacementState } from "../../hooks/useIllustratorPlacement";
+import {
+  DEFAULT_METRES_PER_POINT,
+  type PlacementAction,
+  type PlacementState
+} from "../../hooks/useIllustratorPlacement";
 
 
 function stateWith(floors: { label: string; linked: boolean }[], active: string): PlacementState {
@@ -32,7 +36,7 @@ const THREE_LINKED = stateWith(
 
 
 test("no floor dropdown is rendered, even with three floors", () => {
-  render(<TransformPanel state={THREE_LINKED} dispatch={() => {}} />);
+  render(<TransformPanel mode="group" state={THREE_LINKED} dispatch={() => {}} />);
   // Floor switching lives on the map pills; a second control would be redundant.
   // Asserted on the element, not a label query: the current label is not
   // associated with the select, so a label query would pass either way.
@@ -40,7 +44,7 @@ test("no floor dropdown is rendered, even with three floors", () => {
 });
 
 test("the relink action appears only when the active floor is unlinked", () => {
-  const { rerender } = render(<TransformPanel state={THREE_LINKED} dispatch={() => {}} />);
+  const { rerender } = render(<TransformPanel mode="group" state={THREE_LINKED} dispatch={() => {}} />);
   expect(screen.queryByRole("button", { name: /relink/i })).toBeNull();
 
   const unlinked = stateWith(
@@ -50,7 +54,7 @@ test("the relink action appears only when the active floor is unlinked", () => {
     ],
     "1F"
   );
-  rerender(<TransformPanel state={unlinked} dispatch={() => {}} />);
+  rerender(<TransformPanel mode="group" state={unlinked} dispatch={() => {}} />);
   expect(screen.getByRole("button", { name: /relink/i })).toBeInTheDocument();
 });
 
@@ -58,7 +62,7 @@ test("relinking dispatches relinkFloor for the active floor", () => {
   const seen: { type: string; label?: string }[] = [];
   const unlinked = stateWith([{ label: "2F", linked: false }], "2F");
   render(
-    <TransformPanel
+    <TransformPanel mode="group"
       state={unlinked}
       dispatch={(action) => seen.push(action as { type: string; label?: string })}
     />
@@ -69,7 +73,7 @@ test("relinking dispatches relinkFloor for the active floor", () => {
 
 test("no relink button while the active floor is linked, even if another floor is unlinked", () => {
   render(
-    <TransformPanel
+    <TransformPanel mode="group"
       state={stateWith(
         [
           { label: "1F", linked: true },
@@ -86,7 +90,7 @@ test("no relink button while the active floor is linked, even if another floor i
 });
 
 test("the interaction hint is one line, with the detail behind a control", () => {
-  render(<TransformPanel state={THREE_LINKED} dispatch={() => {}} />);
+  render(<TransformPanel mode="group" state={THREE_LINKED} dispatch={() => {}} />);
   // The short form is always visible.
   expect(screen.getByText(/corners scale/i)).toBeInTheDocument();
   // The keyboard detail is not taking permanent space...
@@ -97,8 +101,31 @@ test("the interaction hint is one line, with the detail behind a control", () =>
 });
 
 test("the scale controls are no longer in this panel", () => {
-  render(<TransformPanel state={THREE_LINKED} dispatch={() => {}} />);
+  render(<TransformPanel mode="group" state={THREE_LINKED} dispatch={() => {}} />);
   // Scale moved to the Scale & fit tab panel.
   expect(screen.queryByText(/m per point/i)).toBeNull();
   expect(screen.queryByRole("button", { name: "Calibrate" })).toBeNull();
+});
+
+test("group mode edits the shared frame from the rotation input", () => {
+  const seen: PlacementAction[] = [];
+  render(<TransformPanel mode="group" state={THREE_LINKED} dispatch={(action) => seen.push(action)} />);
+  fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "45" } });
+  expect(seen).toEqual([{ type: "rotateFrame", rotationDeg: 45 }]);
+});
+
+test("individual mode edits the active floor from the rotation input", () => {
+  const seen: PlacementAction[] = [];
+  render(
+    <TransformPanel mode="individual" state={THREE_LINKED} dispatch={(action) => seen.push(action)} />
+  );
+  fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "45" } });
+  expect(seen).toEqual([{ type: "rotateFloor", label: "1F", rotationDeg: 45 }]);
+});
+
+test("the (this floor) suffix follows what the controls edit, not just linking", () => {
+  const { rerender } = render(<TransformPanel mode="group" state={THREE_LINKED} dispatch={() => {}} />);
+  expect(screen.queryByText(/this floor/)).toBeNull();
+  rerender(<TransformPanel mode="individual" state={THREE_LINKED} dispatch={() => {}} />);
+  expect(screen.getByText(/this floor/)).toBeInTheDocument();
 });

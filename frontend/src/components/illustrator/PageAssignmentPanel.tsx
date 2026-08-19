@@ -166,8 +166,8 @@ export function PageAssignmentPanel({
           className="rounded-[var(--radius-md)] border border-amber-400 bg-amber-50 p-2 text-xs"
         >
           {t(
-            "The pages are not all the same size, so their floor plans may land offset from each other. Position one floor on the map, then drag any floor that needs its own position.",
-            "ページのサイズが揃っていないため、各階の位置がずれる場合があります。地図上で1フロアを配置し、位置が合わないフロアは個別にドラッグしてください。"
+            "The pages are not all the same size, so their floor plans may land offset from each other. Align the building as a group first, then switch to Individual on the map to adjust any floor that needs its own position.",
+            "ページのサイズが揃っていないため、各階の位置がずれる場合があります。まずグループで建物全体を合わせてから、地図の「個別」に切り替えて位置が合わないフロアを調整してください。"
           )}
         </p>
       ) : null}

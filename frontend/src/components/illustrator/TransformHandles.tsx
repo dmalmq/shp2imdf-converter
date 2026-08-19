@@ -3,7 +3,7 @@ import { Maximize2, RotateCw } from "lucide-react";
 import type { MapMouseEvent } from "maplibre-gl";
 import { Marker, type MapRef, type MarkerDragEvent } from "react-map-gl/maplibre";
 
-import type { PlacementAction } from "../../hooks/useIllustratorPlacement";
+import type { AdjustmentMode, PlacementAction } from "../../hooks/useIllustratorPlacement";
 import {
   enuToLngLat,
   lngLatToEnu,
@@ -20,6 +20,8 @@ type Props = {
   map: MapRef | null;
   floorLabel: string;
   linked: boolean;
+  /** Group or per-floor gestures; Alt inverts for one drag. */
+  mode: AdjustmentMode;
   scaleLocked: boolean;
   /** Layers that count as the floor's body, for grab-to-move. */
   bodyLayerIds: string[];
@@ -35,8 +37,10 @@ const HANDLE_ROUND =
  *
  * Grab the floor plan itself to move it, the corners to scale, the handle above
  * the top edge to rotate — the same vocabulary as any drawing tool, so there is
- * nothing to learn. Scale and rotation are frame operations, so they are only
- * offered while the floor is linked; an unlinked floor can still be moved.
+ * nothing to learn. What a gesture acts on follows the adjustment mode: the
+ * whole linked group in group mode, just this floor in individual mode — and an
+ * unlinked floor's handles always act on it alone. Alt+drag inverts the mode
+ * for one move.
  *
  * All maths runs in the ENU frame the preview uses, so the gizmo and the artwork
  * can never disagree.
@@ -48,13 +52,14 @@ export function TransformHandles({
   map,
   floorLabel,
   linked,
+  mode,
   scaleLocked,
   bodyLayerIds
 }: Props) {
     // Read by long-lived map listeners: a drag must survive the re-renders its own
     // dispatches cause, so the listeners are never resubscribed mid-gesture.
-    const latest = useRef({ transform, frame, dispatch, floorLabel, bodyLayerIds, linked });
-    latest.current = { transform, frame, dispatch, floorLabel, bodyLayerIds, linked };
+    const latest = useRef({ transform, frame, dispatch, floorLabel, bodyLayerIds, linked, mode });
+    latest.current = { transform, frame, dispatch, floorLabel, bodyLayerIds, linked, mode };
   const shiftHeld = useRef(false);
 
   useEffect(() => {
@@ -77,8 +82,8 @@ export function TransformHandles({
 
     // Fixed for the whole gesture: the pointer-to-anchor offset, so the plan
     // moves with the cursor instead of snapping its anchor under it.
-    let grab: { origin: [number, number]; offset: [number, number]; perFloor: boolean } | null =
-      null;
+        let grab: { origin: [number, number]; offset: [number, number]; wholeBuilding: boolean } | null =
+          null;
     let pending: MapMouseEvent | null = null;
     let animation = 0;
 
@@ -98,10 +103,10 @@ export function TransformHandles({
         originLng,
         originLat
       );
-      // Moving a floor moves just it, so plans can be stacked independently;
-      // Alt+drag carries the whole linked building instead. The floor's own
-      // rotation/scale are frozen in when it unlinks, and its handles stay.
-      if (grab.perFloor) {
+      // The gesture target was fixed on mouse-down: group mode moves the
+      // whole linked building, individual mode unlinks and moves just this
+      // floor; Alt inverted the mode for this drag.
+      if (grab.wholeBuilding) {
         latest.current.dispatch({ type: "positionBuilding", mapAnchor: moved });
       } else {
         latest.current.dispatch({
@@ -119,7 +124,13 @@ export function TransformHandles({
       if (!overBody(event.point)) return;
       const origin = latest.current.transform.mapAnchor;
       const [east, north] = lngLatToEnu(event.lngLat.lng, event.lngLat.lat, origin[0], origin[1]);
-      grab = { origin, offset: [-east, -north], perFloor: event.originalEvent.altKey };
+      // Group mode moves the whole linked building, individual mode just this
+      // floor; Alt inverts the mode for this one drag.
+      grab = {
+        origin,
+        offset: [-east, -north],
+        wholeBuilding: (latest.current.mode === "group") !== event.originalEvent.altKey
+      };
       instance.dragPan.disable();
       canvas.style.cursor = "grabbing";
       event.preventDefault();
@@ -186,16 +197,17 @@ export function TransformHandles({
     );
     if (reach <= 0) return;
     const metresPerPoint = Math.hypot(east, north) / reach;
-    // Linked floors scale the shared frame (the whole stack); an unlinked floor
-    // scales itself, keeping the others untouched.
-    if (latest.current.linked) {
-      latest.current.dispatch({ type: "scaleFrame", metresPerPoint });
-    } else {
+    // Group mode scales the shared frame (the whole linked stack); individual
+    // mode scales just this floor — and an unlinked floor always scales itself,
+    // since its own values are the only ones the gizmo can mean.
+    if (latest.current.mode === "individual" || !latest.current.linked) {
       latest.current.dispatch({
         type: "scaleFloor",
         label: latest.current.floorLabel,
         metresPerPoint
       });
+    } else {
+      latest.current.dispatch({ type: "scaleFrame", metresPerPoint });
     }
   };
 
@@ -207,14 +219,14 @@ export function TransformHandles({
       bearingTo(event)
     );
     const rotationDeg = shiftHeld.current ? Math.round(raw / 15) * 15 : raw;
-    if (latest.current.linked) {
-      latest.current.dispatch({ type: "rotateFrame", rotationDeg });
-    } else {
+    if (latest.current.mode === "individual" || !latest.current.linked) {
       latest.current.dispatch({
         type: "rotateFloor",
         label: latest.current.floorLabel,
         rotationDeg
       });
+    } else {
+      latest.current.dispatch({ type: "rotateFrame", rotationDeg });
     }
   };
 

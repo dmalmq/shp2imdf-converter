@@ -111,6 +111,30 @@ test("a non-positive per-floor scale is rejected", () => {
   expect(state).toBe(BASE);
 });
 
+test("rotateFloor on a linked floor freezes the frame scale in and unlinks it", () => {
+  // Individual mode rotates one floor directly; detaching with the frame
+  // values frozen keeps the other frame values from moving it later.
+  const state = placementReducer(BASE, { type: "rotateFloor", label: "2F", rotationDeg: 40 });
+  const f = state.floors[1];
+  expect(f.linked).toBe(false);
+  expect(f.rotationDeg).toBe(40);
+  expect(f.metresPerPoint).toBeCloseTo(BASE.frame.metresPerPoint, 9);
+  // The anchor is untouched: the floor rotates in place.
+  expect(f.mapAnchor).toEqual(BASE.floors[1].mapAnchor);
+  expect(resolvedTransform(state, f).rotationDeg).toBe(40);
+});
+
+test("scaleFloor on a linked floor freezes the frame rotation in and unlinks it", () => {
+  const rotated = placementReducer(BASE, { type: "rotateFrame", rotationDeg: 30 });
+  const state = placementReducer(rotated, { type: "scaleFloor", label: "2F", metresPerPoint: 0.5 });
+  const f = state.floors[1];
+  expect(f.linked).toBe(false);
+  expect(f.metresPerPoint).toBe(0.5);
+  expect(f.rotationDeg).toBe(30);
+  // 1F stays on the frame.
+  expect(state.floors[0].linked).toBe(true);
+});
+
 test("frame operations ignore unlinked floors", () => {
   const dragged: [number, number] = [139.72, 35.71];
   let state = placementReducer(BASE, { type: "dragFloor", label: "2F", mapAnchor: dragged });

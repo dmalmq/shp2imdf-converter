@@ -40,6 +40,7 @@ function SidebarHarness() {
     <PlacementSidebar
       state={STATE}
       dispatch={() => {}}
+      mode="group"
       siteName=""
       onLocate={() => {}}
       canUndo={false}

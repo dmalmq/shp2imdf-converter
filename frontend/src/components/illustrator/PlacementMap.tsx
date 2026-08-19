@@ -5,6 +5,7 @@ import MapGL, { Layer, type MapLayerMouseEvent, type MapRef, Source } from "reac
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
   resolvedTransform,
+  type AdjustmentMode,
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
@@ -41,6 +42,9 @@ type Props = {
   floors: FloorLayer[];
   state: PlacementState;
   dispatch: (action: PlacementAction) => void;
+  /** What drags and handles act on: the whole linked group or the active floor. */
+  mode: AdjustmentMode;
+  onModeChange: (mode: AdjustmentMode) => void;
   pickingControlPoint: boolean;
   onPickMap: (lngLat: [number, number]) => void;
   /** Fly here when it changes; set by an address search, never by dragging. */
@@ -57,6 +61,8 @@ export function PlacementMap({
   floors,
   state,
   dispatch,
+  mode,
+  onModeChange,
   pickingControlPoint,
   onPickMap,
   recenterTo,
@@ -300,6 +306,7 @@ export function PlacementMap({
             map={mapRef.current}
             floorLabel={activeFloor.label}
             linked={activeFloor.linked}
+            mode={mode}
             scaleLocked={state.scaleLocked}
             bodyLayerIds={[
               `floor-${activeFloor.label}-fill`,
@@ -345,10 +352,38 @@ export function PlacementMap({
                 </Button>
               );
             })}
+            <span aria-hidden="true" className="mx-1 w-px self-stretch bg-[var(--color-border)]" />
+            {/* What gestures act on: the whole linked group while aligning the
+                building as one, or the selected floor for final per-floor
+                nudges. Sits with the pills because it pairs with floor switching. */}
+            <Button
+              size="sm"
+              variant={mode === "group" ? "primary" : "secondary"}
+              aria-pressed={mode === "group"}
+              onClick={() => onModeChange("group")}
+              title={t(
+                "Drags, rotation and scale move every linked floor together",
+                "ドラッグ・回転・拡大縮小をリンクした全フロアに適用"
+              )}
+            >
+              {t("Group", "グループ")}
+            </Button>
+            <Button
+              size="sm"
+              variant={mode === "individual" ? "primary" : "secondary"}
+              aria-pressed={mode === "individual"}
+              onClick={() => onModeChange("individual")}
+              title={t(
+                "Drags, rotation and scale adjust the selected floor only",
+                "ドラッグ・回転・拡大縮小を選択中の階だけに適用"
+              )}
+            >
+              {t("Individual", "個別")}
+            </Button>
+            <span aria-hidden="true" className="mx-1 w-px self-stretch bg-[var(--color-border)]" />
             {/* Isolating the selected floor sits with the floor pills rather
                 than in the sidebar: it is a view option reached for while
                 watching the map, exactly like the basemap switcher below. */}
-            <span aria-hidden="true" className="mx-1 w-px self-stretch bg-[var(--color-border)]" />
             <Button
               size="sm"
               variant={onlyActiveFloor ? "primary" : "secondary"}

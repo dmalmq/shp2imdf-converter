@@ -5,6 +5,7 @@ import { geocodeSearch, type GeocodeResultItem } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
   resolvedTransform,
+  type AdjustmentMode,
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
@@ -13,6 +14,8 @@ import { Button } from "../ui";
 type Props = {
   state: PlacementState;
   dispatch: (action: PlacementAction) => void;
+  /** What the rotation controls edit: the shared frame or the active floor. */
+  mode: AdjustmentMode;
   /** Building name from the drawing's file name; searched once to pre-locate. */
   siteName?: string;
   /** Reports a chosen location so the map camera can follow it. */
@@ -26,6 +29,7 @@ const FIELD = "w-full rounded-[var(--radius-md)] border px-2 py-1";
 export function TransformPanel({
   state,
   dispatch,
+  mode,
   siteName,
   onLocate,
   canUndo = false,
@@ -93,6 +97,9 @@ export function TransformPanel({
   // An unlinked floor owns its rotation/scale; the panel must show and edit
   // those instead of the frame's.
   const activeTransform = activeFloor ? resolvedTransform(state, activeFloor) : null;
+  // What the rotation controls edit: the shared frame in group mode, this
+  // floor in individual mode — and an unlinked floor's own values either way.
+  const editPerFloor = mode === "individual" || !activeFloor?.linked;
 
   return (
     <div className="space-y-4 text-sm">
@@ -128,15 +135,15 @@ export function TransformPanel({
       </section>
       <p className="-mt-2 text-xs text-[var(--color-text-muted)]">
         {t(
-          "Drag a floor to move it. Corners scale, top handle rotates.",
-          "ドラッグでフロアを移動。四隅で拡大縮小、上のハンドルで回転。"
+          "Drag to move. Corners scale, top handle rotates. The map's Group/Individual switch sets whether gestures act on every floor or just this one.",
+          "ドラッグで移動。四隅で拡大縮小、上のハンドルで回転。地図の「グループ／個別」スイッチで、全フロアかこの階だけかを選べます。"
         )}
       </p>
       {helpOpen ? (
         <p className="-mt-2 rounded-[var(--radius-md)] bg-[var(--color-surface-muted)] p-2 text-xs text-[var(--color-text-secondary)]">
           {t(
-            "Alt+drag moves the whole building. Ctrl+Z / Ctrl+Shift+Z undo and redo. Arrow keys nudge 1 m, Shift+arrows 10 m. Hold Shift while rotating to snap to 15°.",
-            "Alt＋ドラッグで建物全体を移動。Ctrl+Z / Ctrl+Shift+Z で元に戻す・やり直す。矢印キーで1m、Shift＋矢印で10m移動。回転中に Shift で15度刻み。"
+            "Alt+drag reverses the Group/Individual switch for one drag. Ctrl+Z / Ctrl+Shift+Z undo and redo. Arrow keys nudge 1 m, Shift+arrows 10 m. Hold Shift while rotating to snap to 15°.",
+            "Alt＋ドラッグは「グループ／個別」スイッチと逆の操作を1回だけ行います。Ctrl+Z / Ctrl+Shift+Z で元に戻す・やり直す。矢印キーで1m、Shift＋矢印で10m移動。回転中に Shift で15度刻み。"
           )}
         </p>
       ) : null}
@@ -204,7 +211,7 @@ export function TransformPanel({
       <section>
         <label className="block text-xs font-medium">
           {t("Rotation (from true north)", "回転（真北基準）")}
-          {activeFloor && !activeFloor.linked ? (
+          {activeFloor && editPerFloor ? (
             <span className="text-[var(--color-text-muted)]">{t(" (this floor)", "（この階）")}</span>
           ) : null}
         </label>
@@ -216,10 +223,11 @@ export function TransformPanel({
             value={activeTransform?.rotationDeg ?? state.frame.rotationDeg}
             onChange={(event) => {
               const rotationDeg = Number(event.target.value);
-              if (activeFloor?.linked) {
-                dispatch({ type: "rotateFrame", rotationDeg });
-              } else if (activeFloor) {
+              if (!activeFloor) return;
+              if (editPerFloor) {
                 dispatch({ type: "rotateFloor", label: activeFloor.label, rotationDeg });
+              } else {
+                dispatch({ type: "rotateFrame", rotationDeg });
               }
             }}
           />
@@ -228,10 +236,10 @@ export function TransformPanel({
             size="sm"
             variant="secondary"
             onClick={() =>
-              activeFloor?.linked
-                ? dispatch({ type: "rotateFrame", rotationDeg: 0 })
-                : activeFloor &&
-                  dispatch({ type: "rotateFloor", label: activeFloor.label, rotationDeg: 0 })
+              activeFloor &&
+              (editPerFloor
+                ? dispatch({ type: "rotateFloor", label: activeFloor.label, rotationDeg: 0 })
+                : dispatch({ type: "rotateFrame", rotationDeg: 0 }))
             }
           >
             {t("Reset", "リセット")}
