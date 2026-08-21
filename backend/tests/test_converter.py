@@ -81,7 +81,7 @@ def test_converter_translates_raw_gsi_codes_to_imdf_categories() -> None:
                 "id": "u2",
                 "feature_type": "unit",
                 "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [0, 1], [1, 1], [0, 0]]]},
-                "properties": {"category": "B999"},
+                "properties": {"category": "B888"},
             },
             {
                 "type": "Feature",

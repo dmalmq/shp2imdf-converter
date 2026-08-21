@@ -876,14 +876,16 @@ def _dedupe_feature_ids(features: list[dict[str, Any]]) -> None:
         seen.add(feature_id)
 
 
-def _redirect_column_units_to_fixture(
+# Categories IMDF models as units but the spec (別表8.5.1 設置物要素) models as
+# Fixtures: columns are C001 and planting is C009. Neither has a Space code, so a
+# unit tagged with one is redirected instead of landing under Space with the
+# その他部屋 fallback.
+FIXTURE_ONLY_UNIT_CATEGORIES = {"column", "vegetation", "planting"}
+
+
+def _redirect_fixture_only_units(
     rows_by_type: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]],
 ) -> None:
-    # IMDF's "column" is a unit category, but the ODC spec (§8.1.5) classifies
-    # columns as Fixture (固定設置物). Column-tagged unit files (e.g.
-    # ..._floor_unit with category="column") are redirected to fixture type so
-    # the ODC2026 exporter emits them in *_<level>_Fixture.shp with c-code
-    # C001 instead of leaving them orphaned under Space with a B999 fallback.
     unit_rows = rows_by_type.get("unit")
     if not unit_rows:
         return
@@ -891,7 +893,7 @@ def _redirect_column_units_to_fixture(
     keep: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for row, metadata in unit_rows:
         category = _text(_metadata_get(metadata, ["category", "imdf_cat", "type"]))
-        if category is not None and category.lower() == "column":
+        if category is not None and category.lower() in FIXTURE_ONLY_UNIT_CATEGORIES:
             fixture_rows.append((row, metadata))
             continue
         keep.append((row, metadata))
@@ -901,7 +903,7 @@ def _redirect_column_units_to_fixture(
 
 def build_imdf_shapefile_feature_collection(artifacts: ImportArtifacts, language: str = "en") -> dict[str, Any]:
     rows_by_type = _rows_by_type(artifacts)
-    _redirect_column_units_to_fixture(rows_by_type)
+    _redirect_fixture_only_units(rows_by_type)
     address = _build_address(rows_by_type)
     address_id = str(address["id"])
     venues = _build_venues(rows_by_type, address_id=address_id, language=language)

@@ -1,4 +1,5 @@
 {
+  "reference": "国土地理院 別表8.2.4 物理的な空間のカテゴリー (https://www.gsi.go.jp/common/000212584.pdf)",
   "default_category": "unspecified",
   "mappings": {
     "B001": "retail",
@@ -11,24 +12,47 @@
     "B008": "restroom.female",
     "B009": "restroom.unisex",
     "B010": "restroom",
-    "B011": "restroom",
-    "B012": "restroom",
-    "B013": "restroom",
-    "B014": "restroom",
+    "B011": "restroom.wheelchair",
+    "B012": "restroom.wheelchair",
+    "B013": "restroom.wheelchair",
+    "B014": "restroom.wheelchair",
     "B015": "smokingarea",
     "B016": "mothersroom",
     "B017": "firstaid",
-    "B018": "room",
+    "B018": "office",
     "B019": "room",
     "B020": "opentobelow",
     "B021": "stairs",
     "B022": "elevator",
     "B023": "escalator",
-    "B024": "walkway",
-    "B025": "walkway",
+    "B024": "movingwalkway",
+    "B025": "ramp",
     "B026": "nonpublic",
     "B027": "parking",
     "B028": "platform",
-    "B029": "walkway"
+    "B029": "walkway",
+    "B030": "footbridge",
+    "B031": "footbridge",
+    "B999": "unenclosedarea"
+  },
+  "preferred": {
+    "office": "B002",
+    "restroom.wheelchair": "B011",
+    "footbridge": "B030"
+  },
+  "aliases": {
+    "store": "retail",
+    "store_sta": "retail",
+    "shop": "retail",
+    "ticket office": "tickets",
+    "ticketing": "tickets",
+    "information desk": "information",
+    "walkway_sta": "walkway",
+    "concourse": "walkway",
+    "accessible restroom": "restroom.wheelchair",
+    "multipurpose restroom": "restroom.wheelchair",
+    "slope": "ramp",
+    "station office": "office",
+    "outdoors": "unenclosedarea"
   }
 }

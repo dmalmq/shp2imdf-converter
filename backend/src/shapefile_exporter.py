@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from io import BytesIO
 import json
+from dataclasses import dataclass
 from pathlib import Path
 import re
 import tempfile
@@ -575,31 +576,61 @@ def _resolve_legacy_code_map(
     return {}, "none", conflicts
 
 
-def _load_category_code_map(filename: str) -> dict[str, str]:
-    path = CONFIG_DIR / filename
-    if not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    mappings = payload.get("mappings", {})
-    if not isinstance(mappings, dict):
+@dataclass(frozen=True)
+class CategoryCodes:
+    """One spec code family (別表 A / B / C), indexed for export.
+
+    `codes_by_category` is the spec table inverted, preferred code first: the
+    ODC tables are finer-grained than IMDF, so several codes share a category
+    (B011-B014 are all 多機能トイレ) and the winner has to be declared rather
+    than left to sort order. `aliases` folds source vocabulary that is not IMDF
+    ("store_sta", "ticket office") onto the category it means.
+    """
+
+    codes_by_category: dict[str, list[str]]
+    preferred: dict[str, str]
+    aliases: dict[str, str]
+
+
+def _text_map(payload: dict[str, Any], key: str) -> dict[str, str]:
+    value = payload.get(key)
+    if not isinstance(value, dict):
         return {}
     return {
-        str(code).strip().upper(): str(category).strip().lower()
-        for code, category in mappings.items()
-        if str(code).strip() and str(category).strip()
+        str(left).strip().lower(): str(right).strip()
+        for left, right in value.items()
+        if str(left).strip() and str(right).strip()
     }
 
 
-def _reverse_category_code_map(code_map: dict[str, str]) -> dict[str, list[str]]:
-    reversed_map: dict[str, list[str]] = {}
-    for code, category in code_map.items():
-        reversed_map.setdefault(category.lower(), []).append(code.upper())
-    for codes in reversed_map.values():
+def _load_category_codes(filename: str) -> CategoryCodes:
+    path = CONFIG_DIR / filename
+    payload: dict[str, Any] = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            payload = loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            payload = {}
+    mappings = payload.get("mappings", {})
+    if not isinstance(mappings, dict):
+        mappings = {}
+    preferred = {category: code.upper() for category, code in _text_map(payload, "preferred").items()}
+    aliases = {source: category.lower() for source, category in _text_map(payload, "aliases").items()}
+
+    codes_by_category: dict[str, list[str]] = {}
+    for code, category in mappings.items():
+        code_text = str(code).strip().upper()
+        category_text = str(category).strip().lower()
+        if code_text and category_text:
+            codes_by_category.setdefault(category_text, []).append(code_text)
+    for category, codes in codes_by_category.items():
         codes.sort()
-    return reversed_map
+        winner = preferred.get(category)
+        if winner in codes:
+            codes.remove(winner)
+            codes.insert(0, winner)
+    return CategoryCodes(codes_by_category=codes_by_category, preferred=preferred, aliases=aliases)
 
 
 def _feature_rows(session: SessionRecord) -> list[dict[str, Any]]:
@@ -694,7 +725,7 @@ def _code_for_feature_category(
     feature: dict[str, Any],
     prefix: str,
     source_candidates: list[str],
-    reverse_map: dict[str, list[str]],
+    table: CategoryCodes,
     fallback: str,
     report: dict[str, Any],
 ) -> str:
@@ -709,7 +740,9 @@ def _code_for_feature_category(
         )
         return fallback
 
-    codes = reverse_map.get(category.lower(), [])
+    source_category = category.lower()
+    resolved = table.aliases.get(source_category, source_category)
+    codes = table.codes_by_category.get(resolved, [])
     if not codes:
         report["category_code_fallbacks"].append(
             {
@@ -720,7 +753,7 @@ def _code_for_feature_category(
             }
         )
         return fallback
-    if len(codes) > 1:
+    if len(codes) > 1 and resolved not in table.preferred:
         report["category_code_ambiguities"].append(
             {
                 "feature_id": str(feature.get("id", "")),
@@ -729,6 +762,9 @@ def _code_for_feature_category(
                 "candidate_codes": codes,
             }
         )
+    if resolved != source_category:
+        key = f"{source_category} -> {resolved} ({codes[0]})"
+        report["category_code_aliases"][key] = report["category_code_aliases"].get(key, 0) + 1
     return codes[0]
 
 
@@ -994,6 +1030,7 @@ def _odc_report(request: ShapefileExportRequest) -> dict[str, Any]:
         "layers_skipped": [],
         "rows_skipped": [],
         "category_code_ambiguities": [],
+        "category_code_aliases": {},
         "category_code_fallbacks": [],
         "facility_merge_unmapped": [],
         "facility_merge_outside_building": [],
@@ -1020,9 +1057,9 @@ def _write_odc2026_shapefiles(
     write_encoding = _encoding_for_write(request.encoding)
     base = _safe_export_name(request.export_name)
     addresses = _address_by_id(features)
-    a_reverse = _reverse_category_code_map(_load_category_code_map("a-codes.json"))
-    b_reverse = _reverse_category_code_map(_load_category_code_map("b-codes.json"))
-    c_reverse = _reverse_category_code_map(_load_category_code_map("c-codes.json"))
+    a_codes = _load_category_codes("a-codes.json")
+    b_codes = _load_category_codes("b-codes.json")
+    c_codes = _load_category_codes("c-codes.json")
 
     levels = sorted(
         [item for item in features if item.get("feature_type") == "level"],
@@ -1155,7 +1192,7 @@ def _write_odc2026_shapefiles(
                         venue,
                         prefix="A",
                         source_candidates=["category"],
-                        reverse_map=a_reverse,
+                        table=a_codes,
                         fallback="A999",
                         report=report,
                     ),
@@ -1259,8 +1296,8 @@ def _write_odc2026_shapefiles(
                             unit,
                             prefix="B",
                             source_candidates=["category", "imdf_cat"],
-                            reverse_map=b_reverse,
-                            fallback="B999",
+                            table=b_codes,
+                            fallback="B019",
                             report=report,
                         ),
                         "floor_id": level_id,
@@ -1288,7 +1325,7 @@ def _write_odc2026_shapefiles(
                             fixture,
                             prefix="C",
                             source_candidates=["category"],
-                            reverse_map=c_reverse,
+                            table=c_codes,
                             fallback="C999",
                             report=report,
                         ),

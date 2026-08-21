@@ -1,4 +1,5 @@
 {
+  "reference": "国土地理院 別表8.5.1 設置物要素のカテゴリー (https://www.gsi.go.jp/common/000212584.pdf)",
   "default_category": "unspecified",
   "mappings": {
     "C001": "column",
@@ -21,11 +22,19 @@
     "C018": "twsi.guidance",
     "C019": "twsi.crossing",
     "C101": "platform.screen",
-    "C102": "platform.gate",
-    "C103": "ticket.vending",
+    "C102": "ticket.vending",
+    "C103": "twsi.platform",
     "C104": "ticketgate",
     "C201": "baggage.carousel",
     "C202": "checkin.kiosk",
     "C999": "unspecified"
+  },
+  "aliases": {
+    "platform.gate": "platform.screen",
+    "platformdoor": "platform.screen",
+    "ticketmachine": "ticket.vending",
+    "ticket.machine": "ticket.vending",
+    "trashcan": "rubbishbin",
+    "planting": "vegetation"
   }
 }

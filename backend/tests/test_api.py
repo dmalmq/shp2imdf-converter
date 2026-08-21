@@ -2739,6 +2739,58 @@ def test_imdf_schema_import_redirects_column_units_to_fixture(test_client) -> No
 
 
 @pytest.mark.phase5
+def test_imdf_schema_import_redirects_vegetation_units_to_fixture(test_client) -> None:
+    # 植栽・花壇 is a Fixture in the spec (別表8.5.1 C009) and has no Space code,
+    # so a unit tagged "vegetation" belongs in Fixture rather than under Space
+    # with the その他部屋 fallback.
+    planting_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc9"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        ids = _write_imdf_schema_shapefiles(root)
+        gpd.GeoDataFrame(
+            {
+                "id": [planting_id],
+                "category": ["vegetation"],
+                "floor_id": [ids["level_id"]],
+                "name": [None],
+                "source": ["1"],
+            },
+            geometry=[
+                Polygon(
+                    [
+                        (139.7007, 35.6907),
+                        (139.7008, 35.6907),
+                        (139.7008, 35.6908),
+                        (139.7007, 35.6908),
+                        (139.7007, 35.6907),
+                    ]
+                )
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_1F_Z_Space.shp", driver="ESRI Shapefile", index=False)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    assert planting_id in {item["id"] for item in features if item["feature_type"] == "fixture"}
+    assert planting_id not in {item["id"] for item in features if item["feature_type"] == "unit"}
+
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"profile": "odc2026", "export_name": "Demo_Station"},
+    )
+    assert export_response.status_code == 200
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        with tempfile.TemporaryDirectory() as output_dir:
+            archive.extractall(output_dir)
+            fixture = gpd.read_file(Path(output_dir) / "Demo_Station_1_Fixture.shp")
+            assert dict(zip(fixture["id"], fixture["category"]))[planting_id] == "C009"
+            space = gpd.read_file(Path(output_dir) / "Demo_Station_1_Space.shp")
+            assert planting_id not in set(space["id"])
+
+
+@pytest.mark.phase5
 def test_imdf_schema_import_links_orphan_floor_uuid_column_by_filename_label(test_client) -> None:
     column_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
     orphan_floor_id = "deadbeef-dead-4dea-8dea-deaddeaddead"
