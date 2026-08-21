@@ -25,7 +25,25 @@ from shapely.geometry.polygon import orient
 import pyogrio
 
 from backend.src.detector import detect_files, load_keyword_map
-from backend.src.schemas import CleanupSummary, ImportedFile
+from backend.src.schemas import CleanupSummary, DroppedRow, ImportedFile
+
+# dropped_rows is a sample; empty_features_dropped and other counts stay authoritative.
+DROPPED_ROWS_SAMPLE_LIMIT = 50
+
+
+def record_dropped_row(
+    summary: CleanupSummary,
+    *,
+    source_file: str,
+    row_index: int,
+    reason: str,
+    feature_id: str | None = None,
+) -> None:
+    if len(summary.dropped_rows) >= DROPPED_ROWS_SAMPLE_LIMIT:
+        return
+    summary.dropped_rows.append(
+        DroppedRow(source_file=source_file, row_index=row_index, id=feature_id, reason=reason)
+    )
 
 
 SUPPORTED_SHAPEFILE_EXTENSIONS = {
@@ -230,7 +248,22 @@ def _sanitize_value(value: Any) -> Any:
     return str(value)
 
 
-def _clean_geodataframe(gdf: gpd.GeoDataFrame, summary: CleanupSummary) -> gpd.GeoDataFrame:
+def _source_attribute_id(metadata: dict[str, Any]) -> str | None:
+    for key, value in metadata.items():
+        if str(key).strip().lower() != "id":
+            continue
+        sanitized = _sanitize_value(value)
+        if sanitized is None:
+            return None
+        return str(sanitized)
+    return None
+
+
+def _clean_geodataframe(
+    gdf: gpd.GeoDataFrame,
+    summary: CleanupSummary,
+    source_file: str,
+) -> gpd.GeoDataFrame:
     geometry_column = gdf.geometry.name
     if gdf.empty:
         return gdf
@@ -241,6 +274,14 @@ def _clean_geodataframe(gdf: gpd.GeoDataFrame, summary: CleanupSummary) -> gpd.G
     for source_row_index, (_, row) in enumerate(gdf.iterrows()):
         metadata = {column: row[column] for column in non_geom_columns}
         cleaned_geometries = _clean_geometry(row[geometry_column], summary)
+        if not cleaned_geometries:
+            record_dropped_row(
+                summary,
+                source_file=source_file,
+                row_index=source_row_index,
+                reason="empty_geometry",
+                feature_id=_source_attribute_id(metadata),
+            )
         for source_part_index, geometry in enumerate(cleaned_geometries):
             payload = dict(metadata)
             payload["_source_row_index"] = source_row_index
@@ -793,7 +834,7 @@ def import_file_blobs(
 
     for loaded_source in loaded_sources:
         warnings.extend(loaded_source.warnings)
-        cleaned = _clean_geodataframe(loaded_source.gdf, summary)
+        cleaned = _clean_geodataframe(loaded_source.gdf, summary, loaded_source.stem)
         geometry_type = _infer_geometry_type(cleaned)
         columns = [
             column for column in cleaned.columns if column != cleaned.geometry.name and column not in INTERNAL_SOURCE_COLUMNS

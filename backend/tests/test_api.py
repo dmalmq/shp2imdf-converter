@@ -2047,6 +2047,75 @@ def test_imdf_schema_shapefile_import_creates_review_session(test_client) -> Non
 
 
 @pytest.mark.phase5
+def test_imdf_schema_shapefile_import_prefers_filename_floor_when_flagged(test_client) -> None:
+    b1_level_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"
+    b2_level_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    unit_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    b1_geom = Polygon([(139.7001, 35.6901), (139.7009, 35.6901), (139.7009, 35.6909), (139.7001, 35.6909), (139.7001, 35.6901)])
+    b2_geom = Polygon([(139.7001, 35.6901), (139.7009, 35.6901), (139.7009, 35.6909), (139.7001, 35.6909), (139.7001, 35.6901)])
+    unit_geom = Polygon([(139.7002, 35.6902), (139.7004, 35.6902), (139.7004, 35.6904), (139.7002, 35.6904), (139.7002, 35.6902)])
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_imdf_schema_shapefiles(root)
+        (root / "Demo_1F_Space.shp").unlink(missing_ok=True)
+        for extra in root.glob("Demo_1F_Space.*"):
+            extra.unlink()
+        gpd.GeoDataFrame(
+            {
+                "id": [b1_level_id],
+                "category": ["1"],
+                "name": ["Basement 1"],
+                "ordinal": [-1.0],
+                "short_name": ["B1F"],
+                "source": ["1"],
+            },
+            geometry=[b1_geom],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_B1_Floor.shp", driver="ESRI Shapefile", index=False)
+        gpd.GeoDataFrame(
+            {
+                "id": [b2_level_id],
+                "category": ["1"],
+                "name": ["Basement 2"],
+                "ordinal": [-2.0],
+                "short_name": ["B2F"],
+                "source": ["1"],
+            },
+            geometry=[b2_geom],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_B2_Floor.shp", driver="ESRI Shapefile", index=False)
+        gpd.GeoDataFrame(
+            {
+                "id": [unit_id],
+                "category": ["B001"],
+                "floor_id": [b1_level_id],
+                "name": ["Shop B2"],
+                "source": ["1"],
+            },
+            geometry=[unit_geom],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_B2_Space.shp", driver="ESRI Shapefile", index=False)
+
+        default_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+        flagged_response = test_client.post(
+            "/api/import/imdf-shapefiles",
+            files=_upload_all_shapefiles(root),
+            params={"prefer_filename_floor": True},
+        )
+
+    assert default_response.status_code == 201
+    assert flagged_response.status_code == 201
+
+    default_features = test_client.get(f"/api/session/{default_response.json()['session_id']}/features").json()["features"]
+    flagged_features = test_client.get(f"/api/session/{flagged_response.json()['session_id']}/features").json()["features"]
+    default_unit = next(item for item in default_features if item["id"] == unit_id)
+    flagged_unit = next(item for item in flagged_features if item["id"] == unit_id)
+    assert default_unit["properties"]["level_id"] == b1_level_id
+    assert flagged_unit["properties"]["level_id"] == b2_level_id
+
+
+@pytest.mark.phase5
 def test_imdf_schema_shapefile_import_merges_levels_with_same_name(test_client) -> None:
     duplicate_level_id = "55555555-5555-4555-8555-555555555555"
     duplicate_unit_id = "66666666-6666-4666-8666-666666666666"
@@ -2099,6 +2168,61 @@ def test_imdf_schema_shapefile_import_merges_levels_with_same_name(test_client) 
     assert levels[0]["id"] == ids["level_id"]
     assert units[ids["unit_id"]]["properties"]["level_id"] == ids["level_id"]
     assert units[duplicate_unit_id]["properties"]["level_id"] == ids["level_id"]
+
+
+@pytest.mark.phase5
+def test_validate_flags_synthesized_venue_and_building_placeholders(test_client) -> None:
+    # A dataset with no Site or Building layer (JR's opendata ships neither) gets
+    # a synthesized venue/building, and this import profile skips the wizard, so
+    # nothing would otherwise stop "Venue"/A999 from reaching a submission.
+    level_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        floor_geom = Polygon(
+            [(139.7001, 35.6901), (139.7009, 35.6901), (139.7009, 35.6909), (139.7001, 35.6909), (139.7001, 35.6901)]
+        )
+        gpd.GeoDataFrame(
+            {
+                "id": [level_id],
+                "category": ["1"],
+                "name": ["First Floor"],
+                "ordinal": [0.0],
+                "short_name": ["1F"],
+                "source": ["1"],
+            },
+            geometry=[floor_geom],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_1F_Floor.shp", driver="ESRI Shapefile", index=False)
+        gpd.GeoDataFrame(
+            {
+                "id": ["eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee2"],
+                "category": ["B001"],
+                "floor_id": [level_id],
+                "name": ["Shop A"],
+                "source": ["1"],
+            },
+            geometry=[
+                Polygon(
+                    [
+                        (139.7002, 35.6902),
+                        (139.7004, 35.6902),
+                        (139.7004, 35.6904),
+                        (139.7002, 35.6904),
+                        (139.7002, 35.6902),
+                    ]
+                )
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_1F_Space.shp", driver="ESRI Shapefile", index=False)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    validation = test_client.post(f"/api/session/{session_id}/validate").json()
+    placeholders = [issue for issue in validation["errors"] if issue["check"] == "venue_placeholder_metadata"]
+    # Placeholder venue name, unspecified venue category, placeholder building name.
+    assert len(placeholders) == 3
+    assert "venue_placeholder_metadata" not in validation["passed"]
 
 
 @pytest.mark.phase5
@@ -2487,8 +2611,14 @@ def test_odc2026_export_maps_facility_merge_categories_to_f_codes(test_client) -
     assert export_response.status_code == 200
     with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
         report = json.loads(archive.read("export_report.json"))
-        assert report["facility_merge_unmapped"] == [{"feature_id": unmapped_id, "floor": "F7"}]
-        assert report["facility_merge_outside_building"] == [{"feature_id": outside_id, "floor": "F1"}]
+        assert report["facility_merge_unmapped"] == [
+            {"feature_id": unmapped_id, "floor": "F7", "reason": "no_level_for_floor"}
+        ]
+        assert len(report["facility_merge_outside_building"]) == 1
+        outside = report["facility_merge_outside_building"][0]
+        assert outside["feature_id"] == outside_id
+        assert outside["floor"] == "F1"
+        assert isinstance(outside["distance_m"], (int, float))
         assert "facility_merge_missing_image" not in report
         assert sorted(report["facility_merge_missing_category"], key=lambda item: item["feature_id"]) == sorted(
             [
@@ -2531,6 +2661,102 @@ def test_odc2026_export_maps_facility_merge_categories_to_f_codes(test_client) -
             assert list(basement["category"]) == ["F003"]
             assert "image" not in basement.columns
             assert list(basement["floor_id"]) == [basement_level_id]
+
+
+@pytest.mark.phase5
+def test_odc2026_export_reports_facility_merge_floor_miss_reasons(test_client) -> None:
+    no_level_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbc1"
+    unknown_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbc2"
+    outside_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbc3"
+    fourth_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbc4"
+    fourth_level_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc6"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        ids = _write_imdf_schema_shapefiles(root)
+        gpd.GeoDataFrame(
+            {
+                "id": [fourth_level_id],
+                "category": ["1"],
+                "name": ["Fourth Floor"],
+                "ordinal": [3.0],
+                "short_name": ["4F"],
+                "source": ["1"],
+            },
+            geometry=[
+                Polygon(
+                    [
+                        (139.7001, 35.6901),
+                        (139.7009, 35.6901),
+                        (139.7009, 35.6909),
+                        (139.7001, 35.6909),
+                        (139.7001, 35.6901),
+                    ]
+                )
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_4F_Floor.shp", driver="ESRI Shapefile", index=False)
+        # Offset south of the 1F/4F outline so lon-scale error cannot mask metres.
+        outside_point = Point(139.7005, 35.6899)
+        gpd.GeoDataFrame(
+            {
+                "id": [no_level_id, unknown_id, outside_id, fourth_id],
+                "category": ["toilet", "toilet", "toilet", "toilet"],
+                "image": ["/marker/male.png"] * 4,
+                "floor": ["F7", "ZZ9", "F1", "F4"],
+                "name": ["No level", "Unknown", "Outside", "Fourth"],
+                "source": ["1"] * 4,
+            },
+            geometry=[
+                Point(139.7005, 35.6905),
+                Point(139.7005, 35.6905),
+                outside_point,
+                Point(139.7005, 35.6905),
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Facility_Merge.shp", driver="ESRI Shapefile", index=False)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"profile": "odc2026", "export_name": "Demo_Station"},
+    )
+    assert export_response.status_code == 200
+
+    floor_geom = Polygon(
+        [
+            (139.7001, 35.6901),
+            (139.7009, 35.6901),
+            (139.7009, 35.6909),
+            (139.7001, 35.6909),
+            (139.7001, 35.6901),
+        ]
+    )
+    from shapely.ops import nearest_points
+    from pyproj import Geod
+
+    nearest = nearest_points(outside_point, floor_geom)[1]
+    _, _, geodesic_m = Geod(ellps="WGS84").inv(
+        outside_point.x, outside_point.y, nearest.x, nearest.y
+    )
+
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        report = json.loads(archive.read("export_report.json"))
+        unmapped = {item["feature_id"]: item for item in report["facility_merge_unmapped"]}
+        assert unmapped[no_level_id]["reason"] == "no_level_for_floor"
+        assert unmapped[no_level_id]["floor"] == "F7"
+        assert unmapped[unknown_id]["reason"] == "unknown_floor_token"
+        assert unmapped[unknown_id]["floor"] == "ZZ9"
+        assert len(report["facility_merge_outside_building"]) == 1
+        outside = report["facility_merge_outside_building"][0]
+        assert outside["feature_id"] == outside_id
+        assert abs(outside["distance_m"] - geodesic_m) < 1
+        with tempfile.TemporaryDirectory() as output_dir:
+            archive.extractall(output_dir)
+            fourth = gpd.read_file(Path(output_dir) / "Demo_Station_4_Facility.shp")
+            assert list(fourth["id"]) == [fourth_id]
+            assert ids["amenity_id"] not in set(fourth["id"])
 
 
 @pytest.mark.phase5

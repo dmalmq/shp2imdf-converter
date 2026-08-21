@@ -21,6 +21,7 @@ from backend.src.iso_subdivisions import (
     normalize_country,
     normalize_subdivision,
 )
+from backend.src.imdf_shapefile_importer import SYNTHESIZED_BUILDING_NAME, SYNTHESIZED_VENUE_NAME
 from backend.src.schemas import ValidationIssue, ValidationResponse, ValidationSummary
 
 
@@ -162,6 +163,30 @@ def _max_decimals(payload: dict[str, Any]) -> int:
             if "." in text:
                 max_dec = max(max_dec, len(text.split(".")[1]))
     return max_dec
+
+
+def _label_text(value: Any) -> str | None:
+    if isinstance(value, dict):
+        for item in value.values():
+            if isinstance(item, str) and item.strip():
+                return item.strip()
+        return None
+    return value.strip() or None if isinstance(value, str) else None
+
+
+def _floor_token(label: Any) -> str | None:
+    """Floor a label names, with the trailing F dropped ("1F" -> "1", "B1" -> "B1")."""
+    text = _label_text(label)
+    if not text:
+        return None
+    token = text.strip().upper()
+    if len(token) > 1 and token.endswith("F"):
+        token = token[:-1]
+    return token or None
+
+
+def _stem_tokens(stem: Any) -> set[str]:
+    return {token.upper() for token in re.findall(r"[A-Za-z0-9]+", stem)} if isinstance(stem, str) else set()
 
 
 def _labels_ok(value: Any) -> bool:
@@ -595,6 +620,25 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                     "Venue phone should be in international format starting with '+' (e.g. +1-555-123-4567).",
                     feature_id=fid,
                 )
+            # A dataset with no Site layer gets a synthesized venue, which
+            # exports as name "Venue" with category A999 (不明・その他). The
+            # IMDF-shapefile profile skips the wizard, so nothing else asks for
+            # the real facility details before the bundle ships.
+            if _label_text(props.get("name")) in (None, SYNTHESIZED_VENUE_NAME):
+                add_issue(
+                    "error",
+                    "venue_placeholder_metadata",
+                    "Venue still carries the placeholder name. Set the facility name before exporting.",
+                    feature_id=fid,
+                )
+            category = props.get("category")
+            if not isinstance(category, str) or category.strip().lower() in {"", "unspecified"}:
+                add_issue(
+                    "error",
+                    "venue_placeholder_metadata",
+                    "Venue category is unspecified and exports as A999. Pick the facility category.",
+                    feature_id=fid,
+                )
             hours = props.get("hours")
             if isinstance(hours, str) and hours.strip():
                 if not re.match(r"^(Mo|Tu|We|Th|Fr|Sa|Su|PH)([ ,\-;]|$)", hours.strip()):
@@ -634,6 +678,13 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                     )
 
         if ftype == "building":
+            if _label_text(props.get("name")) in (None, SYNTHESIZED_BUILDING_NAME):
+                add_issue(
+                    "error",
+                    "venue_placeholder_metadata",
+                    "Building still carries the placeholder name. Set the building name before exporting.",
+                    feature_id=fid,
+                )
             address_id = props.get("address_id")
             if address_id is not None and (not isinstance(address_id, str) or address_id not in address_ids):
                 add_issue("error", "building_address_id_valid", "Building address_id does not match an address feature.", feature_id=fid)
@@ -831,8 +882,59 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
         if len(units_by_level.get(level_id, [])) == 0:
             add_issue("warning", "level_no_units", "Level has no units assigned.", feature_id=level_id)
 
+    # A source file names the floor it belongs to, so a feature from
+    # "..._B2_unit.shp" assigned to a B1 level is a broken level_id in the source
+    # rather than a conversion choice. Geometry cannot arbitrate this: the 新宿 B1
+    # and B2 level footprints overlap, so most of those rows fall inside both.
+    floor_token_by_level = {
+        str(row.get("id")): _floor_token(_props(row).get("short_name")) or _floor_token(_props(row).get("name"))
+        for row in rows
+        if _feature_type(row) == "level" and row.get("id")
+    }
+    known_floor_tokens = {token for token in floor_token_by_level.values() if token}
+    for row in rows:
+        ftype = _feature_type(row)
+        if ftype not in LEVEL_LINKED_TYPES:
+            continue
+        props = _props(row)
+        level_id = props.get("level_id")
+        assigned = floor_token_by_level.get(level_id) if isinstance(level_id, str) else None
+        if not assigned:
+            continue
+        tokens = _stem_tokens(props.get("source_file"))
+        if not tokens or assigned in tokens:
+            continue
+        declared = sorted(tokens & (known_floor_tokens - {assigned}))
+        if declared:
+            add_issue(
+                "warning",
+                "level_floor_mismatch",
+                f"Source file names floor {declared[0]} but the assigned level is on floor {assigned}.",
+                feature_id=str(row.get("id")) if row.get("id") else None,
+                related_feature_id=level_id,
+            )
+
+    # ODC judges Space names, and a source that carries none produces a bundle of
+    # unnamed rooms. One warning per category keeps it actionable without one
+    # warning per row.
+    nameless_units: Counter = Counter()
+    for row in rows:
+        if _feature_type(row) != "unit":
+            continue
+        props = _props(row)
+        if _label_text(props.get("name")):
+            continue
+        category = props.get("category")
+        nameless_units[str(category).upper() if isinstance(category, str) and category else "(no category)"] += 1
+    for category, count in sorted(nameless_units.items()):
+        add_issue(
+            "warning",
+            "space_missing_name",
+            f"{count} space(s) of category {category} have no name.",
+        )
+
     failed_checks = {issue.check for issue in [*errors, *warnings]}
-    passed = sorted({"unique_uuids", "valid_geometry", "venue_exists", "building_exists", "labels_format_valid", "display_points_valid", "venue_phone_format", "venue_hours_format", "opening_not_touching_boundary", "polygon_has_interior_rings", "footprint_level_coverage"} - failed_checks)
+    passed = sorted({"unique_uuids", "valid_geometry", "venue_exists", "building_exists", "venue_placeholder_metadata", "labels_format_valid", "display_points_valid", "venue_phone_format", "venue_hours_format", "opening_not_touching_boundary", "polygon_has_interior_rings", "footprint_level_coverage"} - failed_checks)
     summary = ValidationSummary(
         total_features=len(rows),
         by_type=dict(by_type),

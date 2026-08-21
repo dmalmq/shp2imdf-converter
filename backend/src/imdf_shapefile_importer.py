@@ -41,6 +41,11 @@ ODC_IGNORED_LAYER_SUFFIXES = {("build", "connect")}
 # Facility_Merge (地図記号表示点) is a station-wide point layer that the ODC
 # export splits back into per-floor Facility layers.
 ODC_SUFFIX_ALIASES = {("facility", "merge"): "amenity"}
+# Names given to the venue/building synthesized for datasets that ship no Site or
+# Building layer. The validator checks for them, because this import profile
+# skips the wizard and nothing else would prompt for the real facility details.
+SYNTHESIZED_VENUE_NAME = "Venue"
+SYNTHESIZED_BUILDING_NAME = "Building"
 
 
 def _metadata_lookup(metadata: dict[str, Any]) -> dict[str, str]:
@@ -556,23 +561,41 @@ def _floor_code(value: Any) -> str | None:
     return f"{prefix}{int(match.group(2))}F"
 
 
+def _canonical_floor_label(value: object) -> str | None:
+    code = _floor_code(value)
+    if code:
+        return code
+    text = _label_text(value) if not isinstance(value, str) else value
+    if not text:
+        return None
+    # Basement/mezzanine tokens such as B2 / M2 (no trailing F). Bare digits stay
+    # rejected so years like 2024 are not treated as floors.
+    match = re.fullmatch(r"(B|M)(\d+)", str(text), re.IGNORECASE)
+    if match:
+        return f"{match.group(1).upper()}{int(match.group(2))}F"
+    return None
+
+
 def _floor_label_from_stem(stem: str) -> str | None:
     for token in re.findall(r"[A-Za-z0-9]+", stem):
-        code = _floor_code(token)
+        code = _canonical_floor_label(token)
         if code:
             return code
     return None
 
 
-def _build_label_to_level(levels: list[dict[str, Any]]) -> dict[str, str]:
+def _build_label_to_level(levels: list[dict[str, Any]]) -> tuple[dict[str, str], dict[str, str]]:
     label_to_level: dict[str, str] = {}
+    level_to_label: dict[str, str] = {}
     for level in levels:
+        level_id = str(level["id"])
         props = level.get("properties") or {}
         for source in (props.get("short_name"), props.get("name")):
-            code = _floor_code(source)
+            code = _canonical_floor_label(source)
             if code:
-                label_to_level.setdefault(code, str(level["id"]))
-    return label_to_level
+                label_to_level.setdefault(code, level_id)
+                level_to_label.setdefault(level_id, code)
+    return label_to_level, level_to_label
 
 
 def _level_id_for_row(
@@ -582,17 +605,26 @@ def _level_id_for_row(
     fallback_ordinal: int | None,
     label_to_level: dict[str, str] | None = None,
     fallback_label: str | None = None,
+    prefer_filename_floor: bool = False,
+    level_to_label: dict[str, str] | None = None,
 ) -> str | None:
     source_level = _text(_metadata_get(metadata, ["level_id", "floor_id", "floorid", "levelid"]))
+    filename_level = None
+    if fallback_label and label_to_level:
+        filename_level = label_to_level.get(fallback_label)
+    if prefer_filename_floor and filename_level:
+        source_floor = None
+        if source_level and source_level in source_to_level and level_to_label:
+            source_floor = level_to_label.get(source_to_level[source_level])
+        if source_floor and fallback_label and source_floor != fallback_label:
+            return filename_level
     if source_level and source_level in source_to_level:
         return source_to_level[source_level]
     # The source level_id does not resolve to a level in this dataset (the 壁あり
     # column files carry floor UUIDs from a separate export). Link by the floor
     # parsed from the filename before falling back to the raw UUID.
-    if fallback_label and label_to_level:
-        mapped = label_to_level.get(fallback_label)
-        if mapped:
-            return mapped
+    if filename_level:
+        return filename_level
     if fallback_ordinal is not None:
         mapped = ordinal_to_level.get(fallback_ordinal)
         if mapped:
@@ -612,6 +644,8 @@ def _build_level_linked_features(
     ordinal_to_level: dict[int, str],
     label_to_level: dict[str, str],
     language: str,
+    prefer_filename_floor: bool = False,
+    level_to_label: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     file_ordinals = {item.stem: item.detected_level for item in artifacts.files}
     file_labels = {item.stem: _floor_label_from_stem(item.stem) for item in artifacts.files}
@@ -633,6 +667,8 @@ def _build_level_linked_features(
                 fallback_ordinal,
                 label_to_level=label_to_level,
                 fallback_label=fallback_label,
+                prefer_filename_floor=prefer_filename_floor,
+                level_to_label=level_to_label,
             )
             if feature_type in LEVEL_LINKED_TYPES and not level_id:
                 continue
@@ -901,7 +937,11 @@ def _redirect_fixture_only_units(
         rows_by_type["unit"] = keep
 
 
-def build_imdf_shapefile_feature_collection(artifacts: ImportArtifacts, language: str = "en") -> dict[str, Any]:
+def build_imdf_shapefile_feature_collection(
+    artifacts: ImportArtifacts,
+    language: str = "en",
+    prefer_filename_floor: bool = False,
+) -> dict[str, Any]:
     rows_by_type = _rows_by_type(artifacts)
     _redirect_fixture_only_units(rows_by_type)
     address = _build_address(rows_by_type)
@@ -915,7 +955,7 @@ def build_imdf_shapefile_feature_collection(artifacts: ImportArtifacts, language
         levels = synthesized_levels
         ordinal_to_level.update(synthesized_by_ordinal)
 
-    label_to_level = _build_label_to_level(levels)
+    label_to_level, level_to_label = _build_label_to_level(levels)
     linked_features = _build_level_linked_features(
         artifacts=artifacts,
         rows_by_type=rows_by_type,
@@ -923,6 +963,8 @@ def build_imdf_shapefile_feature_collection(artifacts: ImportArtifacts, language
         ordinal_to_level=ordinal_to_level,
         label_to_level=label_to_level,
         language=language,
+        prefer_filename_floor=prefer_filename_floor,
+        level_to_label=level_to_label,
     )
     features = [address, *venues, *buildings, *levels, *linked_features]
     features = _ensure_core_features(features, address_id=address_id, language=language)
@@ -934,6 +976,7 @@ def build_imdf_shapefile_feature_collection(artifacts: ImportArtifacts, language
 def import_imdf_shapefile_blobs(
     file_blobs: list[tuple[str, bytes]],
     filename_keywords_path: str | Path,
+    prefer_filename_floor: bool = False,
 ) -> ImportArtifacts:
     if any(Path(filename).suffix.lower() == ".gpkg" for filename, _ in file_blobs):
         raise ValueError("IMDF-schema shapefile import only accepts shapefile components or ZIP archives.")
@@ -942,7 +985,10 @@ def import_imdf_shapefile_blobs(
     if any(item.source_format != "shapefile" for item in artifacts.files):
         raise ValueError("IMDF-schema shapefile import only accepts shapefile sources.")
 
-    feature_collection = build_imdf_shapefile_feature_collection(artifacts)
+    feature_collection = build_imdf_shapefile_feature_collection(
+        artifacts,
+        prefer_filename_floor=prefer_filename_floor,
+    )
     return ImportArtifacts(
         files=artifacts.files,
         cleanup_summary=artifacts.cleanup_summary,

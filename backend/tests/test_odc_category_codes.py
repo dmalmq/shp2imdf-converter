@@ -109,6 +109,27 @@ def test_unclassifiable_space_falls_back_to_other_room() -> None:
 
 
 @pytest.mark.phase5
+def test_a_code_set_on_the_property_passes_through() -> None:
+    # The review screen writes spec codes onto `category` directly, with no
+    # source metadata behind them.
+    from backend.src.shapefile_exporter import _load_category_codes as load
+
+    report = _report()
+    assert (
+        _code_for_feature_category(
+            {"id": "venue-1", "properties": {"category": "A001"}},
+            prefix="A",
+            source_candidates=["category"],
+            table=load("a-codes.json"),
+            fallback="A999",
+            report=report,
+        )
+        == "A001"
+    )
+    assert report["category_code_fallbacks"] == []
+
+
+@pytest.mark.phase5
 def test_source_codes_pass_through_untranslated() -> None:
     # A source row that already carries a spec code keeps it, including the
     # 多機能トイレ variants the aliases cannot infer.

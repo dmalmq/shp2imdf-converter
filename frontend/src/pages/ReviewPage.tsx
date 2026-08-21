@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
+  autofillWizardAddressFromGeometry,
   autofixSession,
   deleteSessionFeature,
   exportSessionArchive,
@@ -20,8 +21,7 @@ import {
   type WizardState,
   validateSession,
   type ValidationIssue,
-  type ValidationResponse
-} from "../api/client";
+  type ValidationResponse} from "../api/client";
 import { FeatureList } from "../components/review/FeatureList";
 import { IssuesPanel } from "../components/review/IssuesPanel";
 import {
@@ -32,6 +32,7 @@ import {
   levelIdsForFloor
 } from "../components/review/floorGroups";
 import { LayerTree } from "../components/review/LayerTree";
+import { VenueDetailsPanel, type AddressParts } from "../components/review/VenueDetailsPanel";
 import { MapPanel } from "../components/review/MapPanel";
 import { PropertiesPanel } from "../components/review/PropertiesPanel";
 import { ValidationBar } from "../components/review/ValidationBar";
@@ -312,6 +313,19 @@ export function ReviewPage() {
     }
   }, [features, floorOptions, mapFloorFilter]);
 
+  const venueFeature = useMemo(
+    () => features.find((item) => item.feature_type === "venue") ?? null,
+    [features]
+  );
+  const buildingFeature = useMemo(
+    () => features.find((item) => item.feature_type === "building") ?? null,
+    [features]
+  );
+  const addressFeature = useMemo(
+    () => features.find((item) => item.feature_type === "address") ?? null,
+    [features]
+  );
+
   const addressOptions = useMemo(() => {
     return features
       .filter((item) => item.feature_type === "address")
@@ -385,6 +399,26 @@ export function ReviewPage() {
       );
     } catch (caught) {
       captureError(caught, "Failed to save feature", "Save failed");
+    }
+  };
+
+  const requestAddressAutofill = async (): Promise<AddressParts | null> => {
+    if (!sessionId) {
+      return null;
+    }
+    try {
+      const response = await autofillWizardAddressFromGeometry(sessionId, wizardState?.project?.language ?? "en");
+      if (!response.result) {
+        pushToast({
+          title: t("No address found", "住所が見つかりません"),
+          description: response.warnings[0] ?? t("Geocoding returned no match.", "ジオコーディングの結果がありません。")
+        });
+        return null;
+      }
+      return response.result.address;
+    } catch (caught) {
+      captureError(caught, t("Address lookup failed", "住所の取得に失敗しました"), t("Lookup failed", "取得失敗"));
+      return null;
     }
   };
 
@@ -1047,6 +1081,17 @@ export function ReviewPage() {
                   onShowBasemapChange={setShowBasemap}
                 />
               </div>
+
+              {importProfile === "imdf_shapefile" ? (
+                <VenueDetailsPanel
+                  venue={venueFeature}
+                  building={buildingFeature}
+                  address={addressFeature}
+                  language={wizardState?.project?.language ?? "en"}
+                  onSave={(featureId, properties) => void saveFeatureProperties(featureId, properties)}
+                  onRequestAutofill={requestAddressAutofill}
+                />
+              ) : null}
 
               {/* Features list */}
               {loading ? (

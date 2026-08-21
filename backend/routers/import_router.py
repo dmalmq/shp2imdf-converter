@@ -11,7 +11,7 @@ from typing import Annotated
 from urllib.parse import quote
 import zipfile
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from fastapi.responses import Response
 
 from backend.src.detector import sync_feature_types
@@ -565,10 +565,15 @@ async def import_files(
 async def import_imdf_shapefiles(
     request: Request,
     files: Annotated[list[UploadFile], File(description="IMDF-schema shapefile components or a zip file")],
+    prefer_filename_floor: Annotated[bool, Query()] = False,
 ) -> ImportResponse:
     raw_blobs = await _read_uploaded_blobs(request, files)
     manager = _session_manager(request)
-    artifacts = import_imdf_shapefile_blobs(raw_blobs, filename_keywords_path=_keyword_config_path(request))
+    artifacts = import_imdf_shapefile_blobs(
+        raw_blobs,
+        filename_keywords_path=_keyword_config_path(request),
+        prefer_filename_floor=prefer_filename_floor,
+    )
     session = manager.create_session(
         files=artifacts.files,
         cleanup_summary=artifacts.cleanup_summary,

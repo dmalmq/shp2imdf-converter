@@ -389,3 +389,32 @@ def test_importer_explodes_multilinestrings_into_linestrings() -> None:
 
     source_refs = {item["properties"]["source_feature_ref"] for item in features}
     assert source_refs == {f"{stem}:0:0", f"{stem}:0:1"}
+
+@pytest.mark.phase1
+def test_importer_records_dropped_row_for_null_geometry() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        stem = "null_geom_units"
+        gdf = gpd.GeoDataFrame(
+            [
+                {"id": "keep-me", "geometry": Polygon([(0, 0), (1, 0), (1, 1), (0, 1), (0, 0)])},
+                {"id": "gone-row", "geometry": None},
+            ],
+            geometry="geometry",
+            crs="EPSG:4326",
+        )
+        gdf.to_file(root / f"{stem}.shp", driver="ESRI Shapefile", index=False)
+        blobs = read_directory_as_blobs(root)
+        artifacts = import_file_blobs(blobs, filename_keywords_path="backend/config/filename_keywords.json")
+
+    assert artifacts.cleanup_summary.empty_features_dropped == 1
+    dropped = [row.model_dump() for row in artifacts.cleanup_summary.dropped_rows]
+    assert dropped == [
+        {
+            "source_file": stem,
+            "row_index": 1,
+            "id": "gone-row",
+            "reason": "empty_geometry",
+        }
+    ]
+    assert len(artifacts.feature_collection["features"]) == 1

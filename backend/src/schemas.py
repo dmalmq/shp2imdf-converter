@@ -10,6 +10,15 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class DroppedRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_file: str
+    row_index: int
+    id: str | None = None
+    reason: str
+
+
 class CleanupSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -18,6 +27,8 @@ class CleanupSummary(BaseModel):
     features_reoriented: int = 0
     empty_features_dropped: int = 0
     coordinates_rounded: int = 0
+    # Bounded sample of dropped-row identities. Counts above stay authoritative.
+    dropped_rows: list[DroppedRow] = Field(default_factory=list)
 
 
 class IsoSubdivision(BaseModel):

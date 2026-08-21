@@ -148,3 +148,72 @@ def test_invalid_geometry_with_display_point_does_not_crash_validation() -> None
     result = validate_feature_collection(collection)
 
     assert any(issue.check == "invalid_geometry" for issue in result.errors)
+
+
+def _floor_collection() -> dict:
+    # B1 and B2 level footprints overlap, exactly like 新宿: geometry cannot tell
+    # which floor a feature belongs to, only the source filename can.
+    footprint = Polygon([(0.0, 0.0), (0.001, 0.0), (0.001, 0.001), (0.0, 0.001), (0.0, 0.0)])
+    inner = Polygon([(0.0002, 0.0002), (0.0004, 0.0002), (0.0004, 0.0004), (0.0002, 0.0004), (0.0002, 0.0002)])
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "id": "b1-level",
+                "feature_type": "level",
+                "geometry": mapping(footprint),
+                "properties": {"ordinal": -1, "short_name": {"en": "B1"}, "name": {"en": "B1ラチ内"}, "outdoor": False},
+            },
+            {
+                "type": "Feature",
+                "id": "b2-level",
+                "feature_type": "level",
+                "geometry": mapping(footprint),
+                "properties": {"ordinal": -2, "short_name": {"en": "B2"}, "name": {"en": "B2ラチ内"}, "outdoor": False},
+            },
+            {
+                "type": "Feature",
+                "id": "b2-unit",
+                "feature_type": "unit",
+                "geometry": mapping(inner),
+                "properties": {"level_id": "b1-level", "category": "stairs", "source_file": "JRShinjukuSta_B2_unit"},
+            },
+            {
+                "type": "Feature",
+                "id": "b1-unit",
+                "feature_type": "unit",
+                "geometry": mapping(inner),
+                "properties": {"level_id": "b1-level", "category": "stairs", "source_file": "JRShinjukuSta_B1_unit"},
+            },
+        ],
+    }
+
+
+@pytest.mark.phase5
+def test_validator_flags_features_whose_level_is_on_another_floor() -> None:
+    response = validate_feature_collection(_floor_collection())
+    mismatches = [issue for issue in response.warnings if issue.check == "level_floor_mismatch"]
+
+    assert [issue.feature_id for issue in mismatches] == ["b2-unit"]
+    assert "B2" in mismatches[0].message and "B1" in mismatches[0].message
+    assert mismatches[0].related_feature_id == "b1-level"
+
+
+@pytest.mark.phase5
+def test_validator_summarizes_nameless_spaces_per_category() -> None:
+    collection = _floor_collection()
+    collection["features"].append(
+        {
+            "type": "Feature",
+            "id": "named-unit",
+            "feature_type": "unit",
+            "geometry": collection["features"][-1]["geometry"],
+            "properties": {"level_id": "b1-level", "category": "retail", "name": {"en": "Shop A"}, "source_file": "JRShinjukuSta_B1_unit"},
+        }
+    )
+    response = validate_feature_collection(collection)
+    nameless = [issue for issue in response.warnings if issue.check == "space_missing_name"]
+
+    # One warning per category, and the named retail unit is not in it.
+    assert [issue.message for issue in nameless] == ["2 space(s) of category STAIRS have no name."]

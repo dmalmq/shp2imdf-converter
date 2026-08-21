@@ -706,7 +706,11 @@ def _source_value(feature: dict[str, Any]) -> str:
 
 
 def _source_code(feature: dict[str, Any], prefix: str, candidates: list[str]) -> str | None:
-    value = _property_or_metadata(feature, [], candidates)
+    # A category that is already a spec code passes through. It can live in the
+    # property as well as the source metadata: the review screen writes codes
+    # straight onto `category`, and only metadata used to be consulted, so a
+    # venue set to A001 by hand still exported as A999.
+    value = _property_or_metadata(feature, ["category"], candidates)
     text = _text_or_none(value)
     if text and re.fullmatch(fr"{prefix}\d{{3}}", text.strip(), flags=re.IGNORECASE):
         return text.strip().upper()
@@ -849,17 +853,19 @@ def _union_geometries(geoms: list[Any]) -> Any | None:
     return unary_union(present)
 
 
-def _level_id_for_point(levels: list[dict[str, Any]], point: Any, tolerance: float) -> str | None:
-    """Level of one floor that owns `point`, or None when it sits too far out.
+def _nearest_level_for_point(
+    levels: list[dict[str, Any]], point: Any
+) -> tuple[str | None, float | None]:
+    """Nearest Level of one floor and its distance in degrees, if measurable.
 
     A floor holds several Level features (新宿 2F is ラチ内 / ラチ外 / 屋外), so a
     display point belongs to whichever of them it falls in. Measuring against the
     floor's first level alone drops everything standing on the rest of the floor.
     """
     if not levels:
-        return None
+        return None, None
     if point is None:
-        return str(levels[0].get("id"))
+        return str(levels[0].get("id")), None
     nearest_id: str | None = None
     nearest_distance = 0.0
     for level in levels:
@@ -871,8 +877,26 @@ def _level_id_for_point(levels: list[dict[str, Any]], point: Any, tolerance: flo
             nearest_id, nearest_distance = str(level.get("id")), distance
     if nearest_id is None:
         # No level on this floor carries geometry, so there is nothing to test.
-        return str(levels[0].get("id"))
-    return nearest_id if nearest_distance <= tolerance else None
+        return str(levels[0].get("id")), None
+    return nearest_id, nearest_distance
+
+
+def _level_id_for_point(
+    levels: list[dict[str, Any]], point: Any, tolerance: float
+) -> tuple[str | None, float | None]:
+    """Level that owns `point`, plus distance in metres to the nearest polygon.
+
+    Distance is the degree measurement converted with DEGREES_PER_METER (the
+    same factor used for FACILITY_INSIDE_TOLERANCE_M) and rounded to 2 d.p.
+    The level id is None when the point sits farther than `tolerance`.
+    """
+    nearest_id, nearest_distance = _nearest_level_for_point(levels, point)
+    if nearest_id is None or nearest_distance is None:
+        return nearest_id, None
+    distance_m = round(nearest_distance / DEGREES_PER_METER, 2)
+    if nearest_distance <= tolerance:
+        return nearest_id, distance_m
+    return None, distance_m
 
 
 def _display_name(feature: dict[str, Any]) -> str | None:
@@ -917,7 +941,10 @@ ODC_FLOOR_LAYER_GEOMS: dict[str, tuple[str, ...]] = {
 }
 
 # ステナビフロアID (Facility_Merge `floor` attribute) → ODC floor code, per spec
-# Table 2-2 (the 東京駅 area floor master).
+# Table 2-2 (the 東京駅 area floor master). Station-specific tokens (SB5, KB4,
+# ...) live here; generic F/B/M tokens are resolved in
+# `_facility_merge_floor_code` because the table is Tokyo Station's floor
+# set and a 4F station would otherwise drop every facility on that floor.
 FACILITY_MERGE_FLOOR_MAP = {
     "SB5": "B5F",
     "KB4": "B4F",
@@ -930,10 +957,33 @@ FACILITY_MERGE_FLOOR_MAP = {
     "F2": "2F",
     "F3": "3F",
 }
+_GENERIC_FACILITY_MERGE_FLOOR = re.compile(r"^(F|B|M)(\d{1,2})$", re.IGNORECASE)
+
+
+def _facility_merge_floor_code(floor_attr: str | None) -> str | None:
+    """Resolve a Facility_Merge `floor` value to an ODC floor code.
+
+    Table entries win so 東京駅-specific ids (SB5, KB4, ...) keep their mapped
+    codes. The table alone is not enough: it is the Tokyo Station master and
+    has no F4/F5/..., so a station with a 4F would silently drop those rows.
+    Generic Stenavi tokens are therefore handled in code: F<n> -> <n>F,
+    B<n> -> B<n>F, M<n> -> M<n>F (1-2 digits, case-insensitive).
+    """
+    if not floor_attr:
+        return None
+    token = floor_attr.strip().upper()
+    if token in FACILITY_MERGE_FLOOR_MAP:
+        return FACILITY_MERGE_FLOOR_MAP[token]
+    match = _GENERIC_FACILITY_MERGE_FLOOR.fullmatch(token)
+    if not match:
+        return None
+    kind, number = match.group(1).upper(), str(int(match.group(2)))
+    if kind == "F":
+        return f"{number}F"
+    return f"{kind}{number}F"
 
 # The opendata Building layer carries a single building (the station itself)
 # whose polygon is the ground-floor (1F) level shape.
-ODC_BUILDING_NAME = "JR東京駅"
 ODC_GROUND_FLOOR_CODE = "1F"
 # Facility_Merge display points may sit fractionally off the level outline;
 # anything beyond this distance from its own floor's Level polygon belongs to a
@@ -1135,17 +1185,36 @@ def _write_odc2026_shapefiles(
                 if not _is_facility_merge_feature(feature):
                     continue
                 floor_attr = _text_or_none(_metadata_value(_feature_metadata(feature), ["floor"]))
-                floor_code = FACILITY_MERGE_FLOOR_MAP.get(floor_attr.upper()) if floor_attr else None
+                floor_code = _facility_merge_floor_code(floor_attr)
                 floor_levels = levels_by_floor_token.get(_floor_token_of_code(floor_code) or "", [])
-                if not floor_levels:
+                if floor_code is None:
                     report["facility_merge_unmapped"].append(
-                        {"feature_id": str(feature.get("id", "")), "floor": floor_attr}
+                        {
+                            "feature_id": str(feature.get("id", "")),
+                            "floor": floor_attr,
+                            "reason": "unknown_floor_token",
+                        }
                     )
                     continue
-                level_id = _level_id_for_point(floor_levels, _feature_geometry(feature), inside_tolerance)
+                if not floor_levels:
+                    report["facility_merge_unmapped"].append(
+                        {
+                            "feature_id": str(feature.get("id", "")),
+                            "floor": floor_attr,
+                            "reason": "no_level_for_floor",
+                        }
+                    )
+                    continue
+                level_id, distance_m = _level_id_for_point(
+                    floor_levels, _feature_geometry(feature), inside_tolerance
+                )
                 if level_id is None:
                     report["facility_merge_outside_building"].append(
-                        {"feature_id": str(feature.get("id", "")), "floor": floor_attr}
+                        {
+                            "feature_id": str(feature.get("id", "")),
+                            "floor": floor_attr,
+                            "distance_m": distance_m,
+                        }
                     )
                     continue
             else:
@@ -1216,8 +1285,15 @@ def _write_odc2026_shapefiles(
             fallback_building_geom = unary_union(site_geoms)
         # The Building polygon takes the shape of the ground floor (1F level).
         buildings = [item for item in features if item.get("feature_type") == "building"]
+        # The station building is the one named after the venue. This used to
+        # match a hardcoded "JR東京駅", so every other station fell through to
+        # the first building in the list and only worked by having exactly one.
+        venue_name = next(
+            (_display_name(item) for item in features if item.get("feature_type") == "venue"),
+            None,
+        )
         station_building = next(
-            (item for item in buildings if (_display_name(item) or "") == ODC_BUILDING_NAME),
+            (item for item in buildings if venue_name and _display_name(item) == venue_name),
             buildings[0] if buildings else None,
         )
         building_rows: list[dict[str, Any]] = []
