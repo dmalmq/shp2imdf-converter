@@ -98,3 +98,14 @@ pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
   `_REFERENCE_FOCUS_MARGIN_METRES` (1 km) of it, pushing that box down into GDAL so
   distant features are never even read. Omitting the field keeps the untrimmed
   behaviour, so the endpoint stays usable on its own.
+- ODC output is one file **per floor**, and a floor routinely holds several Level
+  features: 新宿 2F is ラチ内 / ラチ外 / 屋外, 1F is eight platforms plus 1F and
+  1F屋外. `_write_odc2026_shapefiles` therefore accumulates rows per
+  `(floor token, layer)` and writes each file once. Writing inside the level loop
+  looked correct and silently destroyed data — every level of a floor rewrote the
+  same `<base>_<floor>_Space.shp`, so only the last one survived (Shinjuku
+  exported 152 of 458 units, and layers whose owning level lost the race kept a
+  `floor_id` that was absent from `_Floor.shp`). Any per-floor lookup has the same
+  trap: keep all levels of a token, and route Facility_Merge points to the level
+  they actually fall in. Fixtures for a fixture-only level hid the bug further,
+  because `_write_odc_layer` skips empty row sets instead of truncating the file.

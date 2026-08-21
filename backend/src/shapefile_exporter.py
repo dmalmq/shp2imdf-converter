@@ -797,6 +797,48 @@ def _odc_floor_token(level: dict[str, Any]) -> str:
     return _safe_export_name(str(level.get("id", "level"))[:8])
 
 
+def _floor_token_of_code(code: str | None) -> str | None:
+    """ODC filename token for a canonical floor code ("1F" -> "1", "B1F" -> "B1")."""
+    if not code:
+        return None
+    return code[:-1] if code.upper().endswith("F") else code
+
+
+def _union_geometries(geoms: list[Any]) -> Any | None:
+    present = [geom for geom in geoms if geom is not None and not geom.is_empty]
+    if not present:
+        return None
+    if len(present) == 1:
+        return present[0]
+    return unary_union(present)
+
+
+def _level_id_for_point(levels: list[dict[str, Any]], point: Any, tolerance: float) -> str | None:
+    """Level of one floor that owns `point`, or None when it sits too far out.
+
+    A floor holds several Level features (新宿 2F is ラチ内 / ラチ外 / 屋外), so a
+    display point belongs to whichever of them it falls in. Measuring against the
+    floor's first level alone drops everything standing on the rest of the floor.
+    """
+    if not levels:
+        return None
+    if point is None:
+        return str(levels[0].get("id"))
+    nearest_id: str | None = None
+    nearest_distance = 0.0
+    for level in levels:
+        geom = _feature_geometry(level)
+        if geom is None:
+            continue
+        distance = geom.distance(point)
+        if nearest_id is None or distance < nearest_distance:
+            nearest_id, nearest_distance = str(level.get("id")), distance
+    if nearest_id is None:
+        # No level on this floor carries geometry, so there is nothing to test.
+        return str(levels[0].get("id"))
+    return nearest_id if nearest_distance <= tolerance else None
+
+
 def _display_name(feature: dict[str, Any]) -> str | None:
     properties = _feature_properties(feature)
     return _label_text(properties.get("name")) or _text_or_none(_metadata_value(_feature_metadata(feature), ["name"]))
@@ -827,6 +869,16 @@ def _safe_layer_stem(*parts: str) -> str:
 ODC_POLYGON_GEOMS = ("Polygon", "MultiPolygon")
 ODC_LINE_GEOMS = ("LineString", "MultiLineString")
 ODC_POINT_GEOMS = ("Point",)
+
+# Every per-floor ODC file is named "<base>_<floor token>_<layer>.shp".
+ODC_FLOOR_LAYER_GEOMS: dict[str, tuple[str, ...]] = {
+    "Floor": ODC_POLYGON_GEOMS,
+    "Space": ODC_POLYGON_GEOMS,
+    "Fixture": ODC_POLYGON_GEOMS,
+    "Opening": ODC_LINE_GEOMS,
+    "Drawing": ODC_LINE_GEOMS,
+    "Facility": ODC_POINT_GEOMS,
+}
 
 # ステナビフロアID (Facility_Merge `floor` attribute) → ODC floor code, per spec
 # Table 2-2 (the 東京駅 area floor master).
@@ -983,18 +1035,24 @@ def _write_odc2026_shapefiles(
         level_id: {"unit": [], "fixture": [], "opening": [], "detail": [], "amenity": []}
         for level_id in level_ids
     }
-    level_id_by_floor_code: dict[str, str] = {}
+    # ODC names each per-floor file after its floor token, and a floor commonly
+    # carries several Level features (新宿 2F is ラチ内 / ラチ外 / 屋外), so a token
+    # keeps every one of its levels instead of an arbitrary first one.
+    floor_token_by_level_id: dict[str, str] = {}
+    levels_by_floor_token: dict[str, list[dict[str, Any]]] = {}
     for level in levels:
-        props = _feature_properties(level)
-        code = _floor_code_of(_label_text(props.get("short_name"))) or _floor_code_of(_label_text(props.get("name")))
-        if code and level.get("id"):
-            level_id_by_floor_code.setdefault(code, str(level.get("id")))
-    level_geom_by_id = {
-        str(level.get("id")): _feature_geometry(level)
-        for level in levels
-        if level.get("id")
-    }
-    ground_level_geom = level_geom_by_id.get(level_id_by_floor_code.get(ODC_GROUND_FLOOR_CODE, ""))
+        if not level.get("id"):
+            continue
+        token = _odc_floor_token(level)
+        floor_token_by_level_id[str(level.get("id"))] = token
+        levels_by_floor_token.setdefault(token, []).append(level)
+    # The Building polygon is the whole ground floor, every 1F level included.
+    ground_level_geom = _union_geometries(
+        [
+            _feature_geometry(level)
+            for level in levels_by_floor_token.get(_floor_token_of_code(ODC_GROUND_FLOOR_CODE) or "", [])
+        ]
+    )
     inside_tolerance = FACILITY_INSIDE_TOLERANCE_M * DEGREES_PER_METER
     facility_merge_active = any(
         feature.get("feature_type") == "amenity" and _is_facility_merge_feature(feature)
@@ -1041,20 +1099,18 @@ def _write_odc2026_shapefiles(
                     continue
                 floor_attr = _text_or_none(_metadata_value(_feature_metadata(feature), ["floor"]))
                 floor_code = FACILITY_MERGE_FLOOR_MAP.get(floor_attr.upper()) if floor_attr else None
-                level_id = level_id_by_floor_code.get(floor_code) if floor_code else None
-                if level_id is None:
+                floor_levels = levels_by_floor_token.get(_floor_token_of_code(floor_code) or "", [])
+                if not floor_levels:
                     report["facility_merge_unmapped"].append(
                         {"feature_id": str(feature.get("id", "")), "floor": floor_attr}
                     )
                     continue
-                level_geom = level_geom_by_id.get(level_id)
-                if level_geom is not None:
-                    point = _feature_geometry(feature)
-                    if point is not None and level_geom.distance(point) > inside_tolerance:
-                        report["facility_merge_outside_building"].append(
-                            {"feature_id": str(feature.get("id", "")), "floor": floor_attr}
-                        )
-                        continue
+                level_id = _level_id_for_point(floor_levels, _feature_geometry(feature), inside_tolerance)
+                if level_id is None:
+                    report["facility_merge_outside_building"].append(
+                        {"feature_id": str(feature.get("id", "")), "floor": floor_attr}
+                    )
+                    continue
             else:
                 level_id = _poi_level_id(feature)
                 if level_id is None:
@@ -1067,6 +1123,10 @@ def _write_odc2026_shapefiles(
         level_id = _feature_properties(feature).get("level_id")
         if isinstance(level_id, str) and level_id in features_by_level:
             features_by_level[level_id][feature_type].append(feature)
+        else:
+            report["rows_skipped"].append(
+                {"layer": feature_type, "feature_id": str(feature.get("id", "")), "reason": "unresolved_level"}
+            )
 
     def _emit() -> None:
 
@@ -1151,15 +1211,24 @@ def _write_odc2026_shapefiles(
         else:
             report["layers_skipped"].append({"layer": building_stem, "reason": "no_building_geometry"})
 
+        # One file per floor, not per level. Several Level features share a floor
+        # token, so their rows accumulate in one bucket per (floor, layer) and are
+        # written once at the end; writing inside this loop made each level of a
+        # floor clobber the file the previous level had just written.
+        floor_layers: dict[tuple[str, str], tuple[list[dict[str, Any]], list[Any]]] = {}
+
+        def _floor_layer(label: str, layer: str) -> tuple[list[dict[str, Any]], list[Any]]:
+            return floor_layers.setdefault((label, layer), ([], []))
+
         for level in levels:
             level_id = str(level.get("id"))
-            label = _odc_floor_token(level)
+            label = floor_token_by_level_id.get(level_id) or _odc_floor_token(level)
             level_geom = _feature_geometry(level)
             if level_geom is not None:
                 props = _feature_properties(level)
-                floor_stem = _safe_layer_stem(base, label, "Floor")
                 ordinal = props.get("ordinal")
-                floor_rows = [
+                floor_rows, floor_geoms = _floor_layer(label, "Floor")
+                floor_rows.append(
                     {
                         "id": _feature_id_value(level),
                         "category": "2" if bool(props.get("outdoor")) else "1",
@@ -1168,14 +1237,12 @@ def _write_odc2026_shapefiles(
                         "short_name": _label_text(props.get("short_name")),
                         "source": _source_value(level),
                     }
-                ]
-                if _write_odc_layer(output_dir, floor_stem, floor_rows, [level_geom], write_encoding, ODC_POLYGON_GEOMS, report):
-                    report["layers_written"].append(floor_stem)
+                )
+                floor_geoms.append(level_geom)
 
             grouped = features_by_level.get(level_id, {})
             units = grouped.get("unit", [])
-            space_rows: list[dict[str, Any]] = []
-            space_geoms: list[Any] = []
+            space_rows, space_geoms = _floor_layer(label, "Space")
             for unit in units:
                 geom = _feature_geometry(unit)
                 if geom is None:
@@ -1207,13 +1274,9 @@ def _write_odc2026_shapefiles(
                     }
                 )
                 space_geoms.append(geom)
-            space_stem = _safe_layer_stem(base, label, "Space")
-            if _write_odc_layer(output_dir, space_stem, space_rows, space_geoms, write_encoding, ODC_POLYGON_GEOMS, report):
-                report["layers_written"].append(space_stem)
 
             fixtures = grouped.get("fixture", [])
-            fixture_rows: list[dict[str, Any]] = []
-            fixture_geoms: list[Any] = []
+            fixture_rows, fixture_geoms = _floor_layer(label, "Fixture")
             for fixture in fixtures:
                 geom = _feature_geometry(fixture)
                 if geom is None:
@@ -1234,13 +1297,9 @@ def _write_odc2026_shapefiles(
                     }
                 )
                 fixture_geoms.append(geom)
-            fixture_stem = _safe_layer_stem(base, label, "Fixture")
-            if _write_odc_layer(output_dir, fixture_stem, fixture_rows, fixture_geoms, write_encoding, ODC_POLYGON_GEOMS, report):
-                report["layers_written"].append(fixture_stem)
 
             openings = grouped.get("opening", [])
-            opening_rows: list[dict[str, Any]] = []
-            opening_geoms: list[Any] = []
+            opening_rows, opening_geoms = _floor_layer(label, "Opening")
             for opening in openings:
                 geom = _feature_geometry(opening)
                 if geom is None:
@@ -1254,13 +1313,9 @@ def _write_odc2026_shapefiles(
                     }
                 )
                 opening_geoms.append(geom)
-            opening_stem = _safe_layer_stem(base, label, "Opening")
-            if _write_odc_layer(output_dir, opening_stem, opening_rows, opening_geoms, write_encoding, ODC_LINE_GEOMS, report):
-                report["layers_written"].append(opening_stem)
 
             details = grouped.get("detail", [])
-            drawing_rows: list[dict[str, Any]] = []
-            drawing_geoms: list[Any] = []
+            drawing_rows, drawing_geoms = _floor_layer(label, "Drawing")
             for detail in details:
                 geom = _feature_geometry(detail)
                 if geom is None:
@@ -1273,13 +1328,9 @@ def _write_odc2026_shapefiles(
                     }
                 )
                 drawing_geoms.append(geom)
-            drawing_stem = _safe_layer_stem(base, label, "Drawing")
-            if _write_odc_layer(output_dir, drawing_stem, drawing_rows, drawing_geoms, write_encoding, ODC_LINE_GEOMS, report):
-                report["layers_written"].append(drawing_stem)
 
             amenities = grouped.get("amenity", [])
-            facility_rows: list[dict[str, Any]] = []
-            facility_geoms: list[Any] = []
+            facility_rows, facility_geoms = _floor_layer(label, "Facility")
             for amenity in amenities:
                 geom = _feature_geometry(amenity)
                 if geom is None:
@@ -1306,9 +1357,11 @@ def _write_odc2026_shapefiles(
                     }
                 )
                 facility_geoms.append(geom)
-            facility_stem = _safe_layer_stem(base, label, "Facility")
-            if _write_odc_layer(output_dir, facility_stem, facility_rows, facility_geoms, write_encoding, ODC_POINT_GEOMS, report):
-                report["layers_written"].append(facility_stem)
+
+        for (label, layer), (rows, geoms) in floor_layers.items():
+            stem = _safe_layer_stem(base, label, layer)
+            if _write_odc_layer(output_dir, stem, rows, geoms, write_encoding, ODC_FLOOR_LAYER_GEOMS[layer], report):
+                report["layers_written"].append(stem)
 
     _emit()
     return report, base

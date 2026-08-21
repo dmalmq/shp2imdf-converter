@@ -15,6 +15,7 @@ import zipfile
 import geopandas as gpd
 import pytest
 from shapely.geometry import GeometryCollection, LineString, Point, Polygon, shape
+from shapely.ops import unary_union
 
 from backend.src.geocoding import GeocodeAddressParts, GeocodeMatch, GeocodingError
 from backend.src.schemas import CleanupSummary, ImportedFile
@@ -2164,6 +2165,184 @@ def test_odc2026_shapefile_export_from_imdf_schema_import(test_client) -> None:
             assert building.geometry.iloc[0].equals_exact(floor.geometry.iloc[0], tolerance=1e-12)
             assert space.crs.to_epsg() == 6668
             assert facility.crs.to_epsg() == 6668
+
+
+@pytest.mark.phase5
+def test_odc2026_export_keeps_every_level_of_one_floor(test_client) -> None:
+    # 新宿 1F is ten Level features (eight platforms, 1F and 1F屋外) that all share
+    # the "1" floor token, and ODC names files by floor. Writing a file per level
+    # made the floor's last level clobber every other level's rows.
+    west_level_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2"
+    west_unit_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc3"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        ids = _write_imdf_schema_shapefiles(root)
+        gpd.GeoDataFrame(
+            {
+                "id": [west_level_id],
+                "category": ["1"],
+                "name": ["First Floor West"],
+                "ordinal": [0.0],
+                "short_name": ["1F"],
+                "source": ["1"],
+            },
+            geometry=[
+                Polygon(
+                    [
+                        (139.7011, 35.6901),
+                        (139.7019, 35.6901),
+                        (139.7019, 35.6909),
+                        (139.7011, 35.6909),
+                        (139.7011, 35.6901),
+                    ]
+                )
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_1F_West_Floor.shp", driver="ESRI Shapefile", index=False)
+        gpd.GeoDataFrame(
+            {
+                "id": [west_unit_id],
+                "category": ["B002"],
+                "floor_id": [west_level_id],
+                "name": ["Shop B"],
+                "restricted": [None],
+                "suite": [None],
+                "nonpublic": [None],
+                "toll": [None],
+                "source": ["1"],
+            },
+            geometry=[
+                Polygon(
+                    [
+                        (139.7012, 35.6902),
+                        (139.7014, 35.6902),
+                        (139.7014, 35.6904),
+                        (139.7012, 35.6904),
+                        (139.7012, 35.6902),
+                    ]
+                )
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_1F_West_Space.shp", driver="ESRI Shapefile", index=False)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"profile": "odc2026", "export_name": "Demo_Station"},
+    )
+    assert export_response.status_code == 200
+
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        report = json.loads(archive.read("export_report.json"))
+        # Each layer is written once, so no level can overwrite another's file.
+        assert sorted(report["layers_written"]) == sorted(set(report["layers_written"]))
+        assert report["rows_skipped"] == []
+        with tempfile.TemporaryDirectory() as output_dir:
+            archive.extractall(output_dir)
+            floor = gpd.read_file(Path(output_dir) / "Demo_Station_1_Floor.shp")
+            space = gpd.read_file(Path(output_dir) / "Demo_Station_1_Space.shp")
+            assert set(floor["id"]) == {ids["level_id"], west_level_id}
+            assert dict(zip(space["id"], space["floor_id"])) == {
+                ids["unit_id"]: ids["level_id"],
+                west_unit_id: west_level_id,
+            }
+            # The Building polygon is the whole ground floor, not one level of it.
+            building = gpd.read_file(Path(output_dir) / "Demo_Station_Building.shp")
+            assert building.geometry.iloc[0].equals(unary_union(list(floor.geometry)))
+
+
+@pytest.mark.phase5
+def test_odc2026_export_binds_facility_merge_to_the_level_it_falls_in(test_client) -> None:
+    # Facility_Merge is one station-wide point layer: a point belongs to whichever
+    # level of its floor it falls in, and 新宿 labels basements "B1" with no
+    # trailing F, which the floor token has to resolve from the file stem.
+    west_level_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc4"
+    basement_level_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc5"
+    west_point_id = "dddddddd-dddd-4ddd-8ddd-ddddddddddd1"
+    basement_point_id = "dddddddd-dddd-4ddd-8ddd-ddddddddddd2"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_imdf_schema_shapefiles(root)
+        gpd.GeoDataFrame(
+            {
+                "id": [west_level_id],
+                "category": ["1"],
+                "name": ["First Floor West"],
+                "ordinal": [0.0],
+                "short_name": ["1F"],
+                "source": ["1"],
+            },
+            geometry=[
+                Polygon(
+                    [
+                        (139.7011, 35.6901),
+                        (139.7019, 35.6901),
+                        (139.7019, 35.6909),
+                        (139.7011, 35.6909),
+                        (139.7011, 35.6901),
+                    ]
+                )
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_1F_West_Floor.shp", driver="ESRI Shapefile", index=False)
+        gpd.GeoDataFrame(
+            {
+                "id": [basement_level_id],
+                "category": ["1"],
+                "name": ["B1ラチ内"],
+                "ordinal": [-1.0],
+                "short_name": ["B1"],
+                "source": ["1"],
+            },
+            geometry=[
+                Polygon(
+                    [
+                        (139.7001, 35.6921),
+                        (139.7009, 35.6921),
+                        (139.7009, 35.6929),
+                        (139.7001, 35.6929),
+                        (139.7001, 35.6921),
+                    ]
+                )
+            ],
+            crs="EPSG:4326",
+        ).to_file(root / "Demo_B1_Floor.shp", driver="ESRI Shapefile", index=False)
+        gpd.GeoDataFrame(
+            {
+                "id": [west_point_id, basement_point_id],
+                "category": ["toilet", "toilet"],
+                "image": ["/marker/male.png", "/marker/female.png"],
+                "floor": ["F1", "B1"],
+                "name": ["West toilet", "Basement toilet"],
+                "source": ["1", "1"],
+            },
+            geometry=[Point(139.7015, 35.6905), Point(139.7005, 35.6925)],
+            crs="EPSG:4326",
+        ).to_file(root / "Facility_Merge.shp", driver="ESRI Shapefile", index=False)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"profile": "odc2026", "export_name": "Demo_Station"},
+    )
+    assert export_response.status_code == 200
+
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        report = json.loads(archive.read("export_report.json"))
+        assert report["facility_merge_unmapped"] == []
+        assert report["facility_merge_outside_building"] == []
+        with tempfile.TemporaryDirectory() as output_dir:
+            archive.extractall(output_dir)
+            ground = gpd.read_file(Path(output_dir) / "Demo_Station_1_Facility.shp")
+            basement = gpd.read_file(Path(output_dir) / "Demo_Station_B1_Facility.shp")
+            assert dict(zip(ground["id"], ground["floor_id"])) == {west_point_id: west_level_id}
+            assert dict(zip(basement["id"], basement["floor_id"])) == {basement_point_id: basement_level_id}
+            assert list(ground["category"]) == ["F001"]
+            assert list(basement["category"]) == ["F002"]
 
 
 @pytest.mark.phase5
