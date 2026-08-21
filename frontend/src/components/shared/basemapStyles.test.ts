@@ -42,6 +42,13 @@ test("tile templates use xyz placeholders", () => {
   }
 });
 
+test("styles paint a background so a failed tile fetch is not a white void", () => {
+  for (const id of BASEMAP_ORDER) {
+    const background = BASEMAP_STYLES[id].layers.find((layer) => layer.type === "background");
+    expect(background).toBeDefined();
+  }
+});
+
 test("labels are bilingual", () => {
   const en = (a: string) => a;
   const ja = (_a: string, b: string) => b;

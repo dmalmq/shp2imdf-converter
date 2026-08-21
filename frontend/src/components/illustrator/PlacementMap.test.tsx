@@ -157,3 +157,30 @@ test("no mode switch with a single floor — there is nothing to group", () => {
   renderMap(ONE_LAYER, [{ label: "1F", linked: true }]);
   expect(screen.queryByRole("button", { name: "Individual" })).toBeNull();
 });
+
+
+test("switching floor, isolate, and Individual does not unmount the map wrapper", () => {
+  const { container } = render(
+    <PlacementMap
+      floors={LAYERS}
+      state={stateWith(
+        [
+          { label: "1F", linked: true },
+          { label: "2F", linked: true }
+        ],
+        "1F"
+      )}
+      dispatch={() => {}}
+      mode="group"
+      onModeChange={() => {}}
+      pickStage={null}
+      onPickArtwork={() => {}}
+      onPickMap={() => {}}
+    />
+  );
+  const wrapper = container.firstChild;
+  fireEvent.click(screen.getByRole("button", { name: "2F" }));
+  fireEvent.click(screen.getByRole("button", { name: /only this floor/i }));
+  fireEvent.click(screen.getByRole("button", { name: "Individual" }));
+  expect(container.firstChild).toBe(wrapper);
+});

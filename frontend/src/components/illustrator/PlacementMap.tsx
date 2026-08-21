@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Feature, FeatureCollection } from "geojson";
-import MapGL, {
+import {
   Layer,
   Marker,
   type MapLayerMouseEvent,
@@ -8,6 +8,8 @@ import MapGL, {
   Source
 } from "react-map-gl/maplibre";
 import type { Map as MaplibreMap } from "maplibre-gl";
+
+import { MapView } from "../shared/MapView";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
@@ -32,6 +34,21 @@ import {
 } from "../shared/basemapStyles";
 import { Button } from "../ui";
 import { TransformHandles } from "./TransformHandles";
+import {
+  ARTWORK_SLOT_LAYER_ID,
+  ARTWORK_SLOT_SOURCE_ID,
+  EMPTY_FEATURE_COLLECTION,
+  OVERLAY_SLOT_LAYER_ID,
+  OVERLAY_SLOT_SOURCE_ID,
+  floorFillLayerId,
+  floorLineLayerId,
+  floorSourceId,
+  layerVisibility,
+  referenceFillLayerId,
+  referenceLineLayerId,
+  referencePointLayerId,
+  referenceSourceId
+} from "./placementMapLayers";
 
 export const FLOOR_TINTS = ["#3b82f6", "#16a34a", "#dc2626", "#9333ea", "#d97706", "#0891b2"];
 
@@ -71,6 +88,20 @@ function nearestRenderedVertex(
   const hit = nearestVertex(screenPts, [point.x, point.y], tolerancePx);
   // nearestVertex returns the same tuple reference, so indexOf finds the pair.
   return hit ? lngLats[screenPts.indexOf(hit)] : null;
+}
+
+function raiseFloorToTop(instance: MaplibreMap, label: string): void {
+  try {
+    const slot = instance.getLayer(OVERLAY_SLOT_LAYER_ID);
+    if (!slot) return;
+    for (const id of [floorFillLayerId(label), floorLineLayerId(label)]) {
+      if (instance.getLayer(id)) {
+        instance.moveLayer(id, OVERLAY_SLOT_LAYER_ID);
+      }
+    }
+  } catch {
+    // Style may be swapping when the map remounts; the next load retries.
+  }
 }
 
 export type FloorLayer = {
@@ -160,30 +191,22 @@ export function PlacementMap({
                 { type: "FeatureCollection", features: floor.features } satisfies FeatureCollection,
                 transform
               )
-            : ({ type: "FeatureCollection", features: [] } satisfies FeatureCollection)
+            : EMPTY_FEATURE_COLLECTION
         };
       }),
     [floors, state]
   );
 
   const activeLabel = activeFloor?.label ?? null;
-  // Ghosts help align a floor AGAINST its neighbours, but compete for attention
-  // when the job is just positioning one. Off by default so the shared-frame
-  // workflow is unchanged; the flag lives here because PlacementMap stays
-  // mounted, so isolation survives stepping through floors.
-  const ghostFloors = onlyActiveFloor
-    ? []
-    : placedByFloor.filter((floor) => floor.label !== activeLabel);
-  const placedActive = placedByFloor.find((floor) => floor.label === activeLabel) ?? null;
 
-  // Reference layers are added after the artwork layers already exist, so they
-  // would otherwise be appended on top of it. Anchor them below the bottom-most
-  // artwork layer instead.
-  const bottomArtworkLayerId = ghostFloors.length
-    ? `floor-${ghostFloors[0].label}-ghost-fill`
-    : placedActive
-      ? `floor-${placedActive.label}-fill`
-      : undefined;
+  // Keep the active floor on top of the ghosts without remounting sources.
+  // moveLayer is a no-op when the layer is already in place.
+  useEffect(() => {
+    if (!ready || !activeLabel) return;
+    const instance = mapRef.current?.getMap();
+    if (!instance) return;
+    raiseFloorToTop(instance, activeLabel);
+  }, [ready, activeLabel]);
 
   const gizmo = useMemo(
     () =>
@@ -212,8 +235,8 @@ export function PlacementMap({
       // Pin an artwork point: the click must land on the active floor's plan.
       if (!instance || !activeFloor || !activeTransform) return;
       const bodyIds = [
-        `floor-${activeFloor.label}-fill`,
-        `floor-${activeFloor.label}-line`
+        floorFillLayerId(activeFloor.label),
+        floorLineLayerId(activeFloor.label)
       ];
       const snapped = nearestRenderedVertex(instance, bodyIds, event.point, SNAP_PX);
       if (!snapped) {
@@ -231,9 +254,9 @@ export function PlacementMap({
     const referenceIds = referenceLayers
       .filter((layer) => layer.visible)
       .flatMap((layer) => [
-        `reference-${layer.name}-fill`,
-        `reference-${layer.name}-line`,
-        `reference-${layer.name}-point`
+        referenceFillLayerId(layer.name),
+        referenceLineLayerId(layer.name),
+        referencePointLayerId(layer.name)
       ]);
     const snapped = instance
       ? nearestRenderedVertex(instance, referenceIds, event.point, SNAP_PX)
@@ -249,9 +272,8 @@ export function PlacementMap({
 
   return (
     <div className="relative h-full w-full">
-      <MapGL
+      <MapView
         ref={mapRef}
-        mapLib={import("maplibre-gl")}
         initialViewState={{
           longitude: activeTransform?.mapAnchor[0] ?? 139.7671,
           latitude: activeTransform?.mapAnchor[1] ?? 35.6812,
@@ -259,102 +281,113 @@ export function PlacementMap({
         }}
         mapStyle={BASEMAP_STYLES[basemap]}
         style={{ width: "100%", height: "100%" }}
-        onLoad={() => setReady(true)}
+        onLoad={(event) => {
+          if (activeLabel) {
+            raiseFloorToTop(event.target, activeLabel);
+          }
+          setReady(true);
+        }}
+        onRemove={() => setReady(false)}
         onClick={onClick}
         cursor={pickStage ? "crosshair" : undefined}
       >
-        {/* Reference data sits under everything the user is placing. */}
-        {referenceLayers
-          .filter((layer) => layer.visible)
-          .map((layer) => (
-            <Source
-              key={`reference-${layer.name}`}
-              id={`reference-${layer.name}`}
-              type="geojson"
-              data={layer.data}
-            >
-              <Layer
-                id={`reference-${layer.name}-fill`}
-                type="fill"
-                beforeId={bottomArtworkLayerId}
-                filter={["==", ["geometry-type"], "Polygon"]}
-                paint={{ "fill-color": layer.color, "fill-opacity": 0.08 }}
-              />
-              <Layer
-                id={`reference-${layer.name}-line`}
-                type="line"
-                beforeId={bottomArtworkLayerId}
-                paint={{
-                  "line-color": layer.color,
-                  "line-width": 1.2,
-                  "line-opacity": 0.9,
-                  // Dashed reads as "reference", never as artwork being placed.
-                  "line-dasharray": [2, 1]
-                }}
-              />
-              <Layer
-                id={`reference-${layer.name}-point`}
-                type="circle"
-                beforeId={bottomArtworkLayerId}
-                filter={["==", ["geometry-type"], "Point"]}
-                paint={{ "circle-radius": 3, "circle-color": layer.color }}
-              />
-            </Source>
-          ))}
+        {/* Stable slots so beforeId never names a layer that just unmounted. */}
+        <Source id={ARTWORK_SLOT_SOURCE_ID} type="geojson" data={EMPTY_FEATURE_COLLECTION}>
+          <Layer id={ARTWORK_SLOT_LAYER_ID} type="fill" paint={{ "fill-opacity": 0 }} />
+        </Source>
+        <Source id={OVERLAY_SLOT_SOURCE_ID} type="geojson" data={EMPTY_FEATURE_COLLECTION}>
+          <Layer id={OVERLAY_SLOT_LAYER_ID} type="fill" paint={{ "fill-opacity": 0 }} />
+        </Source>
 
-        {/* Ghosts first so the active floor always draws on top of them. */}
-        {ghostFloors.map((floor) => (
+        {/* Reference data sits under everything the user is placing. Hidden
+            layers stay mounted: unmounting a large shapefile source reallocates
+            GPU buffers and used to blank the map. */}
+        {referenceLayers.map((layer) => (
           <Source
-            key={`ghost-${floor.label}`}
-            id={`floor-${floor.label}`}
+            key={referenceSourceId(layer.name)}
+            id={referenceSourceId(layer.name)}
             type="geojson"
-            data={floor.data}
+            data={layer.data}
           >
             <Layer
-              id={`floor-${floor.label}-ghost-fill`}
+              id={referenceFillLayerId(layer.name)}
               type="fill"
+              beforeId={ARTWORK_SLOT_LAYER_ID}
               filter={["==", ["geometry-type"], "Polygon"]}
-              paint={{ "fill-color": floor.color, "fill-opacity": 0.06 }}
+              layout={{ visibility: layerVisibility(layer.visible) }}
+              paint={{ "fill-color": layer.color, "fill-opacity": 0.08 }}
             />
             <Layer
-              id={`floor-${floor.label}-ghost-line`}
+              id={referenceLineLayerId(layer.name)}
               type="line"
-              paint={{ "line-color": floor.color, "line-opacity": 0.35, "line-width": 0.5 }}
+              beforeId={ARTWORK_SLOT_LAYER_ID}
+              layout={{ visibility: layerVisibility(layer.visible) }}
+              paint={{
+                "line-color": layer.color,
+                "line-width": 1.2,
+                "line-opacity": 0.9,
+                // Dashed reads as "reference", never as artwork being placed.
+                "line-dasharray": [2, 1]
+              }}
+            />
+            <Layer
+              id={referencePointLayerId(layer.name)}
+              type="circle"
+              beforeId={ARTWORK_SLOT_LAYER_ID}
+              filter={["==", ["geometry-type"], "Point"]}
+              layout={{ visibility: layerVisibility(layer.visible) }}
+              paint={{ "circle-radius": 3, "circle-color": layer.color }}
             />
           </Source>
         ))}
 
-        {placedActive ? (
-          <Source
-            key={placedActive.label}
-            id={`floor-${placedActive.label}`}
-            type="geojson"
-            data={placedActive.data}
-          >
-            <Layer
-              id={`floor-${placedActive.label}-fill`}
-              type="fill"
-              filter={["==", ["geometry-type"], "Polygon"]}
-              paint={{
-                "fill-color": ["coalesce", ["get", "fill_color"], placedActive.color],
-                "fill-opacity": 0.45
-              }}
-            />
-            <Layer
-              id={`floor-${placedActive.label}-line`}
-              type="line"
-              paint={{
-                "line-color": [
-                  "coalesce",
-                  ["get", "stroke_color"],
-                  ["get", "fill_color"],
-                  placedActive.color
-                ],
-                "line-width": 1
-              }}
-            />
-          </Source>
-        ) : null}
+        {/* One source per floor for the life of the map. Active vs ghost is
+            paint + visibility, never a remount — swapping React keys while
+            reusing the MapLibre source id is what went white. */}
+        {placedByFloor.map((floor) => {
+          const isActive = floor.label === activeLabel;
+          const visible = isActive || !onlyActiveFloor;
+          return (
+            <Source
+              key={floorSourceId(floor.label)}
+              id={floorSourceId(floor.label)}
+              type="geojson"
+              data={floor.data}
+            >
+              <Layer
+                id={floorFillLayerId(floor.label)}
+                type="fill"
+                beforeId={OVERLAY_SLOT_LAYER_ID}
+                filter={["==", ["geometry-type"], "Polygon"]}
+                layout={{ visibility: layerVisibility(visible) }}
+                paint={{
+                  "fill-color": isActive
+                    ? ["coalesce", ["get", "fill_color"], floor.color]
+                    : floor.color,
+                  "fill-opacity": isActive ? 0.45 : 0.06
+                }}
+              />
+              <Layer
+                id={floorLineLayerId(floor.label)}
+                type="line"
+                beforeId={OVERLAY_SLOT_LAYER_ID}
+                layout={{ visibility: layerVisibility(visible) }}
+                paint={{
+                  "line-color": isActive
+                    ? [
+                        "coalesce",
+                        ["get", "stroke_color"],
+                        ["get", "fill_color"],
+                        floor.color
+                      ]
+                    : floor.color,
+                  "line-width": isActive ? 1 : 0.5,
+                  "line-opacity": isActive ? 1 : 0.35
+                }}
+              />
+            </Source>
+          );
+        })}
 
         {pendingMarkerLngLat ? (
           <Marker
@@ -414,12 +447,12 @@ export function PlacementMap({
             mode={mode}
             scaleLocked={state.scaleLocked}
             bodyLayerIds={[
-              `floor-${activeFloor.label}-fill`,
-              `floor-${activeFloor.label}-line`
+              floorFillLayerId(activeFloor.label),
+              floorLineLayerId(activeFloor.label)
             ]}
           />
         ) : null}
-      </MapGL>
+      </MapView>
 
       <div className="absolute left-3 top-3 flex flex-col gap-2">
         {floors.length > 1 ? (

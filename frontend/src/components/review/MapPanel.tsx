@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
-import MapGL, { Layer, type LayerProps, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
+import { Layer, type LayerProps, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
 
 import { type ReviewFeature, type ReviewIssue, featureLayerKey, isLocatedFeature } from "./types";
+import { MapView } from "../shared/MapView";
 import { STREET_MAP_STYLE } from "../shared/streetMapStyle";
 import { buildUnitFillColorExpr, buildUnitLineColorExpr, buildUnitOpacityExpr } from "../shared/unitCategoryColors";
 
@@ -533,9 +534,8 @@ export function MapPanel({
 
   return (
     <div className="h-full overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)]">
-      <MapGL
+      <MapView
         ref={mapRef}
-        mapLib={import("maplibre-gl")}
         initialViewState={{
           longitude: 139.76,
           latitude: 35.68,
@@ -591,7 +591,7 @@ export function MapPanel({
             )}
           </Source>
         ) : null}
-      </MapGL>
+      </MapView>
     </div>
   );
 }

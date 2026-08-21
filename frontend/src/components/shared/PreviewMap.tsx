@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
-import Map, { Layer, MapRef, Source } from "react-map-gl/maplibre";
+import { Layer, type MapRef, Source } from "react-map-gl/maplibre";
+import { MapView } from "./MapView";
 import { STREET_MAP_STYLE } from "./streetMapStyle";
 import { buildUnitFillColorExpr, buildUnitLineColorExpr, buildUnitOpacityExpr } from "./unitCategoryColors";
 
@@ -208,9 +209,8 @@ export function PreviewMap({ features, selectedStem, hoveredStem }: Props) {
 
   return (
     <div className="h-[58vh] min-h-[430px] max-h-[760px] overflow-hidden rounded border">
-      <Map
+      <MapView
         ref={mapRef}
-        mapLib={import("maplibre-gl")}
         initialViewState={{
           longitude: 139.76,
           latitude: 35.68,
@@ -228,7 +228,7 @@ export function PreviewMap({ features, selectedStem, hoveredStem }: Props) {
           <Layer {...HIGHLIGHT_FILL_LAYER} />
           <Layer {...HIGHLIGHT_LINE_LAYER} />
         </Source>
-      </Map>
+      </MapView>
     </div>
   );
 }

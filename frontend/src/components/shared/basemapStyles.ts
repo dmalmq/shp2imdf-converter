@@ -32,7 +32,10 @@ function rasterStyle(
   return {
     version: 8,
     sources: { [id]: { type: "raster", tiles, tileSize: 256, attribution, maxzoom } },
-    layers: [{ id, type: "raster", source: id }]
+    layers: [
+      { id: "background", type: "background", paint: { "background-color": "#e8eef4" } },
+      { id, type: "raster", source: id }
+    ]
   };
 }
 

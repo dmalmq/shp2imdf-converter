@@ -13,6 +13,11 @@ export const STREET_MAP_STYLE: StyleSpecification = {
   },
   layers: [
     {
+      id: "background",
+      type: "background",
+      paint: { "background-color": "#e8eef4" }
+    },
+    {
       id: "osm-raster",
       type: "raster",
       source: "osm-raster"
