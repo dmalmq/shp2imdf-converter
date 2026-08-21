@@ -106,6 +106,7 @@ export function UploadPage() {
   const [progress, setProgress] = useState(0);
   const [loading, setLoading] = useState(false);
   const [importMode, setImportMode] = useState<"standard" | "imdf_shapefile">("standard");
+  const [preferFilenameFloor, setPreferFilenameFloor] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cleanupExpanded, setCleanupExpanded] = useState(false);
   const [lastCleanup, setLastCleanup] = useState<ImportResponse["cleanup_summary"] | null>(null);
@@ -308,7 +309,7 @@ export function UploadPage() {
     try {
       const payload =
         importMode === "imdf_shapefile"
-          ? await importImdfShapefiles(selectedFiles, setProgress)
+          ? await importImdfShapefiles(selectedFiles, setProgress, preferFilenameFloor)
           : await importShapefiles(selectedFiles, setProgress);
       setSessionExpiredMessage(null);
       setSessionId(payload.session_id);
@@ -417,6 +418,23 @@ export function UploadPage() {
             </span>
           </button>
         </div>
+
+        {importMode === "imdf_shapefile" ? (
+          <label className="mb-5 flex items-start gap-2 text-sm text-[var(--color-text-secondary)]">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={preferFilenameFloor}
+              onChange={(event) => setPreferFilenameFloor(event.target.checked)}
+            />
+            <span>
+              {t(
+                "Prefer the floor in the filename when it disagrees with the source level",
+                "ファイル名の階がソースのレベルと異なる場合はファイル名の階を優先"
+              )}
+            </span>
+          </label>
+        ) : null}
 
         {/* Dropzone */}
         <div

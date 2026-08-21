@@ -388,9 +388,11 @@ export async function importShapefiles(
 
 export async function importImdfShapefiles(
   files: File[],
-  onProgress?: (percent: number) => void
+  onProgress?: (percent: number) => void,
+  preferFilenameFloor = false
 ): Promise<ImportResponse> {
-  return uploadImportFiles("/api/import/imdf-shapefiles", files, onProgress);
+  const query = preferFilenameFloor ? "?prefer_filename_floor=true" : "";
+  return uploadImportFiles(`/api/import/imdf-shapefiles${query}`, files, onProgress);
 }
 
 function uploadImportFiles(
