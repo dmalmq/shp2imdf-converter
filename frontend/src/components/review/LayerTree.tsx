@@ -5,13 +5,13 @@ import { layerKeyLabel } from "./types";
 type Props = {
   featureTypes: string[];
   layerVisibility: Record<string, boolean>;
-  levelFilter: string;
-  levelOptions: Array<{ id: string; label: string }>;
+  floorFilter: string;
+  floorOptions: Array<{ id: string; label: string }>;
   validationLoaded: boolean;
   overlayVisibility: Record<string, boolean>;
   showBasemap: boolean;
   onLayerVisibilityChange: (next: Record<string, boolean>) => void;
-  onLevelFilterChange: (next: string) => void;
+  onFloorFilterChange: (next: string) => void;
   onOverlayVisibilityChange: (next: Record<string, boolean>) => void;
   onShowBasemapChange: (next: boolean) => void;
 };
@@ -20,13 +20,13 @@ type Props = {
 export function LayerTree({
   featureTypes,
   layerVisibility,
-  levelFilter,
-  levelOptions,
+  floorFilter,
+  floorOptions,
   validationLoaded,
   overlayVisibility,
   showBasemap,
   onLayerVisibilityChange,
-  onLevelFilterChange,
+  onFloorFilterChange,
   onOverlayVisibilityChange,
   onShowBasemapChange
 }: Props) {
@@ -66,14 +66,14 @@ export function LayerTree({
       </div>
 
       <label className="mt-3 block text-sm">
-        <span className="mb-1 block text-slate-600">{t("Level Filter", "レベルフィルター")}</span>
+        <span className="mb-1 block text-slate-600">{t("Floor Filter", "フロアフィルター")}</span>
         <select
           className="w-full rounded border px-2 py-1.5"
-          value={levelFilter}
-          onChange={(event) => onLevelFilterChange(event.target.value)}
+          value={floorFilter}
+          onChange={(event) => onFloorFilterChange(event.target.value)}
         >
-          <option value="">{t("All Levels", "すべてのレベル")}</option>
-          {levelOptions.map((option) => (
+          <option value="">{t("All Floors", "すべてのフロア")}</option>
+          {floorOptions.map((option) => (
             <option key={option.id} value={option.id}>
               {option.label}
             </option>

@@ -24,6 +24,13 @@ import {
 } from "../api/client";
 import { FeatureList } from "../components/review/FeatureList";
 import { IssuesPanel } from "../components/review/IssuesPanel";
+import {
+  buildFloorGroups,
+  buildLevelOptions,
+  defaultFloorId,
+  featureLevelId,
+  levelIdsForFloor
+} from "../components/review/floorGroups";
 import { LayerTree } from "../components/review/LayerTree";
 import { MapPanel } from "../components/review/MapPanel";
 import { PropertiesPanel } from "../components/review/PropertiesPanel";
@@ -68,36 +75,6 @@ function normalizeFeature(item: Record<string, unknown>): ReviewFeature | null {
     geometry,
     properties: properties as Record<string, unknown>
   };
-}
-
-function levelLabel(feature: ReviewFeature): string {
-  const shortName = feature.properties.short_name;
-  if (shortName && typeof shortName === "object" && !Array.isArray(shortName)) {
-    const value = Object.values(shortName).find((item) => typeof item === "string");
-    if (typeof value === "string") {
-      return value;
-    }
-  }
-  const name = feature.properties.name;
-  if (name && typeof name === "object" && !Array.isArray(name)) {
-    const value = Object.values(name).find((item) => typeof item === "string");
-    if (typeof value === "string") {
-      return value;
-    }
-  }
-  const ordinal = feature.properties.ordinal;
-  if (typeof ordinal === "number") {
-    return `Ordinal ${ordinal}`;
-  }
-  return feature.id.slice(0, 8);
-}
-
-function featureLevelId(feature: ReviewFeature): string | null {
-  if (feature.feature_type === "level") {
-    return feature.id;
-  }
-  const levelId = feature.properties.level_id;
-  return typeof levelId === "string" ? levelId : null;
 }
 
 function applyFilters(features: ReviewFeature[], filters: Record<string, string | undefined>): ReviewFeature[] {
@@ -229,7 +206,7 @@ export function ReviewPage() {
   const [features, setFeatures] = useState<ReviewFeature[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mapLevelFilter, setMapLevelFilter] = useState("");
+  const [mapFloorFilter, setMapFloorFilter] = useState<string | null>(null);
   const [bulkLevel, setBulkLevel] = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
   const [mergeName, setMergeName] = useState("");
@@ -310,23 +287,30 @@ export function ReviewPage() {
     void loadFeatures();
   }, [sessionId]);
 
-  const levelOptions = useMemo(() => {
-    return features
-      .filter((item) => item.feature_type === "level")
-      .sort((a, b) => {
-        const aOrd = typeof a.properties.ordinal === "number" ? a.properties.ordinal : 0;
-        const bOrd = typeof b.properties.ordinal === "number" ? b.properties.ordinal : 0;
-        return aOrd - bOrd;
-      })
-      .map((item) => ({ id: item.id, label: levelLabel(item) }));
-  }, [features]);
+  // The viewer filters by floor so a floor split across several Level features
+  // (新宿 1F is eight platforms plus 1F and 1F屋外) is shown in one piece.
+  const floorOptions = useMemo(() => buildFloorGroups(features), [features]);
+  const levelOptions = useMemo(() => buildLevelOptions(features), [features]);
+  const visibleLevelIds = useMemo(
+    () => levelIdsForFloor(floorOptions, mapFloorFilter ?? ""),
+    [floorOptions, mapFloorFilter]
+  );
 
-  // Auto-set level filter to first level when features load
+  // Open on the lowest floor, and recover when the chosen floor disappears
+  // (features reload after an edit). "All floors" is a deliberate choice and has
+  // to survive both, hence null for "nothing chosen yet".
   useEffect(() => {
-    if (levelOptions.length > 0 && !mapLevelFilter) {
-      setMapLevelFilter(levelOptions[0].id);
+    if (floorOptions.length === 0) {
+      return;
     }
-  }, [levelOptions, mapLevelFilter]);
+    const stale =
+      mapFloorFilter !== null &&
+      mapFloorFilter !== "" &&
+      !floorOptions.some((floor) => floor.id === mapFloorFilter);
+    if (mapFloorFilter === null || stale) {
+      setMapFloorFilter(defaultFloorId(floorOptions, features) ?? floorOptions[0].id);
+    }
+  }, [features, floorOptions, mapFloorFilter]);
 
   const addressOptions = useMemo(() => {
     return features
@@ -551,10 +535,17 @@ export function ReviewPage() {
       return;
     }
     const levelId = featureLevelId(target);
-    if (levelId && levelId !== mapLevelFilter) {
-      setMapLevelFilter(levelId);
+    if (!levelId) {
+      return;
     }
-  }, [activeIssue, features, mapLevelFilter]);
+    if (mapFloorFilter === "") {
+      return;
+    }
+    const floorId = floorOptions.find((floor) => floor.levelIds.includes(levelId))?.id;
+    if (floorId && floorId !== mapFloorFilter) {
+      setMapFloorFilter(floorId);
+    }
+  }, [activeIssue, features, floorOptions, mapFloorFilter]);
 
   const applyPostValidationState = (next: ValidationResponse) => {
     setActiveIssueIndex(null);
@@ -1045,13 +1036,13 @@ export function ReviewPage() {
                 <LayerTree
                   featureTypes={layerKeys}
                   layerVisibility={layerVisibility}
-                  levelFilter={mapLevelFilter}
-                  levelOptions={levelOptions}
+                  floorFilter={mapFloorFilter ?? ""}
+                  floorOptions={floorOptions}
                   validationLoaded={validation !== null}
                   overlayVisibility={overlayVisibility}
                   showBasemap={showBasemap}
                   onLayerVisibilityChange={setLayerVisibility}
-                  onLevelFilterChange={setMapLevelFilter}
+                  onFloorFilterChange={setMapFloorFilter}
                   onOverlayVisibilityChange={setOverlayVisibility}
                   onShowBasemapChange={setShowBasemap}
                 />
@@ -1154,7 +1145,7 @@ export function ReviewPage() {
                 layerVisibility={layerVisibility}
                 validationIssues={allValidationIssues}
                 overlayVisibility={overlayVisibility}
-                levelFilter={mapLevelFilter}
+                visibleLevelIds={visibleLevelIds}
                 showBasemap={showBasemap}
                 activeIssue={activeIssue}
                 onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}

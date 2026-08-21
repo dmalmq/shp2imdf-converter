@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Layer, type LayerProps, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
 
 import { type ReviewFeature, type ReviewIssue, featureLayerKey, isLocatedFeature } from "./types";
 import { MapView } from "../shared/MapView";
+import { isFeatureOnFloor } from "./floorGroups";
 import { STREET_MAP_STYLE } from "../shared/streetMapStyle";
 import { buildUnitFillColorExpr, buildUnitLineColorExpr, buildUnitOpacityExpr } from "../shared/unitCategoryColors";
 
@@ -13,7 +14,7 @@ type Props = {
   layerVisibility: Record<string, boolean>;
   validationIssues: ReviewIssue[];
   overlayVisibility: Record<string, boolean>;
-  levelFilter: string;
+  visibleLevelIds: readonly string[] | null;
   showBasemap: boolean;
   activeIssue?: ReviewIssue | null;
   onSelectFeature: (id: string, multi?: boolean) => void;
@@ -281,36 +282,22 @@ function computeBounds(features: ReviewFeature[]): [[number, number], [number, n
 }
 
 
-function isVisibleByLevel(feature: ReviewFeature, levelFilter: string): boolean {
-  if (!levelFilter) {
-    return true;
-  }
-  const levelId = feature.properties.level_id;
-  if (typeof levelId === "string" && levelId === levelFilter) {
-    return true;
-  }
-  if (feature.feature_type === "level" && feature.id === levelFilter) {
-    return true;
-  }
-  if (feature.feature_type === "venue" || feature.feature_type === "footprint") {
-    return true;
-  }
-  return false;
-}
-
-
 export function MapPanel({
   features,
   selectedFeatureIds,
   layerVisibility,
   validationIssues,
   overlayVisibility,
-  levelFilter,
+  visibleLevelIds,
   showBasemap,
   activeIssue,
   onSelectFeature
 }: Props) {
   const mapRef = useRef<MapRef | null>(null);
+  // The map finishes loading after the features arrive about as often as before
+  // it, and fitBounds is a no-op until the map exists: without this gate the
+  // review map opened on the hardcoded initial view and never framed the data.
+  const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
     const map = mapRef.current?.getMap();
@@ -329,6 +316,11 @@ export function MapPanel({
     }
   });
 
+  const shownLevelIds = useMemo(
+    () => (visibleLevelIds ? new Set(visibleLevelIds) : null),
+    [visibleLevelIds]
+  );
+
   const visibleFeatures = useMemo(() => {
     return features.filter((feature) => {
       if (!isLocatedFeature(feature)) {
@@ -337,9 +329,9 @@ export function MapPanel({
       if ((layerVisibility[featureLayerKey(feature)] ?? true) === false) {
         return false;
       }
-      return isVisibleByLevel(feature, levelFilter);
+      return isFeatureOnFloor(feature, shownLevelIds);
     });
-  }, [features, layerVisibility, levelFilter]);
+  }, [features, layerVisibility, shownLevelIds]);
 
   const selectedSet = useMemo(() => new Set(selectedFeatureIds), [selectedFeatureIds]);
   const hasSelection = selectedFeatureIds.length > 0;
@@ -490,7 +482,28 @@ export function MapPanel({
     [overlapFeatures]
   );
 
+  // Frame the whole dataset once per dataset, whatever the floor filter shows.
+  // The floor fit below cannot do it: the opening floor may have no features at
+  // all, which used to leave the map on its hardcoded initial view.
+  const datasetBounds = useMemo(() => computeBounds(features.filter(isLocatedFeature)), [features]);
+  const framedBoundsRef = useRef<string | null>(null);
+
   useEffect(() => {
+    if (!mapReady || !datasetBounds || !mapRef.current) {
+      return;
+    }
+    const key = datasetBounds.flat().join(",");
+    if (framedBoundsRef.current === key) {
+      return;
+    }
+    framedBoundsRef.current = key;
+    mapRef.current.fitBounds(datasetBounds, { padding: 40, duration: 0 });
+  }, [mapReady, datasetBounds]);
+
+  useEffect(() => {
+    if (!mapReady) {
+      return;
+    }
     const target = selectedFeatures.length ? selectedFeatures : visibleFeatures;
     const bounds = computeBounds(target);
     if (!bounds || !mapRef.current) {
@@ -500,7 +513,7 @@ export function MapPanel({
       padding: 40,
       duration: 400
     });
-  }, [selectedFeatures, visibleFeatures]);
+  }, [mapReady, selectedFeatures, visibleFeatures]);
 
   // Zoom to the active issue's feature(s) when one is selected
   useEffect(() => {
@@ -551,6 +564,7 @@ export function MapPanel({
           "review-highlight-point"
         ]}
         mapStyle={STREET_MAP_STYLE}
+        onLoad={() => setMapReady(true)}
         onClick={onMapClick}
       >
         <Source id="review-source" type="geojson" data={mapData}>
