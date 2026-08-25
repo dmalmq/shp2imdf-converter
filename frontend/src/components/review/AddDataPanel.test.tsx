@@ -172,7 +172,8 @@ describe("AddDataPanel", () => {
       ],
       on_id_collision: "remint",
       selection: null,
-      apply_alignment: false
+      apply_alignment: false,
+      expand_levels: true
     });
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     expect(onClose).toHaveBeenCalled();
@@ -450,6 +451,7 @@ describe("AddDataPanel", () => {
         rejected_level_ids: [],
         dropped_features: 0,
         alignment_applied: null,
+        expanded_level_ids: [],
         deselected_features: 2,
         skipped_already_imported: 0,
         reminted_ids: 0,
@@ -702,7 +704,7 @@ describe("AddDataPanel alignment", () => {
     commitMock.mockResolvedValue({
       session_id: "session-1", batch_id: "batch-1", added_features: 4, feature_counts: {},
       bound_levels: {}, created_level_ids: [], rejected_level_ids: [], dropped_features: 0,
-      alignment_applied: ALIGNED, deselected_features: 0, skipped_already_imported: 0,
+      alignment_applied: ALIGNED, expanded_level_ids: [], deselected_features: 0, skipped_already_imported: 0,
       reminted_ids: 0, replaced_ids: 0, total_features: 40, warnings: []
     });
     fireEvent.click(screen.getByRole("button", { name: "Add to dataset" }));

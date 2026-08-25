@@ -44,6 +44,9 @@ REVIEW_ONLY_PROPERTY_KEYS = {
     "status",
     "issues",
     "metadata",
+    # Tags what a batch brought in, so the review screen can highlight and undo
+    # it. IMDF has no such property and Apple rejects what it does not know.
+    "import_batch_id",
     "source_file",
     "source_row_index",
     "source_part_index",

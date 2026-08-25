@@ -1964,3 +1964,101 @@ def test_an_inconsistent_gap_is_reported_rather_than_applied_blindly(test_client
     if alignment is not None:
         assert alignment["consistent"] is False
         assert alignment["spread_cm"] > 25.0
+
+
+@pytest.mark.phase5
+def test_the_batch_tag_does_not_reach_the_exported_imdf(test_client) -> None:
+    """It exists for the review screen; IMDF has no such property."""
+    with tempfile.TemporaryDirectory() as host_dir, tempfile.TemporaryDirectory() as add_dir:
+        session_id, _ = _start_session(test_client, Path(host_dir))
+        add_root = Path(add_dir)
+        _write_space_layer(
+            add_root,
+            stem="Demo_1F_Fixture",
+            unit_ids=["55555555-5555-4555-8555-55555555556b"],
+            geometries=[_square(139.7006, 35.6902)],
+        )
+        plan = _stage(test_client, session_id, add_root)
+        assert _commit(test_client, session_id, {"batch_id": plan["batch_id"]})[0] == 200
+
+        # It is on the feature in the session, where the panel needs it...
+        added = next(
+            item for item in _features(test_client, session_id)
+            if item["properties"].get("import_batch_id") == plan["batch_id"]
+        )
+        assert added["properties"]["import_batch_id"] == plan["batch_id"]
+
+        export = test_client.get(f"/api/session/{session_id}/export")
+        assert export.status_code == 200
+
+    # ...and on nothing in the archive.
+    with zipfile.ZipFile(BytesIO(export.content)) as archive:
+        for name in archive.namelist():
+            if not name.endswith(".geojson"):
+                continue
+            payload = json.loads(archive.read(name))
+            for feature in payload.get("features", []):
+                assert "import_batch_id" not in (feature.get("properties") or {}), name
+
+
+@pytest.mark.phase5
+def test_a_floor_grows_to_hold_what_was_added_past_its_edge(test_client) -> None:
+    """Apple calls a unit outside its level an "Invalid level reference", which
+    reads like a broken id rather than a floor plate that stops too soon."""
+    from shapely.geometry import shape as _shape
+
+    outside_id = "55555555-5555-4555-8555-55555555556c"
+    with tempfile.TemporaryDirectory() as host_dir, tempfile.TemporaryDirectory() as add_dir:
+        session_id, ids = _start_session(test_client, Path(host_dir))
+        level_before = _shape(
+            next(item for item in _features(test_client, session_id) if item["id"] == ids["level_id"])["geometry"]
+        )
+        add_root = Path(add_dir)
+        # Well clear of the 1F floor plate, the way an outdoor walkway is.
+        _write_space_layer(
+            add_root,
+            stem="Demo_1F_Outer_Space",
+            unit_ids=[outside_id],
+            geometries=[_square(139.7020, 35.6920)],
+        )
+        plan = _stage(test_client, session_id, add_root)
+        status, result = _commit(test_client, session_id, {"batch_id": plan["batch_id"]})
+
+    assert status == 200, result
+    assert result["expanded_level_ids"] == [ids["level_id"]]
+
+    features = _features(test_client, session_id)
+    level_after = _shape(next(item for item in features if item["id"] == ids["level_id"])["geometry"])
+    added = _shape(next(item for item in features if item["id"] == outside_id)["geometry"])
+
+    assert not level_before.contains(added), "it started outside, or the test proves nothing"
+    assert level_after.contains(added), "the floor grew to hold it"
+    assert level_after.contains(level_before), "and kept everything it already covered"
+
+    validation = test_client.post(f"/api/session/{session_id}/validate").json()
+    outside_warnings = [
+        issue for issue in validation["warnings"] if issue["check"] == "unit_outside_level_warning"
+    ]
+    assert outside_warnings == []
+
+
+@pytest.mark.phase5
+def test_expanding_can_be_declined(test_client) -> None:
+    outside_id = "55555555-5555-4555-8555-55555555556d"
+    with tempfile.TemporaryDirectory() as host_dir, tempfile.TemporaryDirectory() as add_dir:
+        session_id, ids = _start_session(test_client, Path(host_dir))
+        add_root = Path(add_dir)
+        _write_space_layer(
+            add_root, stem="Demo_1F_Outer_Space", unit_ids=[outside_id],
+            geometries=[_square(139.7020, 35.6920)],
+        )
+        plan = _stage(test_client, session_id, add_root)
+        status, result = _commit(
+            test_client, session_id,
+            {"batch_id": plan["batch_id"], "expand_levels": False},
+        )
+
+    assert status == 200, result
+    assert result["expanded_level_ids"] == []
+    validation = test_client.post(f"/api/session/{session_id}/validate").json()
+    assert any(issue["check"] == "unit_outside_level_warning" for issue in validation["warnings"])

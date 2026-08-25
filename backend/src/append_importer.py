@@ -25,10 +25,11 @@ import shutil
 from typing import Any
 from uuid import uuid4
 
-from shapely.geometry import shape
+from shapely.geometry import mapping, shape
 from shapely.ops import unary_union
 
 from backend.src.generator import generate_feature_collection
+from backend.src.geometry import covers_within_tolerance, grow_to_cover
 from backend.src.imdf_reader import read_imdf_zip
 from backend.src.imdf_shapefile_importer import (
     _canonical_floor_label,
@@ -1192,6 +1193,7 @@ def commit_append(
     on_id_collision: str = "remint",
     selection: AppendSelection | None = None,
     apply_alignment: bool = False,
+    expand_levels: bool = True,
 ) -> tuple[AppendCommitResponse, list[dict[str, Any]]]:
     """Merge a staged batch into ``session``.
 
@@ -1306,6 +1308,52 @@ def commit_append(
         feature_type = str(feature.get("feature_type") or "")
         feature_counts[feature_type] = feature_counts.get(feature_type, 0) + 1
 
+    # 4. Grow the floors that now hold something reaching past their edge.
+    #    Apple rejects such a unit as an "Invalid level reference", which reads
+    #    like a broken id rather than a floor plate that stops too soon.
+    expanded_levels: list[str] = []
+    if expand_levels:
+        levels_by_id = {
+            str(item.get("id")): item
+            for item in host_features
+            if item.get("feature_type") == "level" and isinstance(item.get("geometry"), dict)
+        }
+        additions_by_level: dict[str, list[Any]] = {}
+        for feature in kept:
+            if feature.get("feature_type") == "level":
+                continue
+            level_id = _feature_level_id(feature)
+            geometry = _candidate_geometry(feature)
+            if not isinstance(level_id, str) or not isinstance(geometry, dict):
+                continue
+            try:
+                additions_by_level.setdefault(level_id, []).append(shape(geometry))
+            except Exception:
+                continue
+
+        for level_id, additions in additions_by_level.items():
+            level = levels_by_id.get(level_id)
+            if level is None:
+                continue
+            try:
+                base = shape(level["geometry"])
+            except Exception:
+                continue
+            # Slivers on the boundary are inside; growing for those is noise.
+            outside = [geom for geom in additions if not covers_within_tolerance(base, geom)]
+            if not outside:
+                continue
+            grown = grow_to_cover(base, outside)
+            if grown is None or grown.equals(base):
+                continue
+            level["geometry"] = mapping(grown)
+            expanded_levels.append(level_id)
+        if expanded_levels:
+            warnings.append(
+                f"{len(expanded_levels)} floor(s) were expanded to cover added features that "
+                "reached past their edge."
+            )
+
     replaced_features = [
         copy.deepcopy(feature)
         for feature in host_features
@@ -1384,6 +1432,7 @@ def commit_append(
             rejected_level_ids=sorted(rejected),
             dropped_features=dropped,
             alignment_applied=alignment,
+            expanded_level_ids=sorted(set(expanded_levels)),
             deselected_features=deselected,
             skipped_already_imported=skipped_already_imported,
             reminted_ids=reminted,

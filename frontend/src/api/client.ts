@@ -1168,6 +1168,7 @@ export type AppendCommitRequest = {
   /** Omitted means everything in the batch. */
   selection?: AppendSelection | null;
   apply_alignment?: boolean;
+  expand_levels?: boolean;
 };
 
 export type AppendCommitResponse = {
@@ -1180,6 +1181,7 @@ export type AppendCommitResponse = {
   rejected_level_ids: string[];
   dropped_features: number;
   alignment_applied: AppendAlignment | null;
+  expanded_level_ids: string[];
   deselected_features: number;
   skipped_already_imported: number;
   reminted_ids: number;

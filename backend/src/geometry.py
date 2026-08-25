@@ -59,3 +59,61 @@ def safe_union(geoms: list[Any]) -> Any | None:
         return union_all([geom.envelope for geom in valid])
     except GEOSException:
         return None
+
+
+# A level is a floor plate, not a hairline outline: growing it to swallow a
+# walkway that runs off the building needs the walkway's own width, and a line
+# or a point has none. 1e-6 degrees is about 10 cm here.
+COVER_BUFFER_DEGREES = 1e-6
+
+
+def grow_to_cover(base: Any, additions: list[Any]) -> Any | None:
+    """Expand a polygon so it contains everything in ``additions``.
+
+    Apple rejects a unit whose geometry falls outside the level it names —
+    reported as "Invalid level reference", which reads like a broken id rather
+    than a geometry that does not fit. Rather than move the unit, the floor it
+    belongs to is grown to hold it.
+
+    Non-polygonal additions are buffered first: unioning a zero-width line into
+    a polygon adds nothing and yields a GeometryCollection, which is not a level.
+    Returns None when there is nothing to grow.
+    """
+    wanted: list[Any] = []
+    for geom in additions:
+        if geom is None or geom.is_empty:
+            continue
+        wanted.append(geom if geom.geom_type in {"Polygon", "MultiPolygon"} else geom.buffer(COVER_BUFFER_DEGREES))
+    if not wanted:
+        return None
+    if base is not None and not base.is_empty:
+        wanted.append(base)
+    merged = safe_union(wanted)
+    if merged is None or merged.is_empty:
+        return None
+    # A level has to stay a surface; a union that degenerates is worse than
+    # leaving the level alone.
+    return merged if merged.geom_type in {"Polygon", "MultiPolygon"} else None
+
+
+# A unit that genuinely hangs off its floor is wholly or largely outside it.
+# What sits on the boundary differs by a sliver of no area at all, which strict
+# topology still calls a miss — and every floor is tiled with units sharing its
+# outline, so the strict answer fails dozens of them the moment the floor is
+# redrawn.
+COVER_AREA_TOLERANCE = 1e-9
+
+
+def covers_within_tolerance(container: Any, target: Any) -> bool:
+    """Whether ``target`` sits inside ``container``, ignoring zero-area slivers."""
+    if container is None or target is None or container.is_empty or target.is_empty:
+        return False
+    try:
+        if container.covers(target):
+            return True
+        outside = target.difference(container)
+        if outside.is_empty:
+            return True
+        return outside.area <= max(target.area, 0.0) * COVER_AREA_TOLERANCE
+    except GEOSException:
+        return False

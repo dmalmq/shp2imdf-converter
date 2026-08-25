@@ -294,3 +294,23 @@ pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
   stop being clickable — otherwise the floor being worked on disappears under the ones
   already done. The count says how many are off-screen ("12 on other floors") so the total
   does not look wrong.
+- Apple rejects a unit whose geometry falls outside the level it names, and calls it an
+  **"Invalid level reference"** — which reads like a broken id and sends you hunting through
+  level.geojson, where the id is present and fine. It is a geometry problem: the floor plate
+  does not reach that far. Adding an outdoor walkway to a floor is the normal way to hit it.
+  `grow_to_cover` (`backend/src/geometry.py`) grows the floor instead of moving the room —
+  the survey put the walkway where it is. It runs at commit for what a batch adds
+  (`expand_levels`, on by default) and as a prompted autofix for
+  `unit_outside_level_warning`, which is the path that matters when a level is reassigned on
+  the review screen after the fact. Non-polygonal additions are buffered first: unioning a
+  zero-width line into a polygon adds nothing and yields a GeometryCollection, which is not a
+  level.
+- Containment is `covers_within_tolerance`, not a centroid test and not strict topology. Both
+  simpler answers were wrong on real data: the centroid of a U- or ring-shaped room sits in
+  the gap, which raised 20 false alarms on 高輪ゲートウェイ's own untouched export, and strict
+  `covers` fails every room sharing an edge with a floor outline the moment that outline is
+  redrawn — 26 more, each differing by a sliver of exactly no area. A room that genuinely
+  hangs off its floor is wholly or largely outside it, orders of magnitude past the tolerance.
+- `import_batch_id` is review-only and belongs in `REVIEW_ONLY_PROPERTY_KEYS`. It tags what a
+  batch brought in so the panel can highlight and undo it; IMDF has no such property and
+  Apple rejects what it does not know, so it was travelling into every exported archive.

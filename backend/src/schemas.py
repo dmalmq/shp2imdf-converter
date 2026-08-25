@@ -511,6 +511,8 @@ class AppendCommitRequest(BaseModel):
     selection: AppendSelection | None = None
     # Shift the batch onto the dataset's frame before adding it.
     apply_alignment: bool = False
+    # Grow a floor when what lands on it reaches past its edge.
+    expand_levels: bool = True
 
 
 class AppendBatchSummary(BaseModel):
@@ -539,6 +541,8 @@ class AppendCommitResponse(BaseModel):
     rejected_level_ids: list[str] = Field(default_factory=list)
     dropped_features: int = 0
     alignment_applied: AppendAlignment | None = None
+    # Floors grown so an added feature reaching past the edge still fits.
+    expanded_level_ids: list[str] = Field(default_factory=list)
     deselected_features: int = 0
     skipped_already_imported: int = 0
     reminted_ids: int = 0

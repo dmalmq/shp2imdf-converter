@@ -23,6 +23,7 @@ from backend.src.iso_subdivisions import (
 )
 from backend.src.imdf_shapefile_importer import SYNTHESIZED_BUILDING_NAME, SYNTHESIZED_VENUE_NAME
 from backend.src.mapper import load_restriction_categories
+from backend.src.geometry import covers_within_tolerance
 from backend.src.schemas import ValidationIssue, ValidationResponse, ValidationSummary
 
 
@@ -237,6 +238,17 @@ def _repair_and_prepare(geom: BaseGeometry | None) -> BaseGeometry | None:
     if repaired is not None and not repaired.is_empty:
         prepare(repaired)
     return repaired
+
+
+def _safe_covers(container: BaseGeometry | None, target: BaseGeometry | None) -> bool:
+    """Whether ``container`` holds ``target``, boundary and slivers forgiven."""
+    if container is None or target is None or container.is_empty or target.is_empty:
+        return False
+    left = _repair_geometry(container)
+    right = _repair_geometry(target)
+    if left is None or right is None or left.is_empty or right.is_empty:
+        return False
+    return covers_within_tolerance(left, right)
 
 
 def _safe_contains_or_touches(container: BaseGeometry | None, target: BaseGeometry | None) -> bool:
@@ -729,8 +741,18 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
     for level_id, pairs in units_by_level.items():
         level_geom = level_geoms.get(level_id)
         for unit_id, unit_geom in pairs:
-            if level_geom and not _safe_contains_or_touches(level_geom, unit_geom.centroid):
-                add_issue("warning", "unit_outside_level_warning", "Unit centroid is outside assigned level.", feature_id=unit_id)
+            # The whole outline, not its centroid. A U-shaped or ring-shaped
+            # room has a centroid in the gap, which can sit outside the level
+            # while the room itself is well inside it — 20 false alarms on one
+            # real station. Apple checks the geometry, and rejects a unit that
+            # falls outside as an "Invalid level reference".
+            if level_geom and not _safe_covers(level_geom, unit_geom):
+                add_issue(
+                    "warning",
+                    "unit_outside_level_warning",
+                    "Unit geometry is outside assigned level.",
+                    feature_id=unit_id,
+                )
 
         for left_id, left_geom, right_id, right_geom in _iter_overlapping_pairs(pairs):
             overlap = _safe_intersection(left_geom, right_geom)

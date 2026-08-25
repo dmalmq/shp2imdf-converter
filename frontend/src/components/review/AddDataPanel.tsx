@@ -89,6 +89,7 @@ export function AddDataPanel({ sessionId, importProfile, onClose, onChanged }: P
   const [decisions, setDecisions] = useState<Record<string, string>>({});
   const [collisionPolicy, setCollisionPolicy] = useState<"remint" | "replace">("remint");
   const [applyAlignment, setApplyAlignment] = useState(true);
+  const [expandLevels, setExpandLevels] = useState(true);
   const [codeColumn, setCodeColumn] = useState("");
   const [remapping, setRemapping] = useState(false);
   const [committing, setCommitting] = useState(false);
@@ -259,7 +260,8 @@ export function AddDataPanel({ sessionId, importProfile, onClose, onChanged }: P
           .filter((decision) => decision.action !== "bind" || Boolean(decision.host_level_id)),
         on_id_collision: collisionPolicy,
         selection: isUnfiltered(selection) ? null : toRequest(selection),
-        apply_alignment: applyAlignment && Boolean(plan.alignment)
+        apply_alignment: applyAlignment && Boolean(plan.alignment),
+        expand_levels: expandLevels
       });
       onChanged();
       onClose();
@@ -402,6 +404,22 @@ export function AddDataPanel({ sessionId, importProfile, onClose, onChanged }: P
                 ))}
               </ul>
             </details>
+
+            <label className="flex items-start gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+              <input
+                type="checkbox"
+                aria-label={t("Expand floors to fit what is added", "追加分に合わせて階を拡張")}
+                className="mt-0.5"
+                checked={expandLevels}
+                onChange={(event) => setExpandLevels(event.target.checked)}
+              />
+              <span>
+                {t(
+                  "Grow a floor when something added reaches past its edge. Apple rejects a room outside the floor it names, reported as an invalid level reference.",
+                  "追加したものが階の範囲をはみ出す場合、階を拡張します。Apple は階の外にある部屋を無効なレベル参照として拒否します。"
+                )}
+              </span>
+            </label>
 
             {plan.alignment ? (
               <section

@@ -75,3 +75,74 @@ def test_an_envelope_union_is_the_last_resort(monkeypatch) -> None:
 
     assert snapped == list(geometry.GRID_SIZES), "every tolerance is tried before giving up"
     assert merged is not None
+
+
+@pytest.mark.phase5
+def test_growing_a_level_swallows_what_falls_outside_it() -> None:
+    from backend.src.geometry import grow_to_cover
+
+    level = _square(139.70, 35.68, 0.001)
+    outside = _square(139.7015, 35.68, 0.0005)
+    grown = grow_to_cover(level, [outside])
+
+    assert grown is not None
+    assert grown.contains(outside)
+    assert grown.contains(level)
+    assert grown.geom_type in {"Polygon", "MultiPolygon"}
+
+
+@pytest.mark.phase5
+def test_a_line_is_given_width_before_it_is_swallowed() -> None:
+    """Unioning a zero-width line into a polygon yields a GeometryCollection,
+    which is not a level."""
+    from shapely.geometry import LineString
+
+    from backend.src.geometry import grow_to_cover
+
+    level = _square(139.70, 35.68, 0.001)
+    walkway = LineString([(139.7015, 35.6805), (139.7025, 35.6805)])
+    grown = grow_to_cover(level, [walkway])
+
+    assert grown is not None
+    assert grown.geom_type in {"Polygon", "MultiPolygon"}
+    assert grown.intersects(walkway)
+
+
+@pytest.mark.phase5
+def test_nothing_to_grow_is_not_an_error() -> None:
+    from backend.src.geometry import grow_to_cover
+
+    assert grow_to_cover(_square(0, 0), []) is None
+    assert grow_to_cover(None, []) is None
+
+
+@pytest.mark.phase5
+def test_a_ring_shaped_room_is_inside_its_floor_even_though_its_centroid_is_not() -> None:
+    """The check used to test the centroid, which raised 20 false alarms on one
+    real station: a U- or ring-shaped room has its centroid in the gap."""
+    from shapely.geometry import Polygon as _Polygon
+
+    from backend.src.geometry import covers_within_tolerance
+
+    floor = _square(0, 0, 10)
+    ring = _Polygon(
+        [(1, 1), (9, 1), (9, 9), (1, 9)],
+        [[(2, 2), (8, 2), (8, 8), (2, 8)]],
+    )
+    assert not ring.contains(ring.centroid), "the centroid falls in the hole"
+    assert covers_within_tolerance(floor, ring)
+
+
+@pytest.mark.phase5
+def test_a_sliver_on_the_boundary_is_inside_but_a_real_overhang_is_not() -> None:
+    from backend.src.geometry import covers_within_tolerance
+
+    floor = _square(0, 0, 10)
+    # Over the edge by a hair, the way a redrawn floor leaves its neighbours.
+    hair = _square(1, 1, 8.999999999999)
+    assert covers_within_tolerance(floor, hair)
+    # Half out is not a sliver.
+    half_out = _square(5, 0, 10)
+    assert not covers_within_tolerance(floor, half_out)
+    # And wholly out certainly is not.
+    assert not covers_within_tolerance(floor, _square(20, 20, 1))

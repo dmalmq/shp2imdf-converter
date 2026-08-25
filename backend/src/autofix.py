@@ -10,13 +10,14 @@ from shapely import make_valid
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, mapping, shape
 from uuid import UUID
 
+from backend.src.geometry import grow_to_cover
 from backend.src.schemas import AutofixApplied, AutofixPrompt, ValidationResponse
 from backend.src.validator import prune_empty_geometry_features
 
 
 # Checks that require explicit user confirmation before being applied.
 # Only destructive operations (feature deletion) belong here.
-PROMPTED_CHECKS = {"duplicate_geometry_warning", "unit_sliver"}
+PROMPTED_CHECKS = {"duplicate_geometry_warning", "unit_sliver", "unit_outside_level_warning"}
 
 
 def _round_value(value: Any, decimals: int) -> Any:
@@ -185,6 +186,32 @@ def apply_autofix(
             pair = tuple(sorted([issue.feature_id, issue.related_feature_id]))
             duplicate_pairs.add(pair)
 
+    # A unit that falls outside the level it names is rejected by Apple as an
+    # "Invalid level reference" — which reads like a broken id rather than a
+    # floor plate that does not reach far enough. Growing the level is the fix,
+    # not moving the unit: an outdoor walkway really is where the survey put it.
+    # Prompted, because a level's footprint is not a small thing to redraw.
+    outside_by_level: dict[str, set[str]] = {}
+    for issue in issues:
+        if issue.check != "unit_outside_level_warning" or not issue.feature_id:
+            continue
+        unit = by_id.get(issue.feature_id)
+        level_id = (unit or {}).get("properties", {}).get("level_id")
+        if isinstance(level_id, str) and level_id in by_id:
+            outside_by_level.setdefault(level_id, set()).add(issue.feature_id)
+
+    for level_id, unit_ids in sorted(outside_by_level.items()):
+        prompts.append(
+            AutofixPrompt(
+                feature_id=level_id,
+                check="unit_outside_level_warning",
+                action="expand_level",
+                description=(
+                    f"Expand level {level_id[:8]} to cover {len(unit_ids)} feature(s) that fall outside it."
+                ),
+            )
+        )
+
     for left, right in sorted(duplicate_pairs):
         prompts.append(
             AutofixPrompt(
@@ -197,6 +224,34 @@ def apply_autofix(
         )
 
     if apply_prompted:
+        for level_id, unit_ids in sorted(outside_by_level.items()):
+            level = by_id.get(level_id)
+            if not level or not isinstance(level.get("geometry"), dict):
+                continue
+            try:
+                base = shape(level["geometry"])
+                additions = [
+                    shape(by_id[unit_id]["geometry"])
+                    for unit_id in sorted(unit_ids)
+                    if isinstance(by_id.get(unit_id, {}).get("geometry"), dict)
+                ]
+            except Exception:
+                continue
+            grown = grow_to_cover(base, additions)
+            if grown is None or grown.equals(base):
+                continue
+            level["geometry"] = mapping(grown)
+            fixes_applied.append(
+                AutofixApplied(
+                    feature_id=level_id,
+                    check="unit_outside_level_warning",
+                    action="expand_level",
+                    description=(
+                        f"Expanded level {level_id[:8]} to cover {len(additions)} feature(s) outside it."
+                    ),
+                )
+            )
+
         to_delete: set[str] = set()
         for left, right in duplicate_pairs:
             # Keep the lexicographically smaller id for deterministic behavior.

@@ -155,6 +155,7 @@ def commit_session_import(
         on_id_collision=payload.on_id_collision,
         selection=payload.selection,
         apply_alignment=payload.apply_alignment,
+        expand_levels=payload.expand_levels,
     )
     session.upload_artifact_dir = promote_batch_artifacts(uploads_root, session, payload.batch_id)
     save_replaced(uploads_root, session_id, payload.batch_id, replaced)
