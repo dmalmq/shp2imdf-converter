@@ -80,3 +80,33 @@ def test_reader_rejects_archive_with_too_many_entries() -> None:
     archive = _zip_bytes(entries)
     with pytest.raises(ValueError, match="entries"):
         read_imdf_zip(archive)
+
+
+@pytest.mark.phase6
+def test_reader_names_the_mistake_when_handed_shapefiles() -> None:
+    """Both upload controls take .zip, so this is the likely way in by error."""
+    archive = _zip_bytes(
+        {f"{stem}{suffix}": "x" for stem in ("Sta_1_Space", "Sta_1_Opening") for suffix in (".shp", ".dbf", ".shx", ".prj")}
+    )
+    with pytest.raises(ValueError, match="shapefiles, not an IMDF archive"):
+        read_imdf_zip(archive)
+
+
+@pytest.mark.phase6
+def test_a_shapefile_bundle_is_diagnosed_before_the_entry_cap() -> None:
+    """A station's worth of layers trips both checks; the useful one wins.
+
+    The count guard used to fire first, so the commonest mistake produced the
+    one message that said nothing about what to do instead.
+    """
+    entries = {f"Sta_{index}_Space.shp": "x" for index in range(MAX_ARCHIVE_MEMBERS + 1)}
+    archive = _zip_bytes(entries)
+    with pytest.raises(ValueError, match="shapefiles, not an IMDF archive"):
+        read_imdf_zip(archive)
+
+
+@pytest.mark.phase6
+def test_the_entry_cap_still_guards_an_archive_that_is_not_shapefiles() -> None:
+    entries = {f"junk_{index}.txt": "x" for index in range(MAX_ARCHIVE_MEMBERS + 1)}
+    with pytest.raises(ValueError, match="probably not one"):
+        read_imdf_zip(_zip_bytes(entries))

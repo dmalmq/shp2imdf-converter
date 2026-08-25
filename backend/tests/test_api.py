@@ -6,6 +6,7 @@ from io import BytesIO
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
+import re
 import sqlite3
 import shutil
 import tempfile
@@ -1990,6 +1991,11 @@ def _upload_all_shapefiles(root: Path) -> list[tuple[str, tuple[str, bytes, str]
     return files
 
 
+def _odc_id(value: str) -> str:
+    """The undashed form an id is delivered in by the opendata export."""
+    return UUID(value).hex
+
+
 @pytest.mark.phase5
 def test_imdf_schema_shapefile_import_creates_review_session(test_client) -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -2267,28 +2273,103 @@ def test_odc2026_shapefile_export_from_imdf_schema_import(test_client) -> None:
                 "source",
                 "geometry",
             }
-            assert space.iloc[0]["id"] == ids["unit_id"]
+            assert space.iloc[0]["id"] == _odc_id(ids["unit_id"])
             assert space.iloc[0]["category"] == "B001"
-            assert space.iloc[0]["floor_id"] == ids["level_id"]
+            assert space.iloc[0]["floor_id"] == _odc_id(ids["level_id"])
             assert space.iloc[0]["suite"] == "S-1"
 
             floor = gpd.read_file(Path(output_dir) / "Demo_Station_1_Floor.shp")
-            assert floor.iloc[0]["id"] == ids["level_id"]
+            assert floor.iloc[0]["id"] == _odc_id(ids["level_id"])
             assert floor.iloc[0]["category"] == "1"
             assert float(floor.iloc[0]["ordinal"]) == 0.0
             assert floor.crs.to_epsg() == 6668
 
             facility = gpd.read_file(Path(output_dir) / "Demo_Station_1_Facility.shp")
             assert set(facility.columns) == {"id", "category", "floor_id", "name", "source", "geometry"}
-            assert facility.iloc[0]["id"] == ids["amenity_id"]
+            assert facility.iloc[0]["id"] == _odc_id(ids["amenity_id"])
             assert facility.iloc[0]["category"] == "F012a"
-            assert facility.iloc[0]["floor_id"] == ids["level_id"]
+            assert facility.iloc[0]["floor_id"] == _odc_id(ids["level_id"])
 
             building = gpd.read_file(Path(output_dir) / "Demo_Station_Building.shp")
             assert len(building) == 1
             assert building.geometry.iloc[0].equals_exact(floor.geometry.iloc[0], tolerance=1e-12)
             assert space.crs.to_epsg() == 6668
             assert facility.crs.to_epsg() == 6668
+
+
+@pytest.mark.phase5
+def test_odc2026_export_writes_ids_without_dashes(test_client) -> None:
+    # The opendata datasets this feeds carry bare hex ids, so every id and every
+    # reference to one drops the dashes - and has to stay resolvable afterwards.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        _write_imdf_schema_shapefiles(root)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"profile": "odc2026", "export_name": "Demo_Station"},
+    )
+    assert export_response.status_code == 200
+
+    undashed = re.compile(r"^[0-9a-f]{32}$")
+    seen = 0
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        with tempfile.TemporaryDirectory() as output_dir:
+            archive.extractall(output_dir)
+            for shp in sorted(Path(output_dir).glob("*.shp")):
+                gdf = gpd.read_file(shp)
+                for column in ("id", "floor_id"):
+                    if column not in gdf.columns:
+                        continue
+                    values = [value for value in gdf[column].tolist() if value is not None]
+                    assert values, f"{shp.name}.{column} is empty"
+                    assert all(undashed.match(str(value)) for value in values), (shp.name, column, values)
+                    seen += len(values)
+
+            # A dashless id is only useful if the references still join.
+            space = gpd.read_file(Path(output_dir) / "Demo_Station_1_Space.shp")
+            floor = gpd.read_file(Path(output_dir) / "Demo_Station_1_Floor.shp")
+            assert set(space["floor_id"]) <= set(floor["id"])
+    assert seen >= 6
+
+
+
+@pytest.mark.phase5
+def test_misspelled_restriction_exports_as_the_imdf_enum(test_client) -> None:
+    # 池袋 1F ships restrict="enpliyeesonly" while its own B1 file says
+    # "employeesonly". Passed through, the typo lands in the ODC Space layer and
+    # in unit.json's restriction enum, which only accepts the two legal values.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        ids = _write_imdf_schema_shapefiles(root)
+        space = gpd.read_file(root / "Demo_1F_Space.shp")
+        space["restricted"] = "enpliyeesonly"
+        space.to_file(root / "Demo_1F_Space.shp", driver="ESRI Shapefile", index=False)
+        import_response = test_client.post("/api/import/imdf-shapefiles", files=_upload_all_shapefiles(root))
+
+    assert import_response.status_code == 201
+    session_id = import_response.json()["session_id"]
+
+    export_response = test_client.post(
+        f"/api/session/{session_id}/export/shapefiles",
+        json={"profile": "odc2026", "export_name": "Demo_Station"},
+    )
+    assert export_response.status_code == 200
+    with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        with tempfile.TemporaryDirectory() as output_dir:
+            archive.extractall(output_dir)
+            exported = gpd.read_file(Path(output_dir) / "Demo_Station_1_Space.shp")
+    assert exported.iloc[0]["restricted"] == "employeesonly"
+
+    imdf_response = test_client.get(f"/api/session/{session_id}/export")
+    assert imdf_response.status_code == 200
+    with zipfile.ZipFile(BytesIO(imdf_response.content)) as archive:
+        units = json.loads(archive.read("unit.geojson").decode("utf-8"))
+    unit = next(item for item in units["features"] if item["id"] == ids["unit_id"])
+    assert unit["properties"]["restriction"] == "employeesonly"
 
 
 @pytest.mark.phase5
@@ -2367,10 +2448,10 @@ def test_odc2026_export_keeps_every_level_of_one_floor(test_client) -> None:
             archive.extractall(output_dir)
             floor = gpd.read_file(Path(output_dir) / "Demo_Station_1_Floor.shp")
             space = gpd.read_file(Path(output_dir) / "Demo_Station_1_Space.shp")
-            assert set(floor["id"]) == {ids["level_id"], west_level_id}
+            assert set(floor["id"]) == {_odc_id(ids["level_id"]), _odc_id(west_level_id)}
             assert dict(zip(space["id"], space["floor_id"])) == {
-                ids["unit_id"]: ids["level_id"],
-                west_unit_id: west_level_id,
+                _odc_id(ids["unit_id"]): _odc_id(ids["level_id"]),
+                _odc_id(west_unit_id): _odc_id(west_level_id),
             }
             # The Building polygon is the whole ground floor, not one level of it.
             building = gpd.read_file(Path(output_dir) / "Demo_Station_Building.shp")
@@ -2463,8 +2544,10 @@ def test_odc2026_export_binds_facility_merge_to_the_level_it_falls_in(test_clien
             archive.extractall(output_dir)
             ground = gpd.read_file(Path(output_dir) / "Demo_Station_1_Facility.shp")
             basement = gpd.read_file(Path(output_dir) / "Demo_Station_B1_Facility.shp")
-            assert dict(zip(ground["id"], ground["floor_id"])) == {west_point_id: west_level_id}
-            assert dict(zip(basement["id"], basement["floor_id"])) == {basement_point_id: basement_level_id}
+            assert dict(zip(ground["id"], ground["floor_id"])) == {_odc_id(west_point_id): _odc_id(west_level_id)}
+            assert dict(zip(basement["id"], basement["floor_id"])) == {
+                _odc_id(basement_point_id): _odc_id(basement_level_id)
+            }
             assert list(ground["category"]) == ["F001"]
             assert list(basement["category"]) == ["F002"]
 
@@ -2638,29 +2721,29 @@ def test_odc2026_export_maps_facility_merge_categories_to_f_codes(test_client) -
                 for _, row in facility.iterrows()
             }
             assert by_id == {
-                inside_id: "F001",
-                no_image_id: None,
+                _odc_id(inside_id): "F001",
+                _odc_id(no_image_id): None,
                 # ticket.png is always F101, including fare-adjustment rows.
-                ticket_id: "F101",
+                _odc_id(ticket_id): "F101",
                 # Platform logos and unlisted icons export as null.
-                platform_id: None,
-                escalator_id: "F013",
-                stairs_id: "F011",
-                elevator_id: "F012",
-                baby_toilet_id: None,
-                baby_id: "F021",
-                children_id: None,
+                _odc_id(platform_id): None,
+                _odc_id(escalator_id): "F013",
+                _odc_id(stairs_id): "F011",
+                _odc_id(elevator_id): "F012",
+                _odc_id(baby_toilet_id): None,
+                _odc_id(baby_id): "F021",
+                _odc_id(children_id): None,
             }
-            assert set(facility["floor_id"]) == {ids["level_id"]}
-            assert ids["amenity_id"] not in set(facility["id"])
+            assert set(facility["floor_id"]) == {_odc_id(ids["level_id"])}
+            assert _odc_id(ids["amenity_id"]) not in set(facility["id"])
 
             # A facility inside its own basement level survives even though it
             # falls outside the 1F building outline.
             basement = gpd.read_file(Path(output_dir) / "Demo_Station_B3_Facility.shp")
-            assert list(basement["id"]) == [basement_id]
+            assert list(basement["id"]) == [_odc_id(basement_id)]
             assert list(basement["category"]) == ["F003"]
             assert "image" not in basement.columns
-            assert list(basement["floor_id"]) == [basement_level_id]
+            assert list(basement["floor_id"]) == [_odc_id(basement_level_id)]
 
 
 @pytest.mark.phase5
@@ -2755,8 +2838,8 @@ def test_odc2026_export_reports_facility_merge_floor_miss_reasons(test_client) -
         with tempfile.TemporaryDirectory() as output_dir:
             archive.extractall(output_dir)
             fourth = gpd.read_file(Path(output_dir) / "Demo_Station_4_Facility.shp")
-            assert list(fourth["id"]) == [fourth_id]
-            assert ids["amenity_id"] not in set(fourth["id"])
+            assert list(fourth["id"]) == [_odc_id(fourth_id)]
+            assert _odc_id(ids["amenity_id"]) not in set(fourth["id"])
 
 
 @pytest.mark.phase5
@@ -2791,7 +2874,7 @@ def test_odc2026_export_uses_facility_merge_when_present(test_client) -> None:
         with tempfile.TemporaryDirectory() as output_dir:
             archive.extractall(output_dir)
             facility = gpd.read_file(Path(output_dir) / "Demo_Station_1_Facility.shp")
-            assert list(facility["id"]) == [merge_id]
+            assert list(facility["id"]) == [_odc_id(merge_id)]
             assert list(facility["category"]) == ["F013"]
             assert "image" not in facility.columns
 
@@ -2873,12 +2956,14 @@ def test_odc2026_export_skips_mismatched_geometry_rows(test_client) -> None:
     with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
         report = json.loads(archive.read("export_report.json"))
         skipped_ids = {item["feature_id"] for item in report["rows_skipped"]}
+        # The report points back at the review screen, so it keeps the dashed
+        # form the session uses; only the delivered shapefiles drop the dashes.
         assert bad_unit_id in skipped_ids
         with tempfile.TemporaryDirectory() as output_dir:
             archive.extractall(output_dir)
             space = gpd.read_file(Path(output_dir) / "Demo_Station_1_Space.shp")
-            assert bad_unit_id not in set(space["id"])
-            assert ids["unit_id"] in set(space["id"])
+            assert _odc_id(bad_unit_id) not in set(space["id"])
+            assert _odc_id(ids["unit_id"]) in set(space["id"])
 
 
 @pytest.mark.phase5
@@ -2960,15 +3045,16 @@ def test_imdf_schema_import_redirects_column_units_to_fixture(test_client) -> No
         with tempfile.TemporaryDirectory() as output_dir:
             archive.extractall(output_dir)
             fixture_shp = gpd.read_file(Path(output_dir) / "Demo_Station_1_Fixture.shp")
-            assert column_id in set(fixture_shp["id"])
+            assert _odc_id(column_id) in set(fixture_shp["id"])
             assert "C001" in set(fixture_shp["category"])
 
 
 @pytest.mark.phase5
-def test_imdf_schema_import_redirects_vegetation_units_to_fixture(test_client) -> None:
-    # 植栽・花壇 is a Fixture in the spec (別表8.5.1 C009) and has no Space code,
-    # so a unit tagged "vegetation" belongs in Fixture rather than under Space
-    # with the その他部屋 fallback.
+def test_imdf_schema_import_keeps_vegetation_units_as_spaces(test_client) -> None:
+    # A planter is a C009 fixture, but the IMDF `vegetation` category also tags
+    # planted areas (station gardens, green concourse strips), and those are
+    # spaces: 別表8.2.4 B019 その他部屋の範囲. Redirecting them to Fixture, as this
+    # once did, turned a room into a piece of furniture.
     planting_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc9"
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
@@ -2999,21 +3085,25 @@ def test_imdf_schema_import_redirects_vegetation_units_to_fixture(test_client) -
     assert import_response.status_code == 201
     session_id = import_response.json()["session_id"]
     features = test_client.get(f"/api/session/{session_id}/features").json()["features"]
-    assert planting_id in {item["id"] for item in features if item["feature_type"] == "fixture"}
-    assert planting_id not in {item["id"] for item in features if item["feature_type"] == "unit"}
+    assert planting_id in {item["id"] for item in features if item["feature_type"] == "unit"}
+    assert planting_id not in {item["id"] for item in features if item["feature_type"] == "fixture"}
 
     export_response = test_client.post(
         f"/api/session/{session_id}/export/shapefiles",
-        json={"profile": "odc2026", "export_name": "Demo_Station"},
+        json={"profile": "odc2026", "export_name": "Demo_Station", "include_report": True},
     )
     assert export_response.status_code == 200
     with zipfile.ZipFile(BytesIO(export_response.content)) as archive:
+        report = json.loads(archive.read("export_report.json").decode("utf-8"))
         with tempfile.TemporaryDirectory() as output_dir:
             archive.extractall(output_dir)
-            fixture = gpd.read_file(Path(output_dir) / "Demo_Station_1_Fixture.shp")
-            assert dict(zip(fixture["id"], fixture["category"]))[planting_id] == "C009"
             space = gpd.read_file(Path(output_dir) / "Demo_Station_1_Space.shp")
-            assert planting_id not in set(space["id"])
+            assert dict(zip(space["id"], space["category"]))[_odc_id(planting_id)] == "B019"
+            assert "Demo_Station_1_Fixture.shp" not in set(archive.namelist())
+    # Mapped, not defaulted: an unmapped category also lands on B019, and only
+    # the report distinguishes the two.
+    assert report["category_code_fallbacks"] == []
+    assert report["category_code_aliases"]["vegetation -> room (B019)"] == 1
 
 
 @pytest.mark.phase5

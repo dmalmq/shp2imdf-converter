@@ -22,6 +22,7 @@ from backend.src.iso_subdivisions import (
     normalize_subdivision,
 )
 from backend.src.imdf_shapefile_importer import SYNTHESIZED_BUILDING_NAME, SYNTHESIZED_VENUE_NAME
+from backend.src.mapper import load_restriction_categories
 from backend.src.schemas import ValidationIssue, ValidationResponse, ValidationSummary
 
 
@@ -31,6 +32,10 @@ POINT_TYPES = {"amenity", "anchor"}
 NULL_GEOM_TYPES = {"address", "building", "occupant"}
 OPTIONAL_GEOM_TYPES = {"relationship"}
 LEVEL_LINKED_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section"}
+# IMDF restriction is a closed enum. Import repairs near misses
+# (`normalize_restriction`); anything left is a value the spec cannot carry, and
+# it used to reach unit.geojson and the ODC Space layer with nothing objecting.
+RESTRICTION_CATEGORIES = load_restriction_categories()
 
 
 def feature_requires_geometry(ftype: str) -> bool:
@@ -477,6 +482,15 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
         for key in ("name", "short_name", "alt_name"):
             if key in props and props.get(key) is not None and not _labels_ok(props.get(key)):
                 add_issue("error", "labels_format_valid", f"'{key}' must be LABELS object.", feature_id=fid)
+
+        restriction = props.get("restriction")
+        if restriction is not None and restriction not in RESTRICTION_CATEGORIES:
+            add_issue(
+                "error",
+                "restriction_valid",
+                f"Restriction must be null or one of {', '.join(RESTRICTION_CATEGORIES)}; found '{restriction}'.",
+                feature_id=fid,
+            )
 
         if geom is not None and props.get("display_point") is not None and not _point_in_geometry(props.get("display_point"), geom):
             add_issue("error", "display_point_within_geometry", "display_point is outside geometry.", feature_id=fid)
@@ -934,7 +948,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
         )
 
     failed_checks = {issue.check for issue in [*errors, *warnings]}
-    passed = sorted({"unique_uuids", "valid_geometry", "venue_exists", "building_exists", "venue_placeholder_metadata", "labels_format_valid", "display_points_valid", "venue_phone_format", "venue_hours_format", "opening_not_touching_boundary", "polygon_has_interior_rings", "footprint_level_coverage"} - failed_checks)
+    passed = sorted({"unique_uuids", "valid_geometry", "venue_exists", "building_exists", "venue_placeholder_metadata", "labels_format_valid", "display_points_valid", "restriction_valid", "venue_phone_format", "venue_hours_format", "opening_not_touching_boundary", "polygon_has_interior_rings", "footprint_level_coverage"} - failed_checks)
     summary = ValidationSummary(
         total_features=len(rows),
         by_type=dict(by_type),

@@ -13,7 +13,13 @@ from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, mapping,
 from shapely.ops import unary_union
 from shapely.validation import make_valid
 
-from backend.src.mapper import load_unit_categories, resolve_unit_category, wrap_labels
+from backend.src.geometry import safe_union
+from backend.src.mapper import (
+    load_unit_categories,
+    normalize_restriction,
+    resolve_unit_category,
+    wrap_labels,
+)
 from backend.src.schemas import BuildingWizardState, LevelWizardItem, SessionRecord
 from backend.src.wizard import build_address_feature, seed_wizard_state
 
@@ -181,8 +187,11 @@ def _carve_column_units(mapped_features: list[dict[str, Any]]) -> None:
         if not column_geoms:
             continue
 
+        column_union = safe_union(column_geoms)
+        if column_union is None:
+            continue
         try:
-            column_union = make_valid(unary_union(column_geoms))
+            column_union = make_valid(column_union)
         except Exception:
             continue
         if column_union.is_empty:
@@ -494,7 +503,7 @@ def _collect_provided_core_features(
                         "alt_name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["alt_name", "altname"]), language=language),
                         "category": _normalize_text(_metadata_get(metadata, metadata_lookup, ["category", "building_category", "type"]))
                         or "unspecified",
-                        "restriction": _normalize_text(_metadata_get(metadata, metadata_lookup, ["restriction", "restrict"])),
+                        "restriction": normalize_restriction(_metadata_get(metadata, metadata_lookup, ["restriction", "restrict"])),
                         "display_point": _display_point(geom),
                         "address_id": _normalize_text(_metadata_get(metadata, metadata_lookup, ["address_id", "addr_id"])),
                         **common,
@@ -517,7 +526,7 @@ def _collect_provided_core_features(
                 "geometry": geometry,
                 "properties": {
                     "category": venue_category or "unspecified",
-                    "restriction": _normalize_text(_metadata_get(metadata, metadata_lookup, ["restriction", "restrict"])),
+                    "restriction": normalize_restriction(_metadata_get(metadata, metadata_lookup, ["restriction", "restrict"])),
                     "name": wrap_labels(venue_name, language=language),
                     "alt_name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["alt_name", "altname"]), language=language),
                     "hours": _normalize_text(_metadata_get(metadata, metadata_lookup, ["hours", "opening_hours"])),
@@ -534,7 +543,19 @@ def _collect_provided_core_features(
     return provided_buildings, provided_venues
 
 
-def generate_feature_collection(session: SessionRecord, unit_categories_path: str) -> dict[str, Any]:
+def generate_feature_collection(
+    session: SessionRecord,
+    unit_categories_path: str,
+    level_geometry_by_ordinal: dict[int, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a review-ready feature collection from source rows and wizard state.
+
+    A level's outline is normally the union of its own units. ``level_geometry_by_ordinal``
+    supplies a shape for floors that have none — a batch holding only an openings
+    layer, say — which would otherwise produce no level and lose every feature
+    that needed one. See ``append_importer``, which passes the floors the target
+    session already has.
+    """
     seed_wizard_state(session)
     source_rows = _source_feature_rows(session)
     file_map = {item.stem: item for item in session.files}
@@ -586,11 +607,16 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
                 if geom.geom_type in {"Polygon", "MultiPolygon"}:
                     polygon_geoms.append(geom)
 
+        if not polygon_geoms and level_geometry_by_ordinal:
+            fallback = level_geometry_by_ordinal.get(ordinal)
+            if fallback is not None and not fallback.is_empty:
+                polygon_geoms = [fallback]
+
         if not polygon_geoms:
             continue
 
-        merged = unary_union(polygon_geoms)
-        if merged.is_empty:
+        merged = safe_union(polygon_geoms)
+        if merged is None or merged.is_empty:
             continue
         # Heal hairline gaps between adjacent units so the level reads as a
         # clean solid; unit geometries themselves are left untouched.
@@ -672,8 +698,8 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
                 geometries = [level_geom]
             if not geometries:
                 continue
-            merged = unary_union(geometries)
-            if merged.is_empty:
+            merged = safe_union(geometries)
+            if merged is None or merged.is_empty:
                 continue
             gap_fill = max(float(session.wizard.footprint.level_gap_fill_m), 0.0) * DEGREES_PER_METER
             merged = _close_gaps(merged, gap_fill)
@@ -692,8 +718,8 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
             geoms = geoms_by_category.get(category)
             if not geoms:
                 continue
-            combined = unary_union(geoms)
-            if combined.is_empty:
+            combined = safe_union(geoms)
+            if combined is None or combined.is_empty:
                 continue
             footprint_features.append(
                 {
@@ -781,8 +807,8 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
                     if geom is not None and not geom.is_empty:
                         venue_geometries.append(geom)
 
-        if venue_geometries:
-            merged_venue = unary_union(venue_geometries)
+        merged_venue = safe_union(venue_geometries) if venue_geometries else None
+        if merged_venue is not None:
             gap_fill = max(float(session.wizard.footprint.level_gap_fill_m), 0.0) * DEGREES_PER_METER
             merged_venue = _close_gaps(merged_venue, gap_fill)
             venue_buffer = max(float(session.wizard.footprint.venue_buffer_m), 0.0) * DEGREES_PER_METER
@@ -873,7 +899,7 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
             )
             new_properties = {
                 "category": category,
-                "restriction": _normalize_text(metadata.get(mapping_config.unit.restriction_column))
+                "restriction": normalize_restriction(metadata.get(mapping_config.unit.restriction_column))
                 if mapping_config.unit.restriction_column
                 else None,
                 "accessibility": _parse_list(metadata.get(mapping_config.unit.accessibility_column))
@@ -1048,7 +1074,7 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
                 ),
                 "name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["name", "section_name", "label"]), language=language),
                 "alt_name": wrap_labels(_metadata_get(metadata, metadata_lookup, ["alt_name", "altname"]), language=language),
-                "restriction": _normalize_text(_metadata_get(metadata, metadata_lookup, ["restriction", "restrict"])),
+                "restriction": normalize_restriction(_metadata_get(metadata, metadata_lookup, ["restriction", "restrict"])),
                 "level_id": level_id,
                 **common,
             }

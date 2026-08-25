@@ -22,6 +22,7 @@ import {
   validateSession,
   type ValidationIssue,
   type ValidationResponse} from "../api/client";
+import { AddDataPanel } from "../components/review/AddDataPanel";
 import { FeatureList } from "../components/review/FeatureList";
 import { IssuesPanel } from "../components/review/IssuesPanel";
 import {
@@ -237,6 +238,7 @@ export function ReviewPage() {
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [activeIssueIndex, setActiveIssueIndex] = useState<number | null>(null);
   const [issuesPanelCollapsed, setIssuesPanelCollapsed] = useState(false);
+  const [addDataOpen, setAddDataOpen] = useState(false);
 
   const captureError = (caught: unknown, fallbackMessage: string, title: string) => {
     const message = handleApiError(caught, fallbackMessage, { title });
@@ -1259,8 +1261,23 @@ export function ReviewPage() {
         onValidate={() => void runValidation()}
         onAutoFix={() => void runAutofix(false)}
         onFixOverlaps={() => void resolveSafeOverlaps()}
+        onAddData={() => setAddDataOpen(true)}
         onExport={() => void openExportDialog()}
       />
+
+      {/* Add data */}
+      {addDataOpen && sessionId ? (
+        <AddDataPanel
+          sessionId={sessionId}
+          importProfile={importProfile}
+          onClose={() => setAddDataOpen(false)}
+          onChanged={() => {
+            // The stored verdict describes the dataset before the change.
+            setValidation(null);
+            void loadFeatures();
+          }}
+        />
+      ) : null}
 
       {/* Export dialog */}
       {exportDialogOpen && validation ? (
@@ -1370,8 +1387,8 @@ export function ReviewPage() {
                 {exportFormat === "odc2026_shapefiles" ? (
                   <p className="text-xs text-[var(--color-text-muted)]">
                     {t(
-                      "Uses reviewed IMDF-schema features to generate Site, Building, Floor, Space, Fixture, Opening, Drawing, Facility, Occupant, and Segment shapefiles.",
-                      "レビュー済みの IMDF スキーマ地物から Site・Building・Floor・Space・Fixture・Opening・Drawing・Facility・Occupant・Segment のシェープファイルを生成します。"
+                      "Uses reviewed IMDF-schema features to generate Site, Building, Floor, Space, Fixture, Opening, Drawing, Facility, Occupant, and Segment shapefiles, plus a QGIS project (.qgs) that groups the layers per floor, colors spaces by category and draws openings in red.",
+                      "レビュー済みの IMDF スキーマ地物から Site・Building・Floor・Space・Fixture・Opening・Drawing・Facility・Occupant・Segment のシェープファイルを生成し、あわせて階層ごとにレイヤをグループ化し、空間をカテゴリ別に色分けし、開口部を赤で描画した QGIS プロジェクト (.qgs) を同梱します。"
                     )}
                   </p>
                 ) : null}
@@ -1379,8 +1396,8 @@ export function ReviewPage() {
                 {exportFormat === "qgis_project" ? (
                   <p className="text-xs text-[var(--color-text-muted)]">
                     {t(
-                      "Generates a styled QGIS .qgz project (floors grouped as layers, spaces colored by category) bundled with the ODC2026 shapefiles. Extract the zip and open the .qgz in QGIS.",
-                      "階層ごとにレイヤをグループ化し、空間をカテゴリ別に色分けした QGIS プロジェクト (.qgz) を ODC2026 シェープファイルと一緒に zip で出力します。zip を展開して .qgz を QGIS で開いてください。"
+                      "Generates a styled QGIS .qgz project (floors grouped as layers, spaces colored by category) bundled with the ODC2026 shapefiles. Extract the zip and open the .qgz in QGIS. Requires QGIS on the server; the Open Data export bundles a simple .qgs project that does not.",
+                      "階層ごとにレイヤをグループ化し、空間をカテゴリ別に色分けした QGIS プロジェクト (.qgz) を ODC2026 シェープファイルと一緒に zip で出力します。zip を展開して .qgz を QGIS で開いてください。サーバーに QGIS がインストールされている必要があります (オープンデータのエクスポートには QGIS 不要の簡易プロジェクト (.qgs) が同梱されます)。"
                     )}
                   </p>
                 ) : null}

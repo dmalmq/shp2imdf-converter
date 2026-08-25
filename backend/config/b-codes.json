@@ -53,6 +53,7 @@
     "multipurpose restroom": "restroom.wheelchair",
     "slope": "ramp",
     "station office": "office",
+    "vegetation": "room",
     "outdoors": "unenclosedarea"
   }
 }

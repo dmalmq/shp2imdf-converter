@@ -71,6 +71,51 @@ def test_duplicate_uuids_error(test_client, sample_dir: Path) -> None:
     assert any(issue.check == "duplicate_uuids" for issue in result.errors)
 
 
+@pytest.mark.phase5
+@pytest.mark.parametrize("restriction", ["employeesonly", "restricted", None])
+def test_legal_restriction_is_accepted(test_client, sample_dir: Path, restriction: str | None) -> None:
+    collection = copy.deepcopy(_generated_collection(test_client, sample_dir))
+    unit = next(item for item in collection["features"] if item["feature_type"] == "unit")
+    unit["properties"]["restriction"] = restriction
+    result = validate_feature_collection(collection)
+    assert not any(issue.check == "restriction_valid" for issue in result.errors)
+    assert "restriction_valid" in result.passed
+
+
+@pytest.mark.phase5
+def test_restriction_outside_the_imdf_enum_is_an_error(test_client, sample_dir: Path) -> None:
+    """A value the enum cannot carry used to export with nothing objecting.
+
+    Import repairs near misses of the two legal values, so what reaches here is
+    something else entirely - which makes the archive non-conformant and has to
+    be corrected in the source data.
+    """
+    collection = copy.deepcopy(_generated_collection(test_client, sample_dir))
+    unit = next(item for item in collection["features"] if item["feature_type"] == "unit")
+    unit["properties"]["restriction"] = "staffonly"
+    result = validate_feature_collection(collection)
+    issues = [issue for issue in result.errors if issue.check == "restriction_valid"]
+    assert [issue.feature_id for issue in issues] == [unit["id"]]
+    assert "staffonly" in issues[0].message
+    assert "restriction_valid" not in result.passed
+
+
+@pytest.mark.phase5
+def test_restriction_is_checked_on_every_feature_that_carries_one(test_client, sample_dir: Path) -> None:
+    # restriction is not a unit-only property: venue, building, level and
+    # section carry it too, and each is written straight from source columns.
+    collection = copy.deepcopy(_generated_collection(test_client, sample_dir))
+    flagged = []
+    for feature_type in ("venue", "building", "level"):
+        feature = next(item for item in collection["features"] if item["feature_type"] == feature_type)
+        feature["properties"]["restriction"] = "enpliyeesonly"
+        flagged.append(feature["id"])
+    result = validate_feature_collection(collection)
+    issues = [issue for issue in result.errors if issue.check == "restriction_valid"]
+    assert sorted(issue.feature_id for issue in issues) == sorted(flagged)
+
+
+
 def _address_feature(collection: dict) -> dict:
     return next(item for item in collection["features"] if item["feature_type"] == "address")
 

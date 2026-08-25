@@ -17,42 +17,12 @@ from dataclasses import dataclass
 from uuid import uuid4
 from xml.sax.saxutils import escape, quoteattr
 
+from backend.src.qgis_xml import project_document, srs_xml
+
 # Neutral fallback colors, used only when a feature's color attribute is null.
 _FILL_FALLBACK = "200,200,200,255"
 _OUTLINE_FALLBACK = "35,35,35,255"
 _LINE_FALLBACK = "50,50,50,255"
-
-_UNKNOWN_SRS = (
-    "<spatialrefsys nativeFormat=\"Wkt\">"
-    "<wkt></wkt><proj4></proj4><srsid>0</srsid><srid>0</srid>"
-    "<authid></authid><description></description>"
-    "<projectionacronym></projectionacronym><ellipsoidacronym></ellipsoidacronym>"
-    "<geographicflag>false</geographicflag>"
-    "</spatialrefsys>"
-)
-
-
-def _srs_xml(crs: str | None) -> str:
-    """A QGIS ``<spatialrefsys>`` block for ``crs``, or the unknown-CRS block."""
-    if not crs:
-        return _UNKNOWN_SRS
-
-    from pyproj import CRS as _PyprojCRS  # local import keeps module import cheap
-
-    parsed = _PyprojCRS.from_user_input(crs)
-    authority = parsed.to_authority()
-    authid = f"{authority[0]}:{authority[1]}" if authority else crs
-    srid = authority[1] if authority else "0"
-    return (
-        '<spatialrefsys nativeFormat="Wkt">'
-        f"<wkt>{escape(parsed.to_wkt())}</wkt><proj4>{escape(parsed.to_proj4())}</proj4>"
-        f"<srsid>{escape(str(srid))}</srsid><srid>{escape(str(srid))}</srid>"
-        f"<authid>{escape(authid)}</authid>"
-        f"<description>{escape(parsed.name)}</description>"
-        "<projectionacronym></projectionacronym><ellipsoidacronym></ellipsoidacronym>"
-        f"<geographicflag>{'true' if parsed.is_geographic else 'false'}</geographicflag>"
-        "</spatialrefsys>"
-    )
 
 
 @dataclass(slots=True)
@@ -144,7 +114,7 @@ def _layer_tree_entry(layer_id: str, spec: QgisLayerSpec, gpkg_filename: str) ->
     )
 
 
-def _maplayer(spec: QgisLayerSpec, layer_id: str, gpkg_filename: str, srs_xml: str) -> str:
+def _maplayer(spec: QgisLayerSpec, layer_id: str, gpkg_filename: str, srs: str) -> str:
     is_poly = spec.role == "polygon"
     geometry = "Polygon" if is_poly else "Line"
     wkb = "MultiPolygon" if is_poly else "MultiLineString"
@@ -157,7 +127,7 @@ def _maplayer(spec: QgisLayerSpec, layer_id: str, gpkg_filename: str, srs_xml: s
         f"<id>{layer_id}</id>"
         f"<datasource>{escape(datasource)}</datasource>"
         f"<layername>{escape(spec.display_name)}</layername>"
-        f"<srs>{srs_xml}</srs>"
+        f"<srs>{srs}</srs>"
         "<provider encoding=\"UTF-8\">ogr</provider>"
         f"{renderer}"
         "</maplayer>"
@@ -182,7 +152,7 @@ def build_qgs_project(
     ``<projectlayers>`` block stays flat either way. ``layers`` is ignored when
     ``layer_groups`` is provided.
     """
-    srs_xml = _srs_xml(crs)
+    srs = srs_xml(crs)
     if layer_groups is not None:
         flat = [spec for _name, specs in layer_groups for spec in specs]
         ids = [f"lyr{i:03d}_{uuid4().hex}" for i in range(len(flat))]
@@ -196,7 +166,7 @@ def build_qgs_project(
             for group_name, specs in layer_groups
         )
         maplayers = "".join(
-            _maplayer(spec, lid, gpkg_filename, srs_xml) for lid, spec in zip(ids, flat)
+            _maplayer(spec, lid, gpkg_filename, srs) for lid, spec in zip(ids, flat)
         )
         layerorder = "".join(f"<layer id=\"{lid}\"/>" for lid in ids)
     else:
@@ -205,33 +175,14 @@ def build_qgs_project(
             _layer_tree_entry(lid, spec, gpkg_filename) for lid, spec in zip(ids, layers)
         )
         maplayers = "".join(
-            _maplayer(spec, lid, gpkg_filename, srs_xml) for lid, spec in zip(ids, layers)
+            _maplayer(spec, lid, gpkg_filename, srs) for lid, spec in zip(ids, layers)
         )
         layerorder = "".join(f"<layer id=\"{lid}\"/>" for lid in ids)
 
-    # QGIS reads <projectCrs> only when projections are switched on in the legacy
-    # <properties> block. Without it the CRS below is parsed and then silently
-    # discarded, and the project opens with no CRS - which is why every export had
-    # to have its CRS set by hand. Established by loading the generated file in
-    # QGIS 3.42 via PyQGIS: with the flag at 1 the project reports EPSG:6677, with
-    # it at 0, or with <properties> absent, it reports an empty authid. Nothing
-    # else from QGIS's much larger <properties> block is needed, and no
-    # <mapcanvas>/<destinationsrs> is needed either.
-    #
-    # Flag stays off without a CRS, so the ungeoreferenced artwork-space output
-    # keeps declaring an unknown CRS rather than claiming a bogus one.
-    properties = (
-        "<properties><SpatialRefSys>"
-        f"<ProjectionsEnabled type=\"int\">{'1' if crs else '0'}</ProjectionsEnabled>"
-        "</SpatialRefSys></properties>"
-    )
-    return (
-        "<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>"
-        f"<qgis version=\"3.34.0\" projectname={quoteattr(project_name)}>"
-        f"{properties}"
-        f"<projectCrs>{srs_xml}</projectCrs>"
+    return project_document(
+        project_name,
+        crs,
         f"<layer-tree-group>{tree_entries}<custom-order enabled=\"0\"/></layer-tree-group>"
         f"<projectlayers>{maplayers}</projectlayers>"
-        f"<layerorder>{layerorder}</layerorder>"
-        "</qgis>"
+        f"<layerorder>{layerorder}</layerorder>",
     )

@@ -13,6 +13,7 @@ type Props = {
   onValidate: () => void;
   onAutoFix: () => void;
   onFixOverlaps: () => void;
+  onAddData: () => void;
   onExport: () => void;
 };
 
@@ -27,6 +28,7 @@ export function ValidationBar({
   onValidate,
   onAutoFix,
   onFixOverlaps,
+  onAddData,
   onExport
 }: Props) {
   const { t } = useUiLanguage();
@@ -82,6 +84,14 @@ export function ValidationBar({
             {autofixing ? t("Fixing...", "修正中...") : t("Auto-fix", "自動修正")}
           </Button>
         ) : null}
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onAddData}
+          disabled={loading}
+        >
+          {t("Add data", "データを追加")}
+        </Button>
         <Button
           variant="secondary"
           size="sm"

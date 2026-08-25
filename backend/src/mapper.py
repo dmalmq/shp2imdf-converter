@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import difflib
+from functools import lru_cache
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 from backend.src.schemas import ImportedFile, UnitCodePreviewRow
@@ -12,6 +15,18 @@ from backend.src.schemas import ImportedFile, UnitCodePreviewRow
 CATEGORY_ALIASES = {
     "retailstore": "retail",
 }
+
+RESTRICTION_CATEGORIES_PATH = (
+    Path(__file__).resolve().parent.parent / "config" / "categories" / "restriction_categories.json"
+)
+# Source data spells the IMDF `restriction` enum by hand and gets it wrong: the
+# 池袋 dataset ships "enpliyeesonly" on 1F while its own B1 file says
+# "employeesonly". A value that close to a legal one is a typo, not a different
+# meaning, so it is repaired rather than carried into unit.json and the ODC
+# Space layer. 0.8 sits in a wide empty band: typos of these two values score
+# >= 0.84 against the one they meant, while genuinely different words
+# ("public", "staffonly", "nonpublic", "open") score <= 0.46.
+_RESTRICTION_TYPO_RATIO = 0.8
 
 
 def _normalize_category_alias(value: str) -> str:
@@ -22,6 +37,44 @@ def _normalize_category_alias(value: str) -> str:
     compact = normalized.replace(" ", "").replace("-", "").replace("_", "")
     aliased = CATEGORY_ALIASES.get(compact)
     return aliased if aliased else normalized
+
+
+@lru_cache(maxsize=1)
+def load_restriction_categories() -> tuple[str, ...]:
+    """The legal IMDF ``restriction`` values, in config order."""
+    try:
+        payload = json.loads(RESTRICTION_CATEGORIES_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    categories = payload.get("categories")
+    if not isinstance(categories, list):
+        return ()
+    return tuple(str(item).strip().lower() for item in categories if str(item).strip())
+
+
+def normalize_restriction(value: Any) -> str | None:
+    """Canonical IMDF ``restriction`` for ``value``, or the trimmed text as given.
+
+    Exact members pass through; formatting differences ("Employees Only",
+    "employees_only") and near misses of one member ("enpliyeesonly") resolve to
+    that member. A value close to nothing legal is left alone rather than
+    guessed at or dropped - it may carry meaning this enum cannot express, and
+    it is the source data that has to be corrected.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    legal = load_restriction_categories()
+    lowered = text.lower()
+    if lowered in legal:
+        return lowered
+    compact = re.sub(r"[^a-z0-9]+", "", lowered)
+    if compact in legal:
+        return compact
+    near = difflib.get_close_matches(compact, legal, n=1, cutoff=_RESTRICTION_TYPO_RATIO)
+    return near[0] if near else text
 
 
 def load_unit_categories(config_path: str | Path) -> tuple[set[str], str]:

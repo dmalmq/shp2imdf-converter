@@ -18,6 +18,8 @@ import pandas as pd
 from shapely.geometry import mapping, shape
 from shapely.ops import unary_union
 
+from backend.src.mapper import normalize_restriction
+from backend.src.odc_qgis import OdcQgisLayer, build_odc_qgs_project
 from backend.src.schemas import SessionRecord, ShapefileExportRequest
 
 
@@ -337,6 +339,36 @@ def _canonicalize_uuid_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     if not renamed:
         return gdf
     return gdf.assign(**renamed)
+
+
+# ODC ids are delivered as bare hex - the datasets this feeds do not use the
+# dashed form. Only the roundtrip profile keeps it (`_canonicalize_uuid_value`),
+# because there the id has to match the source shapefile it is written back to.
+ODC_UUID_FIELDS = ("id", "floor_id")
+
+
+def _odc_uuid_value(value: Any) -> Any:
+    """``value`` as an undashed UUID, or unchanged when it is not a UUID.
+
+    An id the spec never issued (a source key like ``shop-12``) keeps its
+    dashes: they are part of what it says, not formatting.
+    """
+    canonical = _canonicalize_uuid_value(value)
+    if not isinstance(canonical, str):
+        return canonical
+    try:
+        return UUID(canonical).hex
+    except ValueError:
+        return canonical
+
+
+def _compact_uuid_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    renamed = {
+        column: gdf[column].astype("object").map(_odc_uuid_value)
+        for column in ODC_UUID_FIELDS
+        if column in gdf.columns
+    }
+    return gdf.assign(**renamed) if renamed else gdf
 
 
 def _normalize_columns(
@@ -926,6 +958,10 @@ def _safe_layer_stem(*parts: str) -> str:
 
 
 
+# Opendata is delivered in JGD2011 geographic coordinates; the bundled QGIS
+# project has to declare the same CRS the shapefiles were written in.
+ODC_EXPORT_CRS = "EPSG:6668"
+
 ODC_POLYGON_GEOMS = ("Polygon", "MultiPolygon")
 ODC_LINE_GEOMS = ("LineString", "MultiLineString")
 ODC_POINT_GEOMS = ("Point",)
@@ -1047,7 +1083,8 @@ def _write_odc_layer(
     write_encoding: str | None,
     allowed_geoms: tuple[str, ...],
     report: dict[str, Any],
-) -> bool:
+) -> tuple[float, float, float, float] | None:
+    """Write one ODC layer; returns its extent, or None when nothing was written."""
     kept_rows: list[dict[str, Any]] = []
     kept_geoms: list[Any] = []
     for row, geom in zip(rows, geometries):
@@ -1060,16 +1097,28 @@ def _write_odc_layer(
             )
     rows, geometries = kept_rows, kept_geoms
     if not rows or not geometries:
-        return False
-    gdf = gpd.GeoDataFrame(rows, geometry=geometries, crs="EPSG:4326")
-    # Opendata is delivered in JGD2011 geographic coordinates (EPSG:6668).
-    gdf = gdf.to_crs("EPSG:6668")
+        return None
+    gdf = _compact_uuid_columns(gpd.GeoDataFrame(rows, geometry=geometries, crs="EPSG:4326"))
+    gdf = gdf.to_crs(ODC_EXPORT_CRS)
     destination = output_dir / f"{stem}.shp"
     write_kwargs: dict[str, Any] = {"driver": "ESRI Shapefile", "index": False}
     if write_encoding is not None:
         write_kwargs["encoding"] = write_encoding
     gdf.to_file(destination, **write_kwargs)
-    return True
+    xmin, ymin, xmax, ymax = gdf.total_bounds
+    return float(xmin), float(ymin), float(xmax), float(ymax)
+
+
+def _space_categories(
+    rows: list[dict[str, Any]], labels: dict[str, str]
+) -> tuple[tuple[str, str], ...]:
+    """Sorted (code, legend label) pairs for the Space codes present in `rows`.
+
+    The bundled QGIS project needs the values enumerated, because a categorized
+    renderer holds one symbol per value: it can only color what was written.
+    """
+    codes = sorted({text for row in rows if (text := _text_or_none(row.get("category")))})
+    return tuple((code, labels.get(code, code)) for code in codes)
 
 
 def _odc_report(request: ShapefileExportRequest) -> dict[str, Any]:
@@ -1077,6 +1126,7 @@ def _odc_report(request: ShapefileExportRequest) -> dict[str, Any]:
         "profile": request.profile,
         "encoding": request.encoding,
         "layers_written": [],
+        "qgis_project": None,
         "layers_skipped": [],
         "rows_skipped": [],
         "category_code_ambiguities": [],
@@ -1092,7 +1142,7 @@ def _write_odc2026_shapefiles(
     session: SessionRecord,
     request: ShapefileExportRequest,
     output_dir: Path,
-) -> tuple[dict[str, Any], str]:
+) -> tuple[dict[str, Any], str, list[OdcQgisLayer]]:
     if any(item.source_format != "shapefile" for item in session.files):
         raise ValueError(
             "Open Data Contest 2026 shapefile export unavailable: this session includes GeoPackage sources. "
@@ -1110,6 +1160,14 @@ def _write_odc2026_shapefiles(
     a_codes = _load_category_codes("a-codes.json")
     b_codes = _load_category_codes("b-codes.json")
     c_codes = _load_category_codes("c-codes.json")
+    # The bundled QGIS project colors Space by its 別表8.2.4 code; the legend
+    # reads "B001 retail" rather than the bare code.
+    b_code_labels = {
+        code: f"{code} {category}"
+        for category, codes in b_codes.codes_by_category.items()
+        for code in codes
+    }
+    qgis_layers: list[OdcQgisLayer] = []
 
     levels = sorted(
         [item for item in features if item.get("feature_type") == "level"],
@@ -1275,8 +1333,12 @@ def _write_odc2026_shapefiles(
             )
             site_geoms.append(geom)
         site_stem = _safe_layer_stem(base, "Site")
-        if _write_odc_layer(output_dir, site_stem, site_rows, site_geoms, write_encoding, ODC_POLYGON_GEOMS, report):
+        site_bounds = _write_odc_layer(
+            output_dir, site_stem, site_rows, site_geoms, write_encoding, ODC_POLYGON_GEOMS, report
+        )
+        if site_bounds is not None:
             report["layers_written"].append(site_stem)
+            qgis_layers.append(OdcQgisLayer(stem=site_stem, kind="Site", bounds=site_bounds))
         else:
             report["layers_skipped"].append({"layer": site_stem, "reason": "no_venue_geometry"})
 
@@ -1319,8 +1381,14 @@ def _write_odc2026_shapefiles(
                 )
                 building_geoms.append(geom)
         building_stem = _safe_layer_stem(base, "Building")
-        if _write_odc_layer(output_dir, building_stem, building_rows, building_geoms, write_encoding, ODC_POLYGON_GEOMS, report):
+        building_bounds = _write_odc_layer(
+            output_dir, building_stem, building_rows, building_geoms, write_encoding, ODC_POLYGON_GEOMS, report
+        )
+        if building_bounds is not None:
             report["layers_written"].append(building_stem)
+            qgis_layers.append(
+                OdcQgisLayer(stem=building_stem, kind="Building", bounds=building_bounds)
+            )
         else:
             report["layers_skipped"].append({"layer": building_stem, "reason": "no_building_geometry"})
 
@@ -1378,8 +1446,13 @@ def _write_odc2026_shapefiles(
                         ),
                         "floor_id": level_id,
                         "name": _label_text(props.get("name")),
-                        "restricted": _text_or_none(_metadata_value(metadata, ["restricted", "restrict", "restriction"]))
-                        or _text_or_none(props.get("restriction")),
+                        # Read from the source row first, so a reviewed value
+                        # never silently outranks it - and normalized, because
+                        # that raw value bypasses the import-time repair.
+                        "restricted": normalize_restriction(
+                            _text_or_none(_metadata_value(metadata, ["restricted", "restrict", "restriction"]))
+                            or _text_or_none(props.get("restriction"))
+                        ),
                         "suite": _text_or_none(_metadata_value(metadata, ["suite"])),
                         "nonpublic": _text_or_none(nonpublic),
                         "toll": _text_or_none(_metadata_value(metadata, ["toll"])),
@@ -1473,21 +1546,60 @@ def _write_odc2026_shapefiles(
 
         for (label, layer), (rows, geoms) in floor_layers.items():
             stem = _safe_layer_stem(base, label, layer)
-            if _write_odc_layer(output_dir, stem, rows, geoms, write_encoding, ODC_FLOOR_LAYER_GEOMS[layer], report):
+            bounds = _write_odc_layer(
+                output_dir, stem, rows, geoms, write_encoding, ODC_FLOOR_LAYER_GEOMS[layer], report
+            )
+            if bounds is not None:
                 report["layers_written"].append(stem)
+                qgis_layers.append(
+                    OdcQgisLayer(
+                        stem=stem,
+                        kind=layer,
+                        floor=label,
+                        categories=_space_categories(rows, b_code_labels) if layer == "Space" else (),
+                        bounds=bounds,
+                    )
+                )
 
     _emit()
-    return report, base
+    return report, base, qgis_layers
+
+
+def _write_odc_qgis_project(
+    output_dir: Path,
+    base: str,
+    layers: list[OdcQgisLayer],
+    request: ShapefileExportRequest,
+    report: dict[str, Any],
+) -> None:
+    """Drop a ready-to-open QGIS project beside the shapefiles it references."""
+    if not layers:
+        report["layers_skipped"].append({"layer": f"{base}_qgis.qgs", "reason": "no_layers_written"})
+        return
+    filename = f"{base}_qgis.qgs"
+    (output_dir / filename).write_text(
+        build_odc_qgs_project(
+            layers,
+            project_name=base,
+            crs=ODC_EXPORT_CRS,
+            # What the DBFs were written in; "preserve_source" leaves the
+            # pyogrio default, which is UTF-8.
+            encoding=_encoding_for_write(request.encoding) or "UTF-8",
+        ),
+        encoding="utf-8",
+    )
+    report["qgis_project"] = filename
 
 
 def build_odc2026_shapefile_export_archive(
     session: SessionRecord,
     request: ShapefileExportRequest,
 ) -> tuple[bytes, str]:
-    """Open Data Contest 2026 shapefile bundle (.zip)."""
+    """Open Data Contest 2026 shapefile bundle (.zip), with a QGIS project."""
     with tempfile.TemporaryDirectory() as tmpdir:
         out = Path(tmpdir)
-        report, base = _write_odc2026_shapefiles(session, request, out)
+        report, base, layers = _write_odc2026_shapefiles(session, request, out)
+        _write_odc_qgis_project(out, base, layers, request, report)
         archive_bytes = BytesIO()
         with zipfile.ZipFile(archive_bytes, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
             for exported_file in sorted(out.glob("*")):
@@ -1511,7 +1623,7 @@ def build_qgis_project_archive(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         out = Path(tmpdir)
-        report, base = _write_odc2026_shapefiles(session, request, out)
+        report, base, _layers = _write_odc2026_shapefiles(session, request, out)
         qgz_name = f"{base}_qgis.qgz"
         generate_qgis_project_for_folder(out, out / qgz_name, base)
         archive_bytes = BytesIO()

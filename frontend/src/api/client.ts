@@ -395,11 +395,11 @@ export async function importImdfShapefiles(
   return uploadImportFiles(`/api/import/imdf-shapefiles${query}`, files, onProgress);
 }
 
-function uploadImportFiles(
+function uploadImportFiles<T = ImportResponse>(
   endpoint: string,
   files: File[],
   onProgress?: (percent: number) => void
-): Promise<ImportResponse> {
+): Promise<T> {
   const formData = new FormData();
   files.forEach((file) => formData.append("files", file));
 
@@ -418,7 +418,7 @@ function uploadImportFiles(
     request.onload = () => {
       if (request.status >= 200 && request.status < 300) {
         try {
-          resolve(JSON.parse(request.responseText) as ImportResponse);
+          resolve(JSON.parse(request.responseText) as T);
         } catch {
           reject(new ApiClientError(request.status, "INVALID_RESPONSE", "Import returned invalid JSON."));
         }
@@ -1038,4 +1038,265 @@ export async function deletePlacement(id: number): Promise<void> {
   if (!response.ok) {
     throw buildApiClientError(response.status, (await response.text()) || "");
   }
+}
+
+
+// --- Adding further source data to an existing session -------------------
+// Staged first, committed second: the review screen's edits have no undo, so
+// the user sees what a batch would do before it lands.
+
+export type AppendProfile = "imdf_shapefile" | "imdf" | "standard";
+
+export type AppendHostLevel = {
+  id: string;
+  name: string | null;
+  short_name: string | null;
+  ordinal: number | null;
+  label: string | null;
+};
+
+export type AppendLevelMatch = {
+  candidate_level_id: string;
+  name: string | null;
+  short_name: string | null;
+  ordinal: number | null;
+  label: string | null;
+  feature_count: number;
+  match_basis: "name" | "floor_label" | "ordinal" | "ambiguous" | "unmatched";
+  host_level_id: string | null;
+  host_level_options: AppendHostLevel[];
+};
+
+export type AppendFileSummary = {
+  stem: string;
+  geometry_type: string;
+  feature_count: number;
+  detected_type: string | null;
+  detected_level: number | null;
+  level_name: string | null;
+  short_name: string | null;
+  outdoor: boolean;
+  level_category: string;
+  confidence: string;
+  source_format: "shapefile" | "gpkg";
+  attribute_columns: string[];
+  crs_detected: string | null;
+  warnings: string[];
+};
+
+export type AppendStageResponse = {
+  session_id: string;
+  batch_id: string;
+  profile: AppendProfile;
+  files: AppendFileSummary[];
+  levels: AppendLevelMatch[];
+  host_levels: AppendHostLevel[];
+  feature_counts: Record<string, number>;
+  id_collisions: number;
+  id_collision_sample: string[];
+  needs_decisions: boolean;
+  needs_mapping: boolean;
+  alignment: AppendAlignment | null;
+  mappings: WizardMappingsState | null;
+  cleanup_summary: CleanupSummary;
+  warnings: string[];
+};
+
+export type AppendLayerSelection = {
+  stem: string;
+  included: boolean;
+  filter_column: string | null;
+  filter_values: string[];
+};
+
+export type AppendSelection = {
+  base: "filters" | "picked";
+  layers: AppendLayerSelection[];
+  feature_types: string[] | null;
+  level_ids: string[] | null;
+  categories: string[] | null;
+  bbox: [number, number, number, number] | null;
+  excluded_feature_ids: string[];
+  included_feature_ids: string[];
+};
+
+export type AppendCandidateFeature = {
+  id: string;
+  feature_type: string;
+  stem: string | null;
+  source_row_index: number | null;
+  name: string | null;
+  category: string | null;
+  level_id: string | null;
+  level_label: string | null;
+  /** [longitude, latitude] of the representative point. */
+  point: [number, number] | null;
+  geometry: Record<string, unknown> | null;
+  attributes: Record<string, string>;
+  already_imported: boolean;
+};
+
+export type AppendCandidateFeaturesResponse = {
+  session_id: string;
+  batch_id: string;
+  features: AppendCandidateFeature[];
+  columns_by_stem: Record<string, string[]>;
+};
+
+export type AppendAlignment = {
+  offset_lon: number;
+  offset_lat: number;
+  east_metres: number;
+  north_metres: number;
+  distance_metres: number;
+  sample_count: number;
+  spread_cm: number;
+  consistent: boolean;
+  from_session: boolean;
+};
+
+export type AppendLevelDecision = {
+  candidate_level_id: string;
+  action: "bind" | "create" | "reject";
+  host_level_id?: string | null;
+};
+
+export type AppendCommitRequest = {
+  batch_id: string;
+  level_decisions?: AppendLevelDecision[];
+  on_id_collision?: "remint" | "replace";
+  /** Omitted means everything in the batch. */
+  selection?: AppendSelection | null;
+  apply_alignment?: boolean;
+};
+
+export type AppendCommitResponse = {
+  session_id: string;
+  batch_id: string;
+  added_features: number;
+  feature_counts: Record<string, number>;
+  bound_levels: Record<string, string>;
+  created_level_ids: string[];
+  rejected_level_ids: string[];
+  dropped_features: number;
+  alignment_applied: AppendAlignment | null;
+  deselected_features: number;
+  skipped_already_imported: number;
+  reminted_ids: number;
+  replaced_ids: number;
+  total_features: number;
+  warnings: string[];
+};
+
+export type AppendBatchSummary = {
+  batch_id: string;
+  profile: AppendProfile;
+  committed_at: string;
+  file_stems: string[];
+  feature_count: number;
+  created_level_ids: string[];
+  warnings: string[];
+};
+
+export type AppendUndoResponse = {
+  session_id: string;
+  batch_id: string;
+  removed_features: number;
+  removed_source_rows: number;
+  removed_files: string[];
+  total_features: number;
+};
+
+export type AppendFileOverride = {
+  stem: string;
+  detected_type?: string | null;
+  detected_level?: number | null;
+  level_name?: string | null;
+  short_name?: string | null;
+  outdoor?: boolean | null;
+  level_category?: string | null;
+};
+
+export type AppendRestageRequest = {
+  files?: AppendFileOverride[];
+  mappings?: WizardMappingsState | null;
+};
+
+export async function stageSessionImport(
+  sessionId: string,
+  files: File[],
+  profile: AppendProfile,
+  onProgress?: (percent: number) => void,
+  preferFilenameFloor = false
+): Promise<AppendStageResponse> {
+  const query = new URLSearchParams({ profile });
+  if (preferFilenameFloor) {
+    query.set("prefer_filename_floor", "true");
+  }
+  return uploadImportFiles<AppendStageResponse>(
+    `/api/session/${sessionId}/import/stage?${query.toString()}`,
+    files,
+    onProgress
+  );
+}
+
+export async function restageSessionImport(
+  sessionId: string,
+  batchId: string,
+  payload: AppendRestageRequest
+): Promise<AppendStageResponse> {
+  const response = await fetch(
+    `/api/session/${sessionId}/import/stage/${encodeURIComponent(batchId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }
+  );
+  return handleJson<AppendStageResponse>(response);
+}
+
+export async function discardStagedImport(sessionId: string, batchId: string): Promise<void> {
+  const response = await fetch(
+    `/api/session/${sessionId}/import/stage/${encodeURIComponent(batchId)}`,
+    { method: "DELETE" }
+  );
+  if (!response.ok) {
+    throw buildApiClientError(response.status, await response.text());
+  }
+}
+
+export async function commitSessionImport(
+  sessionId: string,
+  payload: AppendCommitRequest
+): Promise<AppendCommitResponse> {
+  const response = await fetch(`/api/session/${sessionId}/import/commit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  return handleJson<AppendCommitResponse>(response);
+}
+
+export async function listImportBatches(sessionId: string): Promise<AppendBatchSummary[]> {
+  const response = await fetch(`/api/session/${sessionId}/import/batches`);
+  return handleJson<AppendBatchSummary[]>(response);
+}
+
+export async function undoImportBatch(sessionId: string, batchId: string): Promise<AppendUndoResponse> {
+  const response = await fetch(
+    `/api/session/${sessionId}/import/batches/${encodeURIComponent(batchId)}`,
+    { method: "DELETE" }
+  );
+  return handleJson<AppendUndoResponse>(response);
+}
+
+export async function fetchStagedFeatures(
+  sessionId: string,
+  batchId: string
+): Promise<AppendCandidateFeaturesResponse> {
+  const response = await fetch(
+    `/api/session/${sessionId}/import/stage/${encodeURIComponent(batchId)}/features`
+  );
+  return handleJson<AppendCandidateFeaturesResponse>(response);
 }

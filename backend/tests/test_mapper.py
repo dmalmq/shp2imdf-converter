@@ -7,12 +7,56 @@ import pytest
 from backend.src.mapper import (
     build_unit_code_preview,
     detect_candidate_columns,
+    load_restriction_categories,
     normalize_company_mappings_payload,
+    normalize_restriction,
     normalize_unit_category_overrides,
     resolve_unit_category,
     wrap_labels,
 )
 from backend.src.schemas import ImportedFile
+
+
+@pytest.mark.phase3
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        # The 池袋 dataset spells it this way on 1F and correctly on B1.
+        ("enpliyeesonly", "employeesonly"),
+        ("enployeesonly", "employeesonly"),
+        ("restrictd", "restricted"),
+        # Formatting, not spelling.
+        ("Employees Only", "employeesonly"),
+        ("employees_only", "employeesonly"),
+        ("EMPLOYEESONLY", "employeesonly"),
+        ("  restricted  ", "restricted"),
+        # Already canonical.
+        ("employeesonly", "employeesonly"),
+        ("restricted", "restricted"),
+        # Nothing to say.
+        (None, None),
+        ("", None),
+        ("   ", None),
+    ],
+)
+def test_restriction_typos_resolve_to_the_imdf_enum(value: str | None, expected: str | None) -> None:
+    assert normalize_restriction(value) == expected
+
+
+@pytest.mark.phase3
+@pytest.mark.parametrize("value", ["public", "staffonly", "nonpublic", "open", "none", "公開制限"])
+def test_values_that_are_not_near_the_enum_are_left_alone(value: str) -> None:
+    """A word that means something else is not guessed at, and not dropped either.
+
+    Only near misses are repairs; anything else may carry meaning this enum
+    cannot express, and losing it silently would be worse than exporting it.
+    """
+    assert normalize_restriction(value) == value
+
+
+@pytest.mark.phase3
+def test_restriction_enum_comes_from_the_category_config() -> None:
+    assert load_restriction_categories() == ("employeesonly", "restricted")
 
 
 @pytest.mark.phase3

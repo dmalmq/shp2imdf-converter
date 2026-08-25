@@ -14,7 +14,9 @@ from shapely.errors import GEOSException
 from shapely.geometry import mapping, shape
 from shapely.ops import unary_union
 
+from backend.src.geometry import safe_union
 from backend.src.importer import ImportArtifacts, import_file_blobs
+from backend.src.mapper import normalize_restriction
 
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
@@ -291,7 +293,7 @@ def _build_venues(
                 "geometry": geometry,
                 "properties": {
                     "category": _raw_category_value(_metadata_get(metadata, ["category", "venue_category"]), "unspecified"),
-                    "restriction": _text(_metadata_get(metadata, ["restriction", "restrict", "restricted"])),
+                    "restriction": normalize_restriction(_metadata_get(metadata, ["restriction", "restrict", "restricted"])),
                     "name": _label(_metadata_get(metadata, ["name", "venue_name"]), language),
                     "alt_name": _label(_metadata_get(metadata, ["alt_name", "altname"]), language),
                     "hours": _text(_metadata_get(metadata, ["hours", "hours1"])),
@@ -326,7 +328,7 @@ def _build_buildings(
                 "geometry": None,
                 "properties": {
                     "category": _category_value(_metadata_get(metadata, ["category", "building_category"]), {}, "unspecified"),
-                    "restriction": _text(_metadata_get(metadata, ["restriction", "restrict", "restricted"])),
+                    "restriction": normalize_restriction(_metadata_get(metadata, ["restriction", "restrict", "restricted"])),
                     "name": _label(_metadata_get(metadata, ["name", "building_name"]), language),
                     "alt_name": _label(_metadata_get(metadata, ["alt_name", "altname"]), language),
                     "display_point": _display_point(source_geometry),
@@ -338,40 +340,9 @@ def _build_buildings(
     return buildings
 
 
-def _safe_union(geoms: list[Any]) -> Any | None:
-    """Union geometries, tolerating invalid or near-coincident source data.
-
-    GEOS raises a TopologyException ("side location conflict") when unioning
-    polygons whose edges nearly coincide, which is common in ODC column data.
-    Retry with each part made valid and the operation snapped to a fine grid,
-    then fall back to an envelope union that cannot side-location conflict.
-    """
-    cleaned = [geom for geom in geoms if geom is not None and not geom.is_empty]
-    if not cleaned:
-        return None
-    try:
-        return unary_union(cleaned)
-    except GEOSException:
-        pass
-    valid: list[Any] = []
-    for geom in cleaned:
-        try:
-            fixed = make_valid(geom)
-        except Exception:
-            continue
-        if not fixed.is_empty:
-            valid.append(fixed)
-    if not valid:
-        return None
-    for grid_size in (1e-9, 1e-8, 1e-7, 1e-6):
-        try:
-            return union_all(valid, grid_size=grid_size)
-        except GEOSException:
-            continue
-    try:
-        return union_all([geom.envelope for geom in valid])
-    except GEOSException:
-        return None
+# Kept as a module-local name; the implementation is shared with the generator,
+# which unions the same source geometry.
+_safe_union = safe_union
 
 
 def _build_levels(
@@ -416,7 +387,7 @@ def _build_levels(
             "geometry": geometry,
             "properties": {
                 "category": "outdoor" if outdoor else "indoor",
-                "restriction": _text(_metadata_get(metadata, ["restriction", "restrict", "restricted"])),
+                "restriction": normalize_restriction(_metadata_get(metadata, ["restriction", "restrict", "restricted"])),
                 "outdoor": bool(outdoor),
                 "ordinal": ordinal,
                 "name": _label(level_name, language) or _label(short_name, language) or {language: str(ordinal)},
@@ -678,7 +649,7 @@ def _build_level_linked_features(
             if feature_type == "unit":
                 properties = {
                     "category": _raw_category_value(_metadata_get(metadata, ["category", "imdf_cat", "type"]), "unspecified"),
-                    "restriction": _text(_metadata_get(metadata, ["restriction", "restrict", "restricted"])),
+                    "restriction": normalize_restriction(_metadata_get(metadata, ["restriction", "restrict", "restricted"])),
                     "accessibility": _parse_list(_metadata_get(metadata, ["accessibility", "accessible"])),
                     "name": _label(_metadata_get(metadata, ["name", "unit_name"]), language),
                     "alt_name": _label(_metadata_get(metadata, ["alt_name", "altname"]), language),
@@ -715,7 +686,7 @@ def _build_level_linked_features(
                     "category": _category_value(_metadata_get(metadata, ["category", "type"]), {}, "walkway"),
                     "name": _label(_metadata_get(metadata, ["name", "section_name"]), language),
                     "alt_name": _label(_metadata_get(metadata, ["alt_name", "altname"]), language),
-                    "restriction": _text(_metadata_get(metadata, ["restriction", "restrict", "restricted"])),
+                    "restriction": normalize_restriction(_metadata_get(metadata, ["restriction", "restrict", "restricted"])),
                     "level_id": level_id,
                     **common,
                 }
@@ -916,7 +887,12 @@ def _dedupe_feature_ids(features: list[dict[str, Any]]) -> None:
 # Fixtures: columns are C001 and planting is C009. Neither has a Space code, so a
 # unit tagged with one is redirected instead of landing under Space with the
 # その他部屋 fallback.
-FIXTURE_ONLY_UNIT_CATEGORIES = {"column", "vegetation", "planting"}
+#
+# `vegetation` is deliberately not here. A planter is a C009 fixture, but the
+# IMDF category also tags planted *areas* (station gardens, green concourse
+# strips), which are spaces: those export as Space B019 (その他部屋の範囲) via the
+# b-codes alias. Redirecting them turned a room into a piece of furniture.
+FIXTURE_ONLY_UNIT_CATEGORIES = {"column", "planting"}
 
 
 def _redirect_fixture_only_units(

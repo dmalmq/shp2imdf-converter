@@ -74,6 +74,8 @@ def test_source_vocabulary_aliases_onto_the_spec_category() -> None:
     assert _space_code("information desk") == "B006"
     assert _space_code("walkway_sta") == "B029"
     assert _space_code("accessible restroom") == "B011"
+    # A planted area is その他部屋の範囲, not a C009 planter fixture.
+    assert _space_code("vegetation") == "B019"
 
     report = _report()
     _space_code("store_sta", report)

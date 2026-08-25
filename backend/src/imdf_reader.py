@@ -35,8 +35,28 @@ def read_imdf_zip(payload: bytes, max_uncompressed_bytes: int | None = None) -> 
 
     with archive as zf:
         infos = zf.infolist()
+        basenames = [info.filename.rsplit("/", 1)[-1] for info in infos if not info.is_dir()]
+
+        # Say what is wrong before saying how big it is. The upload page offers
+        # two buttons that both accept .zip, so a bundle of shapefiles arriving
+        # here is the likeliest way to reach this function in error — and a
+        # station's worth of them also trips the entry cap, which used to be the
+        # only thing the user was told. Reading the central directory does not
+        # decompress anything, so this costs nothing.
+        if not any(name.endswith(".geojson") for name in basenames) and any(
+            name.lower().endswith(".shp") for name in basenames
+        ):
+            raise ValueError(
+                "This zip contains shapefiles, not an IMDF archive. Add it in the main upload "
+                "area above and use Import & Continue; 'Open IMDF archive' is for re-opening a "
+                "previously exported .imdf/.zip."
+            )
+
         if len(infos) > MAX_ARCHIVE_MEMBERS:
-            raise ValueError(f"Archive contains more than {MAX_ARCHIVE_MEMBERS} entries.")
+            raise ValueError(
+                f"Archive contains more than {MAX_ARCHIVE_MEMBERS} entries. An IMDF archive holds "
+                "one .geojson per feature type, so this is probably not one."
+            )
         for info in infos:
             if info.is_dir():
                 continue
