@@ -314,3 +314,22 @@ pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
 - `import_batch_id` is review-only and belongs in `REVIEW_ONLY_PROPERTY_KEYS`. It tags what a
   batch brought in so the panel can highlight and undo it; IMDF has no such property and
   Apple rejects what it does not know, so it was travelling into every exported archive.
+- `restriction` arrives from ODC/GSI shapefiles as a **code**, not a word: 1 is
+  `employeesonly` and 2 is no restriction, which IMDF spells as no value rather than a member
+  of the enum. Untranslated they reached `unit.geojson` verbatim and Apple rejected every one
+  — 157 in 高輪ゲートウェイ alone. `RESTRICTION_CODES` maps them ahead of the fuzzy typo
+  repair, since "1" is nowhere near any legal value and guessing is what that fallback exists
+  to avoid. The ODC export applies `denormalize_restriction` on the way out so the round trip
+  holds ("1" -> employeesonly -> "1"); writing the word into a coded field would not survive
+  being read back. There is no code for `restricted`, so it passes through untranslated
+  rather than being invented.
+- The selection map keeps a transparent 14 px line layer purely as a click target. Openings
+  and details draw a pixel or two wide, which is far below what a mouse can hit: aiming dead
+  at a line registered 15 times in 25, and four pixels off never registered at all. With the
+  target layer both are 25/25. Same trick as the zero-opacity fill for polygon interiors, and
+  it has to sit first in `PICKABLE_LAYERS` so a fat line beats a hairline outline underneath it.
+- The map is hidden, never unmounted, when another tab is showing. Taking it out of the tree
+  gave every return trip a fresh `MapView` with a fresh camera, so the view snapped back to
+  the batch's full extent — the reported "it zooms out when I unclick units", since feature
+  types live on the Filters tab. It also re-parsed eighteen thousand features to do it. A
+  hidden map has no size, so `resize()` is needed on the tick it comes back.

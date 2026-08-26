@@ -2362,7 +2362,10 @@ def test_misspelled_restriction_exports_as_the_imdf_enum(test_client) -> None:
         with tempfile.TemporaryDirectory() as output_dir:
             archive.extractall(output_dir)
             exported = gpd.read_file(Path(output_dir) / "Demo_Station_1_Space.shp")
-    assert exported.iloc[0]["restricted"] == "employeesonly"
+    # The ODC Space layer carries the spec's code, not the IMDF word: the field
+    # is coded (1 staff-only, 2 unrestricted), so writing "employeesonly" into
+    # it would not survive being read back.
+    assert exported.iloc[0]["restricted"] == "1"
 
     imdf_response = test_client.get(f"/api/session/{session_id}/export")
     assert imdf_response.status_code == 200

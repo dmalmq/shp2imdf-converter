@@ -266,3 +266,38 @@ def test_normalize_unit_category_overrides_filters_invalid_values() -> None:
         {"unspecified", "retail", "office"},
     )
     assert normalized == {"SHOP": "retail"}
+
+
+@pytest.mark.phase5
+def test_the_odc_restriction_codes_become_imdf_values() -> None:
+    """The spec writes `restricted` as a code: 1 staff-only, 2 unrestricted."""
+    assert normalize_restriction("1") == "employeesonly"
+    # IMDF spells "no restriction" as no value, not as a member of the enum.
+    assert normalize_restriction("2") is None
+    assert normalize_restriction(1) == "employeesonly"
+    assert normalize_restriction(2) is None
+
+
+@pytest.mark.phase5
+def test_a_code_outside_the_table_is_still_left_alone() -> None:
+    """The codes are translated; anything else keeps the old behaviour of being
+    reported rather than guessed at."""
+    assert normalize_restriction("3") == "3"
+    assert normalize_restriction("staffonly") == "staffonly"
+    # And the words still win over any numeric reading.
+    assert normalize_restriction("employeesonly") == "employeesonly"
+    assert normalize_restriction("Employees Only") == "employeesonly"
+
+
+@pytest.mark.phase5
+def test_a_restriction_code_survives_the_round_trip() -> None:
+    """Read as a word for IMDF, written back as the code the ODC spec uses."""
+    from backend.src.mapper import denormalize_restriction
+
+    for code in ("1", "2"):
+        assert denormalize_restriction(normalize_restriction(code)) == code
+    # Absent means unrestricted, which the spec spells "2".
+    assert denormalize_restriction(None) == "2"
+    # No code exists for the other enum member, so it is passed through rather
+    # than guessed at.
+    assert denormalize_restriction("restricted") == "restricted"

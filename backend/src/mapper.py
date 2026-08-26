@@ -52,20 +52,33 @@ def load_restriction_categories() -> tuple[str, ...]:
     return tuple(str(item).strip().lower() for item in categories if str(item).strip())
 
 
+# The ODC/GSI shapefile spec writes `restricted` as a code, not a word: 1 is
+# staff-only, 2 is "no restriction" — which IMDF spells as no value at all
+# rather than a member of the enum. Left untranslated these travelled into
+# unit.geojson verbatim and Apple rejected every one of them; 高輪ゲートウェイ
+# alone carried 157.
+RESTRICTION_CODES: dict[str, str | None] = {"1": "employeesonly", "2": None}
+RESTRICTION_CODE_BY_VALUE: dict[str | None, str] = {value: code for code, value in RESTRICTION_CODES.items()}
+
+
 def normalize_restriction(value: Any) -> str | None:
     """Canonical IMDF ``restriction`` for ``value``, or the trimmed text as given.
 
     Exact members pass through; formatting differences ("Employees Only",
     "employees_only") and near misses of one member ("enpliyeesonly") resolve to
-    that member. A value close to nothing legal is left alone rather than
-    guessed at or dropped - it may carry meaning this enum cannot express, and
-    it is the source data that has to be corrected.
+    that member, as do the ODC spec's numeric codes. A value close to nothing
+    legal is left alone rather than guessed at or dropped - it may carry meaning
+    this enum cannot express, and it is the source data that has to be corrected.
     """
     if value is None:
         return None
     text = str(value).strip()
     if not text:
         return None
+    # Before the fuzzy match: "1" and "2" are nowhere near any member, and
+    # guessing at them is exactly what the fallback is meant to avoid.
+    if text in RESTRICTION_CODES:
+        return RESTRICTION_CODES[text]
     legal = load_restriction_categories()
     lowered = text.lower()
     if lowered in legal:
@@ -76,6 +89,25 @@ def normalize_restriction(value: Any) -> str | None:
     near = difflib.get_close_matches(compact, legal, n=1, cutoff=_RESTRICTION_TYPO_RATIO)
     return near[0] if near else text
 
+
+
+def denormalize_restriction(value: Any) -> str | None:
+    """The ODC spec's code for an IMDF ``restriction``.
+
+    The inverse of the code table above, for writing the Space layer back out.
+    Without it the round trip loses: a source "1" is read as ``employeesonly``
+    and would be written back as that word, which the spec has no room for.
+
+    A value with no code — ``restricted``, or anything the source invented — is
+    passed through unchanged rather than guessed at, the same way the import
+    leaves what it cannot resolve alone.
+    """
+    if value is None:
+        return RESTRICTION_CODE_BY_VALUE[None]
+    text = str(value).strip()
+    if not text:
+        return RESTRICTION_CODE_BY_VALUE[None]
+    return RESTRICTION_CODE_BY_VALUE.get(text.lower(), text)
 
 def load_unit_categories(config_path: str | Path) -> tuple[set[str], str]:
     payload = json.loads(Path(config_path).read_text(encoding="utf-8"))

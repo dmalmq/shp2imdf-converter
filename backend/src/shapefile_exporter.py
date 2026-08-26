@@ -18,7 +18,7 @@ import pandas as pd
 from shapely.geometry import mapping, shape
 from shapely.ops import unary_union
 
-from backend.src.mapper import normalize_restriction
+from backend.src.mapper import denormalize_restriction, normalize_restriction
 from backend.src.odc_qgis import OdcQgisLayer, build_odc_qgs_project
 from backend.src.schemas import SessionRecord, ShapefileExportRequest
 
@@ -1449,9 +1449,14 @@ def _write_odc2026_shapefiles(
                         # Read from the source row first, so a reviewed value
                         # never silently outranks it - and normalized, because
                         # that raw value bypasses the import-time repair.
-                        "restricted": normalize_restriction(
-                            _text_or_none(_metadata_value(metadata, ["restricted", "restrict", "restriction"]))
-                            or _text_or_none(props.get("restriction"))
+                        # Normalized on the way in so a raw source value gets
+                        # the import-time repair, then put back into the code
+                        # the spec writes: read as "1" -> employeesonly -> "1".
+                        "restricted": denormalize_restriction(
+                            normalize_restriction(
+                                _text_or_none(_metadata_value(metadata, ["restricted", "restrict", "restriction"]))
+                                or _text_or_none(props.get("restriction"))
+                            )
                         ),
                         "suite": _text_or_none(_metadata_value(metadata, ["suite"])),
                         "nonpublic": _text_or_none(nonpublic),

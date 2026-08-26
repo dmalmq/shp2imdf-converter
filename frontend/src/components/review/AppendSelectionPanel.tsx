@@ -109,8 +109,21 @@ const POINT_LAYER: any = {
 
 const SOURCE_ID = "append-candidates-src";
 
-/** Layers a click can land on. The zero-opacity fill covers polygon interiors. */
+// Openings and details are drawn a pixel or two wide, which is most of a
+// building away from anything a mouse can reliably hit. This carries no colour
+// and does nothing but widen the target: a transparent line is still
+// hit-tested, the same trick the zero-opacity fill uses for polygon interiors.
+const LINE_TARGET_LAYER: any = {
+  id: "append-candidates-line-target",
+  type: "line",
+  filter: ["==", ["geometry-type"], "LineString"],
+  paint: { "line-color": "#000000", "line-opacity": 0, "line-width": 14 }
+};
+
+/** Layers a click can land on. Widest targets first, so a fat line beats a
+ *  hairline outline when both are under the cursor. */
 const PICKABLE_LAYERS = [
+  "append-candidates-line-target",
   "append-candidates-fill",
   "append-candidates-outline",
   "append-candidates-line",
@@ -299,6 +312,16 @@ export function AppendSelectionPanel({ features, columnsByStem, selection, onCha
     });
     painted.current = { selected: nextSelected, pickable: nextPickable };
   }, [features, selection, sourceReady]);
+
+  useEffect(() => {
+    if (tab !== "map") {
+      return;
+    }
+    // It was display:none until this tick, so MapLibre still thinks it is
+    // whatever size it last measured.
+    const frame = requestAnimationFrame(() => mapRef.current?.getMap()?.resize());
+    return () => cancelAnimationFrame(frame);
+  }, [tab]);
 
   const activeBox = dragBox ?? selection.bbox;
 
@@ -554,8 +577,11 @@ export function AppendSelectionPanel({ features, columnsByStem, selection, onCha
         </div>
       ) : null}
 
-      {tab === "map" ? (
-        <div className="mt-3">
+      {/* Hidden rather than unmounted. Taking it out of the tree threw the
+          camera away, so coming back from Filters or Features dropped you at
+          the batch's full extent again, and re-parsed eighteen thousand
+          features to do it. */}
+      <div className={tab === "map" ? "mt-3" : "hidden"} aria-hidden={tab !== "map"}>
           <div className="mb-1 flex flex-wrap items-center gap-2">
             <Button
               variant={drawing ? "primary" : "secondary"}
@@ -692,6 +718,7 @@ export function AppendSelectionPanel({ features, columnsByStem, selection, onCha
                 <Layer {...FILL_LAYER} />
                 <Layer {...OUTLINE_LAYER} />
                 <Layer {...LINE_LAYER} />
+                <Layer {...LINE_TARGET_LAYER} />
                 <Layer {...POINT_LAYER} />
               </Source>
               {activeBox ? (
@@ -702,8 +729,7 @@ export function AppendSelectionPanel({ features, columnsByStem, selection, onCha
               ) : null}
             </MapView>
           </div>
-        </div>
-      ) : null}
+      </div>
 
     </section>
   );
