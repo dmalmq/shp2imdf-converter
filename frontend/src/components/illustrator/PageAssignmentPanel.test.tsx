@@ -70,8 +70,12 @@ function alignmentEntry(
     page,
     anchor_page,
     offset: aligned ? [8, -3] : [0, 0],
+    rotation_deg: 0,
+    scale: 1,
     overlap_iou: aligned ? 0.9 : 0.1,
-    aligned
+    matched_outlines: aligned ? 3 : 0,
+    aligned,
+    reason: aligned ? null : "no_consensus"
   };
 }
 

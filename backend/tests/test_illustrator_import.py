@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import math
 import tempfile
 import warnings
 import zipfile
@@ -14,6 +15,8 @@ import pytest
 
 from backend.src.illustrator_importer import (
     IllustratorConversionError,
+    _PathRecord,
+    _align_pages,
     _build_polygon,
     convert_ai_to_geopackage,
     convert_ai_to_geopackage_bundle,
@@ -142,18 +145,13 @@ def _assemble_multipage_pdf(pages: list[tuple[bytes, bytes]]) -> bytes:
 
 
 def _build_offset_multipage_ai_pdf() -> bytes:
-    """Three same-size sheets, each holding a border plus one plan outline.
+    """Three sheets: three agreeing plans, then one unrelated floor.
 
-    | Page | Border      | Plan                     |
-    |------|-------------|--------------------------|
-    | 1    | 0 0 200 200 | 100x60 rect at (50, 50)  |
-    | 2    | 0 0 200 200 | 100x60 rect at (80, 30)  |
-    | 3    | 0 0 200 200 | 20x180 strip at (90, 10) |
-
-    Page 2 is page 1's plan shifted by (30, -20), so it must be shifted back.
-    Page 3 is a different shape, so it must be left alone. The border repeats
-    identically on every sheet: matching it would claim a perfect fit and move
-    nothing, which is exactly what the frame filter has to prevent.
+    Page 2 copies all three page-1 outlines at (+30, -20), providing independent
+    support for one transform. Page 3 contains a different strip and must stay
+    untouched. The border repeats identically on every sheet: matching it would
+    claim a perfect fit and move nothing, which is exactly what the frame filter
+    has to prevent.
     """
     def content(rects: list[tuple[int, int, int, int]]) -> bytes:
         body = b"/OC /MC0 BDC\n0 1 1 0 k\n"
@@ -164,8 +162,28 @@ def _build_offset_multipage_ai_pdf() -> bytes:
     sheet = b"[0 0 200 200]"
     return _assemble_multipage_pdf(
         [
-            (sheet, content([(0, 0, 200, 200), (50, 50, 100, 60)])),
-            (sheet, content([(0, 0, 200, 200), (80, 30, 100, 60)])),
+            (
+                sheet,
+                content(
+                    [
+                        (0, 0, 200, 200),
+                        (50, 50, 100, 60),
+                        (20, 140, 40, 30),
+                        (150, 100, 30, 70),
+                    ]
+                ),
+            ),
+            (
+                sheet,
+                content(
+                    [
+                        (0, 0, 200, 200),
+                        (80, 30, 100, 60),
+                        (50, 120, 40, 30),
+                        (180, 80, 30, 70),
+                    ]
+                ),
+            ),
             (sheet, content([(0, 0, 200, 200), (90, 10, 20, 180)])),
         ]
     )
@@ -508,6 +526,9 @@ def test_an_offset_page_is_shifted_onto_the_anchor_page() -> None:
     assert entry["anchor_page"] == 1
     assert entry["offset"] == [-30.0, 20.0]
     assert entry["overlap_iou"] == pytest.approx(1.0)
+    assert entry["rotation_deg"] == pytest.approx(0.0, abs=0.001)
+    assert entry["scale"] == pytest.approx(1.0, abs=0.001)
+    assert entry["matched_outlines"] == 3
     # The plan now sits where page 1 draws it, and the rest of the sheet came along.
     assert (50.0, 50.0, 150.0, 110.0) in _page_bounds(gpkg, 2)
     assert (-30.0, 20.0, 170.0, 220.0) in _page_bounds(gpkg, 2)
@@ -528,8 +549,139 @@ def test_single_page_artwork_reports_no_page_alignment() -> None:
     assert report.to_dict()["page_alignment"] == []
 
 
-def test_pages_that_already_coincide_report_a_zero_shift() -> None:
+def test_one_outline_per_page_is_not_enough_to_move_artwork() -> None:
     _gpkg, _name, report = convert_ai_to_geopackage(_build_multipage_ai_pdf(), "three.ai")
     assert [entry["page"] for entry in report.page_alignment] == [2, 3]
-    assert all(entry["aligned"] for entry in report.page_alignment)
+    assert not any(entry["aligned"] for entry in report.page_alignment)
     assert {tuple(entry["offset"]) for entry in report.page_alignment} == {(0.0, 0.0)}
+
+
+def _outline_record(
+    page: int,
+    points: list[tuple[float, float]],
+    *,
+    role: str = "polygon",
+    layer: str = "Plan",
+    closed: bool = True,
+) -> _PathRecord:
+    subpath = [*points, points[0]] if closed else points
+    return _PathRecord(
+        page=page,
+        layer=layer,
+        role=role,
+        subpaths=[subpath],
+        fill_color="#ff0000" if role == "polygon" else None,
+        stroke_color="#000000" if role == "line" else None,
+        line_width=1.0,
+        dashed=False,
+    )
+
+
+def _move_outline(
+    points: list[tuple[float, float]],
+    *,
+    scale: float,
+    rotation_deg: float,
+    offset: tuple[float, float],
+) -> list[tuple[float, float]]:
+    theta = math.radians(rotation_deg)
+    cosine, sine = math.cos(theta), math.sin(theta)
+    return [
+        (
+            scale * (cosine * x - sine * y) + offset[0],
+            scale * (sine * x + cosine * y) + offset[1],
+        )
+        for x, y in points
+    ]
+
+
+def _alignment_shapes() -> list[list[tuple[float, float]]]:
+    return [
+        [(20, 20), (100, 20), (100, 40), (55, 40), (55, 85), (20, 85)],
+        [(245, 25), (325, 25), (325, 70), (295, 70), (295, 100), (245, 100)],
+        [(145, 190), (220, 190), (220, 215), (185, 215), (185, 265), (145, 265)],
+    ]
+
+
+def test_multi_outline_consensus_recovers_rotation_scale_and_translation() -> None:
+    shapes = _alignment_shapes()
+    records: list[_PathRecord] = []
+    for points in shapes:
+        # Fill and stroke twins are the same evidence and must count once.
+        records.extend(
+            [
+                _outline_record(1, points),
+                _outline_record(1, points, role="line"),
+            ]
+        )
+        moved = _move_outline(
+            points,
+            scale=1.02,
+            rotation_deg=3.0,
+            offset=(40.0, -25.0),
+        )
+        records.extend(
+            [
+                _outline_record(2, moved),
+                _outline_record(2, moved, role="line"),
+            ]
+        )
+    # This is larger than every real outline, but it is an open stroke. Closing
+    # it would create the exact artificial-polygon bug from 0989_千葉.ai.
+    records.extend(
+        [
+            _outline_record(
+                1,
+                [(0, 10), (390, 30), (360, 280), (10, 250)],
+                role="line",
+                closed=False,
+                layer="Incidental",
+            ),
+            _outline_record(
+                2,
+                [(70, 0), (390, 80), (320, 290), (20, 210)],
+                role="line",
+                closed=False,
+                layer="Incidental",
+            ),
+        ]
+    )
+    report = _align_pages(
+        records,
+        [
+            {"index": 1, "width_pt": 400.0, "height_pt": 300.0},
+            {"index": 2, "width_pt": 400.0, "height_pt": 300.0},
+        ],
+    )
+    assert report[0]["aligned"] is True
+    assert report[0]["matched_outlines"] == 3
+    assert report[0]["scale"] == pytest.approx(1 / 1.02, rel=0.001)
+    assert report[0]["rotation_deg"] == pytest.approx(-3.0, abs=0.01)
+    # The exact unrounded matrix is applied to stored artwork, not the rounded report.
+    source_first = records[2].subpaths[0][0]
+    assert source_first == pytest.approx(shapes[0][0], abs=0.01)
+
+
+def test_two_matching_outlines_are_insufficient_to_move_a_page() -> None:
+    shapes = _alignment_shapes()[:2]
+    records = [
+        _outline_record(page, _move_outline(
+            points,
+            scale=1.0,
+            rotation_deg=0.0,
+            offset=(30.0, -20.0) if page == 2 else (0.0, 0.0),
+        ))
+        for page in (1, 2)
+        for points in shapes
+    ]
+    before = records[2].subpaths[0][0]
+    report = _align_pages(
+        records,
+        [
+            {"index": 1, "width_pt": 400.0, "height_pt": 300.0},
+            {"index": 2, "width_pt": 400.0, "height_pt": 300.0},
+        ],
+    )
+    assert report[0]["aligned"] is False
+    assert report[0]["offset"] == [0.0, 0.0]
+    assert records[2].subpaths[0][0] == before

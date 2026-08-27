@@ -436,8 +436,12 @@ export type IllustratorPageAlignment = {
   page: number;
   anchor_page: number;
   offset: [number, number];
+  rotation_deg: number;
+  scale: number;
   overlap_iou: number;
+  matched_outlines: number;
   aligned: boolean;
+  reason: "missing_sheet" | "no_consensus" | null;
 };
 
 export type IllustratorConversionReport = {

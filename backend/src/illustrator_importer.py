@@ -18,6 +18,7 @@ Coordinates are the artwork's own PDF points (bottom-left origin, so already
 from __future__ import annotations
 
 import logging
+import math
 import tempfile
 import warnings
 import zipfile
@@ -36,7 +37,7 @@ from pdfminer.pdftypes import dict_value, list_value, resolve1
 from pdfminer.psparser import PSLiteral, literal_name
 from pdfminer.utils import apply_matrix_pt
 from shapely import make_valid
-from shapely.affinity import translate
+from shapely.affinity import affine_transform
 from shapely.geometry import LineString, MultiLineString, Polygon
 from shapely.ops import unary_union
 
@@ -49,16 +50,26 @@ _LINE_SUFFIX = "__lines"
 # Curves (`c`/`v`/`y`) are flattened into this many straight segments.
 _BEZIER_STEPS = 16
 _MIN_RING_POINTS = 3
-# Pages are normalized to their own MediaBox origin, so the same building drawn
-# at a different spot on each sheet lands at different artwork coordinates and
-# every floor would then have to be georeferenced separately. These bound the
-# search that shifts each page onto the anchor page's plan.
-_ALIGN_CANDIDATES = 3
-_ALIGN_MIN_IOU = 0.5
-_ALIGN_AREA_RATIO = 2.0
-# An outline whose bounding box spans this much of the sheet in *both* axes is a
-# border or clipping rectangle. Those repeat identically on every page, so
-# matching them would report success while leaving the plans misaligned.
+# Pages are normalized to their own MediaBox origin, so copied floor geometry
+# can start at a different translation, rotation, or scale on each sheet.
+_ALIGN_CANDIDATES = 40
+_ALIGN_SAMPLES = 48
+_ALIGN_MIN_AREA_FRACTION = 0.002
+_ALIGN_AREA_RATIO = 2.5
+_ALIGN_COMPACTNESS_DELTA = 0.12
+_ALIGN_ELONGATION_DELTA = 0.18
+_ALIGN_MATCH_MIN_IOU = 0.85
+_ALIGN_MATCH_MAX_NORMALIZED_RMSE = 0.05
+_ALIGN_MIN_SCALE = 0.9
+_ALIGN_MAX_SCALE = 1.1
+_ALIGN_MAX_ABS_ROTATION_DEG = 15.0
+_ALIGN_MIN_SUPPORT = 3
+_ALIGN_RUNNER_SUPPORT_RATIO = 0.8
+_ALIGN_SUPPORT_DIAGONAL_FRACTION = 0.2
+_ALIGN_ROTATION_TOLERANCE_DEG = 0.25
+_ALIGN_SCALE_TOLERANCE = 0.005
+# An outline whose bounding box spans this much of the sheet in both axes is a
+# border or clipping rectangle. Repeated frames must not count as floor evidence.
 _FRAME_COVERAGE = 0.85
 
 
@@ -79,8 +90,8 @@ class ConversionReport:
     total_features: int = 0
     warnings: list[str] = field(default_factory=list)
     layer_order: list[str] = field(default_factory=list)
-    # One entry per non-anchor page carrying geometry: {"page", "anchor_page",
-    # "offset", "overlap_iou", "aligned"}. Empty for single-page artwork.
+    # One entry per non-anchor page: the applied similarity and independent
+    # support count, or identity plus a rejection reason. Empty for one page.
     page_alignment: list[dict[str, Any]] = field(default_factory=list)
 
     def record(self, layer: str, role: str) -> None:
@@ -453,11 +464,29 @@ def _sanitize_layer_name(name: str, taken: set[str]) -> str:
 
 @dataclass(slots=True, frozen=True)
 class _AlignCandidate:
-    """One page outline considered when matching that page to the anchor."""
+    """One closed, non-frame outline considered for page registration."""
 
+    index: int
     geom: Any
     area: float
-    centroid: tuple[float, float]
+    compactness: float
+    elongation: float
+    samples: tuple[tuple[float, float], ...]
+
+
+@dataclass(slots=True, frozen=True)
+class _AlignMatch:
+    """One independently fitted source/anchor outline pair."""
+
+    source_index: int
+    target_index: int
+    matrix: tuple[float, float, float, float, float, float]
+    scale: float
+    rotation_deg: float
+    center_shift: tuple[float, float]
+    overlap_iou: float
+    normalized_rmse: float
+    weight: float
 
 
 def _ring_area(ring: list[tuple[float, float]]) -> float:
@@ -467,17 +496,22 @@ def _ring_area(ring: list[tuple[float, float]]) -> float:
     return abs(total) / 2.0
 
 
-def _candidate_polygon(subpaths: list[list[tuple[float, float]]]) -> Any:
-    """The path's largest subpath closed into a polygon, or ``None``.
+def _candidate_polygon(record: _PathRecord) -> Any:
+    """The path's largest genuinely closed subpath, or ``None``.
 
-    Stroked outlines matter as much as filled ones here, so the ring is closed
-    rather than requiring the parity nesting :func:`_build_polygon` needs.
+    Filled paths are closed by the PDF paint operator even without an explicit
+    ``h`` segment. A stroke is only an outline when Illustrator actually closed
+    it; force-closing arbitrary open linework creates large artificial polygons
+    whose area and centroid have no spatial meaning.
     """
     best_ring: list[tuple[float, float]] | None = None
     best_area = 0.0
-    for pts in subpaths:
-        ring = _dedupe(pts)
-        if len(ring) > 1 and ring[0] == ring[-1]:
+    for points in record.subpaths:
+        ring = _dedupe(points)
+        explicitly_closed = len(ring) > 1 and ring[0] == ring[-1]
+        if record.role != "polygon" and not explicitly_closed:
+            continue
+        if explicitly_closed:
             ring = ring[:-1]
         if len(ring) < _MIN_RING_POINTS:
             continue
@@ -502,27 +536,131 @@ def _covers_sheet(polygon: Any, sheet: tuple[float, float]) -> bool:
     return (maxx - minx) >= _FRAME_COVERAGE * width and (maxy - miny) >= _FRAME_COVERAGE * height
 
 
+def _outline_descriptor(polygon: Any) -> tuple[float, float]:
+    area = float(polygon.area)
+    perimeter = float(polygon.length)
+    compactness = 4.0 * math.pi * area / (perimeter * perimeter) if perimeter > 0 else 0.0
+    rectangle = polygon.minimum_rotated_rectangle
+    coords = list(rectangle.exterior.coords)
+    sides = [math.dist(coords[index], coords[index + 1]) for index in range(4)]
+    short, long = min(sides), max(sides)
+    return compactness, short / long if long > 0 else 1.0
+
+
+def _sample_outline(polygon: Any) -> tuple[tuple[float, float], ...]:
+    ring = LineString(polygon.exterior.coords)
+    length = float(ring.length)
+    if length <= 0:
+        return ()
+    return tuple(
+        (float(point.x), float(point.y))
+        for point in (
+            ring.interpolate(index * length / _ALIGN_SAMPLES)
+            for index in range(_ALIGN_SAMPLES)
+        )
+    )
+
+
 def _page_candidates(
     records: list[_PathRecord], sheet: tuple[float, float] | None
 ) -> list[_AlignCandidate]:
-    """The page's largest plan-like outlines, biggest first."""
+    """Large, unique, closed outlines; decorative details never become votes."""
+    minimum_area = (
+        sheet[0] * sheet[1] * _ALIGN_MIN_AREA_FRACTION
+        if sheet is not None
+        else 0.0
+    )
     found: list[_AlignCandidate] = []
-    for rec in records:
-        polygon = _candidate_polygon(rec.subpaths)
-        if polygon is None:
+    seen: set[bytes] = set()
+    for record in records:
+        polygon = _candidate_polygon(record)
+        if polygon is None or polygon.area < minimum_area:
             continue
         if sheet is not None and _covers_sheet(polygon, sheet):
             continue
-        centroid = polygon.centroid
+        signature = polygon.normalize().wkb
+        if signature in seen:
+            continue
+        seen.add(signature)
+        compactness, elongation = _outline_descriptor(polygon)
+        samples = _sample_outline(polygon)
+        if not samples:
+            continue
         found.append(
             _AlignCandidate(
+                index=len(found),
                 geom=polygon,
                 area=float(polygon.area),
-                centroid=(float(centroid.x), float(centroid.y)),
+                compactness=compactness,
+                elongation=elongation,
+                samples=samples,
             )
         )
     found.sort(key=lambda item: -item.area)
-    return found[:_ALIGN_CANDIDATES]
+    return [
+        _AlignCandidate(
+            index=index,
+            geom=item.geom,
+            area=item.area,
+            compactness=item.compactness,
+            elongation=item.elongation,
+            samples=item.samples,
+        )
+        for index, item in enumerate(found[:_ALIGN_CANDIDATES])
+    ]
+
+
+def _fit_point_pairs(
+    source: tuple[tuple[float, float], ...],
+    target: tuple[tuple[float, float], ...],
+) -> tuple[tuple[float, float, float, float, float, float], float] | None:
+    count = len(source)
+    if count < 2 or len(target) != count:
+        return None
+    source_x = sum(point[0] for point in source) / count
+    source_y = sum(point[1] for point in source) / count
+    target_x = sum(point[0] for point in target) / count
+    target_y = sum(point[1] for point in target) / count
+    denominator = 0.0
+    real = 0.0
+    imaginary = 0.0
+    for (sx, sy), (tx, ty) in zip(source, target):
+        x = sx - source_x
+        y = sy - source_y
+        east = tx - target_x
+        north = ty - target_y
+        denominator += x * x + y * y
+        real += x * east + y * north
+        imaginary += x * north - y * east
+    if denominator <= 1e-12:
+        return None
+    a = real / denominator
+    d = imaginary / denominator
+    b = -d
+    e = a
+    xoff = target_x - (a * source_x + b * source_y)
+    yoff = target_y - (d * source_x + e * source_y)
+    squared = 0.0
+    for (sx, sy), (tx, ty) in zip(source, target):
+        dx = a * sx + b * sy + xoff - tx
+        dy = d * sx + e * sy + yoff - ty
+        squared += dx * dx + dy * dy
+    return (a, b, d, e, xoff, yoff), math.sqrt(squared / count)
+
+
+def _fit_outlines(
+    source: _AlignCandidate, target: _AlignCandidate
+) -> tuple[tuple[float, float, float, float, float, float], float] | None:
+    best: tuple[tuple[float, float, float, float, float, float], float] | None = None
+    count = len(source.samples)
+    for reverse in (False, True):
+        sequence = tuple(reversed(target.samples)) if reverse else target.samples
+        for start in range(count):
+            paired = sequence[start:] + sequence[:start]
+            fitted = _fit_point_pairs(source.samples, paired)
+            if fitted is not None and (best is None or fitted[1] < best[1]):
+                best = fitted
+    return best
 
 
 def _overlap(left: Any, right: Any) -> float:
@@ -535,46 +673,208 @@ def _overlap(left: Any, right: Any) -> float:
         return 0.0
 
 
-def _best_shift(
-    targets: list[_AlignCandidate], sources: list[_AlignCandidate]
-) -> tuple[float, float, float] | None:
-    """Best ``(overlap, dx, dy)`` over candidate pairs of comparable size.
+def _outline_match(
+    source: _AlignCandidate,
+    target: _AlignCandidate,
+    sheet: tuple[float, float],
+) -> _AlignMatch | None:
+    ratio = source.area / target.area
+    if not 1.0 / _ALIGN_AREA_RATIO <= ratio <= _ALIGN_AREA_RATIO:
+        return None
+    if abs(source.compactness - target.compactness) > _ALIGN_COMPACTNESS_DELTA:
+        return None
+    if abs(source.elongation - target.elongation) > _ALIGN_ELONGATION_DELTA:
+        return None
+    fitted = _fit_outlines(source, target)
+    if fitted is None:
+        return None
+    matrix, rmse = fitted
+    a, b, d, e, xoff, yoff = matrix
+    scale = math.hypot(a, d)
+    rotation_deg = math.degrees(math.atan2(d, a))
+    if (
+        not _ALIGN_MIN_SCALE <= scale <= _ALIGN_MAX_SCALE
+        or abs(rotation_deg) > _ALIGN_MAX_ABS_ROTATION_DEG
+    ):
+        return None
+    moved = make_valid(affine_transform(source.geom, matrix))
+    if moved.geom_type == "MultiPolygon":
+        moved = max(moved.geoms, key=lambda part: part.area)
+    if moved.geom_type != "Polygon":
+        return None
+    overlap = _overlap(moved, target.geom)
+    normalized_rmse = rmse / max(math.sqrt(target.area), 1.0)
+    if (
+        overlap < _ALIGN_MATCH_MIN_IOU
+        or normalized_rmse > _ALIGN_MATCH_MAX_NORMALIZED_RMSE
+    ):
+        return None
+    center_x, center_y = sheet[0] / 2.0, sheet[1] / 2.0
+    mapped_x = a * center_x + b * center_y + xoff
+    mapped_y = d * center_x + e * center_y + yoff
+    return _AlignMatch(
+        source_index=source.index,
+        target_index=target.index,
+        matrix=matrix,
+        scale=scale,
+        rotation_deg=rotation_deg,
+        center_shift=(mapped_x - center_x, mapped_y - center_y),
+        overlap_iou=overlap,
+        normalized_rmse=normalized_rmse,
+        weight=math.sqrt(min(source.area, target.area)),
+    )
 
-    Identical outlines are matched by their centroids, which is exact for a
-    translated copy; the overlap it achieves is what decides whether the pair
-    really is the same plan.
-    """
-    best: tuple[float, float, float] | None = None
-    for target in targets:
-        if target.area <= 0:
+
+def _rotation_difference(left: float, right: float) -> float:
+    return abs((left - right + 180.0) % 360.0 - 180.0)
+
+
+def _same_transform(
+    left: _AlignMatch,
+    right: _AlignMatch,
+    translation_tolerance: float,
+) -> bool:
+    return (
+        math.dist(left.center_shift, right.center_shift) <= translation_tolerance
+        and _rotation_difference(left.rotation_deg, right.rotation_deg)
+        <= _ALIGN_ROTATION_TOLERANCE_DEG
+        and abs(left.scale - right.scale) / max(left.scale, right.scale)
+        <= _ALIGN_SCALE_TOLERANCE
+    )
+
+
+def _independent_matches(matches: list[_AlignMatch]) -> list[_AlignMatch]:
+    """One vote per source and target outline; fill/stroke copies count once."""
+    chosen: list[_AlignMatch] = []
+    source_indexes: set[int] = set()
+    target_indexes: set[int] = set()
+    for match in sorted(
+        matches,
+        key=lambda item: (-item.overlap_iou, item.normalized_rmse, -item.weight),
+    ):
+        if (
+            match.source_index in source_indexes
+            or match.target_index in target_indexes
+        ):
             continue
-        for source in sources:
-            ratio = source.area / target.area
-            if not 1.0 / _ALIGN_AREA_RATIO <= ratio <= _ALIGN_AREA_RATIO:
-                continue
-            dx = target.centroid[0] - source.centroid[0]
-            dy = target.centroid[1] - source.centroid[1]
-            overlap = _overlap(translate(source.geom, dx, dy), target.geom)
-            if best is None or overlap > best[0]:
-                best = (overlap, dx, dy)
-    return best
+        chosen.append(match)
+        source_indexes.add(match.source_index)
+        target_indexes.add(match.target_index)
+    return chosen
+
+
+def _match_clusters(
+    matches: list[_AlignMatch], sheet: tuple[float, float]
+) -> list[list[_AlignMatch]]:
+    translation_tolerance = max(1.0, math.hypot(*sheet) * 0.001)
+    unique: dict[tuple[tuple[int, int], ...], list[_AlignMatch]] = {}
+    for seed in matches:
+        independent = _independent_matches(
+            [
+                match
+                for match in matches
+                if _same_transform(seed, match, translation_tolerance)
+            ]
+        )
+        key = tuple(
+            sorted((match.source_index, match.target_index) for match in independent)
+        )
+        if key:
+            unique[key] = independent
+    clusters = list(unique.values())
+    clusters.sort(
+        key=lambda cluster: (
+            -len(cluster),
+            -sum(match.weight for match in cluster),
+            -sum(match.overlap_iou for match in cluster) / len(cluster),
+        )
+    )
+    return clusters
+
+
+def _transform_distance(
+    left: _AlignMatch, right: _AlignMatch, sheet: tuple[float, float]
+) -> float:
+    translation_tolerance = max(1.0, math.hypot(*sheet) * 0.001)
+    return (
+        math.dist(left.center_shift, right.center_shift) / translation_tolerance
+        + _rotation_difference(left.rotation_deg, right.rotation_deg)
+        / _ALIGN_ROTATION_TOLERANCE_DEG
+        + abs(left.scale - right.scale)
+        / max(left.scale, right.scale)
+        / _ALIGN_SCALE_TOLERANCE
+    )
+
+
+def _select_consensus(
+    targets: list[_AlignCandidate],
+    sources: list[_AlignCandidate],
+    sheet: tuple[float, float],
+) -> tuple[_AlignMatch, list[_AlignMatch]] | None:
+    matches = [
+        match
+        for source in sources
+        for target in targets
+        if (match := _outline_match(source, target, sheet)) is not None
+    ]
+    clusters = _match_clusters(matches, sheet)
+    if not clusters:
+        return None
+    best = clusters[0]
+    if len(best) < _ALIGN_MIN_SUPPORT:
+        return None
+    if (
+        len(clusters) > 1
+        and len(clusters[1]) / len(best) >= _ALIGN_RUNNER_SUPPORT_RATIO
+    ):
+        return None
+    support_bounds = [sources[match.source_index].geom.bounds for match in best]
+    support_width = max(bounds[2] for bounds in support_bounds) - min(
+        bounds[0] for bounds in support_bounds
+    )
+    support_height = max(bounds[3] for bounds in support_bounds) - min(
+        bounds[1] for bounds in support_bounds
+    )
+    if math.hypot(support_width, support_height) < (
+        math.hypot(*sheet) * _ALIGN_SUPPORT_DIAGONAL_FRACTION
+    ):
+        return None
+    medoid = min(
+        best,
+        key=lambda candidate: sum(
+            _transform_distance(candidate, other, sheet) for other in best
+        ),
+    )
+    return medoid, best
+
+
+def _unaligned_page(page: int, anchor: int, reason: str) -> dict[str, Any]:
+    return {
+        "page": page,
+        "anchor_page": anchor,
+        "offset": [0.0, 0.0],
+        "rotation_deg": 0.0,
+        "scale": 1.0,
+        "overlap_iou": 0.0,
+        "matched_outlines": 0,
+        "aligned": False,
+        "reason": reason,
+    }
 
 
 def _align_pages(
     records: list[_PathRecord], sheets: list[dict[str, float]]
 ) -> list[dict[str, Any]]:
-    """Shift each page's artwork so its plan overlays the anchor page's.
+    """Normalize each page from independent outline matches that agree.
 
-    Multi-page artwork holds one floor per sheet, and each sheet has its own
-    origin, so floors that depict the same building still start out scattered.
-    Matching one distinctive outline per page and translating the whole page by
-    the difference makes the floors coincide, so georeferencing any one of them
-    places them all. A page whose outline does not match is left untouched and
-    reported, because guessing there would be worse than doing nothing.
+    A single incidental path must never move a floor. Each candidate is fitted
+    independently by a no-reflection similarity, then transform hypotheses are
+    clustered. At least three distinct source/anchor outlines must agree;
+    ambiguous or weak pages remain untouched.
     """
     by_page: dict[int, list[_PathRecord]] = {}
-    for rec in records:
-        by_page.setdefault(rec.page, []).append(rec)
+    for record in records:
+        by_page.setdefault(record.page, []).append(record)
     if len(by_page) < 2:
         return []
 
@@ -582,7 +882,10 @@ def _align_pages(
         int(sheet["index"]): (float(sheet["width_pt"]), float(sheet["height_pt"]))
         for sheet in sheets
     }
-    candidates = {page: _page_candidates(recs, sizes.get(page)) for page, recs in by_page.items()}
+    candidates = {
+        page: _page_candidates(page_records, sizes.get(page))
+        for page, page_records in by_page.items()
+    }
     ordered = sorted(by_page)
     anchor = next((page for page in ordered if candidates[page]), None)
     if anchor is None:
@@ -592,29 +895,45 @@ def _align_pages(
     for page in ordered:
         if page == anchor:
             continue
-        best = _best_shift(candidates[anchor], candidates[page])
-        if best is None or best[0] < _ALIGN_MIN_IOU:
-            alignment.append(
-                {
-                    "page": page,
-                    "anchor_page": anchor,
-                    "offset": [0.0, 0.0],
-                    "overlap_iou": round(best[0], 4) if best else 0.0,
-                    "aligned": False,
-                }
-            )
+        sheet = sizes.get(page)
+        if sheet is None:
+            alignment.append(_unaligned_page(page, anchor, "missing_sheet"))
             continue
-        overlap, dx, dy = best
-        if dx or dy:
-            for rec in by_page[page]:
-                rec.subpaths = [[(x + dx, y + dy) for x, y in sub] for sub in rec.subpaths]
+        selected = _select_consensus(
+            candidates[anchor],
+            candidates[page],
+            sheet,
+        )
+        if selected is None:
+            alignment.append(_unaligned_page(page, anchor, "no_consensus"))
+            continue
+        match, supporting = selected
+        a, b, d, e, xoff, yoff = match.matrix
+        if match.matrix != (1.0, 0.0, 0.0, 1.0, 0.0, 0.0):
+            for record in by_page[page]:
+                record.subpaths = [
+                    [
+                        (
+                            a * x + b * y + xoff,
+                            d * x + e * y + yoff,
+                        )
+                        for x, y in subpath
+                    ]
+                    for subpath in record.subpaths
+                ]
+        overlaps = sorted(item.overlap_iou for item in supporting)
+        median_overlap = overlaps[len(overlaps) // 2]
         alignment.append(
             {
                 "page": page,
                 "anchor_page": anchor,
-                "offset": [round(dx, 4), round(dy, 4)],
-                "overlap_iou": round(overlap, 4),
+                "offset": [round(xoff, 4), round(yoff, 4)],
+                "rotation_deg": round(match.rotation_deg, 4),
+                "scale": round(match.scale, 6),
+                "overlap_iou": round(median_overlap, 4),
+                "matched_outlines": len(supporting),
                 "aligned": True,
+                "reason": None,
             }
         )
     return alignment
