@@ -380,7 +380,11 @@ def test_preview_source_row_resolves_the_cached_polygon(tmp_path: Path) -> None:
     )
     assert matches[0]["reference_feature_index"] == 0
     assert matches[0]["overlap_iou"] > 0.9
-    assert matches[0]["transform"]["rotation_deg"] == pytest.approx(TRUTH_ROTATION, abs=0.5)
+    # The PDF fixture is a 100x60 rectangle, identical under a 180° rotation.
+    # Helmert may recover the planted heading or its opposite; both yield IoU ≈ 1.
+    got = matches[0]["transform"]["rotation_deg"]
+    delta = abs((got - TRUTH_ROTATION + 180.0) % 360.0 - 180.0)
+    assert min(delta, abs(180.0 - delta)) <= 0.5
 
 
 @pytest.mark.georef
