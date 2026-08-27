@@ -10,6 +10,8 @@ import {
 } from "../../hooks/useIllustratorPlacement";
 import { Button } from "../ui";
 import { ControlPointList } from "./ControlPointList";
+import type { ReferenceLayer } from "./PlacementMap";
+import { ShapeMatchPanel, type ShapeMatchPanelModel } from "./ShapeMatchPanel";
 
 type Props = {
   state: PlacementState;
@@ -19,13 +21,23 @@ type Props = {
   /** What fits and scale operations act on. */
   mode: AdjustmentMode;
   onTogglePicking: () => void;
+  referenceLayers: ReferenceLayer[];
+  shapeMatch: ShapeMatchPanelModel;
 };
 
 /**
  * Everything that derives the transform numerically: the drawing scale, the
  * measured-distance calibration, and the control points that fit both at once.
  */
-export function ScaleAndFitPanel({ state, dispatch, pickStage, mode, onTogglePicking }: Props) {
+export function ScaleAndFitPanel({
+  state,
+  dispatch,
+  pickStage,
+  mode,
+  onTogglePicking,
+  referenceLayers,
+  shapeMatch
+}: Props) {
   const { t } = useUiLanguage();
   const [denominator, setDenominator] = useState(String(DEFAULT_DRAWING_SCALE));
   const [artworkDistance, setArtworkDistance] = useState("");
@@ -111,6 +123,12 @@ export function ScaleAndFitPanel({ state, dispatch, pickStage, mode, onTogglePic
         pickStage={pickStage}
         mode={mode}
         onTogglePicking={onTogglePicking}
+      />
+      <ShapeMatchPanel
+        state={state}
+        mode={mode}
+        referenceLayers={referenceLayers}
+        model={shapeMatch}
       />
     </div>
   );

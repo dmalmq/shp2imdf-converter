@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 
 import { PageAssignmentPanel, buildFloors, duplicateLabels } from "./PageAssignmentPanel";
 import { AssignmentPanel } from "./AssignmentPanel";
-import type { IllustratorPagePreview } from "../../api/client";
+import type { IllustratorPageAlignment, IllustratorPagePreview } from "../../api/client";
 import type { PartitionFloor } from "../../lib/svgPreview";
 
 
@@ -41,7 +41,8 @@ function feature(pageNo: number) {
 function renderPanel(
   pages: IllustratorPagePreview[],
   onAssigned = () => {},
-  initialBoxesByPage?: Map<number, PartitionFloor[]>
+  initialBoxesByPage?: Map<number, PartitionFloor[]>,
+  alignment?: IllustratorPageAlignment[]
 ) {
   const preview = {
     type: "FeatureCollection" as const,
@@ -53,10 +54,25 @@ function renderPanel(
       pages={pages}
       layerSummaries={[{ table: "Fill Layer", ai_layer: "Fill Layer", role: "polygon", feature_count: 1 }]}
       initialBoxesByPage={initialBoxesByPage}
+      alignment={alignment}
       onAssigned={onAssigned}
       onSkip={() => {}}
     />
   );
+}
+
+function alignmentEntry(
+  page: number,
+  aligned: boolean,
+  anchor_page = 1
+): IllustratorPageAlignment {
+  return {
+    page,
+    anchor_page,
+    offset: aligned ? [8, -3] : [0, 0],
+    overlap_iou: aligned ? 0.9 : 0.1,
+    aligned
+  };
 }
 
 
@@ -247,4 +263,38 @@ test("AssignmentPanel seeds drafts from initialDrafts, and starts blank without 
   );
   expect(screen.queryByDisplayValue("1F-north")).toBeNull();
   expect(screen.getByRole("button", { name: /done assigning/i })).toBeDisabled();
+});
+
+test("alignment note lists moved pages and warning lists failed pages", () => {
+  renderPanel(
+    [page(1), page(2), page(3), page(4), page(5)],
+    () => {},
+    undefined,
+    [
+      alignmentEntry(2, true),
+      alignmentEntry(3, true),
+      alignmentEntry(4, false),
+      alignmentEntry(5, false)
+    ]
+  );
+  expect(screen.getByTestId("page-alignment-note")).toHaveTextContent(
+    "Pages 2, 3 were aligned to page 1 automatically."
+  );
+  expect(screen.getByTestId("page-alignment-warning")).toHaveTextContent(
+    "Pages 4, 5 did not match page 1; align those floors yourself."
+  );
+});
+
+test("a single moved page uses singular wording", () => {
+  renderPanel([page(1), page(2)], () => {}, undefined, [alignmentEntry(2, true)]);
+  expect(screen.getByTestId("page-alignment-note")).toHaveTextContent(
+    "Page 2 was aligned to page 1 automatically."
+  );
+  expect(screen.queryByTestId("page-alignment-warning")).toBeNull();
+});
+
+test("omitted alignment renders neither note nor warning", () => {
+  renderPanel([page(1), page(2)]);
+  expect(screen.queryByTestId("page-alignment-note")).toBeNull();
+  expect(screen.queryByTestId("page-alignment-warning")).toBeNull();
 });

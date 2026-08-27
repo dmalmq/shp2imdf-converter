@@ -96,6 +96,11 @@ def _build_multipage_ai_pdf() -> bytes:
         (b"[0 0 400 400]", content(50, 50)),
     ]
 
+    return _assemble_multipage_pdf(pages)
+
+
+def _assemble_multipage_pdf(pages: list[tuple[bytes, bytes]]) -> bytes:
+    """Assemble ``(mediabox, content stream)`` pairs into a one-layer PDF."""
     objects: list[bytes | None] = [
         b"<< /Type /Catalog /Pages 2 0 R "
         b"/OCProperties << /OCGs [3 0 R] /D << /Order [3 0 R] >> >> >>",
@@ -134,6 +139,36 @@ def _build_multipage_ai_pdf() -> bytes:
         out += f"{off:010d} 00000 n \n".encode()
     out += f"trailer\n<< /Size {n} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode()
     return bytes(out)
+
+
+def _build_offset_multipage_ai_pdf() -> bytes:
+    """Three same-size sheets, each holding a border plus one plan outline.
+
+    | Page | Border      | Plan                     |
+    |------|-------------|--------------------------|
+    | 1    | 0 0 200 200 | 100x60 rect at (50, 50)  |
+    | 2    | 0 0 200 200 | 100x60 rect at (80, 30)  |
+    | 3    | 0 0 200 200 | 20x180 strip at (90, 10) |
+
+    Page 2 is page 1's plan shifted by (30, -20), so it must be shifted back.
+    Page 3 is a different shape, so it must be left alone. The border repeats
+    identically on every sheet: matching it would claim a perfect fit and move
+    nothing, which is exactly what the frame filter has to prevent.
+    """
+    def content(rects: list[tuple[int, int, int, int]]) -> bytes:
+        body = b"/OC /MC0 BDC\n0 1 1 0 k\n"
+        for x, y, w, h in rects:
+            body += f"{x} {y} {w} {h} re\n".encode() + b"f\n"
+        return body + b"EMC\n"
+
+    sheet = b"[0 0 200 200]"
+    return _assemble_multipage_pdf(
+        [
+            (sheet, content([(0, 0, 200, 200), (50, 50, 100, 60)])),
+            (sheet, content([(0, 0, 200, 200), (80, 30, 100, 60)])),
+            (sheet, content([(0, 0, 200, 200), (90, 10, 20, 180)])),
+        ]
+    )
 
 
 @pytest.fixture()
@@ -452,3 +487,49 @@ def test_overlapping_subpaths_survive_a_real_conversion() -> None:
     geom = gdf.geometry.iloc[0]
     assert geom.geom_type in {"Polygon", "MultiPolygon"}
     assert geom.area == pytest.approx(45900.0)
+
+
+def _alignment_by_page(report) -> dict[int, dict]:
+    return {int(entry["page"]): entry for entry in report.page_alignment}
+
+
+def _page_bounds(gpkg: bytes, page: int) -> set[tuple[float, ...]]:
+    gdf = _read_layer(gpkg, "Fill Layer")
+    return {
+        tuple(round(value, 3) for value in geom.bounds)
+        for geom in gdf[gdf["page"] == page].geometry
+    }
+
+
+def test_an_offset_page_is_shifted_onto_the_anchor_page() -> None:
+    gpkg, _name, report = convert_ai_to_geopackage(_build_offset_multipage_ai_pdf(), "offset.ai")
+    entry = _alignment_by_page(report)[2]
+    assert entry["aligned"] is True
+    assert entry["anchor_page"] == 1
+    assert entry["offset"] == [-30.0, 20.0]
+    assert entry["overlap_iou"] == pytest.approx(1.0)
+    # The plan now sits where page 1 draws it, and the rest of the sheet came along.
+    assert (50.0, 50.0, 150.0, 110.0) in _page_bounds(gpkg, 2)
+    assert (-30.0, 20.0, 170.0, 220.0) in _page_bounds(gpkg, 2)
+
+
+def test_a_page_whose_outline_differs_is_left_untouched() -> None:
+    gpkg, _name, report = convert_ai_to_geopackage(_build_offset_multipage_ai_pdf(), "offset.ai")
+    entry = _alignment_by_page(report)[3]
+    assert entry["aligned"] is False
+    assert entry["offset"] == [0.0, 0.0]
+    assert entry["overlap_iou"] < 0.5
+    assert _page_bounds(gpkg, 3) == {(0.0, 0.0, 200.0, 200.0), (90.0, 10.0, 110.0, 190.0)}
+
+
+def test_single_page_artwork_reports_no_page_alignment() -> None:
+    _gpkg, _name, report = convert_ai_to_geopackage(_build_minimal_ai_pdf(), "sample.ai")
+    assert report.page_alignment == []
+    assert report.to_dict()["page_alignment"] == []
+
+
+def test_pages_that_already_coincide_report_a_zero_shift() -> None:
+    _gpkg, _name, report = convert_ai_to_geopackage(_build_multipage_ai_pdf(), "three.ai")
+    assert [entry["page"] for entry in report.page_alignment] == [2, 3]
+    assert all(entry["aligned"] for entry in report.page_alignment)
+    assert {tuple(entry["offset"]) for entry in report.page_alignment} == {(0.0, 0.0)}

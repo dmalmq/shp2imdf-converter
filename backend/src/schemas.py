@@ -727,3 +727,68 @@ class FloorExportPayload(BaseModel):
 
     label: str
     transform: TransformPayload
+
+
+class ShapeMatchArtworkRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_table: str = Field(min_length=1)
+    source_row: int = Field(ge=0)
+
+
+class ShapeMatchFloorRef(BaseModel):
+    """Another assigned floor, already placed, to rank outlines against."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1)
+    transform: TransformPayload
+
+
+class GeoJsonFeatureCollection(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    type: Literal["FeatureCollection"]
+    features: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class IllustratorShapeMatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    floor_label: str = Field(min_length=1)
+    artwork: ShapeMatchArtworkRef
+    current_transform: TransformPayload
+    scale_locked: bool
+    reference: GeoJsonFeatureCollection | None = None
+    reference_floor: ShapeMatchFloorRef | None = None
+
+
+class ShapeMatchResidualVector(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    artwork: list[float] = Field(min_length=2, max_length=2)
+    reference: list[float] = Field(min_length=2, max_length=2)
+    distance_m: float
+
+
+class IllustratorShapeMatchSuggestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rank: int
+    score: float
+    relative_gap: float | None = None
+    reference_feature_index: int
+    reference_part_index: int
+    transform: TransformPayload
+    boundary_rmse_m: float
+    boundary_p95_m: float
+    max_residual_m: float
+    overlap_iou: float
+    reference_geometry: dict[str, Any]
+    residual_vectors: list[ShapeMatchResidualVector] = Field(max_length=12)
+
+
+class IllustratorShapeMatchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    matches: list[IllustratorShapeMatchSuggestion] = Field(max_length=3)

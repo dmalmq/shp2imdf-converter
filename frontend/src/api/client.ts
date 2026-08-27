@@ -1,4 +1,4 @@
-import type { Feature } from "geojson";
+import type { Feature, Geometry } from "geojson";
 
 import { ApiClientError, buildApiClientError } from "./errors";
 
@@ -432,6 +432,14 @@ function uploadImportFiles(
   });
 }
 
+export type IllustratorPageAlignment = {
+  page: number;
+  anchor_page: number;
+  offset: [number, number];
+  overlap_iou: number;
+  aligned: boolean;
+};
+
 export type IllustratorConversionReport = {
   source_name: string;
   page_count: number;
@@ -439,6 +447,7 @@ export type IllustratorConversionReport = {
   total_features: number;
   layers: Record<string, { polygon: number; line: number }>;
   warnings: string[];
+  page_alignment?: IllustratorPageAlignment[];
 };
 
 export type IllustratorConversionResult = {
@@ -936,6 +945,62 @@ export async function assignFloors(
     body: JSON.stringify({ floors })
   });
   return handleJson<AssignFloorsResponse>(response);
+}
+
+export type ShapeMatchResidualVector = {
+  artwork: [number, number];
+  reference: [number, number];
+  distance_m: number;
+};
+
+export type IllustratorShapeMatchSuggestion = {
+  rank: number;
+  score: number;
+  relative_gap: number | null;
+  reference_feature_index: number;
+  reference_part_index: number;
+  transform: TransformPayload;
+  boundary_rmse_m: number;
+  boundary_p95_m: number;
+  max_residual_m: number;
+  overlap_iou: number;
+  reference_geometry: Geometry;
+  residual_vectors: ShapeMatchResidualVector[];
+};
+
+export type ShapeMatchArtworkRef = {
+  source_table: string;
+  source_row: number;
+};
+
+export type ShapeMatchFloorRef = {
+  label: string;
+  transform: TransformPayload;
+};
+
+export type IllustratorShapeMatchRequest = {
+  floor_label: string;
+  artwork: ShapeMatchArtworkRef;
+  current_transform: TransformPayload;
+  scale_locked: boolean;
+  reference?: { type: "FeatureCollection"; features: Feature[] };
+  reference_floor?: ShapeMatchFloorRef;
+};
+
+export type IllustratorShapeMatchResponse = {
+  matches: IllustratorShapeMatchSuggestion[];
+};
+
+export async function matchIllustratorShape(
+  conversionId: string,
+  payload: IllustratorShapeMatchRequest
+): Promise<IllustratorShapeMatchResponse> {
+  const response = await fetch(`/api/convert/illustrator/${conversionId}/shape-matches`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  return handleJson<IllustratorShapeMatchResponse>(response);
 }
 
 export async function exportIllustrator(

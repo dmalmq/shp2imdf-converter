@@ -237,6 +237,8 @@ def build_preview(
             page_totals[page] += len(chunk)
             page_bounds[page] = _extend_bounds(page_bounds.get(page), chunk.total_bounds)
         simplified = gdf.copy()
+        simplified["source_table"] = spec["table"]
+        simplified["source_row"] = [int(i) for i in range(len(simplified))]
         if tolerance > 0:
             simplified["geometry"] = simplified.geometry.simplify(
                 tolerance, preserve_topology=True

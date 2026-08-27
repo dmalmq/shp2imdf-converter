@@ -3,6 +3,7 @@ import { useReducer } from "react";
 import type { TransformPayload } from "../api/client";
 import {
   applyMatrix,
+  artworkToLngLat,
   enuToLngLat,
   fitHelmert,
   lngLatToEnu,
@@ -18,6 +19,9 @@ export const DEFAULT_DRAWING_SCALE = 1000;
 
 /** Ground metres per PDF point at {@link DEFAULT_DRAWING_SCALE}. */
 export const DEFAULT_METRES_PER_POINT = metresPerPointForScale(DEFAULT_DRAWING_SCALE);
+
+/** Product-level minimum for accepting a similarity fit. */
+export const MIN_CONTROL_POINTS = 3;
 
 export type ControlPoint = {
   id: string;
@@ -75,6 +79,7 @@ export type PlacementAction =
   | { type: "addControlPoint"; point: ControlPoint }
   | { type: "removeControlPoint"; id: string }
   | { type: "fitControlPoints"; mode: AdjustmentMode }
+  | { type: "applySimilarity"; mode: AdjustmentMode; transform: SimilarityTransform }
   | { type: "applyFloors"; floors: { label: string; transform: TransformPayload }[] }
   /** Install a whole new floor set (new file or new assignment), labels included. */
   | { type: "resetPlacement"; state: PlacementState }
@@ -342,13 +347,16 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
 
     case "fitControlPoints": {
       const active = activeFloor(state);
-      if (!active || active.controlPoints.length < 2) return state;
+      if (
+        !active ||
+        active.controlPoints.length < MIN_CONTROL_POINTS ||
+        (action.mode === "group" && !active.linked)
+      ) {
+        return state;
+      }
       const [lon0, lat0] = active.mapAnchor;
       const enu = active.controlPoints.map((p) => lngLatToEnu(p.map[0], p.map[1], lon0, lat0));
-      // Group mode fits the shared frame — but only while the active floor is
-      // linked: fitting the frame cannot move an unlinked floor, so the points
-      // picked on it must own its transform instead.
-      const frameFit = action.mode === "group" && active.linked;
+      const frameFit = action.mode === "group";
       const fitted = fitHelmert(
         active.controlPoints.map((p) => p.artwork),
         enu,
@@ -402,6 +410,57 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
                 mapAnchor: [lon, lat],
                 rotationDeg: fitted.rotationDeg,
                 metresPerPoint: fitted.metresPerPoint
+              }
+            : f
+        )
+      };
+    }
+
+    case "applySimilarity": {
+      const active = activeFloor(state);
+      if (!active || (action.mode === "group" && !active.linked)) {
+        return state;
+      }
+      const transform = action.transform;
+      if (action.mode === "group") {
+        // Same apply path as a group fitControlPoints: the incoming transform
+        // is already a resolved WGS84 similarity (not an ENU Helmert result).
+        // Map the active floor's own artwork origin through it, then let every
+        // linked floor follow the updated frame. Control points are untouched.
+        const applied: SimilarityTransform = {
+          ...transform,
+          metresPerPoint: state.scaleLocked ? state.frame.metresPerPoint : transform.metresPerPoint
+        };
+        if (!(applied.metresPerPoint > 0)) return state;
+        const [lon, lat] = artworkToLngLat(
+          applied,
+          active.artworkAnchor[0],
+          active.artworkAnchor[1]
+        );
+        return recomputeLinked({
+          ...state,
+          frame: {
+            ...state.frame,
+            rotationDeg: applied.rotationDeg,
+            metresPerPoint: applied.metresPerPoint
+          },
+          floors: state.floors.map((f) =>
+            f.label === active.label ? { ...f, mapAnchor: [lon, lat] } : f
+          )
+        });
+      }
+      if (!(transform.metresPerPoint > 0)) return state;
+      return {
+        ...state,
+        floors: state.floors.map((f) =>
+          f.label === active.label
+            ? {
+                ...f,
+                linked: false,
+                artworkAnchor: [transform.artworkAnchor[0], transform.artworkAnchor[1]],
+                mapAnchor: [transform.mapAnchor[0], transform.mapAnchor[1]],
+                rotationDeg: transform.rotationDeg,
+                metresPerPoint: transform.metresPerPoint
               }
             : f
         )
@@ -524,7 +583,7 @@ export function currentResiduals(
   state: PlacementState
 ): { perPoint: number[]; rmse: number } | null {
   const active = activeFloor(state);
-  if (!active || active.controlPoints.length < 2) return null;
+  if (!active || active.controlPoints.length < MIN_CONTROL_POINTS) return null;
   const [lon0, lat0] = active.mapAnchor;
   const enu = active.controlPoints.map((p) => lngLatToEnu(p.map[0], p.map[1], lon0, lat0));
   return residuals(

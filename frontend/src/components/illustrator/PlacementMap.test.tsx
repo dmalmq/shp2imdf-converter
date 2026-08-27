@@ -1,8 +1,22 @@
 import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-import { PlacementMap, type FloorLayer } from "./PlacementMap";
-import { DEFAULT_METRES_PER_POINT, type PlacementState } from "../../hooks/useIllustratorPlacement";
+import type { IllustratorShapeMatchSuggestion } from "../../api/client";
+
+import {
+  DEFAULT_METRES_PER_POINT,
+  type ControlPoint,
+  type PlacementState
+} from "../../hooks/useIllustratorPlacement";
+import { artworkToLngLat, type SimilarityTransform } from "../../lib/similarity";
+import {
+  buildControlPointOverlay,
+  buildShapeMatchOverlay,
+  PlacementMap,
+  resolvePickedOutline,
+  type ArtworkShapeSelection,
+  type FloorLayer
+} from "./PlacementMap";
 
 
 function stateWith(floors: { label: string; linked: boolean }[], active: string): PlacementState {
@@ -183,4 +197,213 @@ test("switching floor, isolate, and Individual does not unmount the map wrapper"
   fireEvent.click(screen.getByRole("button", { name: /only this floor/i }));
   fireEvent.click(screen.getByRole("button", { name: "Individual" }));
   expect(container.firstChild).toBe(wrapper);
+});
+
+test("buildControlPointOverlay pairs artwork, reference, and residual features", () => {
+  const transform: SimilarityTransform = {
+    artworkAnchor: [10, 20],
+    mapAnchor: [139.7, 35.69],
+    rotationDeg: 90,
+    metresPerPoint: 0.5,
+    workingCrs: "EPSG:6677"
+  };
+  const controlPoints: ControlPoint[] = [
+    { id: "a", artwork: [10, 20], map: [139.7001, 35.6901] },
+    { id: "b", artwork: [110, 20], map: [139.7002, 35.6902] }
+  ];
+
+  const overlay = buildControlPointOverlay(controlPoints, transform);
+  expect(overlay.features).toHaveLength(controlPoints.length * 3);
+  expect(
+    overlay.features.reduce<Record<string, number>>((counts, feature) => {
+      const kind = String(feature.properties?.kind);
+      counts[kind] = (counts[kind] ?? 0) + 1;
+      return counts;
+    }, {})
+  ).toEqual({ residual: 2, artwork: 2, reference: 2 });
+
+  controlPoints.forEach((point, index) => {
+    const label = String(index + 1);
+    const artworkCoordinates = artworkToLngLat(
+      transform,
+      point.artwork[0],
+      point.artwork[1]
+    );
+    const residual = overlay.features.find(
+      (feature) => feature.properties?.kind === "residual" && feature.properties.label === label
+    );
+    const artwork = overlay.features.find(
+      (feature) => feature.properties?.kind === "artwork" && feature.properties.label === label
+    );
+    const reference = overlay.features.find(
+      (feature) => feature.properties?.kind === "reference" && feature.properties.label === label
+    );
+
+    expect(artwork?.geometry).toEqual({ type: "Point", coordinates: artworkCoordinates });
+    expect(reference?.geometry).toEqual({ type: "Point", coordinates: point.map });
+    expect(residual?.geometry).toEqual({
+      type: "LineString",
+      coordinates: [artworkCoordinates, point.map]
+    });
+  });
+});
+
+test("buildShapeMatchOverlay keeps current, proposed, reference, and residual geometry distinct", () => {
+  const selection: ArtworkShapeSelection = {
+    floorLabel: "1F",
+    sourceTable: "Fill_Layer",
+    sourceRow: 0,
+    feature: {
+      type: "Feature",
+      properties: { source_table: "Fill_Layer", source_row: 0 },
+      geometry: {
+        type: "Polygon",
+        coordinates: [[[0, 0], [100, 0], [100, 80], [0, 80], [0, 0]]]
+      }
+    }
+  };
+  const current: SimilarityTransform = {
+    artworkAnchor: [50, 40],
+    mapAnchor: [139.7, 35.69],
+    rotationDeg: 0,
+    metresPerPoint: 0.3,
+    workingCrs: "EPSG:6677"
+  };
+  const proposed: SimilarityTransform = {
+    ...current,
+    mapAnchor: [139.701, 35.691],
+    rotationDeg: 25,
+    metresPerPoint: 0.45
+  };
+  const suggestion: IllustratorShapeMatchSuggestion = {
+    rank: 1,
+    score: 0.1,
+    relative_gap: 0.2,
+    reference_feature_index: 3,
+    reference_part_index: 0,
+    transform: {
+      artwork_anchor: proposed.artworkAnchor,
+      map_anchor: proposed.mapAnchor,
+      rotation_deg: proposed.rotationDeg,
+      metres_per_point: proposed.metresPerPoint,
+      working_crs: proposed.workingCrs
+    },
+    boundary_rmse_m: 1,
+    boundary_p95_m: 2,
+    max_residual_m: 3,
+    overlap_iou: 0.9,
+    reference_geometry: {
+      type: "Polygon",
+      coordinates: [
+        [
+          [139.7008, 35.6908],
+          [139.7012, 35.6908],
+          [139.7012, 35.6912],
+
+          [139.7008, 35.6912],
+          [139.7008, 35.6908]
+        ]
+      ]
+    },
+    residual_vectors: [
+      {
+        artwork: [139.7009, 35.6909],
+        reference: [139.701, 35.691],
+        distance_m: 1.2
+      }
+    ]
+  };
+  const overlay = buildShapeMatchOverlay(selection, current, { suggestion, transform: proposed });
+  expect(overlay.features.map((feature) => feature.properties?.kind)).toEqual([
+    "selected",
+    "reference",
+    "preview",
+    "residual"
+  ]);
+  expect(overlay.features.find((feature) => feature.properties?.kind === "reference")?.geometry).toEqual(
+    suggestion.reference_geometry
+  );
+  expect(overlay.features.find((feature) => feature.properties?.kind === "residual")?.geometry).toEqual({
+    type: "LineString",
+    coordinates: [
+      [139.7009, 35.6909],
+      [139.701, 35.691]
+    ]
+  });
+  const selected = overlay.features.find((feature) => feature.properties?.kind === "selected");
+  const previewed = overlay.features.find((feature) => feature.properties?.kind === "preview");
+  expect(selected?.geometry).not.toEqual(previewed?.geometry);
+});
+
+const ROOM = {
+  type: "Feature" as const,
+  properties: { source_table: "Rooms", source_row: 0 },
+  geometry: {
+    type: "Polygon" as const,
+    coordinates: [[[0, 0], [10, 0], [10, 8], [0, 8], [0, 0]]]
+  }
+};
+const NEIGHBOUR = {
+  type: "Feature" as const,
+  properties: { source_table: "Rooms", source_row: 1 },
+  geometry: {
+    type: "Polygon" as const,
+    coordinates: [[[12, 0], [20, 0], [20, 8], [12, 8], [12, 0]]]
+  }
+};
+const STROKE = {
+  type: "Feature" as const,
+  properties: { source_table: "Buildings__lines", source_row: 0 },
+  geometry: {
+    type: "LineString" as const,
+    coordinates: [[0, 0], [40, 0], [40, 30], [0, 30], [0, 0]]
+  }
+};
+const PICK_LAYER = [ROOM, NEIGHBOUR, STROKE];
+
+test("an exact fill hit wins even when a stroked path is nearby", () => {
+  expect(
+    resolvePickedOutline(
+      [{ geometry: ROOM.geometry, properties: ROOM.properties }],
+      [
+        { geometry: STROKE.geometry, properties: STROKE.properties },
+        { geometry: NEIGHBOUR.geometry, properties: NEIGHBOUR.properties }
+      ],
+      PICK_LAYER
+    )
+  ).toBe(ROOM);
+});
+
+test("a nearby stroked path beats a neighbouring fill in the snap box", () => {
+  expect(
+    resolvePickedOutline(
+      [],
+      [
+        { geometry: NEIGHBOUR.geometry, properties: NEIGHBOUR.properties },
+        { geometry: STROKE.geometry, properties: STROKE.properties }
+      ],
+      PICK_LAYER
+    )
+  ).toBe(STROKE);
+});
+
+test("buildShapeMatchOverlay keeps a picked line as LineString selected geometry", () => {
+  const overlay = buildShapeMatchOverlay(
+    {
+      floorLabel: "1F",
+      sourceTable: "Buildings__lines",
+      sourceRow: 0,
+      feature: STROKE
+    },
+    {
+      artworkAnchor: [20, 15],
+      mapAnchor: [139.7, 35.69],
+      rotationDeg: 0,
+      metresPerPoint: 0.3,
+      workingCrs: "EPSG:6677"
+    }
+  );
+  expect(overlay.features).toHaveLength(1);
+  expect(overlay.features[0]?.properties?.kind).toBe("selected");
+  expect(overlay.features[0]?.geometry?.type).toBe("LineString");
 });

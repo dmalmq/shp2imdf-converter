@@ -103,7 +103,16 @@ def test_preview_reports_bounds_and_counts(cached) -> None:
 @pytest.mark.georef
 def test_preview_features_carry_layer_and_colour_properties(cached) -> None:
     feature = build_preview(cached)["preview"]["features"][0]
-    assert set(feature["properties"]) >= {"ai_layer", "role", "fill_color", "stroke_color"}
+    assert set(feature["properties"]) >= {
+        "ai_layer",
+        "role",
+        "fill_color",
+        "stroke_color",
+        "source_table",
+        "source_row",
+    }
+    assert isinstance(feature["properties"]["source_table"], str)
+    assert isinstance(feature["properties"]["source_row"], int)
 
 
 @pytest.mark.georef

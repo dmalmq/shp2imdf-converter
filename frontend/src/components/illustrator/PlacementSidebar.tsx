@@ -8,6 +8,7 @@ import { ExportPanel } from "./ExportPanel";
 import type { ReferenceLayer } from "./PlacementMap";
 import { ReferenceLayerList } from "./ReferenceLayerList";
 import { ScaleAndFitPanel } from "./ScaleAndFitPanel";
+import type { ShapeMatchPanelModel } from "./ShapeMatchPanel";
 import { TransformPanel } from "./TransformPanel";
 
 export type PlacementTab = "fit" | "reference" | "export";
@@ -34,6 +35,7 @@ type Props = {
   /** Pair-picking stage, forwarded to the fit panel. */
   pickStage: "artwork" | "map" | null;
   onTogglePicking: () => void;
+  shapeMatch: ShapeMatchPanelModel;
   referenceLayers: ReferenceLayer[];
   onReferenceLayersChange: (layers: ReferenceLayer[]) => void;
   /** WGS84 box of the placed artwork; reference uploads are trimmed to ~1 km. */
@@ -70,6 +72,7 @@ export function PlacementSidebar({
   onTabChange,
   pickStage,
   onTogglePicking,
+  shapeMatch,
   referenceLayers,
   onReferenceLayersChange,
   focusBounds,
@@ -125,12 +128,16 @@ export function PlacementSidebar({
               pickStage={pickStage}
               mode={mode}
               onTogglePicking={onTogglePicking}
+              referenceLayers={referenceLayers}
+              shapeMatch={shapeMatch}
             />
           </div>
           <div {...tabPanelProps("placement", "reference", tab === "reference")}>
             <ReferenceLayerList
               layers={referenceLayers}
               onChange={onReferenceLayersChange}
+              matchTargetName={shapeMatch.referenceName}
+              onMatchTargetChange={shapeMatch.onReferenceChange}
               focusBounds={focusBounds}
             />
           </div>

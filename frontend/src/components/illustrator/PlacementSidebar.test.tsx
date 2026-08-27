@@ -49,6 +49,24 @@ function SidebarHarness() {
       onTabChange={setTab}
       pickStage={null}
       onTogglePicking={() => {}}
+      shapeMatch={{
+        referenceName: "",
+        referenceFloorLabel: "",
+        selecting: false,
+        selection: null,
+        matches: [],
+        previewRank: null,
+        loading: false,
+        searched: false,
+        error: null,
+        onReferenceChange: () => {},
+        onMatchTargetChange: () => {},
+        onToggleSelection: () => {},
+        onFind: () => {},
+        onPreview: () => {},
+        onApply: () => {},
+        onClear: () => {}
+      }}
       referenceLayers={[]}
       onReferenceLayersChange={() => {}}
       bounds={[0, 0, 100, 100]}

@@ -9,6 +9,9 @@ import type { ReferenceLayer } from "./PlacementMap";
 type Props = {
   layers: ReferenceLayer[];
   onChange: (layers: ReferenceLayer[]) => void;
+  /** Layer used for shape matching; owned by the placement page. */
+  matchTargetName: string;
+  onMatchTargetChange: (name: string) => void;
   /** WGS84 box of the placed artwork; uploads are trimmed to ~1 km around it. */
   focusBounds?: [number, number, number, number] | null;
 };
@@ -16,12 +19,61 @@ type Props = {
 export const REFERENCE_TINTS = ["#0f766e", "#b45309", "#7e22ce", "#be123c", "#1d4ed8"];
 
 /**
+ * Keep the current match target when it still exists, auto-select the only
+ * remaining layer, and otherwise clear so the user picks explicitly.
+ */
+export function nextMatchTargetName(
+  layers: readonly { name: string }[],
+  current: string
+): string {
+  if (layers.some((layer) => layer.name === current)) return current;
+  return layers.length === 1 ? layers[0].name : "";
+}
+
+export type ShapeMatchTarget = {
+  referenceName: string;
+  referenceFloorLabel: string;
+};
+
+/**
+ * Keep a still-valid shapefile or other-floor target, auto-select when only
+ * one candidate remains, and otherwise clear so the user picks explicitly.
+ */
+export function nextMatchTarget(
+  layers: readonly { name: string }[],
+  floorLabels: readonly string[],
+  activeFloorLabel: string | null,
+  current: ShapeMatchTarget
+): ShapeMatchTarget {
+  const otherFloors = floorLabels.filter((label) => label !== activeFloorLabel);
+  if (current.referenceFloorLabel && otherFloors.includes(current.referenceFloorLabel)) {
+    return { referenceName: "", referenceFloorLabel: current.referenceFloorLabel };
+  }
+  if (current.referenceName && layers.some((layer) => layer.name === current.referenceName)) {
+    return { referenceName: current.referenceName, referenceFloorLabel: "" };
+  }
+  if (layers.length === 1) {
+    return { referenceName: layers[0].name, referenceFloorLabel: "" };
+  }
+  if (otherFloors.length === 1) {
+    return { referenceName: "", referenceFloorLabel: otherFloors[0] };
+  }
+  return { referenceName: "", referenceFloorLabel: "" };
+}
+
+/**
  * Existing survey/GIS data drawn under the artwork to align against.
  *
  * Layers live only in this session: they are a visual reference and never
  * take part in an export.
  */
-export function ReferenceLayerList({ layers, onChange, focusBounds }: Props) {
+export function ReferenceLayerList({
+  layers,
+  onChange,
+  matchTargetName,
+  onMatchTargetChange,
+  focusBounds
+}: Props) {
   const { t } = useUiLanguage();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [loading, setLoading] = useState(false);
@@ -121,7 +173,19 @@ export function ReferenceLayerList({ layers, onChange, focusBounds }: Props) {
       {error ? <p className="text-xs text-[var(--color-error)]">{error}</p> : null}
       {notice ? <p className="text-xs text-[var(--color-warning)]">{notice}</p> : null}
 
-      <ul className="space-y-1">
+      {layers.length > 0 ? (
+        <p className="text-[11px] text-[var(--color-text-muted)]">
+          {t(
+            "The selected layer is used for shape matching.",
+            "選択したレイヤーを形状合わせに使います。"
+          )}
+        </p>
+      ) : null}
+      <ul
+        className="space-y-1"
+        role={layers.length > 0 ? "radiogroup" : undefined}
+        aria-label={layers.length > 0 ? t("Match target", "照合対象") : undefined}
+      >
         {layers.map((layer, index) => {
           const shown = layer.data.features.length;
           const trimmed = layer.truncated ? t(", trimmed", "、一部表示") : "";
@@ -131,6 +195,13 @@ export function ReferenceLayerList({ layers, onChange, focusBounds }: Props) {
               : `${layer.featureCount}${trimmed}`;
           return (
             <li key={layer.name} className="flex items-center gap-2 text-xs">
+              <input
+                type="radio"
+                name="shape-match-target"
+                checked={layer.name === matchTargetName}
+                onChange={() => onMatchTargetChange(layer.name)}
+                aria-label={t(`Match with ${layer.name}`, `${layer.name} で照合`)}
+              />
               <input
                 type="checkbox"
                 checked={layer.visible}

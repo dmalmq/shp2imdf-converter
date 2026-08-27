@@ -30,6 +30,7 @@ from backend.src.illustrator_georeference import (
 )
 from backend.src.illustrator_importer import _sanitize_layer_name
 from backend.src.illustrator_importer import convert_ai_to_geopackage_bundle, parse_ai
+from backend.src.illustrator_shape_match import match_shapes
 from backend.src.illustrator_store import ConversionStore
 from backend.src.imdf_reader import read_imdf_zip
 from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
@@ -51,6 +52,8 @@ from backend.src.schemas import (
     PlacementRequest,
     ReferenceLayerItem,
     ReferenceLayersResponse,
+    IllustratorShapeMatchRequest,
+    IllustratorShapeMatchResponse,
     TransformPayload,
 )
 from backend.src.session import SessionManager
@@ -319,6 +322,35 @@ def _transform_from_payload(payload: TransformPayload) -> SimilarityTransform:
         metres_per_point=payload.metres_per_point,
         working_crs=payload.working_crs,
     )
+
+
+@router.post(
+    "/convert/illustrator/{conversion_id}/shape-matches",
+    response_model=IllustratorShapeMatchResponse,
+)
+async def match_illustrator_shape(
+    conversion_id: str,
+    request: Request,
+    payload: IllustratorShapeMatchRequest,
+) -> IllustratorShapeMatchResponse:
+    """Rank posted reference polygons, or another floor, against one outline."""
+    cached = _illustrator_store(request).get(conversion_id)
+    matches = match_shapes(
+        cached,
+        floor_label=payload.floor_label,
+        source_table=payload.artwork.source_table,
+        source_row=payload.artwork.source_row,
+        current=_transform_from_payload(payload.current_transform),
+        scale_locked=payload.scale_locked,
+        reference=None if payload.reference is None else payload.reference.model_dump(),
+        reference_floor_label=None if payload.reference_floor is None else payload.reference_floor.label,
+        reference_transform=(
+            None
+            if payload.reference_floor is None
+            else _transform_from_payload(payload.reference_floor.transform)
+        ),
+    )
+    return IllustratorShapeMatchResponse(matches=matches)
 
 
 @router.post("/convert/illustrator/{conversion_id}/assign", response_model=AssignFloorsResponse)

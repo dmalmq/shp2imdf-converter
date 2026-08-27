@@ -6,7 +6,7 @@ import { uploadReferenceLayers } from "../../api/client";
 import type * as ApiClient from "../../api/client";
 import { buildApiClientError } from "../../api/errors";
 import type { ReferenceLayer } from "./PlacementMap";
-import { ReferenceLayerList } from "./ReferenceLayerList";
+import { nextMatchTarget, nextMatchTargetName, ReferenceLayerList } from "./ReferenceLayerList";
 
 vi.mock("../../api/client", async (importOriginal) => ({
   ...(await importOriginal<typeof ApiClient>()),
@@ -55,8 +55,54 @@ function ListHarness({
   focusBounds?: [number, number, number, number] | null;
 }) {
   const [layers, setLayers] = useState<ReferenceLayer[]>([]);
-  return <ReferenceLayerList layers={layers} onChange={setLayers} focusBounds={focusBounds} />;
+  const [matchTargetName, setMatchTargetName] = useState("");
+  const update = (next: ReferenceLayer[]) => {
+    setLayers(next);
+    setMatchTargetName((current) => nextMatchTargetName(next, current));
+  };
+  return (
+    <ReferenceLayerList
+      layers={layers}
+      onChange={update}
+      matchTargetName={matchTargetName}
+      onMatchTargetChange={setMatchTargetName}
+      focusBounds={focusBounds}
+    />
+  );
 }
+
+test("keeps the current match target, auto-selects a single layer, and otherwise clears", () => {
+  expect(nextMatchTargetName([{ name: "station" }], "")).toBe("station");
+  expect(
+    nextMatchTargetName([{ name: "station" }, { name: "parcels" }], "station")
+  ).toBe("station");
+  expect(nextMatchTargetName([{ name: "parcels" }, { name: "roads" }], "station")).toBe("");
+  expect(nextMatchTargetName([{ name: "parcels" }], "station")).toBe("parcels");
+  expect(nextMatchTargetName([], "station")).toBe("");
+});
+
+test("keeps a floor target, auto-selects the only other floor, and prefers a single shapefile", () => {
+  const empty = { referenceName: "", referenceFloorLabel: "" };
+  expect(nextMatchTarget([], ["1F", "2F"], "1F", empty)).toEqual({
+    referenceName: "",
+    referenceFloorLabel: "2F"
+  });
+  expect(
+    nextMatchTarget([], ["1F", "2F", "3F"], "1F", { ...empty, referenceFloorLabel: "2F" })
+  ).toEqual({ referenceName: "", referenceFloorLabel: "2F" });
+  expect(
+    nextMatchTarget([], ["1F", "2F", "3F"], "2F", { ...empty, referenceFloorLabel: "2F" })
+  ).toEqual(empty);
+  expect(
+    nextMatchTarget([{ name: "station" }], ["1F", "2F", "3F"], "1F", empty)
+  ).toEqual({ referenceName: "station", referenceFloorLabel: "" });
+  expect(
+    nextMatchTarget([{ name: "station" }], ["1F", "2F"], "1F", {
+      referenceName: "",
+      referenceFloorLabel: "2F"
+    })
+  ).toEqual({ referenceName: "", referenceFloorLabel: "2F" });
+});
 
 test("shows the kept count over the source total when a spatial trim happened", async () => {
   upload.mockResolvedValue([layer("station", 12139, 842)]);
@@ -83,7 +129,15 @@ test("a zero-feature response says nothing was found instead of adding a ghost l
   upload.mockResolvedValue([layer("station", 0, 0)]);
   const onChange = vi.fn();
 
-  render(<ReferenceLayerList layers={[]} onChange={onChange} focusBounds={FOCUS} />);
+  render(
+    <ReferenceLayerList
+      layers={[]}
+      onChange={onChange}
+      matchTargetName=""
+      onMatchTargetChange={() => {}}
+      focusBounds={FOCUS}
+    />
+  );
   addFile();
 
   await waitFor(() =>
@@ -97,7 +151,14 @@ test("a stopped backend is reported as unreachable, not as a corrupt file", asyn
   // The dev proxy answers a refused connection with a bodiless 500.
   upload.mockRejectedValue(buildApiClientError(500, ""));
 
-  render(<ReferenceLayerList layers={[]} onChange={() => {}} />);
+  render(
+    <ReferenceLayerList
+      layers={[]}
+      onChange={() => {}}
+      matchTargetName=""
+      onMatchTargetChange={() => {}}
+    />
+  );
   addFile();
 
   await waitFor(() => expect(screen.getByText(/could not reach the converter/i)).toBeInTheDocument());
@@ -112,9 +173,74 @@ test("a real API error message is shown verbatim", async () => {
     )
   );
 
-  render(<ReferenceLayerList layers={[]} onChange={() => {}} />);
+  render(
+    <ReferenceLayerList
+      layers={[]}
+      onChange={() => {}}
+      matchTargetName=""
+      onMatchTargetChange={() => {}}
+    />
+  );
   addFile();
 
   await waitFor(() => expect(screen.getByText("Not a readable shapefile.")).toBeInTheDocument());
   expect(screen.queryByText(/could not reach the converter/i)).toBeNull();
+});
+
+test("auto-selects the only uploaded layer as the match target", async () => {
+  upload.mockResolvedValue([layer("station", 4, 4)]);
+
+  render(<ListHarness focusBounds={FOCUS} />);
+  addFile();
+
+  await waitFor(() =>
+    expect(screen.getByRole("radio", { name: "Match with station" })).toBeChecked()
+  );
+});
+
+test("does not auto-select when two layers are added together", async () => {
+  upload.mockResolvedValue([layer("station", 4, 4), layer("parcels", 3, 3)]);
+
+  render(<ListHarness focusBounds={FOCUS} />);
+  addFile();
+
+  await waitFor(() => expect(screen.getByRole("radio", { name: "Match with station" })).toBeInTheDocument());
+  expect(screen.getByRole("radio", { name: "Match with station" })).not.toBeChecked();
+  expect(screen.getByRole("radio", { name: "Match with parcels" })).not.toBeChecked();
+});
+
+test("clicking a match-target radio selects that layer", async () => {
+  upload.mockResolvedValue([layer("station", 4, 4), layer("parcels", 3, 3)]);
+
+  render(<ListHarness focusBounds={FOCUS} />);
+  addFile();
+
+  await waitFor(() => expect(screen.getByRole("radio", { name: "Match with parcels" })).toBeInTheDocument());
+  fireEvent.click(screen.getByRole("radio", { name: "Match with parcels" }));
+  expect(screen.getByRole("radio", { name: "Match with parcels" })).toBeChecked();
+  expect(screen.getByRole("radio", { name: "Match with station" })).not.toBeChecked();
+});
+
+test("removing the selected layer among several clears the match target", async () => {
+  upload
+    .mockResolvedValueOnce([layer("station", 4, 4)])
+    .mockResolvedValueOnce([layer("parcels", 3, 3)])
+    .mockResolvedValueOnce([layer("roads", 2, 2)]);
+
+  render(<ListHarness focusBounds={FOCUS} />);
+  addFile();
+  await waitFor(() =>
+    expect(screen.getByRole("radio", { name: "Match with station" })).toBeChecked()
+  );
+  addFile();
+  await waitFor(() => expect(screen.getByRole("radio", { name: "Match with parcels" })).toBeInTheDocument());
+  addFile();
+  await waitFor(() => expect(screen.getByRole("radio", { name: "Match with roads" })).toBeInTheDocument());
+
+  const stationRow = screen.getByRole("radio", { name: "Match with station" }).closest("li")!;
+  fireEvent.click(stationRow.querySelector("button")!);
+
+  expect(screen.queryByRole("radio", { name: "Match with station" })).toBeNull();
+  expect(screen.getByRole("radio", { name: "Match with parcels" })).not.toBeChecked();
+  expect(screen.getByRole("radio", { name: "Match with roads" })).not.toBeChecked();
 });

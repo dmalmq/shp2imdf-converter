@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { FeatureCollection } from "geojson";
 
-import type { IllustratorPagePreview } from "../../api/client";
+import type { IllustratorPageAlignment, IllustratorPagePreview } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { buildSvgPaths, splitByPage, type PartitionFloor } from "../../lib/svgPreview";
 import { Button } from "../ui";
@@ -18,6 +18,7 @@ type Props = {
    * the only in-app call path — behaves exactly as before (empty map).
    */
   initialBoxesByPage?: Map<number, PartitionFloor[]>;
+  alignment?: IllustratorPageAlignment[];
 };
 
 export type PageCard = {
@@ -91,7 +92,8 @@ export function PageAssignmentPanel({
   layerSummaries,
   onAssigned,
   onSkip,
-  initialBoxesByPage
+  initialBoxesByPage,
+  alignment = []
 }: Props) {
   const { t } = useUiLanguage();
   const byPage = useMemo(() => splitByPage(preview), [preview]);
@@ -118,6 +120,9 @@ export function PageAssignmentPanel({
   );
   const floors = useMemo(() => buildFloors(cards, boxesByPage), [cards, boxesByPage]);
   const duplicates = useMemo(() => duplicateLabels(floors), [floors]);
+  const movedPages = alignment.filter((entry) => entry.aligned);
+  const failedPages = alignment.filter((entry) => !entry.aligned);
+  const anchor = alignment[0]?.anchor_page;
   const labelCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const card of cards) {
@@ -159,6 +164,34 @@ export function PageAssignmentPanel({
           "各ページのフロア名を入力してください。同じ名前のページは1つのフロアにまとまります。表紙や凡例はチェックを外して除外できます。"
         )}
       </p>
+
+      {movedPages.length > 0 ? (
+        <p data-testid="page-alignment-note" className="text-xs text-[var(--color-text-muted)]">
+          {movedPages.length === 1
+            ? t(
+                `Page ${movedPages[0].page} was aligned to page ${anchor} automatically.`,
+                `ページ ${movedPages[0].page} をページ ${anchor} に自動で合わせました。`
+              )
+            : t(
+                `Pages ${movedPages.map((entry) => entry.page).join(", ")} were aligned to page ${anchor} automatically.`,
+                `ページ ${movedPages.map((entry) => entry.page).join("、")} をページ ${anchor} に自動で合わせました。`
+              )}
+        </p>
+      ) : null}
+
+      {failedPages.length > 0 ? (
+        <p data-testid="page-alignment-warning" className="text-xs text-[var(--color-warning)]">
+          {failedPages.length === 1
+            ? t(
+                `Page ${failedPages[0].page} did not match page ${anchor}; align that floor yourself.`,
+                `ページ ${failedPages[0].page} はページ ${anchor} と一致しませんでした。該当フロアは手動で合わせてください。`
+              )
+            : t(
+                `Pages ${failedPages.map((entry) => entry.page).join(", ")} did not match page ${anchor}; align those floors yourself.`,
+                `ページ ${failedPages.map((entry) => entry.page).join("、")} はページ ${anchor} と一致しませんでした。該当フロアは手動で合わせてください。`
+              )}
+        </p>
+      ) : null}
 
       {sizesDiffer ? (
         <p

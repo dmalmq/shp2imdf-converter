@@ -12,7 +12,7 @@ import {
   type FloorPlacement,
   type PlacementState
 } from "./useIllustratorPlacement";
-import { enuToLngLat, lngLatToEnu } from "../lib/similarity";
+import { enuToLngLat, lngLatToEnu, type SimilarityTransform } from "../lib/similarity";
 
 const ANCHOR: [number, number] = [139.700258, 35.690921];
 
@@ -335,71 +335,199 @@ test("distance calibration locks the scale", () => {
   expect(next.scaleLocked).toBe(true);
 });
 
-test("fitting control points drives residuals to zero", () => {
-  let state = placementReducer(BASE, {
-    type: "addControlPoint",
-    point: { id: "a", artwork: [0, 0], map: [139.7, 35.69] }
-  });
-  state = placementReducer(state, {
-    type: "addControlPoint",
-    point: { id: "b", artwork: [500, 0], map: [139.701, 35.6903] }
-  });
-  state = placementReducer(state, { type: "fitControlPoints", mode: "individual" });
-  const fit = currentResiduals(state);
-  expect(fit).not.toBeNull();
-  expect(fit!.rmse).toBeLessThan(0.01);
-});
-
-// Two pairs: artwork (0,0) and (100,0); the second map point 50 m due NORTH of
-// the first, so the fit must recover a 90° rotation and 0.5 m per point.
-function twoPairState(): PlacementState {
-  const north: [number, number] = enuToLngLat(0, 50, ANCHOR[0], ANCHOR[1]);
-  let state = placementReducer(BASE, {
-    type: "addControlPoint",
-    point: { id: "a", artwork: [0, 0], map: ANCHOR }
-  });
-  state = placementReducer(state, {
-    type: "addControlPoint",
-    point: { id: "b", artwork: [100, 0], map: north }
-  });
-  return state;
+function controlPointState(count: 2 | 3, thirdOffset: [number, number] = [-50, 0]): PlacementState {
+  const north = enuToLngLat(0, 50, ANCHOR[0], ANCHOR[1]);
+  const third = enuToLngLat(thirdOffset[0], thirdOffset[1], ANCHOR[0], ANCHOR[1]);
+  const points = [
+    { id: "a", artwork: [0, 0] as [number, number], map: ANCHOR },
+    { id: "b", artwork: [100, 0] as [number, number], map: north },
+    { id: "c", artwork: [0, 100] as [number, number], map: third }
+  ];
+  return points.slice(0, count).reduce(
+    (state, point) => placementReducer(state, { type: "addControlPoint", point }),
+    BASE
+  );
 }
 
-test("a group-mode fit drives the frame and keeps every floor linked", () => {
-  const state = placementReducer(twoPairState(), { type: "fitControlPoints", mode: "group" });
+test("two control points cannot fit either scope and have no residual summary", () => {
+  const state = controlPointState(2);
+  expect(currentResiduals(state)).toBeNull();
+  expect(placementReducer(state, { type: "fitControlPoints", mode: "group" })).toBe(state);
+  expect(placementReducer(state, { type: "fitControlPoints", mode: "individual" })).toBe(state);
+});
+
+test("a three-point group fit recovers the shared frame and keeps every floor linked", () => {
+  const state = placementReducer(controlPointState(3), {
+    type: "fitControlPoints",
+    mode: "group"
+  });
   expect(state.frame.rotationDeg).toBeCloseTo(90, 6);
   expect(state.frame.metresPerPoint).toBeCloseTo(0.5, 9);
-  expect(state.floors.map((f) => f.linked)).toEqual([true, true]);
-  // The anchor shift places 1F's own artwork anchor exactly under the fit.
-  const fit = currentResiduals(state);
-  expect(fit!.rmse).toBeLessThan(0.01);
+  expect(state.floors.map((floorPlacement) => floorPlacement.linked)).toEqual([true, true]);
+  expect(currentResiduals(state)!.rmse).toBeLessThan(0.01);
+});
+
+test("a perturbed third target leaves a visible residual after fitting", () => {
+  const state = placementReducer(controlPointState(3, [-45, 0]), {
+    type: "fitControlPoints",
+    mode: "group"
+  });
+  expect(currentResiduals(state)!.rmse).toBeGreaterThan(0.1);
 });
 
 test("a group-mode fit respects the locked scale", () => {
-  let state = placementReducer(twoPairState(), { type: "setDrawingScale", denominator: 500 });
+  let state = placementReducer(controlPointState(3), {
+    type: "setDrawingScale",
+    denominator: 500
+  });
   state = placementReducer(state, { type: "fitControlPoints", mode: "group" });
   expect(state.frame.metresPerPoint).toBeCloseTo(0.1763888888, 9);
   expect(state.frame.rotationDeg).toBeCloseTo(90, 6);
   expect(state.floors[0].linked).toBe(true);
 });
 
-test("an individual-mode fit unlinks the active floor and owns its transform", () => {
-  const state = placementReducer(twoPairState(), { type: "fitControlPoints", mode: "individual" });
+test("a three-point individual fit changes and unlinks only the active floor", () => {
+  const before = controlPointState(3);
+  const state = placementReducer(before, { type: "fitControlPoints", mode: "individual" });
   const fitted = state.floors[0];
   expect(fitted.linked).toBe(false);
   expect(fitted.rotationDeg).toBeCloseTo(90, 6);
   expect(fitted.metresPerPoint).toBeCloseTo(0.5, 9);
-  expect(state.floors[1].linked).toBe(true);
+  expect(state.floors[1]).toEqual(before.floors[1]);
 });
 
-test("group mode still fits an unlinked active floor individually", () => {
-  // The frame cannot move an unlinked floor, so points picked on it must own
-  // its transform even in group mode.
-  let state = placementReducer(twoPairState(), { type: "unlockFloor", label: "1F" });
-  state = placementReducer(state, { type: "fitControlPoints", mode: "group" });
-  expect(state.floors[0].linked).toBe(false);
-  expect(state.floors[0].rotationDeg).toBeCloseTo(90, 6);
-  expect(state.frame.rotationDeg).toBe(0);
+test("group fitting is a no-op when the registration floor is unlinked", () => {
+  const state = placementReducer(controlPointState(3), { type: "unlockFloor", label: "1F" });
+  expect(placementReducer(state, { type: "fitControlPoints", mode: "group" })).toBe(state);
+});
+
+function sampleSimilarity(): SimilarityTransform {
+  return {
+    artworkAnchor: [85, 80],
+    mapAnchor: [139.71, 35.7],
+    rotationDeg: 90,
+    metresPerPoint: 0.5,
+    workingCrs: "EPSG:6677"
+  };
+}
+
+function stateWithControlPoints(): PlacementState {
+  let state = placementReducer(BASE, {
+    type: "addControlPoint",
+    point: { id: "a", artwork: [0, 0], map: ANCHOR }
+  });
+  state = placementReducer(state, { type: "setActiveFloor", label: "2F" });
+  state = placementReducer(state, {
+    type: "addControlPoint",
+    point: { id: "b", artwork: [1, 1], map: ANCHOR }
+  });
+  return placementReducer(state, { type: "setActiveFloor", label: "1F" });
+}
+
+test("a group applySimilarity updates the shared frame and recomputes every linked floor", () => {
+  const before = stateWithControlPoints();
+  const next = placementReducer(before, {
+    type: "applySimilarity",
+    mode: "group",
+    transform: sampleSimilarity()
+  });
+  expect(next.floors.map((floorPlacement) => floorPlacement.linked)).toEqual([true, true]);
+  expect(next.frame.rotationDeg).toBe(90);
+  expect(next.frame.metresPerPoint).toBe(0.5);
+  expect(next.floors[0].mapAnchor[0]).toBeCloseTo(139.71, 9);
+  expect(next.floors[0].mapAnchor[1]).toBeCloseTo(35.7, 9);
+  expect(next.floors[0].artworkAnchor).toEqual(before.floors[0].artworkAnchor);
+  expect(next.floors[0].controlPoints).toEqual(before.floors[0].controlPoints);
+  expect(next.floors[1].controlPoints).toEqual(before.floors[1].controlPoints);
+  const [e, n] = lngLatToEnu(
+    next.floors[1].mapAnchor[0],
+    next.floors[1].mapAnchor[1],
+    139.71,
+    35.7
+  );
+  expect(e).toBeCloseTo(0, 6);
+  expect(n).toBeCloseTo(100, 6);
+});
+
+test("an individual applySimilarity changes and unlinks only the active floor", () => {
+  const before = stateWithControlPoints();
+  const next = placementReducer(before, {
+    type: "applySimilarity",
+    mode: "individual",
+    transform: sampleSimilarity()
+  });
+  const fitted = next.floors[0];
+  expect(fitted.linked).toBe(false);
+  expect(fitted.rotationDeg).toBe(90);
+  expect(fitted.metresPerPoint).toBe(0.5);
+  expect(fitted.mapAnchor).toEqual([139.71, 35.7]);
+  expect(fitted.artworkAnchor).toEqual([85, 80]);
+  expect(fitted.controlPoints).toEqual(before.floors[0].controlPoints);
+  expect(next.floors[1]).toEqual(before.floors[1]);
+  expect(next.frame).toEqual(before.frame);
+});
+
+test("group applySimilarity is a no-op when the registration floor is unlinked", () => {
+  const state = placementReducer(BASE, { type: "unlockFloor", label: "1F" });
+  expect(
+    placementReducer(state, { type: "applySimilarity", mode: "group", transform: sampleSimilarity() })
+  ).toBe(state);
+});
+
+test("a group applySimilarity respects the locked scale like fitControlPoints", () => {
+  let state = placementReducer(stateWithControlPoints(), {
+    type: "setDrawingScale",
+    denominator: 500
+  });
+  const lockedScale = state.frame.metresPerPoint;
+  state = placementReducer(state, {
+    type: "applySimilarity",
+    mode: "group",
+    transform: sampleSimilarity()
+  });
+  expect(state.frame.metresPerPoint).toBeCloseTo(lockedScale, 9);
+  expect(state.frame.rotationDeg).toBe(90);
+  expect(state.floors.map((floorPlacement) => floorPlacement.linked)).toEqual([true, true]);
+  const [e, n] = lngLatToEnu(
+    state.floors[1].mapAnchor[0],
+    state.floors[1].mapAnchor[1],
+    state.floors[0].mapAnchor[0],
+    state.floors[0].mapAnchor[1]
+  );
+  expect(e).toBeCloseTo(0, 6);
+  expect(n).toBeCloseTo(200 * lockedScale, 6);
+});
+
+test("an individual applySimilarity ignores scale lock like fitControlPoints", () => {
+  const locked = placementReducer(stateWithControlPoints(), {
+    type: "setDrawingScale",
+    denominator: 500
+  });
+  const next = placementReducer(locked, {
+    type: "applySimilarity",
+    mode: "individual",
+    transform: sampleSimilarity()
+  });
+  expect(next.frame.metresPerPoint).toBeCloseTo(locked.frame.metresPerPoint, 9);
+  expect(next.floors[0].metresPerPoint).toBe(0.5);
+  expect(next.floors[0].linked).toBe(false);
+  expect(next.floors[1]).toEqual(locked.floors[1]);
+});
+
+test("applySimilarity is one historic undo step", () => {
+  const before = stateWithControlPoints();
+  let history = initialPlacementHistory(before);
+  history = placementHistoryReducer(history, {
+    type: "applySimilarity",
+    mode: "group",
+    transform: sampleSimilarity()
+  });
+  expect(history.past).toHaveLength(1);
+  expect(history.future).toHaveLength(0);
+  expect(history.present.frame.rotationDeg).toBe(90);
+  history = placementHistoryReducer(history, { type: "undo" });
+  expect(history.present).toBe(before);
+  expect(history.past).toHaveLength(0);
 });
 
 test("a whole drag collapses into one undo step", () => {

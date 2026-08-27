@@ -1,37 +1,48 @@
-import { useMemo, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useState } from "react";
 
 import {
   assignFloors,
   exportIllustrator,
+  matchIllustratorShape,
   previewIllustrator,
   type AssignFloorsResponse,
   type ExportFormatsPayload,
-  type IllustratorPreviewResponse
+  type IllustratorPreviewResponse,
+  type IllustratorShapeMatchSuggestion
 } from "../api/client";
 import { isApiClientError, isBackendUnreachableError, toErrorMessage } from "../api/errors";
 import { AssignmentPanel } from "../components/illustrator/AssignmentPanel";
 import { PageAssignmentPanel } from "../components/illustrator/PageAssignmentPanel";
 import {
   FLOOR_TINTS,
+  type ArtworkShapeSelection,
   type FloorLayer,
   type ReferenceLayer
 } from "../components/illustrator/PlacementMap";
 import { PlacementMap } from "../components/illustrator/PlacementMap";
 import { PlacementSidebar, type PlacementTab } from "../components/illustrator/PlacementSidebar";
+import { nextMatchTarget } from "../components/illustrator/ReferenceLayerList";
+import {
+  parseMatchTarget,
+  type ShapeMatchPanelModel
+} from "../components/illustrator/ShapeMatchPanel";
 import { Button, Card } from "../components/ui";
 import { siteNameFromFilename } from "../lib/siteName";
 import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
 import {
   DEFAULT_METRES_PER_POINT,
+  MIN_CONTROL_POINTS,
   initialPlacementHistory,
   placedBoundsWgs84,
   placementHistoryReducer,
+  resolvedTransform,
   toFloorPayloads,
   type AdjustmentMode,
   type PlacementState
 } from "../hooks/useIllustratorPlacement";
 import { usePlacementShortcuts } from "../hooks/usePlacementShortcuts";
 import { useUiLanguage } from "../hooks/useUiLanguage";
+import type { SimilarityTransform } from "../lib/similarity";
 
 type AssignedRegion = {
   label: string;
@@ -40,12 +51,54 @@ type AssignedRegion = {
   layer_names: string[] | null;
 };
 
-/** Pair-picking session: pin a point on the plan, then its map correspondence. */
 type PickSession = {
   stage: "artwork" | "map";
-  /** The artwork point waiting for its map correspondence. */
   pendingArtwork: [number, number] | null;
+  floorLabel: string;
+  mode: AdjustmentMode;
 };
+
+type ShapeMatchState = {
+  referenceName: string;
+  referenceFloorLabel: string;
+  selecting: boolean;
+  selection: ArtworkShapeSelection | null;
+  matches: IllustratorShapeMatchSuggestion[];
+  previewRank: number | null;
+  loading: boolean;
+  searched: boolean;
+  error: string | null;
+};
+
+const EMPTY_SHAPE_MATCH: ShapeMatchState = {
+  referenceName: "",
+  referenceFloorLabel: "",
+  selecting: false,
+  selection: null,
+  matches: [],
+  previewRank: null,
+  loading: false,
+  searched: false,
+  error: null
+};
+
+function transformPayload(transform: SimilarityTransform) {
+  return {
+    artwork_anchor: transform.artworkAnchor,
+    map_anchor: transform.mapAnchor,
+    rotation_deg: transform.rotationDeg,
+    metres_per_point: transform.metresPerPoint,
+    working_crs: transform.workingCrs
+  };
+}
+
+function keptMatchTarget(current: Pick<ShapeMatchState, "referenceName" | "referenceFloorLabel">): ShapeMatchState {
+  return {
+    ...EMPTY_SHAPE_MATCH,
+    referenceName: current.referenceName,
+    referenceFloorLabel: current.referenceFloorLabel
+  };
+}
 
 /** Union of the given pages' content bounds, or null when none are known. */
 function pageUnionBounds(
@@ -146,6 +199,7 @@ export function IllustratorPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickSession, setPickSession] = useState<PickSession | null>(null);
+  const [shapeMatch, setShapeMatch] = useState<ShapeMatchState>(EMPTY_SHAPE_MATCH);
   const [outputCrs, setOutputCrs] = useState("EPSG:4326");
   const [formats, setFormats] = useState<ExportFormatsPayload>({
     geopackage: true,
@@ -173,8 +227,24 @@ export function IllustratorPage() {
     dispatch,
     mode: adjustmentMode,
     enabled: Boolean(preview) && assignment !== null,
-    onEscape: () => setPickSession(null)
+    onEscape: () => {
+      setPickSession(null);
+      setShapeMatch((current) => ({ ...current, selecting: false, previewRank: null }));
+    }
   });
+
+  useEffect(() => {
+    setPickSession(null);
+    setShapeMatch((current) => ({
+      ...EMPTY_SHAPE_MATCH,
+      ...nextMatchTarget(
+        referenceLayers,
+        state.floors.map((floor) => floor.label),
+        state.activeFloorLabel,
+        current
+      )
+    }));
+  }, [state.activeFloorLabel, adjustmentMode]);
 
   // Computed unconditionally so the hook order is stable across the early
   // returns below (a conditional hook here crashes the placement view).
@@ -219,6 +289,21 @@ export function IllustratorPage() {
     [state, floorLayers]
   );
 
+  const previewSuggestion =
+    shapeMatch.matches.find((match) => match.rank === shapeMatch.previewRank) ?? null;
+  const shapeMatchPreview = previewSuggestion
+    ? {
+        suggestion: previewSuggestion,
+        transform: {
+          artworkAnchor: previewSuggestion.transform.artwork_anchor,
+          mapAnchor: previewSuggestion.transform.map_anchor,
+          rotationDeg: previewSuggestion.transform.rotation_deg,
+          metresPerPoint: previewSuggestion.transform.metres_per_point,
+          workingCrs: previewSuggestion.transform.working_crs
+        } satisfies SimilarityTransform
+      }
+    : null;
+
   /**
    * The API explains its own failures far better than this screen can guess, so
    * prefer its message and keep the local string as the last resort. An
@@ -232,6 +317,167 @@ export function IllustratorPage() {
           "コンバーターに接続できません。サーバーが停止または再起動中の可能性があります。稼働状況を確認してから、もう一度お試しください。"
         )
       : toErrorMessage(error, fallback);
+
+  const updateReferenceLayers = (layers: ReferenceLayer[]) => {
+    setReferenceLayers(layers);
+    setShapeMatch((current) => {
+      const next = nextMatchTarget(
+        layers,
+        state.floors.map((floor) => floor.label),
+        state.activeFloorLabel,
+        current
+      );
+      return next.referenceName === current.referenceName &&
+        next.referenceFloorLabel === current.referenceFloorLabel
+        ? current
+        : {
+            ...current,
+            ...next,
+            matches: [],
+            previewRank: null,
+            searched: false,
+            error: null
+          };
+    });
+  };
+
+  const findShapeMatches = async () => {
+    const selection = shapeMatch.selection;
+    const reference = referenceLayers.find((layer) => layer.name === shapeMatch.referenceName);
+    const referenceFloor = state.floors.find(
+      (floor) => floor.label === shapeMatch.referenceFloorLabel
+    );
+    const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
+    if (
+      !preview ||
+      !selection ||
+      !active ||
+      selection.floorLabel !== active.label ||
+      (!reference && !referenceFloor)
+    ) {
+      return;
+    }
+
+    setShapeMatch((current) => ({ ...current, loading: true, searched: false, error: null }));
+    const currentTransform = resolvedTransform(state, active);
+    try {
+      const response = await matchIllustratorShape(preview.conversion_id, {
+        floor_label: active.label,
+        artwork: {
+          source_table: selection.sourceTable,
+          source_row: selection.sourceRow
+        },
+        current_transform: transformPayload(currentTransform),
+        scale_locked: adjustmentMode === "group" && state.scaleLocked,
+        ...(referenceFloor
+          ? {
+              reference_floor: {
+                label: referenceFloor.label,
+                transform: transformPayload(resolvedTransform(state, referenceFloor))
+              }
+            }
+          : { reference: reference!.data })
+      });
+      setShapeMatch((current) =>
+        current.selection?.floorLabel === selection.floorLabel &&
+        current.selection.sourceTable === selection.sourceTable &&
+        current.selection.sourceRow === selection.sourceRow &&
+        (referenceFloor
+          ? current.referenceFloorLabel === referenceFloor.label
+          : current.referenceName === reference?.name)
+          ? {
+              ...current,
+              matches: response.matches,
+              previewRank: response.matches[0]?.rank ?? null,
+              loading: false,
+              searched: true,
+              error: null
+            }
+          : current
+      );
+    } catch (error) {
+      setShapeMatch((current) =>
+        current.selection?.floorLabel === selection.floorLabel &&
+        current.selection.sourceTable === selection.sourceTable &&
+        current.selection.sourceRow === selection.sourceRow &&
+        (referenceFloor
+          ? current.referenceFloorLabel === referenceFloor.label
+          : current.referenceName === reference?.name)
+          ? {
+              ...current,
+              loading: false,
+              searched: true,
+              error: describeFailure(
+                error,
+                t(
+                  "Could not compare that outline with the selected target.",
+                  "選択した外周と照合対象を比較できませんでした。"
+                )
+              )
+            }
+          : current
+      );
+    }
+  };
+
+  const shapeMatchModel: ShapeMatchPanelModel = {
+    referenceName: shapeMatch.referenceName,
+    referenceFloorLabel: shapeMatch.referenceFloorLabel,
+    selecting: shapeMatch.selecting,
+    selection: shapeMatch.selection,
+    matches: shapeMatch.matches,
+    previewRank: shapeMatch.previewRank,
+    loading: shapeMatch.loading,
+    searched: shapeMatch.searched,
+    error: shapeMatch.error,
+    onReferenceChange: (referenceName) =>
+      setShapeMatch((current) => ({
+        ...current,
+        referenceName,
+        referenceFloorLabel: "",
+        matches: [],
+        previewRank: null,
+        searched: false,
+        error: null
+      })),
+    onMatchTargetChange: (target) =>
+      setShapeMatch((current) => ({
+        ...current,
+        ...parseMatchTarget(target),
+        matches: [],
+        previewRank: null,
+        searched: false,
+        error: null
+      })),
+    onToggleSelection: () => {
+      setPickSession(null);
+      setShapeMatch((current) =>
+        current.selecting
+          ? { ...current, selecting: false }
+          : {
+              ...current,
+              selecting: true,
+              selection: null,
+              matches: [],
+              previewRank: null,
+              searched: false,
+              error: null
+            }
+      );
+    },
+    onFind: () => void findShapeMatches(),
+    onPreview: (previewRank) => setShapeMatch((current) => ({ ...current, previewRank })),
+    onApply: () => {
+      if (!shapeMatchPreview) return;
+      dispatch({
+        type: "applySimilarity",
+        mode: shapeMatch.referenceFloorLabel ? "individual" : adjustmentMode,
+        transform: shapeMatchPreview.transform
+      });
+      setShapeMatch((current) => keptMatchTarget(current));
+    },
+    onClear: () => setShapeMatch((current) => keptMatchTarget(current))
+  };
 
   const convert = async (file: File) => {
     setLoading(true);
@@ -373,6 +619,7 @@ export function IllustratorPage() {
               preview={preview.preview}
               pages={preview.pages}
               layerSummaries={preview.layers}
+              alignment={preview.report.page_alignment ?? []}
               onSkip={() => setAssignment([])}
               onAssigned={commitAssignment}
             />
@@ -404,13 +651,24 @@ export function IllustratorPage() {
         tab={placementTab}
         onTabChange={setPlacementTab}
         pickStage={pickSession?.stage ?? null}
-        onTogglePicking={() =>
-          setPickSession((session) =>
-            session ? null : { stage: "artwork", pendingArtwork: null }
-          )
-        }
+        onTogglePicking={() => {
+          setShapeMatch((current) => keptMatchTarget(current));
+          setPickSession((session) => {
+            if (session) return null;
+            const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
+            return active
+              ? {
+                  stage: "artwork",
+                  pendingArtwork: null,
+                  floorLabel: active.label,
+                  mode: adjustmentMode
+                }
+              : null;
+          });
+        }}
+        shapeMatch={shapeMatchModel}
         referenceLayers={referenceLayers}
-        onReferenceLayersChange={setReferenceLayers}
+        onReferenceLayersChange={updateReferenceLayers}
         focusBounds={focusBounds}
         bounds={bounds}
         suggestedCrs={preview.suggested_crs}
@@ -431,36 +689,72 @@ export function IllustratorPage() {
           state={state}
           dispatch={dispatch}
           mode={adjustmentMode}
-          onModeChange={setAdjustmentMode}
+          onModeChange={(mode) => {
+            setPickSession(null);
+            setShapeMatch((current) => keptMatchTarget(current));
+            setAdjustmentMode(mode);
+          }}
           recenterTo={recenterTo}
           referenceLayers={referenceLayers}
           pickStage={pickSession?.stage ?? null}
           pendingArtwork={pickSession?.pendingArtwork ?? null}
-          onPickArtwork={(pt) => setPickSession({ stage: "map", pendingArtwork: pt })}
-          onPickMap={(lngLat) => {
-            const active =
-              state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
-            if (!active || !pickSession?.pendingArtwork) return;
+          shapePickActive={shapeMatch.selecting}
+          selectedShape={shapeMatch.selection}
+          shapeMatchPreview={shapeMatchPreview}
+          onPickShape={(selection) => {
+            const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
+            if (!shapeMatch.selecting || !active || selection.floorLabel !== active.label) {
+              setShapeMatch((current) => ({ ...current, selecting: false }));
+              return;
+            }
+            setShapeMatch((current) => ({
+              ...current,
+              selecting: false,
+              selection,
+              matches: [],
+              previewRank: null,
+              searched: false,
+              error: null
+            }));
+          }}
+          onPickArtwork={(artwork) => {
+            const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
+            if (
+              !active ||
+              !pickSession ||
+              pickSession.floorLabel !== active.label ||
+              pickSession.mode !== adjustmentMode
+            ) {
+              setPickSession(null);
+              return;
+            }
+            setPickSession({ ...pickSession, stage: "map", pendingArtwork: artwork });
+          }}
+          onPickMap={(map) => {
+            const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
+            if (
+              !active ||
+              !pickSession?.pendingArtwork ||
+              pickSession.floorLabel !== active.label ||
+              pickSession.mode !== adjustmentMode
+            ) {
+              setPickSession(null);
+              return;
+            }
             dispatch({
               type: "addControlPoint",
               point: {
                 id: `${Date.now()}`,
                 artwork: pickSession.pendingArtwork,
-                map: lngLat
+                map
               }
             });
             const count = active.controlPoints.length + 1;
-            if (count >= 2) {
-              // Two exact pairs determine the transform: fit immediately (one
-              // undo step) instead of making the user reach for the button.
-              if (count === 2) {
-                dispatch({ type: "fitControlPoints", mode: adjustmentMode });
-              }
-              setPickSession(null);
-            } else {
-              // Straight on to the second pair.
-              setPickSession({ stage: "artwork", pendingArtwork: null });
-            }
+            setPickSession(
+              count < MIN_CONTROL_POINTS
+                ? { ...pickSession, stage: "artwork", pendingArtwork: null }
+                : null
+            );
           }}
         />
       </div>

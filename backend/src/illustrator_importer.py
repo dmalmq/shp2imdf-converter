@@ -36,6 +36,7 @@ from pdfminer.pdftypes import dict_value, list_value, resolve1
 from pdfminer.psparser import PSLiteral, literal_name
 from pdfminer.utils import apply_matrix_pt
 from shapely import make_valid
+from shapely.affinity import translate
 from shapely.geometry import LineString, MultiLineString, Polygon
 from shapely.ops import unary_union
 
@@ -48,6 +49,17 @@ _LINE_SUFFIX = "__lines"
 # Curves (`c`/`v`/`y`) are flattened into this many straight segments.
 _BEZIER_STEPS = 16
 _MIN_RING_POINTS = 3
+# Pages are normalized to their own MediaBox origin, so the same building drawn
+# at a different spot on each sheet lands at different artwork coordinates and
+# every floor would then have to be georeferenced separately. These bound the
+# search that shifts each page onto the anchor page's plan.
+_ALIGN_CANDIDATES = 3
+_ALIGN_MIN_IOU = 0.5
+_ALIGN_AREA_RATIO = 2.0
+# An outline whose bounding box spans this much of the sheet in *both* axes is a
+# border or clipping rectangle. Those repeat identically on every page, so
+# matching them would report success while leaving the plans misaligned.
+_FRAME_COVERAGE = 0.85
 
 
 class IllustratorConversionError(RuntimeError):
@@ -67,6 +79,9 @@ class ConversionReport:
     total_features: int = 0
     warnings: list[str] = field(default_factory=list)
     layer_order: list[str] = field(default_factory=list)
+    # One entry per non-anchor page carrying geometry: {"page", "anchor_page",
+    # "offset", "overlap_iou", "aligned"}. Empty for single-page artwork.
+    page_alignment: list[dict[str, Any]] = field(default_factory=list)
 
     def record(self, layer: str, role: str) -> None:
         counts = self.layers.setdefault(layer, {"polygon": 0, "line": 0})
@@ -82,6 +97,7 @@ class ConversionReport:
             "layers": self.layers,
             "layer_order": self.layer_order,
             "warnings": self.warnings,
+            "page_alignment": self.page_alignment,
         }
 
 
@@ -435,6 +451,175 @@ def _sanitize_layer_name(name: str, taken: set[str]) -> str:
     return candidate
 
 
+@dataclass(slots=True, frozen=True)
+class _AlignCandidate:
+    """One page outline considered when matching that page to the anchor."""
+
+    geom: Any
+    area: float
+    centroid: tuple[float, float]
+
+
+def _ring_area(ring: list[tuple[float, float]]) -> float:
+    total = 0.0
+    for (x0, y0), (x1, y1) in zip(ring, ring[1:] + ring[:1]):
+        total += x0 * y1 - x1 * y0
+    return abs(total) / 2.0
+
+
+def _candidate_polygon(subpaths: list[list[tuple[float, float]]]) -> Any:
+    """The path's largest subpath closed into a polygon, or ``None``.
+
+    Stroked outlines matter as much as filled ones here, so the ring is closed
+    rather than requiring the parity nesting :func:`_build_polygon` needs.
+    """
+    best_ring: list[tuple[float, float]] | None = None
+    best_area = 0.0
+    for pts in subpaths:
+        ring = _dedupe(pts)
+        if len(ring) > 1 and ring[0] == ring[-1]:
+            ring = ring[:-1]
+        if len(ring) < _MIN_RING_POINTS:
+            continue
+        area = _ring_area(ring)
+        if area > best_area:
+            best_ring, best_area = ring, area
+    if best_ring is None or best_area <= 0:
+        return None
+    polygon = make_valid(Polygon(best_ring))
+    if polygon.geom_type == "MultiPolygon":
+        polygon = max(polygon.geoms, key=lambda part: part.area)
+    if polygon.geom_type != "Polygon" or polygon.area <= 0:
+        return None
+    return polygon
+
+
+def _covers_sheet(polygon: Any, sheet: tuple[float, float]) -> bool:
+    width, height = sheet
+    if width <= 0 or height <= 0:
+        return False
+    minx, miny, maxx, maxy = polygon.bounds
+    return (maxx - minx) >= _FRAME_COVERAGE * width and (maxy - miny) >= _FRAME_COVERAGE * height
+
+
+def _page_candidates(
+    records: list[_PathRecord], sheet: tuple[float, float] | None
+) -> list[_AlignCandidate]:
+    """The page's largest plan-like outlines, biggest first."""
+    found: list[_AlignCandidate] = []
+    for rec in records:
+        polygon = _candidate_polygon(rec.subpaths)
+        if polygon is None:
+            continue
+        if sheet is not None and _covers_sheet(polygon, sheet):
+            continue
+        centroid = polygon.centroid
+        found.append(
+            _AlignCandidate(
+                geom=polygon,
+                area=float(polygon.area),
+                centroid=(float(centroid.x), float(centroid.y)),
+            )
+        )
+    found.sort(key=lambda item: -item.area)
+    return found[:_ALIGN_CANDIDATES]
+
+
+def _overlap(left: Any, right: Any) -> float:
+    try:
+        union_area = float(left.union(right).area)
+        if union_area <= 0:
+            return 0.0
+        return float(left.intersection(right).area) / union_area
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _best_shift(
+    targets: list[_AlignCandidate], sources: list[_AlignCandidate]
+) -> tuple[float, float, float] | None:
+    """Best ``(overlap, dx, dy)`` over candidate pairs of comparable size.
+
+    Identical outlines are matched by their centroids, which is exact for a
+    translated copy; the overlap it achieves is what decides whether the pair
+    really is the same plan.
+    """
+    best: tuple[float, float, float] | None = None
+    for target in targets:
+        if target.area <= 0:
+            continue
+        for source in sources:
+            ratio = source.area / target.area
+            if not 1.0 / _ALIGN_AREA_RATIO <= ratio <= _ALIGN_AREA_RATIO:
+                continue
+            dx = target.centroid[0] - source.centroid[0]
+            dy = target.centroid[1] - source.centroid[1]
+            overlap = _overlap(translate(source.geom, dx, dy), target.geom)
+            if best is None or overlap > best[0]:
+                best = (overlap, dx, dy)
+    return best
+
+
+def _align_pages(
+    records: list[_PathRecord], sheets: list[dict[str, float]]
+) -> list[dict[str, Any]]:
+    """Shift each page's artwork so its plan overlays the anchor page's.
+
+    Multi-page artwork holds one floor per sheet, and each sheet has its own
+    origin, so floors that depict the same building still start out scattered.
+    Matching one distinctive outline per page and translating the whole page by
+    the difference makes the floors coincide, so georeferencing any one of them
+    places them all. A page whose outline does not match is left untouched and
+    reported, because guessing there would be worse than doing nothing.
+    """
+    by_page: dict[int, list[_PathRecord]] = {}
+    for rec in records:
+        by_page.setdefault(rec.page, []).append(rec)
+    if len(by_page) < 2:
+        return []
+
+    sizes = {
+        int(sheet["index"]): (float(sheet["width_pt"]), float(sheet["height_pt"]))
+        for sheet in sheets
+    }
+    candidates = {page: _page_candidates(recs, sizes.get(page)) for page, recs in by_page.items()}
+    ordered = sorted(by_page)
+    anchor = next((page for page in ordered if candidates[page]), None)
+    if anchor is None:
+        return []
+
+    alignment: list[dict[str, Any]] = []
+    for page in ordered:
+        if page == anchor:
+            continue
+        best = _best_shift(candidates[anchor], candidates[page])
+        if best is None or best[0] < _ALIGN_MIN_IOU:
+            alignment.append(
+                {
+                    "page": page,
+                    "anchor_page": anchor,
+                    "offset": [0.0, 0.0],
+                    "overlap_iou": round(best[0], 4) if best else 0.0,
+                    "aligned": False,
+                }
+            )
+            continue
+        overlap, dx, dy = best
+        if dx or dy:
+            for rec in by_page[page]:
+                rec.subpaths = [[(x + dx, y + dy) for x, y in sub] for sub in rec.subpaths]
+        alignment.append(
+            {
+                "page": page,
+                "anchor_page": anchor,
+                "offset": [round(dx, 4), round(dy, 4)],
+                "overlap_iou": round(overlap, 4),
+                "aligned": True,
+            }
+        )
+    return alignment
+
+
 def _records_to_rows(records: list[_PathRecord], report: ConversionReport) -> tuple[list[dict], list]:
     rows: list[dict] = []
     geoms: list = []
@@ -585,6 +770,7 @@ def _convert(ai_bytes: bytes, source_name: str) -> _ConversionResult:
         raise IllustratorConversionError(f"Failed to parse the Illustrator file: {exc}") from exc
 
     report.layer_order = layer_order
+    report.page_alignment = _align_pages(device.records, report.pages)
     gpkg_bytes, written = _write_geopackage(device.records, report)
     stem = Path(source_name).stem or "illustrator"
     return _ConversionResult(gpkg_bytes, written, layer_order, report, stem)
