@@ -17,6 +17,11 @@ export type ShapeMatchPanelModel = {
   onReferenceChange: (name: string) => void;
   onMatchTargetChange: (target: string) => void;
   onToggleSelection: () => void;
+  sourceFloorLabel: string;
+  regionStage: "source" | "target" | null;
+  hasSourceRegion: boolean;
+  hasTargetRegion: boolean;
+  onToggleRegions: () => void;
   onFind: () => void;
   onPreview: (rank: number) => void;
   onApply: () => void;
@@ -62,6 +67,8 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
   const selectedReference = referenceLayers.find((layer) => layer.name === model.referenceName);
   const selectedTarget = matchTargetValue(model.referenceName, model.referenceFloorLabel);
   const candidateCount = otherFloors.length + referenceLayers.length;
+  const regionsReady = model.hasSourceRegion && model.hasTargetRegion;
+  const canFind = Boolean(model.selection) || regionsReady;
 
   return (
     <section className="border-t border-[var(--color-border)] pt-4">
@@ -152,12 +159,54 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
         </Button>
         <Button
           size="sm"
-          disabled={!model.selection || !hasTarget || model.loading}
+          disabled={!canFind || !hasTarget || model.loading}
           onClick={model.onFind}
         >
           {model.loading ? t("Comparing…", "比較中…") : t("Find matches", "候補を検索")}
         </Button>
       </div>
+
+      {floorTarget ? (
+        <Button
+          size="sm"
+          className="mt-2 w-full"
+          variant={model.regionStage ? "primary" : "secondary"}
+          onClick={model.onToggleRegions}
+        >
+          {model.regionStage === "source"
+            ? t(
+                `Drag around the area on ${model.sourceFloorLabel}…`,
+                `「${model.sourceFloorLabel}」で範囲をドラッグ…`
+              )
+            : model.regionStage === "target"
+              ? t(
+                  `Now drag the matching area on ${model.referenceFloorLabel}…`,
+                  `次に「${model.referenceFloorLabel}」で対応する範囲をドラッグ…`
+                )
+              : regionsReady
+                ? t("Choose areas again", "範囲を選び直す")
+                : t("Match areas instead", "範囲どうしで合わせる")}
+        </Button>
+      ) : null}
+
+      {floorTarget && !model.regionStage && !regionsReady && !model.selection ? (
+        <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+          {t(
+            "Use areas when only part of the two floors is the same.",
+            "2つのフロアの一部だけが同じ場合は範囲で合わせます。"
+          )}
+        </p>
+      ) : null}
+
+      {regionsReady && !model.regionStage ? (
+        <p className="mt-2 flex items-center gap-1.5 text-xs">
+          <span className="h-2.5 w-2.5 rounded-full border border-white bg-[#f59e0b] shadow" />
+          {t(
+            `Areas selected on ${model.sourceFloorLabel} and ${model.referenceFloorLabel}.`,
+            `「${model.sourceFloorLabel}」と「${model.referenceFloorLabel}」の範囲を選択しました。`
+          )}
+        </p>
+      ) : null}
 
       {model.selection ? (
         <p className="mt-2 flex items-center gap-1.5 text-xs">
@@ -172,7 +221,7 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
       {model.error ? <p className="mt-2 text-xs text-[var(--color-error)]">{model.error}</p> : null}
 
       {!model.loading &&
-      model.selection &&
+      (model.selection || regionsReady) &&
       model.matches.length === 0 &&
       !model.error &&
       !model.searched ? (
@@ -186,10 +235,15 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
 
       {model.searched && model.matches.length === 0 && !model.loading && !model.error ? (
         <p className="mt-2 rounded-[var(--radius-sm)] bg-[var(--color-surface-muted)] p-2 text-xs">
-          {t(
-            "No comparable reference polygons were found. Choose a different outline or target.",
-            "比較できる参照ポリゴンが見つかりませんでした。別の外周または対象を選択してください。"
-          )}
+          {regionsReady
+            ? t(
+                "Nothing in those two areas matched. Try areas that share a distinctive shape.",
+                "選択した2つの範囲では一致しませんでした。特徴的な形が含まれる範囲を選び直してください。"
+              )
+            : t(
+                "No comparable reference polygons were found. Choose a different outline or target.",
+                "比較できる参照ポリゴンが見つかりませんでした。別の外周または対象を選択してください。"
+              )}
         </p>
       ) : null}
 

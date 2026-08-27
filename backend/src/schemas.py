@@ -745,6 +745,16 @@ class ShapeMatchFloorRef(BaseModel):
     transform: TransformPayload
 
 
+class ShapeMatchFloorRegionRef(BaseModel):
+    """Another assigned floor plus the boxed area that corresponds to the query."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1)
+    transform: TransformPayload
+    region: list[float] = Field(min_length=4, max_length=4)
+
+
 class GeoJsonFeatureCollection(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -786,6 +796,16 @@ class IllustratorShapeMatchSuggestion(BaseModel):
     overlap_iou: float
     reference_geometry: dict[str, Any]
     residual_vectors: list[ShapeMatchResidualVector] = Field(max_length=12)
+
+
+class IllustratorRegionMatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    floor_label: str = Field(min_length=1)
+    region: list[float] = Field(min_length=4, max_length=4)
+    current_transform: TransformPayload
+    scale_locked: bool
+    reference_floor: ShapeMatchFloorRegionRef
 
 
 class IllustratorShapeMatchResponse(BaseModel):

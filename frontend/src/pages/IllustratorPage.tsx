@@ -3,11 +3,13 @@ import { useEffect, useMemo, useReducer, useState } from "react";
 import {
   assignFloors,
   exportIllustrator,
+  matchIllustratorRegions,
   matchIllustratorShape,
   previewIllustrator,
   type AssignFloorsResponse,
   type ExportFormatsPayload,
   type IllustratorPreviewResponse,
+  type ArtworkRegion,
   type IllustratorShapeMatchSuggestion
 } from "../api/client";
 import { isApiClientError, isBackendUnreachableError, toErrorMessage } from "../api/errors";
@@ -42,7 +44,11 @@ import {
 } from "../hooks/useIllustratorPlacement";
 import { usePlacementShortcuts } from "../hooks/usePlacementShortcuts";
 import { useUiLanguage } from "../hooks/useUiLanguage";
-import type { SimilarityTransform } from "../lib/similarity";
+import {
+  artworkFromLngLat,
+  artworkToLngLat,
+  type SimilarityTransform
+} from "../lib/similarity";
 
 type AssignedRegion = {
   label: string;
@@ -68,6 +74,11 @@ type ShapeMatchState = {
   loading: boolean;
   searched: boolean;
   error: string | null;
+  /** The floor the source area belongs to, and the only floor an apply moves. */
+  sourceFloorLabel: string;
+  regionStage: "source" | "target" | null;
+  sourceRegion: ArtworkRegion | null;
+  targetRegion: ArtworkRegion | null;
 };
 
 const EMPTY_SHAPE_MATCH: ShapeMatchState = {
@@ -79,7 +90,11 @@ const EMPTY_SHAPE_MATCH: ShapeMatchState = {
   previewRank: null,
   loading: false,
   searched: false,
-  error: null
+  error: null,
+  sourceFloorLabel: "",
+  regionStage: null,
+  sourceRegion: null,
+  targetRegion: null,
 };
 
 function transformPayload(transform: SimilarityTransform) {
@@ -90,6 +105,30 @@ function transformPayload(transform: SimilarityTransform) {
     metres_per_point: transform.metresPerPoint,
     working_crs: transform.workingCrs
   };
+}
+
+/** The drawn corners as that floor's own artwork box, so it tracks the floor. */
+function artworkRegion(
+  transform: SimilarityTransform,
+  corners: [number, number][]
+): ArtworkRegion {
+  const points = corners.map((corner) => artworkFromLngLat(transform, corner));
+  const xs = points.map((point) => point[0]);
+  const ys = points.map((point) => point[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+function regionCorners(
+  transform: SimilarityTransform,
+  region: ArtworkRegion
+): [number, number][] {
+  const [minX, minY, maxX, maxY] = region;
+  return [
+    artworkToLngLat(transform, minX, maxY),
+    artworkToLngLat(transform, maxX, maxY),
+    artworkToLngLat(transform, maxX, minY),
+    artworkToLngLat(transform, minX, minY)
+  ];
 }
 
 function keptMatchTarget(current: Pick<ShapeMatchState, "referenceName" | "referenceFloorLabel">): ShapeMatchState {
@@ -235,15 +274,23 @@ export function IllustratorPage() {
 
   useEffect(() => {
     setPickSession(null);
-    setShapeMatch((current) => ({
-      ...EMPTY_SHAPE_MATCH,
-      ...nextMatchTarget(
-        referenceLayers,
-        state.floors.map((floor) => floor.label),
-        state.activeFloorLabel,
-        current
-      )
-    }));
+    setShapeMatch((current) => {
+      // Switching levels is how the user gets a clear look at the floor being
+      // boxed, so an area pick has to survive it. Only the outline selection,
+      // which belongs to one floor, is discarded.
+      if (current.regionStage || current.sourceRegion || current.targetRegion) {
+        return { ...current, selecting: false, selection: null };
+      }
+      return {
+        ...EMPTY_SHAPE_MATCH,
+        ...nextMatchTarget(
+          referenceLayers,
+          state.floors.map((floor) => floor.label),
+          state.activeFloorLabel,
+          current
+        )
+      };
+    });
   }, [state.activeFloorLabel, adjustmentMode]);
 
   // Computed unconditionally so the hook order is stable across the early
@@ -288,6 +335,11 @@ export function IllustratorPage() {
       ),
     [state, floorLayers]
   );
+
+  const referenceFloorPlacement =
+    state.floors.find((floor) => floor.label === shapeMatch.referenceFloorLabel) ?? null;
+  const sourceFloorPlacement =
+    state.floors.find((floor) => floor.label === shapeMatch.sourceFloorLabel) ?? null;
 
   const previewSuggestion =
     shapeMatch.matches.find((match) => match.rank === shapeMatch.previewRank) ?? null;
@@ -348,10 +400,22 @@ export function IllustratorPage() {
       (floor) => floor.label === shapeMatch.referenceFloorLabel
     );
     const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
+    if (!preview || !active) return;
+
+    // Two areas the user asserted are the same thing beat a single outline.
+    // They are anchored to the floor that was active when picking started, not
+    // to whichever floor the user is currently looking at.
     if (
-      !preview ||
+      referenceFloor &&
+      sourceFloorPlacement &&
+      shapeMatch.sourceRegion &&
+      shapeMatch.targetRegion
+    ) {
+      void findRegionMatches(sourceFloorPlacement, referenceFloor);
+      return;
+    }
+    if (
       !selection ||
-      !active ||
       selection.floorLabel !== active.label ||
       (!reference && !referenceFloor)
     ) {
@@ -420,6 +484,62 @@ export function IllustratorPage() {
     }
   };
 
+  const findRegionMatches = async (
+    sourceFloor: PlacementState["floors"][number],
+    referenceFloor: PlacementState["floors"][number]
+  ) => {
+    const sourceRegion = shapeMatch.sourceRegion;
+    const targetRegion = shapeMatch.targetRegion;
+    if (!preview || !sourceRegion || !targetRegion) return;
+
+    setShapeMatch((current) => ({ ...current, loading: true, searched: false, error: null }));
+    try {
+      const response = await matchIllustratorRegions(preview.conversion_id, {
+        floor_label: sourceFloor.label,
+        region: sourceRegion,
+        current_transform: transformPayload(resolvedTransform(state, sourceFloor)),
+        // The result is applied to this floor alone, and an individual apply
+        // ignores the scale lock, so constraining the fit would only reject
+        // correspondences the two areas actually agree on.
+        scale_locked: false,
+        reference_floor: {
+          label: referenceFloor.label,
+          transform: transformPayload(resolvedTransform(state, referenceFloor)),
+          region: targetRegion
+        }
+      });
+      setShapeMatch((current) =>
+        current.sourceRegion === sourceRegion && current.targetRegion === targetRegion
+          ? {
+              ...current,
+              matches: response.matches,
+              previewRank: response.matches[0]?.rank ?? null,
+              loading: false,
+              searched: true,
+              error: null
+            }
+          : current
+      );
+    } catch (error) {
+      setShapeMatch((current) =>
+        current.sourceRegion === sourceRegion && current.targetRegion === targetRegion
+          ? {
+              ...current,
+              loading: false,
+              searched: true,
+              error: describeFailure(
+                error,
+                t(
+                  "Could not compare those two areas.",
+                  "選択した2つの範囲を比較できませんでした。"
+                )
+              )
+            }
+          : current
+      );
+    }
+  };
+
   const shapeMatchModel: ShapeMatchPanelModel = {
     referenceName: shapeMatch.referenceName,
     referenceFloorLabel: shapeMatch.referenceFloorLabel,
@@ -430,6 +550,10 @@ export function IllustratorPage() {
     loading: shapeMatch.loading,
     searched: shapeMatch.searched,
     error: shapeMatch.error,
+    sourceFloorLabel: shapeMatch.sourceFloorLabel || state.activeFloorLabel || "",
+    regionStage: shapeMatch.regionStage,
+    hasSourceRegion: shapeMatch.sourceRegion !== null,
+    hasTargetRegion: shapeMatch.targetRegion !== null,
     onReferenceChange: (referenceName) =>
       setShapeMatch((current) => ({
         ...current,
@@ -465,10 +589,35 @@ export function IllustratorPage() {
             }
       );
     },
+    onToggleRegions: () => {
+      setPickSession(null);
+      setShapeMatch((current) =>
+        current.regionStage
+          ? { ...current, regionStage: null }
+          : {
+              ...current,
+              sourceFloorLabel: state.activeFloorLabel ?? "",
+              regionStage: "source",
+              selecting: false,
+              selection: null,
+              sourceRegion: null,
+              targetRegion: null,
+              matches: [],
+              previewRank: null,
+              searched: false,
+              error: null
+            }
+      );
+    },
     onFind: () => void findShapeMatches(),
     onPreview: (previewRank) => setShapeMatch((current) => ({ ...current, previewRank })),
     onApply: () => {
       if (!shapeMatchPreview) return;
+      // An apply always moves the floor the source area came from, even if the
+      // user is currently looking at a different level.
+      if (shapeMatch.sourceFloorLabel && shapeMatch.sourceFloorLabel !== state.activeFloorLabel) {
+        dispatch({ type: "setActiveFloor", label: shapeMatch.sourceFloorLabel });
+      }
       dispatch({
         type: "applySimilarity",
         mode: shapeMatch.referenceFloorLabel ? "individual" : adjustmentMode,
@@ -701,6 +850,53 @@ export function IllustratorPage() {
           shapePickActive={shapeMatch.selecting}
           selectedShape={shapeMatch.selection}
           shapeMatchPreview={shapeMatchPreview}
+          regionPickStage={shapeMatch.regionStage}
+          regionSource={
+            shapeMatch.sourceRegion && sourceFloorPlacement
+              ? regionCorners(
+                  resolvedTransform(state, sourceFloorPlacement),
+                  shapeMatch.sourceRegion
+                )
+              : null
+          }
+          regionTarget={
+            shapeMatch.targetRegion && referenceFloorPlacement
+              ? regionCorners(
+                  resolvedTransform(state, referenceFloorPlacement),
+                  shapeMatch.targetRegion
+                )
+              : null
+          }
+          onRegionDrawn={(corners) => {
+            const stage = shapeMatch.regionStage;
+            if (!stage) return;
+            const floor = stage === "source" ? sourceFloorPlacement : referenceFloorPlacement;
+            if (!floor) return;
+            const region = artworkRegion(resolvedTransform(state, floor), corners);
+            setShapeMatch((current) =>
+              current.regionStage !== stage
+                ? current
+                : stage === "source"
+                  ? { ...current, sourceRegion: region, regionStage: "target" }
+                  : {
+                      ...current,
+                      targetRegion: region,
+                      regionStage: null,
+                      matches: [],
+                      previewRank: null,
+                      searched: false,
+                      error: null
+                    }
+            );
+            // Bring the floor being boxed to the front so the next area is
+            // drawn against a solid plan instead of a ghost, then hand the
+            // view back once both areas are in.
+            const nextLabel =
+              stage === "source" ? shapeMatch.referenceFloorLabel : shapeMatch.sourceFloorLabel;
+            if (nextLabel && nextLabel !== state.activeFloorLabel) {
+              dispatch({ type: "setActiveFloor", label: nextLabel });
+            }
+          }}
           onPickShape={(selection) => {
             const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
             if (!shapeMatch.selecting || !active || selection.floorLabel !== active.label) {

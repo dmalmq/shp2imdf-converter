@@ -30,6 +30,7 @@ from backend.src.illustrator_georeference import (
 )
 from backend.src.illustrator_importer import _sanitize_layer_name
 from backend.src.illustrator_importer import convert_ai_to_geopackage_bundle, parse_ai
+from backend.src.illustrator_shape_match import match_regions
 from backend.src.illustrator_shape_match import match_shapes
 from backend.src.illustrator_store import ConversionStore
 from backend.src.imdf_reader import read_imdf_zip
@@ -52,6 +53,7 @@ from backend.src.schemas import (
     PlacementRequest,
     ReferenceLayerItem,
     ReferenceLayersResponse,
+    IllustratorRegionMatchRequest,
     IllustratorShapeMatchRequest,
     IllustratorShapeMatchResponse,
     TransformPayload,
@@ -349,6 +351,30 @@ async def match_illustrator_shape(
             if payload.reference_floor is None
             else _transform_from_payload(payload.reference_floor.transform)
         ),
+    )
+    return IllustratorShapeMatchResponse(matches=matches)
+
+
+@router.post(
+    "/convert/illustrator/{conversion_id}/region-matches",
+    response_model=IllustratorShapeMatchResponse,
+)
+async def match_illustrator_region(
+    conversion_id: str,
+    request: Request,
+    payload: IllustratorRegionMatchRequest,
+) -> IllustratorShapeMatchResponse:
+    """Rank similarity placements of a boxed active-floor area onto another floor."""
+    cached = _illustrator_store(request).get(conversion_id)
+    matches = match_regions(
+        cached,
+        floor_label=payload.floor_label,
+        region=payload.region,
+        current=_transform_from_payload(payload.current_transform),
+        scale_locked=payload.scale_locked,
+        reference_floor_label=payload.reference_floor.label,
+        reference_transform=_transform_from_payload(payload.reference_floor.transform),
+        reference_region=payload.reference_floor.region,
     )
     return IllustratorShapeMatchResponse(matches=matches)
 

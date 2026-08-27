@@ -222,6 +222,27 @@ export function buildShapeMatchOverlay(
   return { type: "FeatureCollection", features };
 }
 
+export type RegionCorners = [number, number][];
+
+/** The two picked areas, drawn so the asserted correspondence stays visible. */
+export function buildRegionOverlay(
+  source: RegionCorners | null,
+  target: RegionCorners | null
+): FeatureCollection {
+  const features: Feature[] = [];
+  const push = (corners: RegionCorners | null, kind: string) => {
+    if (!corners || corners.length < 3) return;
+    features.push({
+      type: "Feature",
+      properties: { kind },
+      geometry: { type: "Polygon", coordinates: [[...corners, corners[0]]] }
+    });
+  };
+  push(source, "region-source");
+  push(target, "region-target");
+  return { type: "FeatureCollection", features };
+}
+
 /**
  * Nearest rendered vertex of the given layers to a screen point, as lngLat, or
  * null when nothing renders within the tolerance. Vertices are compared in
@@ -294,6 +315,11 @@ type Props = {
     transform: SimilarityTransform;
   } | null;
   onPickShape?: (selection: ArtworkShapeSelection) => void;
+  /** Which area is being drawn: the active floor's, then the target floor's. */
+  regionPickStage?: "source" | "target" | null;
+  regionSource?: RegionCorners | null;
+  regionTarget?: RegionCorners | null;
+  onRegionDrawn?: (corners: RegionCorners) => void;
 };
 
 /**
@@ -316,13 +342,20 @@ export function PlacementMap({
   shapePickActive = false,
   selectedShape = null,
   shapeMatchPreview = null,
-  onPickShape
+  onPickShape,
+  regionPickStage = null,
+  regionSource = null,
+  regionTarget = null,
+  onRegionDrawn
 }: Props) {
   const { t } = useUiLanguage();
   const mapRef = useRef<MapRef | null>(null);
   const [ready, setReady] = useState(false);
   const [basemap, setBasemap] = useState<BasemapId>("osm");
   const [onlyActiveFloor, setOnlyActiveFloor] = useState(false);
+  const [rubber, setRubber] = useState<
+    { x0: number; y0: number; x1: number; y1: number } | null
+  >(null);
   const mapStyle = useMemo(
     () => ({ ...BASEMAP_STYLES[basemap], glyphs: PLACEMENT_GLYPHS }),
     [basemap]
@@ -395,6 +428,11 @@ export function PlacementMap({
         ? buildShapeMatchOverlay(selectedShape, activeTransform, shapeMatchPreview)
         : EMPTY_FEATURE_COLLECTION,
     [selectedShape, activeTransform, shapeMatchPreview]
+  );
+
+  const regionData = useMemo(
+    () => buildRegionOverlay(regionSource, regionTarget),
+    [regionSource, regionTarget]
   );
 
   const onClick = (event: MapLayerMouseEvent) => {
@@ -698,6 +736,36 @@ export function PlacementMap({
           />
         </Source>
 
+        <Source id="placement-regions" type="geojson" data={regionData}>
+          <Layer
+            id="placement-region-fill"
+            type="fill"
+            paint={{
+              "fill-color": [
+                "case",
+                ["==", ["get", "kind"], "region-source"],
+                "#2563eb",
+                "#f59e0b"
+              ],
+              "fill-opacity": 0.1
+            }}
+          />
+          <Layer
+            id="placement-region-line"
+            type="line"
+            paint={{
+              "line-color": [
+                "case",
+                ["==", ["get", "kind"], "region-source"],
+                "#2563eb",
+                "#f59e0b"
+              ],
+              "line-width": 2,
+              "line-dasharray": [2, 1]
+            }}
+          />
+        </Source>
+
         {/* Bounding box of the active floor: shows what the handles act on. */}
         {gizmo ? (
           <Source
@@ -725,6 +793,7 @@ export function PlacementMap({
         {ready &&
         !pickStage &&
         !shapePickActive &&
+        !regionPickStage &&
         activeFloor &&
         activeTransform &&
         activeLayer &&
@@ -746,7 +815,71 @@ export function PlacementMap({
         ) : null}
       </MapView>
 
-      <div className="absolute left-3 top-3 flex flex-col gap-2">
+      {/* Drawing captures its own pointer events so the map cannot pan away
+          underneath the rubber band. */}
+      {regionPickStage ? (
+        <div
+          data-testid="region-capture"
+          className="absolute inset-0 z-10 cursor-crosshair"
+          onPointerDown={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setRubber({
+              x0: event.clientX - rect.left,
+              y0: event.clientY - rect.top,
+              x1: event.clientX - rect.left,
+              y1: event.clientY - rect.top
+            });
+          }}
+          onPointerMove={(event) => {
+            if (!rubber) return;
+            const rect = event.currentTarget.getBoundingClientRect();
+            setRubber({
+              ...rubber,
+              x1: event.clientX - rect.left,
+              y1: event.clientY - rect.top
+            });
+          }}
+          onPointerUp={() => {
+            const instance = mapRef.current?.getMap();
+            const box = rubber;
+            setRubber(null);
+            if (!instance || !box || !onRegionDrawn) return;
+            const left = Math.min(box.x0, box.x1);
+            const right = Math.max(box.x0, box.x1);
+            const top = Math.min(box.y0, box.y1);
+            const bottom = Math.max(box.y0, box.y1);
+            // A stray click is not an area; require a deliberate drag.
+            if (right - left < 8 || bottom - top < 8) return;
+            const corner = (x: number, y: number): [number, number] => {
+              const { lng, lat } = instance.unproject([x, y]);
+              return [lng, lat];
+            };
+            onRegionDrawn([
+              corner(left, top),
+              corner(right, top),
+              corner(right, bottom),
+              corner(left, bottom)
+            ]);
+          }}
+        >
+          {rubber ? (
+            <div
+              className="pointer-events-none absolute border-2 border-dashed border-[#2563eb] bg-[#2563eb]/10"
+              style={{
+                left: Math.min(rubber.x0, rubber.x1),
+                top: Math.min(rubber.y0, rubber.y1),
+                width: Math.abs(rubber.x1 - rubber.x0),
+                height: Math.abs(rubber.y1 - rubber.y0)
+              }}
+            />
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Above the area-capture layer: switching levels mid-pick is how the
+          user gets a clear look at the floor being boxed. */}
+      <div className="absolute left-3 top-3 z-20 flex flex-col gap-2">
         {floors.length > 1 ? (
           <div className="flex flex-wrap gap-1 rounded-[var(--radius-md)] bg-white/90 p-1 shadow">
             {floors.map((floor) => {

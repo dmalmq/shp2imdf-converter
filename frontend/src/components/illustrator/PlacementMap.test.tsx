@@ -1,6 +1,8 @@
 import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 
+import type { Polygon } from "geojson";
+
 import type { IllustratorShapeMatchSuggestion } from "../../api/client";
 
 import {
@@ -11,6 +13,7 @@ import {
 import { artworkToLngLat, type SimilarityTransform } from "../../lib/similarity";
 import {
   buildControlPointOverlay,
+  buildRegionOverlay,
   buildShapeMatchOverlay,
   PlacementMap,
   resolvePickedOutline,
@@ -406,4 +409,31 @@ test("buildShapeMatchOverlay keeps a picked line as LineString selected geometry
   expect(overlay.features).toHaveLength(1);
   expect(overlay.features[0]?.properties?.kind).toBe("selected");
   expect(overlay.features[0]?.geometry?.type).toBe("LineString");
+});
+
+
+test("buildRegionOverlay closes each picked area and tags which floor it came from", () => {
+  const source: [number, number][] = [
+    [139.766, 35.682],
+    [139.768, 35.682],
+    [139.768, 35.68],
+    [139.766, 35.68]
+  ];
+  const target: [number, number][] = [
+    [139.776, 35.692],
+    [139.778, 35.692],
+    [139.778, 35.69],
+    [139.776, 35.69]
+  ];
+  const overlay = buildRegionOverlay(source, target);
+  expect(overlay.features.map((feature) => feature.properties?.kind)).toEqual([
+    "region-source",
+    "region-target"
+  ]);
+  const ring = (overlay.features[0]?.geometry as Polygon).coordinates[0];
+  expect(ring).toHaveLength(5);
+  expect(ring[4]).toEqual(ring[0]);
+
+  // Nothing drawn yet is an empty overlay, not a degenerate polygon.
+  expect(buildRegionOverlay(null, null).features).toHaveLength(0);
 });

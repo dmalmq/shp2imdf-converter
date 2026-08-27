@@ -14,6 +14,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 from typing import Mapping
+from typing import Sequence
 
 import geopandas as gpd
 from shapely import make_valid
@@ -26,10 +27,15 @@ from shapely.geometry import mapping
 from shapely.geometry import shape
 from shapely.ops import linemerge
 from shapely.ops import nearest_points
+from shapely.ops import unary_union
 
 from backend.src.illustrator_export import ExportFloor
 from backend.src.illustrator_export import _floor_mask
 from backend.src.illustrator_export import _read_layers
+from backend.src.illustrator_outline_match import build_candidates
+from backend.src.illustrator_outline_match import match_clusters
+from backend.src.illustrator_outline_match import outline_match
+from backend.src.illustrator_outline_match import transform_distance
 from backend.src.illustrator_georeference import GeoreferenceError
 from backend.src.illustrator_georeference import SimilarityTransform
 from backend.src.illustrator_georeference import fit_helmert
@@ -40,6 +46,12 @@ from backend.src.illustrator_store import CachedConversion
 _SAMPLE_COUNT = 72
 _RESIDUAL_VECTORS = 12
 _MAX_MATCHES = 3
+_REGION_CANDIDATE_LIMIT = 40
+# The user asserted the correspondence by drawing the boxes, so a single match
+# is enough and any rotation is legitimate. Scale still needs a sane band: an
+# unbounded fit happily maps a stair tread onto a concourse.
+_REGION_MIN_SCALE = 0.2
+_REGION_MAX_SCALE = 5.0
 _SHORTLIST_LIMIT = 48
 _OUTLINE_ERROR = "The selected artwork feature is not a usable outline."
 _SAME_FLOOR_ERROR = "The reference floor must be different from the selected floor."
@@ -135,6 +147,228 @@ def match_shapes(
     ]
     fitted.sort(key=lambda item: (-item.score, item.candidate.feature_index, item.candidate.part_index))
     return [_suggestion(item, index, fitted) for index, item in enumerate(fitted[:_MAX_MATCHES])]
+
+
+def match_regions(
+    cached: CachedConversion,
+    *,
+    floor_label: str,
+    region: Sequence[float],
+    current: SimilarityTransform,
+    scale_locked: bool,
+    reference_floor_label: str,
+    reference_transform: SimilarityTransform,
+    reference_region: Sequence[float],
+) -> list[dict[str, Any]]:
+    """Rank similarity placements that map a boxed active-floor area onto a boxed reference floor."""
+    _floor_assignment(cached, floor_label)
+    if reference_floor_label == floor_label:
+        raise ValueError(_SAME_FLOOR_ERROR)
+    _floor_assignment(cached, reference_floor_label)
+
+    sources = build_candidates(
+        _region_outlines(cached, floor_label, region),
+        minimum_area=0.0,
+        limit=_REGION_CANDIDATE_LIMIT,
+    )
+    targets = build_candidates(
+        _region_outlines(cached, reference_floor_label, reference_region),
+        minimum_area=0.0,
+        limit=_REGION_CANDIDATE_LIMIT,
+    )
+    if not sources or not targets:
+        return []
+
+    minx, miny, maxx, maxy = (float(value) for value in region)
+    sheet = (max(maxx - minx, 1.0), max(maxy - miny, 1.0))
+    center = ((minx + maxx) / 2.0, (miny + maxy) / 2.0)
+    fixed_scale = (
+        current.metres_per_point / reference_transform.metres_per_point
+        if scale_locked
+        else None
+    )
+    matches = [
+        match
+        for source in sources
+        for target in targets
+        if (
+            match := outline_match(
+                source,
+                target,
+                sheet,
+                fixed_scale=fixed_scale,
+                center=center,
+                min_scale=_REGION_MIN_SCALE,
+                max_scale=_REGION_MAX_SCALE,
+            )
+        )
+        is not None
+    ]
+    clusters = match_clusters(matches, sheet)
+    clusters.sort(
+        key=lambda cluster: (
+            -len(cluster),
+            # Area-weighted, so a cluster of substantial outlines outranks an
+            # equally sized cluster of incidental fragments.
+            -sum(item.weight for item in cluster),
+            -_median([item.overlap_iou for item in cluster]),
+            _median([item.normalized_rmse for item in cluster]),
+        )
+    )
+    ranked = [
+        _region_suggestion(
+            cluster,
+            sources,
+            targets,
+            current,
+            reference_transform,
+            sheet,
+            scale_locked,
+        )
+        for cluster in clusters
+    ]
+    return [
+        _suggestion_rank(item, index, ranked)
+        for index, item in enumerate(ranked[:_MAX_MATCHES])
+    ]
+
+
+def _region_outlines(
+    cached: CachedConversion, floor_label: str, region: Sequence[float]
+) -> list:
+    stored = _floor_assignment(cached, floor_label)
+    export_floor = ExportFloor(
+        label=floor_label,
+        transform=_PLACEHOLDER_TRANSFORM,
+        region=stored.get("box"),
+        layer_names=stored.get("layer_names"),
+        pages=stored.get("pages"),
+    )
+    minx, miny, maxx, maxy = (float(value) for value in region)
+    outlines = []
+    for _spec, frame in _read_layers(cached):
+        if frame.empty:
+            continue
+        subset = frame[_floor_mask(frame, export_floor)]
+        for geom in subset.geometry:
+            try:
+                outline = _as_outline_polygon(geom)
+            except ValueError:
+                continue
+            centroid = outline.centroid
+            if minx <= centroid.x <= maxx and miny <= centroid.y <= maxy:
+                outlines.append(outline)
+    return outlines
+
+
+def _region_suggestion(
+    cluster,
+    sources,
+    targets,
+    current: SimilarityTransform,
+    reference_transform: SimilarityTransform,
+    sheet: tuple[float, float],
+    scale_locked: bool,
+) -> dict[str, Any]:
+    medoid = min(
+        cluster,
+        key=lambda candidate: sum(
+            transform_distance(candidate, other, sheet) for other in cluster
+        ),
+    )
+    source = sources[medoid.source_index]
+    target = targets[medoid.target_index]
+    composed = _compose_region_transform(
+        current, reference_transform, medoid, scale_locked
+    )
+    metres = composed.metres_per_point
+    moved = make_valid(affine_transform(source.geom, medoid.matrix))
+    if moved.geom_type == "MultiPolygon":
+        moved = max(moved.geoms, key=lambda part: part.area)
+    moved_samples = [_apply_matrix(medoid.matrix, point) for point in source.samples]
+    distances = (
+        _symmetric_distances(moved_samples, list(target.samples), moved, target.geom)
+        if moved.geom_type == "Polygon"
+        else []
+    )
+    median_overlap = _median([item.overlap_iou for item in cluster])
+    boundary_rmse_m = _rmse(distances) * metres
+    art_placed = [
+        _apply_matrix(composed.to_affine_matrix(), point) for point in source.samples
+    ]
+    ref_placed = affine_transform(target.geom, reference_transform.to_affine_matrix())
+    unioned = unary_union([targets[item.target_index].geom for item in cluster])
+    placed_union = make_valid(
+        affine_transform(unioned, reference_transform.to_affine_matrix())
+    )
+    wgs = _to_wgs84(placed_union, reference_transform.working_crs)
+    return {
+        "rank": 0,
+        "score": median_overlap / (1.0 + boundary_rmse_m),
+        "relative_gap": None,
+        "reference_feature_index": medoid.target_index,
+        "reference_part_index": 0,
+        "transform": {
+            "artwork_anchor": [composed.artwork_anchor[0], composed.artwork_anchor[1]],
+            "map_anchor": [composed.map_anchor[0], composed.map_anchor[1]],
+            "rotation_deg": composed.rotation_deg,
+            "metres_per_point": composed.metres_per_point,
+            "working_crs": composed.working_crs,
+        },
+        "boundary_rmse_m": boundary_rmse_m,
+        "boundary_p95_m": _percentile(distances, 95.0) * metres,
+        "max_residual_m": (max(distances) if distances else 0.0) * metres,
+        "overlap_iou": median_overlap,
+        "reference_geometry": json.loads(to_geojson(wgs)),
+        "residual_vectors": _residual_vectors(
+            art_placed, ref_placed, composed.working_crs
+        ),
+    }
+
+
+def _compose_region_transform(
+    current: SimilarityTransform,
+    reference_transform: SimilarityTransform,
+    match,
+    scale_locked: bool,
+) -> SimilarityTransform:
+    metres = (
+        current.metres_per_point
+        if scale_locked
+        else reference_transform.metres_per_point * match.scale
+    )
+    rotation = (
+        reference_transform.rotation_deg + match.rotation_deg + 180.0
+    ) % 360.0 - 180.0
+    ax, ay = current.artwork_anchor
+    a, b, d, e, xoff, yoff = match.matrix
+    mapped_x = a * ax + b * ay + xoff
+    mapped_y = d * ax + e * ay + yoff
+    ra, rb, rd, re, rxoff, ryoff = reference_transform.to_affine_matrix()
+    east = ra * mapped_x + rb * mapped_y + rxoff
+    north = rd * mapped_x + re * mapped_y + ryoff
+    return SimilarityTransform(
+        artwork_anchor=current.artwork_anchor,
+        map_anchor=unproject_point(east, north, reference_transform.working_crs),
+        rotation_deg=rotation,
+        metres_per_point=metres,
+        working_crs=reference_transform.working_crs,
+    )
+
+
+def _suggestion_rank(item: dict[str, Any], index: int, ranked: list[dict[str, Any]]) -> dict[str, Any]:
+    nxt = ranked[index + 1] if index + 1 < len(ranked) else None
+    relative_gap = None
+    if nxt is not None and item["score"] > 0:
+        relative_gap = (item["score"] - nxt["score"]) / item["score"]
+    return {**item, "rank": index + 1, "relative_gap": relative_gap}
+
+
+def _median(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2]
 
 
 def _resolve_artwork_polygon(

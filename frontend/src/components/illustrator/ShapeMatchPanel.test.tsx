@@ -94,6 +94,11 @@ function model(overrides: Partial<ShapeMatchPanelModel> = {}): ShapeMatchPanelMo
     loading: false,
     searched: false,
     error: null,
+    sourceFloorLabel: "1F",
+    regionStage: null,
+    hasSourceRegion: false,
+    hasTargetRegion: false,
+    onToggleRegions: vi.fn(),
     onReferenceChange: vi.fn(),
     onMatchTargetChange: vi.fn(),
     onToggleSelection: vi.fn(),
@@ -232,4 +237,86 @@ test("blocks group apply while the registration floor is unlinked", () => {
   );
   expect(screen.getByRole("button", { name: "Apply to all linked floors" })).toBeDisabled();
   expect(screen.getByText("Relink 1F before applying to all floors.")).toBeInTheDocument();
+});
+
+
+test("areas are offered only against another floor, and guide each drag", () => {
+  const onToggleRegions = vi.fn();
+  const { rerender } = render(
+    <ShapeMatchPanel
+      state={placementState(true, ["1F", "2F"])}
+      mode="group"
+      referenceLayers={[]}
+      model={model({ referenceName: "", referenceFloorLabel: "2F", onToggleRegions })}
+    />
+  );
+  expect(
+    screen.getByText("Use areas when only part of the two floors is the same.")
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Match areas instead" }));
+  expect(onToggleRegions).toHaveBeenCalledOnce();
+
+  rerender(
+    <ShapeMatchPanel
+      state={placementState(true, ["1F", "2F"])}
+      mode="group"
+      referenceLayers={[]}
+      model={model({ referenceName: "", referenceFloorLabel: "2F", regionStage: "source" })}
+    />
+  );
+  expect(
+    screen.getByRole("button", { name: "Drag around the area on 1F…" })
+  ).toBeInTheDocument();
+
+  rerender(
+    <ShapeMatchPanel
+      state={placementState(true, ["1F", "2F"])}
+      mode="group"
+      referenceLayers={[]}
+      model={model({
+        referenceName: "",
+        referenceFloorLabel: "2F",
+        regionStage: "target",
+        hasSourceRegion: true
+      })}
+    />
+  );
+  expect(
+    screen.getByRole("button", { name: "Now drag the matching area on 2F…" })
+  ).toBeInTheDocument();
+
+  // A shapefile target has no second floor to box, so the control is absent.
+  rerender(
+    <ShapeMatchPanel
+      state={placementState(true, ["1F", "2F"])}
+      mode="group"
+      referenceLayers={referenceLayers}
+      model={model({ referenceFloorLabel: "" })}
+    />
+  );
+  expect(screen.queryByRole("button", { name: /Match areas instead/ })).toBeNull();
+});
+
+test("two picked areas can be compared without selecting any outline", () => {
+  const onFind = vi.fn();
+  render(
+    <ShapeMatchPanel
+      state={placementState(true, ["1F", "2F"])}
+      mode="group"
+      referenceLayers={[]}
+      model={model({
+        referenceName: "",
+        referenceFloorLabel: "2F",
+        selection: null,
+        hasSourceRegion: true,
+        hasTargetRegion: true,
+        onFind
+      })}
+    />
+  );
+  expect(screen.getByText("Areas selected on 1F and 2F.")).toBeInTheDocument();
+  const find = screen.getByRole("button", { name: "Find matches" });
+  expect(find).toBeEnabled();
+  fireEvent.click(find);
+  expect(onFind).toHaveBeenCalledOnce();
 });

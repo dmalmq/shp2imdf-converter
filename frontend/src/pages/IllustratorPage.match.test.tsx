@@ -2,7 +2,12 @@ import React, { type Dispatch } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Feature, Polygon } from "geojson";
 
-import { assignFloors, matchIllustratorShape, previewIllustrator } from "../api/client";
+import {
+  assignFloors,
+  matchIllustratorRegions,
+  matchIllustratorShape,
+  previewIllustrator
+} from "../api/client";
 import type * as ApiClient from "../api/client";
 import type { ShapeMatchPanelModel } from "../components/illustrator/ShapeMatchPanel";
 import type {
@@ -15,6 +20,7 @@ import { IllustratorPage } from "./IllustratorPage";
 vi.mock("../api/client", async (importOriginal) => ({
   ...(await importOriginal<typeof ApiClient>()),
   assignFloors: vi.fn(),
+  matchIllustratorRegions: vi.fn(),
   matchIllustratorShape: vi.fn(),
   previewIllustrator: vi.fn()
 }));
@@ -78,6 +84,8 @@ type MapProps = {
     sourceRow: number;
     feature: Feature<Polygon>;
   }) => void;
+  regionPickStage?: "source" | "target" | null;
+  onRegionDrawn?: (corners: [number, number][]) => void;
 };
 
 vi.mock("../components/illustrator/PlacementSidebar", () => ({
@@ -92,10 +100,19 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
       <button type="button" onClick={() => shapeMatch.onMatchTargetChange("floor:2F")}>
         Match 2F
       </button>
+      <button type="button" onClick={shapeMatch.onToggleRegions}>
+        Match areas
+      </button>
+      <output data-testid="active-floor">{state.activeFloorLabel}</output>
+      <output data-testid="region-stage">{shapeMatch.regionStage ?? "idle"}</output>
+      <output data-testid="region-count">
+        {[shapeMatch.hasSourceRegion, shapeMatch.hasTargetRegion].filter(Boolean).length}
+      </output>
       <button
         type="button"
         disabled={
-          !shapeMatch.selection || !(shapeMatch.referenceName || shapeMatch.referenceFloorLabel)
+          !(shapeMatch.selection || (shapeMatch.hasSourceRegion && shapeMatch.hasTargetRegion)) ||
+          !(shapeMatch.referenceName || shapeMatch.referenceFloorLabel)
         }
         onClick={shapeMatch.onFind}
       >
@@ -132,7 +149,9 @@ vi.mock("../components/illustrator/PlacementMap", () => ({
     onModeChange,
     shapePickActive,
     shapeMatchPreview,
-    onPickShape
+    onPickShape,
+    regionPickStage,
+    onRegionDrawn
   }: MapProps) => {
     const activeIndex = state.floors.findIndex((floor) => floor.label === state.activeFloorLabel);
     const nextFloor = state.floors[(activeIndex + 1) % state.floors.length];
@@ -156,6 +175,20 @@ vi.mock("../components/illustrator/PlacementMap", () => ({
         </button>
         <button
           type="button"
+          disabled={!regionPickStage}
+          onClick={() =>
+            onRegionDrawn?.([
+              [139.766, 35.682],
+              [139.768, 35.682],
+              [139.768, 35.68],
+              [139.766, 35.68]
+            ])
+          }
+        >
+          Draw region
+        </button>
+        <button
+          type="button"
           onClick={() => dispatch({ type: "setActiveFloor", label: nextFloor.label })}
         >
           Change floor
@@ -174,6 +207,7 @@ vi.mock("../components/illustrator/PlacementMap", () => ({
 const preview = vi.mocked(previewIllustrator);
 const assign = vi.mocked(assignFloors);
 const matchShapes = vi.mocked(matchIllustratorShape);
+const matchRegions = vi.mocked(matchIllustratorRegions);
 
 const PREVIEW: ApiClient.IllustratorPreviewResponse = {
   conversion_id: "shape-match-test",
@@ -231,6 +265,7 @@ beforeEach(() => {
   preview.mockReset();
   assign.mockReset();
   matchShapes.mockReset();
+  matchRegions.mockReset();
   preview.mockResolvedValue(PREVIEW);
   assign.mockResolvedValue({
     floors: ["1F", "2F", "3F"].map((label) => ({
@@ -323,4 +358,81 @@ test("changing floor or mode discards an uncommitted shape selection", async () 
   fireEvent.click(screen.getByRole("button", { name: "Change mode" }));
   expect(screen.getByTestId("match-selection")).toHaveTextContent("empty");
   expect(screen.getByTestId("frame-rotation")).toHaveTextContent("0");
+});
+
+
+test("two drawn areas are compared through the region endpoint", async () => {
+  matchRegions.mockResolvedValue({ matches: MATCHES });
+  await enterPlacementView();
+  fireEvent.click(screen.getByRole("button", { name: "Match 2F" }));
+  fireEvent.click(screen.getByRole("button", { name: "Match areas" }));
+  expect(screen.getByTestId("region-stage")).toHaveTextContent("source");
+
+  fireEvent.click(screen.getByRole("button", { name: "Draw region" }));
+  expect(screen.getByTestId("region-stage")).toHaveTextContent("target");
+  expect(screen.getByTestId("region-count")).toHaveTextContent("1");
+
+  fireEvent.click(screen.getByRole("button", { name: "Draw region" }));
+  expect(screen.getByTestId("region-stage")).toHaveTextContent("idle");
+  expect(screen.getByTestId("region-count")).toHaveTextContent("2");
+
+  // No outline was ever picked: the two areas are the whole correspondence.
+  expect(screen.getByTestId("match-selection")).toHaveTextContent("empty");
+  fireEvent.click(screen.getByRole("button", { name: "Find matches" }));
+  await waitFor(() => expect(screen.getByTestId("match-count")).toHaveTextContent("3"));
+  expect(matchShapes).not.toHaveBeenCalled();
+  expect(matchRegions).toHaveBeenCalledWith(
+    "shape-match-test",
+    expect.objectContaining({
+      floor_label: "1F",
+      region: expect.arrayContaining([expect.any(Number)]),
+      reference_floor: expect.objectContaining({ label: "2F" })
+    })
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
+  await waitFor(() =>
+    expect(screen.getByTestId("linked-floors")).toHaveTextContent("false,true,true")
+  );
+});
+
+
+test("boxing an area brings that level to the front and survives switching levels", async () => {
+  matchRegions.mockResolvedValue({ matches: MATCHES });
+  await enterPlacementView();
+  fireEvent.click(screen.getByRole("button", { name: "Match 2F" }));
+  fireEvent.click(screen.getByRole("button", { name: "Match areas" }));
+  expect(screen.getByTestId("active-floor")).toHaveTextContent("1F");
+
+  // The target floor is raised so its area is drawn on a solid plan, not a ghost.
+  fireEvent.click(screen.getByRole("button", { name: "Draw region" }));
+  expect(screen.getByTestId("region-stage")).toHaveTextContent("target");
+  expect(screen.getByTestId("active-floor")).toHaveTextContent("2F");
+
+  // Looking at another level mid-pick must not discard the area already boxed.
+  fireEvent.click(screen.getByRole("button", { name: "Change floor" }));
+  expect(screen.getByTestId("active-floor")).toHaveTextContent("3F");
+  expect(screen.getByTestId("region-stage")).toHaveTextContent("target");
+  expect(screen.getByTestId("region-count")).toHaveTextContent("1");
+  expect(screen.getByTestId("match-target")).toHaveTextContent("2F");
+
+  fireEvent.click(screen.getByRole("button", { name: "Draw region" }));
+  expect(screen.getByTestId("region-count")).toHaveTextContent("2");
+  // The view hands back to the floor that will actually move.
+  expect(screen.getByTestId("active-floor")).toHaveTextContent("1F");
+
+  fireEvent.click(screen.getByRole("button", { name: "Find matches" }));
+  await waitFor(() => expect(screen.getByTestId("match-count")).toHaveTextContent("3"));
+  expect(matchRegions).toHaveBeenCalledWith(
+    "shape-match-test",
+    expect.objectContaining({
+      floor_label: "1F",
+      reference_floor: expect.objectContaining({ label: "2F" })
+    })
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
+  await waitFor(() =>
+    expect(screen.getByTestId("linked-floors")).toHaveTextContent("false,true,true")
+  );
 });

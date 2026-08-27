@@ -1007,6 +1007,34 @@ export async function matchIllustratorShape(
   return handleJson<IllustratorShapeMatchResponse>(response);
 }
 
+export type ArtworkRegion = [number, number, number, number];
+
+export type ShapeMatchFloorRegionRef = {
+  label: string;
+  transform: TransformPayload;
+  region: ArtworkRegion;
+};
+
+export type IllustratorRegionMatchRequest = {
+  floor_label: string;
+  region: ArtworkRegion;
+  current_transform: TransformPayload;
+  scale_locked: boolean;
+  reference_floor: ShapeMatchFloorRegionRef;
+};
+
+export async function matchIllustratorRegions(
+  conversionId: string,
+  payload: IllustratorRegionMatchRequest
+): Promise<IllustratorShapeMatchResponse> {
+  const response = await fetch(`/api/convert/illustrator/${conversionId}/region-matches`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  return handleJson<IllustratorShapeMatchResponse>(response);
+}
+
 export async function exportIllustrator(
   conversionId: string,
   body: {
