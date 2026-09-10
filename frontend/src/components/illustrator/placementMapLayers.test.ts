@@ -20,6 +20,9 @@ test("a floor keeps the same source and layer ids whether it is active or a ghos
   expect(floorLineLayerId("1F")).toBe("floor-1F-line");
   expect(floorFillLayerId("1F")).not.toMatch(/ghost/);
   expect(floorFillLayerId("2F")).toBe("floor-2F-fill");
+  expect(floorSourceId("1F")).not.toMatch(/solid|transparent|ghost|hidden/);
+  expect(floorFillLayerId("1F")).not.toMatch(/solid|transparent|ghost|hidden/);
+  expect(floorLineLayerId("1F")).not.toMatch(/solid|transparent|ghost|hidden/);
 });
 
 test("hiding a reference shapefile does not change its source id", () => {

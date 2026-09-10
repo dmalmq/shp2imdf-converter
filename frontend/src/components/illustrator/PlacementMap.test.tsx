@@ -176,7 +176,7 @@ test("no mode switch with a single floor — there is nothing to group", () => {
 });
 
 
-test("switching floor, isolate, and Individual does not unmount the map wrapper", () => {
+test("switching floor, isolate, Individual and Transparent does not unmount the map wrapper", () => {
   const { container } = render(
     <PlacementMap
       floors={LAYERS}
@@ -199,7 +199,56 @@ test("switching floor, isolate, and Individual does not unmount the map wrapper"
   fireEvent.click(screen.getByRole("button", { name: "2F" }));
   fireEvent.click(screen.getByRole("button", { name: /only this floor/i }));
   fireEvent.click(screen.getByRole("button", { name: "Individual" }));
+  fireEvent.click(screen.getByRole("button", { name: "Transparent" }));
   expect(container.firstChild).toBe(wrapper);
+});
+
+const TWO_LINKED = [
+  { label: "1F", linked: true },
+  { label: "2F", linked: true }
+];
+
+test("the transparent toggle starts off, so the selected floor is solid by default", () => {
+  renderMap(LAYERS, TWO_LINKED);
+  expect(screen.getByRole("button", { name: "Transparent", pressed: false })).toBeInTheDocument();
+});
+
+test("clicking Transparent flips its pressed state", () => {
+  renderMap(LAYERS, TWO_LINKED);
+  fireEvent.click(screen.getByRole("button", { name: "Transparent" }));
+  expect(screen.getByRole("button", { name: "Transparent", pressed: true })).toBeInTheDocument();
+});
+
+test("Transparent is offered with a single floor — the selected floor is still solid there", () => {
+  renderMap(ONE_LAYER, [{ label: "1F", linked: true }]);
+  expect(screen.getByRole("button", { name: "Transparent", pressed: false })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /only this floor/i })).toBeNull();
+});
+
+test("Transparent and Only this floor are independent toggles", () => {
+  renderMap(LAYERS, TWO_LINKED);
+  fireEvent.click(screen.getByRole("button", { name: "Transparent" }));
+  expect(screen.getByRole("button", { name: /only this floor/i, pressed: false })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /only this floor/i }));
+  expect(screen.getByRole("button", { name: "Transparent", pressed: true })).toBeInTheDocument();
+});
+
+test("transparency survives a change of active floor — area-pick raises floors the same way", () => {
+  const props = {
+    dispatch: () => {},
+    mode: "group" as const,
+    onModeChange: () => {},
+    pickStage: null,
+    onPickArtwork: () => {},
+    onPickMap: () => {}
+  };
+  const { rerender } = render(
+    <PlacementMap {...props} floors={LAYERS} state={stateWith(TWO_LINKED, "1F")} />
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Transparent" }));
+  rerender(<PlacementMap {...props} floors={LAYERS} state={stateWith(TWO_LINKED, "2F")} />);
+  expect(screen.getByRole("button", { name: "2F", pressed: true })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Transparent", pressed: true })).toBeInTheDocument();
 });
 
 test("buildControlPointOverlay pairs artwork, reference, and residual features", () => {

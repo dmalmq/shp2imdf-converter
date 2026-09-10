@@ -36,6 +36,13 @@ import {
   type BasemapId
 } from "../shared/basemapStyles";
 import { Button } from "../ui";
+import {
+  DEFAULT_ARTWORK_VIEW,
+  floorPaint,
+  toggleOthersHidden,
+  toggleTransparent,
+  type ArtworkView
+} from "./artworkView";
 import { TransformHandles } from "./TransformHandles";
 import {
   ARTWORK_SLOT_LAYER_ID,
@@ -352,7 +359,7 @@ export function PlacementMap({
   const mapRef = useRef<MapRef | null>(null);
   const [ready, setReady] = useState(false);
   const [basemap, setBasemap] = useState<BasemapId>("osm");
-  const [onlyActiveFloor, setOnlyActiveFloor] = useState(false);
+  const [view, setView] = useState<ArtworkView>(DEFAULT_ARTWORK_VIEW);
   const [rubber, setRubber] = useState<
     { x0: number; y0: number; x1: number; y1: number } | null
   >(null);
@@ -580,8 +587,11 @@ export function PlacementMap({
             paint + visibility, never a remount — swapping React keys while
             reusing the MapLibre source id is what went white. */}
         {placedByFloor.map((floor) => {
-          const isActive = floor.label === activeLabel;
-          const visible = isActive || !onlyActiveFloor;
+          const paint = floorPaint(
+            floor.label === activeLabel ? "active" : "other",
+            view,
+            floor.color
+          );
           return (
             <Source
               key={floorSourceId(floor.label)}
@@ -594,31 +604,15 @@ export function PlacementMap({
                 type="fill"
                 beforeId={OVERLAY_SLOT_LAYER_ID}
                 filter={["==", ["geometry-type"], "Polygon"]}
-                layout={{ visibility: layerVisibility(visible) }}
-                paint={{
-                  "fill-color": isActive
-                    ? ["coalesce", ["get", "fill_color"], floor.color]
-                    : floor.color,
-                  "fill-opacity": isActive ? 0.45 : 0.06
-                }}
+                layout={paint.layout}
+                paint={paint.fill}
               />
               <Layer
                 id={floorLineLayerId(floor.label)}
                 type="line"
                 beforeId={OVERLAY_SLOT_LAYER_ID}
-                layout={{ visibility: layerVisibility(visible) }}
-                paint={{
-                  "line-color": isActive
-                    ? [
-                        "coalesce",
-                        ["get", "stroke_color"],
-                        ["get", "fill_color"],
-                        floor.color
-                      ]
-                    : floor.color,
-                  "line-width": isActive ? 1 : 0.5,
-                  "line-opacity": isActive ? 1 : 0.35
-                }}
+                layout={paint.layout}
+                paint={paint.line}
               />
             </Source>
           );
@@ -880,87 +874,101 @@ export function PlacementMap({
       {/* Above the area-capture layer: switching levels mid-pick is how the
           user gets a clear look at the floor being boxed. */}
       <div className="absolute left-3 top-3 z-20 flex flex-col gap-2">
-        {floors.length > 1 ? (
-          <div className="flex flex-wrap gap-1 rounded-[var(--radius-md)] bg-white/90 p-1 shadow">
-            {floors.map((floor) => {
-              const linked = state.floors.find((f) => f.label === floor.label)?.linked ?? true;
-              return (
-                <Button
-                  key={floor.label}
-                  size="sm"
-                  variant={floor.label === state.activeFloorLabel ? "primary" : "secondary"}
-                  // The deleted dropdown announced its current value; the
-                  // pills are the only floor control now, so the active one
-                  // must expose the state, not just the colour.
-                  aria-pressed={floor.label === state.activeFloorLabel}
-                  onClick={() => dispatch({ type: "setActiveFloor", label: floor.label })}
-                  aria-label={
-                    linked ? undefined : `${floor.label} ${t("(unlinked)", "（非連動）")}`
-                  }
-                  title={
-                    linked
-                      ? floor.label
-                      : `${floor.label} ${t("(unlinked)", "（非連動）")}`
-                  }
-                >
-                  {/* A dot, not colour alone, so the state survives a
-                      colour-vision deficiency. */}
-                  {linked ? null : (
-                    <span
-                      aria-hidden="true"
-                      className="mr-1 inline-block h-1 w-1 rounded-full bg-current"
-                    />
-                  )}
-                  {floor.label}
-                </Button>
-              );
-            })}
-            <span aria-hidden="true" className="mx-1 w-px self-stretch bg-[var(--color-border)]" />
-            {/* What gestures act on: the whole linked group while aligning the
-                building as one, or the selected floor for final per-floor
-                nudges. Sits with the pills because it pairs with floor switching. */}
-            <Button
-              size="sm"
-              variant={mode === "group" ? "primary" : "secondary"}
-              aria-pressed={mode === "group"}
-              onClick={() => onModeChange("group")}
-              title={t(
-                "Drags, rotation and scale move every linked floor together",
-                "ドラッグ・回転・拡大縮小をリンクした全フロアに適用"
-              )}
-            >
-              {t("Group", "グループ")}
-            </Button>
-            <Button
-              size="sm"
-              variant={mode === "individual" ? "primary" : "secondary"}
-              aria-pressed={mode === "individual"}
-              onClick={() => onModeChange("individual")}
-              title={t(
-                "Drags, rotation and scale adjust the selected floor only",
-                "ドラッグ・回転・拡大縮小を選択中の階だけに適用"
-              )}
-            >
-              {t("Individual", "個別")}
-            </Button>
-            <span aria-hidden="true" className="mx-1 w-px self-stretch bg-[var(--color-border)]" />
-            {/* Isolating the selected floor sits with the floor pills rather
-                than in the sidebar: it is a view option reached for while
-                watching the map, exactly like the basemap switcher below. */}
-            <Button
-              size="sm"
-              variant={onlyActiveFloor ? "primary" : "secondary"}
-              aria-pressed={onlyActiveFloor}
-              onClick={() => setOnlyActiveFloor((only) => !only)}
-              title={t(
-                "Hide the other floors while aligning this one",
-                "この階を合わせる間、他の階を隠す"
-              )}
-            >
-              {t("Only this floor", "この階のみ")}
-            </Button>
-          </div>
-        ) : null}
+        <div className="flex flex-wrap gap-1 rounded-[var(--radius-md)] bg-white/90 p-1 shadow">
+          {floors.length > 1 ? (
+            <>
+              {floors.map((floor) => {
+                const linked = state.floors.find((f) => f.label === floor.label)?.linked ?? true;
+                return (
+                  <Button
+                    key={floor.label}
+                    size="sm"
+                    variant={floor.label === state.activeFloorLabel ? "primary" : "secondary"}
+                    // The deleted dropdown announced its current value; the
+                    // pills are the only floor control now, so the active one
+                    // must expose the state, not just the colour.
+                    aria-pressed={floor.label === state.activeFloorLabel}
+                    onClick={() => dispatch({ type: "setActiveFloor", label: floor.label })}
+                    aria-label={
+                      linked ? undefined : `${floor.label} ${t("(unlinked)", "（非連動）")}`
+                    }
+                    title={
+                      linked
+                        ? floor.label
+                        : `${floor.label} ${t("(unlinked)", "（非連動）")}`
+                    }
+                  >
+                    {/* A dot, not colour alone, so the state survives a
+                        colour-vision deficiency. */}
+                    {linked ? null : (
+                      <span
+                        aria-hidden="true"
+                        className="mr-1 inline-block h-1 w-1 rounded-full bg-current"
+                      />
+                    )}
+                    {floor.label}
+                  </Button>
+                );
+              })}
+              <span aria-hidden="true" className="mx-1 w-px self-stretch bg-[var(--color-border)]" />
+              {/* What gestures act on: the whole linked group while aligning the
+                  building as one, or the selected floor for final per-floor
+                  nudges. Sits with the pills because it pairs with floor switching. */}
+              <Button
+                size="sm"
+                variant={mode === "group" ? "primary" : "secondary"}
+                aria-pressed={mode === "group"}
+                onClick={() => onModeChange("group")}
+                title={t(
+                  "Drags, rotation and scale move every linked floor together",
+                  "ドラッグ・回転・拡大縮小をリンクした全フロアに適用"
+                )}
+              >
+                {t("Group", "グループ")}
+              </Button>
+              <Button
+                size="sm"
+                variant={mode === "individual" ? "primary" : "secondary"}
+                aria-pressed={mode === "individual"}
+                onClick={() => onModeChange("individual")}
+                title={t(
+                  "Drags, rotation and scale adjust the selected floor only",
+                  "ドラッグ・回転・拡大縮小を選択中の階だけに適用"
+                )}
+              >
+                {t("Individual", "個別")}
+              </Button>
+              <span aria-hidden="true" className="mx-1 w-px self-stretch bg-[var(--color-border)]" />
+              {/* Isolating the selected floor sits with the floor pills rather
+                  than in the sidebar: it is a view option reached for while
+                  watching the map, exactly like the basemap switcher below. */}
+              <Button
+                size="sm"
+                variant={view.others === "hidden" ? "primary" : "secondary"}
+                aria-pressed={view.others === "hidden"}
+                onClick={() => setView(toggleOthersHidden)}
+                title={t(
+                  "Hide the other floors while aligning this one",
+                  "この階を合わせる間、他の階を隠す"
+                )}
+              >
+                {t("Only this floor", "この階のみ")}
+              </Button>
+            </>
+          ) : null}
+          <Button
+            size="sm"
+            variant={view.active === "transparent" ? "primary" : "secondary"}
+            aria-pressed={view.active === "transparent"}
+            onClick={() => setView(toggleTransparent)}
+            title={t(
+              "Draw the selected floor as outlines so the map shows through",
+              "選択中の階を輪郭だけで描き、下の地図を透かして見る"
+            )}
+          >
+            {t("Transparent", "透過表示")}
+          </Button>
+        </div>
         <div className="flex gap-1 rounded-[var(--radius-md)] bg-white/90 p-1 shadow">
           {BASEMAP_ORDER.map((id) => (
             <Button
