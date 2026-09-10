@@ -1,16 +1,11 @@
-import type { LayerSpecification } from "maplibre-gl";
+import type { FillLayerSpecification, LineLayerSpecification } from "maplibre-gl";
 
 import { layerVisibility } from "./placementMapLayers";
 
-// maplibre-gl@4 re-exports the LayerSpecification union but not the per-type
-// members, so fill/line paint is narrowed from that union.
-type FillPaint = NonNullable<Extract<LayerSpecification, { type: "fill" }>["paint"]>;
-type LinePaint = NonNullable<Extract<LayerSpecification, { type: "line" }>["paint"]>;
+type FillPaint = NonNullable<FillLayerSpecification["paint"]>;
+type LinePaint = NonNullable<LineLayerSpecification["paint"]>;
 
-/** How the floor the handles act on is drawn. No "hidden": those layers are the hit target. */
 export type ActiveFloorAppearance = "solid" | "transparent";
-
-/** How every floor other than the active one is drawn. */
 export type OtherFloorsAppearance = "ghost" | "hidden";
 
 export type ArtworkView = Readonly<{
@@ -30,15 +25,12 @@ export type FloorLayerProps = Readonly<{
 
 const APPEARANCE = {
   solid: { fillOpacity: 0.45, lineWidth: 1, lineOpacity: 1 },
-  // Drop the CAD fill so streets read through; keep the stroke as the plan.
   // fill-opacity 0 is still hittable; visibility none is not.
   transparent: { fillOpacity: 0, lineWidth: 1, lineOpacity: 0.8 },
   ghost: { fillOpacity: 0.06, lineWidth: 0.5, lineOpacity: 0.35 }
 } as const;
 
 export function floorPaint(role: FloorRole, view: ArtworkView, tint: string): FloorLayerProps {
-  // Coalesce arrays only type-check as ExpressionSpecification when written
-  // in the returned literal; parking them in a const widens them.
   if (role === "active") {
     const p = APPEARANCE[view.active];
     return {

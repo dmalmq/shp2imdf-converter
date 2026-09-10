@@ -585,8 +585,7 @@ export function PlacementMap({
 
         {/* One source per floor for the life of the map. Active vs ghost is
             paint + visibility, never a remount — swapping React keys while
-            reusing the MapLibre source id is what went white. Transparent is
-            paint only; hidden is layout only. */}
+            reusing the MapLibre source id is what went white. */}
         {placedByFloor.map((floor) => {
           const paint = floorPaint(
             floor.label === activeLabel ? "active" : "other",
@@ -957,7 +956,6 @@ export function PlacementMap({
               </Button>
             </>
           ) : null}
-          {/* Needed with one floor: that floor is still an opaque fill over the map. */}
           <Button
             size="sm"
             variant={view.active === "transparent" ? "primary" : "secondary"}
