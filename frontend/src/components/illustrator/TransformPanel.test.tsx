@@ -37,9 +37,6 @@ const THREE_LINKED = stateWith(
 
 test("no floor dropdown is rendered, even with three floors", () => {
   render(<TransformPanel mode="group" state={THREE_LINKED} dispatch={() => {}} />);
-  // Floor switching lives on the map pills; a second control would be redundant.
-  // Asserted on the element, not a label query: the current label is not
-  // associated with the select, so a label query would pass either way.
   expect(document.querySelector("select")).toBeNull();
 });
 
@@ -84,25 +81,20 @@ test("no relink button while the active floor is linked, even if another floor i
       dispatch={() => {}}
     />
   );
-  // Relink acts on the ACTIVE floor only; an unlinked sibling changes nothing
-  // about it, so the action must stay hidden (and cost 0px).
   expect(screen.queryByRole("button", { name: /relink/i })).toBeNull();
 });
 
-test("the interaction hint is one line, with the detail behind a control", () => {
+test("both interaction hints sit behind the help control", () => {
   render(<TransformPanel mode="group" state={THREE_LINKED} dispatch={() => {}} />);
-  // The short form is always visible.
-  expect(screen.getByText(/corners scale/i)).toBeInTheDocument();
-  // The keyboard detail is not taking permanent space...
+  expect(screen.queryByText(/corners scale/i)).toBeNull();
   expect(screen.queryByText(/arrow keys nudge/i)).toBeNull();
-  // ...but is reachable.
   fireEvent.click(screen.getByRole("button", { name: /keyboard and mouse help/i }));
+  expect(screen.getByText(/corners scale/i)).toBeInTheDocument();
   expect(screen.getByText(/arrow keys nudge/i)).toBeInTheDocument();
 });
 
 test("the scale controls are no longer in this panel", () => {
   render(<TransformPanel mode="group" state={THREE_LINKED} dispatch={() => {}} />);
-  // Scale moved to the Scale & fit tab panel.
   expect(screen.queryByText(/m per point/i)).toBeNull();
   expect(screen.queryByRole("button", { name: "Calibrate" })).toBeNull();
 });

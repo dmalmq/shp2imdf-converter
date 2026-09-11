@@ -5,6 +5,7 @@ import type { AdjustmentMode, PlacementAction, PlacementState } from "../../hook
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { Card, Tabs, tabPanelProps } from "../ui";
 import { ExportPanel } from "./ExportPanel";
+import { LocateControl } from "./LocateControl";
 import type { ReferenceLayer } from "./PlacementMap";
 import { ReferenceLayerList } from "./ReferenceLayerList";
 import { ScaleAndFitPanel } from "./ScaleAndFitPanel";
@@ -21,18 +22,14 @@ const CRS_CHOICES = (suggested: string, suggestedLabel: string) => [
 type Props = {
   state: PlacementState;
   dispatch: Dispatch<PlacementAction>;
-  /** What placement gestures act on; forwarded to the transform panel. */
   mode: AdjustmentMode;
   /** Building name from the drawing's file name; searched once to pre-locate. */
   siteName: string;
-  /** Reports a chosen location so the map camera can follow it. */
   onLocate: (lngLat: [number, number]) => void;
   canUndo: boolean;
   canRedo: boolean;
-  /** Active tab id; the three panels stay mounted, hidden when inactive. */
   tab: PlacementTab;
   onTabChange: (tab: PlacementTab) => void;
-  /** Pair-picking stage, forwarded to the fit panel. */
   pickStage: "artwork" | "map" | null;
   onTogglePicking: () => void;
   shapeMatch: ShapeMatchPanelModel;
@@ -53,13 +50,6 @@ type Props = {
   error: string | null;
 };
 
-/**
- * The pinned transform card plus the tabbed card with its three panels.
- *
- * Extracted from {@link IllustratorPage} so the mounted-and-hidden invariant
- * — every panel stays mounted with the inactive ones `hidden`, preserving the
- * typed values a remount would discard — is testable without maplibre.
- */
 export function PlacementSidebar({
   state,
   dispatch,
@@ -91,24 +81,18 @@ export function PlacementSidebar({
   const { t } = useUiLanguage();
 
   return (
-    <div className="flex w-80 shrink-0 flex-col gap-4 overflow-hidden">
-      <Card padding="md" className="shrink-0">
-        <TransformPanel
-          state={state}
-          dispatch={dispatch}
-          mode={mode}
-          siteName={siteName}
-          onLocate={onLocate}
-          canUndo={canUndo}
-          canRedo={canRedo}
-        />
-      </Card>
-
-      {/* One card holds the strip and the panels — a card inside a card is
-          never right. The panel area takes the remaining height and is the
-          only scrolling region in this column, so no amount of content can
-          push the page again. */}
-      <Card padding="md" className="flex min-h-0 flex-1 flex-col">
+    <div className="flex h-full min-h-0 w-80 shrink-0 flex-col overflow-hidden">
+      <Card padding="md" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <LocateControl key={siteName} siteName={siteName} dispatch={dispatch} onLocate={onLocate} />
+        <div className="mt-2 shrink-0">
+          <TransformPanel
+            state={state}
+            dispatch={dispatch}
+            mode={mode}
+            canUndo={canUndo}
+            canRedo={canRedo}
+          />
+        </div>
         <Tabs
           tabs={[
             { id: "fit", label: t("Scale & fit", "縮尺と調整") },
@@ -118,7 +102,7 @@ export function PlacementSidebar({
           active={tab}
           onChange={onTabChange}
           idPrefix="placement"
-          className="shrink-0"
+          className="mt-3 shrink-0"
         />
         <div className="min-h-0 flex-1 overflow-auto pt-3">
           <div {...tabPanelProps("placement", "fit", tab === "fit")}>
