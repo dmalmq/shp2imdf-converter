@@ -140,16 +140,25 @@ test("Escape closes the open box and does not reach window listeners", async () 
   const onWindowEscape = vi.fn();
   window.addEventListener("keydown", onWindowEscape);
   renderLocate("");
-  fireEvent.click(screen.getByRole("button", { name: /find the building/i }));
+  const row = screen.getByRole("button", { name: /find the building/i });
+  fireEvent.click(row);
   fireEvent.change(screen.getByPlaceholderText(/新宿駅/), { target: { value: "新宿" } });
   fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
   expect(await screen.findByText(/address search is unavailable/i)).toBeInTheDocument();
-  fireEvent.keyDown(screen.getByRole("region", { name: /find the building/i }), {
-    key: "Escape"
-  });
+  fireEvent.keyDown(row, { key: "Escape" });
   expect(screen.queryByRole("region", { name: /find the building/i })).toBeNull();
   expect(onWindowEscape).not.toHaveBeenCalled();
   window.removeEventListener("keydown", onWindowEscape);
+});
+
+test("opening the row focuses the query field so Escape from the input closes", async () => {
+  vi.mocked(geocodeSearch).mockResolvedValue([]);
+  renderLocate("");
+  fireEvent.click(screen.getByRole("button", { name: /find the building/i }));
+  const field = screen.getByPlaceholderText(/新宿駅/);
+  expect(field).toHaveFocus();
+  fireEvent.keyDown(field, { key: "Escape" });
+  expect(screen.queryByRole("region", { name: /find the building/i })).toBeNull();
 });
 
 test("reopening after a pick lists cached hits without a second geocode", async () => {

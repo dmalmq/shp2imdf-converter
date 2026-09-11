@@ -28,6 +28,7 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
   const locateRef = useRef(locate);
   locateRef.current = locate;
   const searchedFor = useRef<string | null>(null);
+  const queryInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const name = siteName.trim();
@@ -54,6 +55,11 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
         if (acceptsGuess(locateRef.current)) send({ type: "guessed", candidates: [] });
       });
   }, [siteName, uiLanguage, dispatch, onLocate]);
+
+  useEffect(() => {
+    if (locate.search.kind !== "open") return;
+    queryInput.current?.focus();
+  }, [locate.search.kind]);
 
   const runSearch = (query: string) => {
     const trimmed = query.trim();
@@ -89,7 +95,15 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
   const searchDisabled = pending || !query.trim();
 
   return (
-    <div className="shrink-0 text-sm">
+    <div
+      className="shrink-0 text-sm"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || search.kind !== "open") return;
+        event.preventDefault();
+        event.stopPropagation();
+        send({ type: "close" });
+      }}
+    >
       <button
         type="button"
         className="flex h-6 w-full items-center gap-1 truncate rounded-[var(--radius-md)] px-1 text-left text-xs hover:bg-[var(--color-surface-muted)]"
@@ -110,15 +124,10 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
           role="region"
           aria-label={t("Find the building", "建物を検索")}
           className="mt-1"
-          onKeyDown={(event) => {
-            if (event.key !== "Escape") return;
-            event.preventDefault();
-            event.stopPropagation();
-            send({ type: "close" });
-          }}
         >
           <div className="flex gap-2">
             <input
+              ref={queryInput}
               className={FIELD}
               value={search.query}
               onChange={(event) => send({ type: "editQuery", query: event.target.value })}
