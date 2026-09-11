@@ -5,8 +5,8 @@ export type NonEmpty<T> = readonly [T, ...T[]];
 export type Located =
   | { kind: "none" }
   | { kind: "locating"; query: string }
-  | { kind: "guessed"; place: Place; candidates: NonEmpty<Place> }
-  | { kind: "chosen"; place: Place; candidates: NonEmpty<Place> };
+  | { kind: "guessed"; place: Place; candidates: NonEmpty<Place>; query: string }
+  | { kind: "chosen"; place: Place; candidates: NonEmpty<Place>; query: string };
 
 export type SearchOutcome =
   | { kind: "idle" }
@@ -41,7 +41,12 @@ export function isNonEmpty<T>(items: readonly T[]): items is NonEmpty<T> {
   return items.length > 0;
 }
 
-export function acceptsGuess(state: LocateState): boolean {
+export function acceptsGuess(
+  state: LocateState
+): state is LocateState & {
+  located: { kind: "locating"; query: string };
+  search: { kind: "collapsed" };
+} {
   return state.located.kind === "locating" && state.search.kind === "collapsed";
 }
 
@@ -57,6 +62,10 @@ export function cachedCandidates(located: Located): NonEmpty<Place> | null {
 export function locatedPlace(located: Located): Place | null {
   if (located.kind === "guessed" || located.kind === "chosen") return located.place;
   return null;
+}
+
+export function locatedQuery(located: Located): string | null {
+  return located.kind === "none" ? null : located.query;
 }
 
 export function toPlace(item: {
@@ -96,14 +105,21 @@ export function locateReducer(state: LocateState, event: LocateEvent): LocateSta
         located: {
           kind: "guessed",
           place: event.candidates[0],
-          candidates: event.candidates
+          candidates: event.candidates,
+          query: state.located.query
         },
         search: { kind: "collapsed" }
       };
     }
     case "open": {
+      const origin = locatedQuery(state.located);
+      const cached = cachedCandidates(state.located);
       const query =
-        state.search.kind === "open" && !event.siteName ? state.search.query : event.siteName;
+        state.search.kind === "open" && !event.siteName
+          ? state.search.query
+          : cached && origin
+            ? origin
+            : event.siteName;
       return { ...state, search: { kind: "open", query, outcome: hitsFromLocated(state.located) } };
     }
     case "close":
@@ -158,8 +174,12 @@ export function locateReducer(state: LocateState, event: LocateEvent): LocateSta
           ? state.search.outcome.places
           : cachedCandidates(state.located);
       const candidates: NonEmpty<Place> = fromHits ?? [event.place];
+      const query =
+        state.search.kind === "open"
+          ? state.search.query
+          : (locatedQuery(state.located) ?? "");
       return {
-        located: { kind: "chosen", place: event.place, candidates },
+        located: { kind: "chosen", place: event.place, candidates, query },
         search: { kind: "collapsed" }
       };
     }

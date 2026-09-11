@@ -16,7 +16,12 @@ test("filename guess stays collapsed, open lists those hits, pick chooses and co
   expect(s.located).toEqual({ kind: "locating", query: "大井町" });
   s = locateReducer(s, { type: "guessed", candidates: [oimachiSta, oimachiTown] });
   expect(s).toEqual({
-    located: { kind: "guessed", place: oimachiSta, candidates: [oimachiSta, oimachiTown] },
+    located: {
+      kind: "guessed",
+      place: oimachiSta,
+      candidates: [oimachiSta, oimachiTown],
+      query: "大井町"
+    },
     search: { kind: "collapsed" }
   });
   s = locateReducer(s, { type: "open", siteName: "大井町" });
@@ -27,7 +32,12 @@ test("filename guess stays collapsed, open lists those hits, pick chooses and co
   });
   s = locateReducer(s, { type: "picked", place: oimachiTown });
   expect(s).toEqual({
-    located: { kind: "chosen", place: oimachiTown, candidates: [oimachiSta, oimachiTown] },
+    located: {
+      kind: "chosen",
+      place: oimachiTown,
+      candidates: [oimachiSta, oimachiTown],
+      query: "大井町"
+    },
     search: { kind: "collapsed" }
   });
   s = locateReducer(s, { type: "open", siteName: "大井町" });
@@ -57,7 +67,7 @@ test("guessed with no candidates leaves none, and a later guess is ignored once 
   const opened = locateReducer(INITIAL_LOCATE, { type: "open", siteName: "大井町" });
   expect(locateReducer(opened, { type: "guessed", candidates: [oimachiSta] })).toBe(opened);
   const chosen: LocateState = {
-    located: { kind: "chosen", place: oimachiTown, candidates: [oimachiTown] },
+    located: { kind: "chosen", place: oimachiTown, candidates: [oimachiTown], query: "大井町" },
     search: { kind: "collapsed" }
   };
   expect(locateReducer(chosen, { type: "guessed", candidates: [oimachiSta] })).toBe(chosen);
@@ -117,6 +127,29 @@ test("editQuery while pending stays pending only when the query is unchanged", (
   expect(locateReducer(INITIAL_LOCATE, { type: "submitted" })).toBe(INITIAL_LOCATE);
 });
 
+test("reopening after a pick restores that search's query with its hits, not the filename", () => {
+  const shinjuku: Place = { name: "新宿駅", lngLat: [139.7003, 35.6896] };
+  let s = locateReducer(INITIAL_LOCATE, { type: "armFilename", query: "大井町" });
+  s = locateReducer(s, { type: "guessed", candidates: [oimachiSta, oimachiTown] });
+  s = locateReducer(s, { type: "open", siteName: "大井町" });
+  s = locateReducer(s, { type: "editQuery", query: "新宿" });
+  s = locateReducer(s, { type: "submitted" });
+  s = locateReducer(s, { type: "settled", query: "新宿", places: [shinjuku] });
+  s = locateReducer(s, { type: "picked", place: shinjuku });
+  expect(s.located).toEqual({
+    kind: "chosen",
+    place: shinjuku,
+    candidates: [shinjuku],
+    query: "新宿"
+  });
+  s = locateReducer(s, { type: "open", siteName: "大井町" });
+  expect(s.search).toEqual({
+    kind: "open",
+    query: "新宿",
+    outcome: { kind: "hits", places: [shinjuku] }
+  });
+});
+
 test("acceptsGuess, samePlace, and toPlace", () => {
   expect(acceptsGuess(INITIAL_LOCATE)).toBe(false);
   expect(
@@ -127,7 +160,7 @@ test("acceptsGuess, samePlace, and toPlace", () => {
   ).toBe(true);
   expect(
     acceptsGuess({
-      located: { kind: "guessed", place: oimachiSta, candidates: [oimachiSta] },
+      located: { kind: "guessed", place: oimachiSta, candidates: [oimachiSta], query: "大井町" },
       search: { kind: "collapsed" }
     })
   ).toBe(false);

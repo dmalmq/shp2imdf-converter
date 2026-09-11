@@ -172,3 +172,28 @@ test("reopening after a pick lists cached hits without a second geocode", async 
   expect(screen.getByRole("button", { name: oimachiStaWire.display_name })).toBeInTheDocument();
   expect(geocodeSearch).toHaveBeenCalledTimes(1);
 });
+
+const shinjukuStaWire: GeocodeResultItem = {
+  display_name: "新宿駅, 新宿区, 東京都",
+  latitude: 35.6896,
+  longitude: 139.7003,
+  source: "nominatim",
+  address: EMPTY_ADDRESS
+};
+
+test("reopening after a later search keeps that query in the field with those hits", async () => {
+  vi.mocked(geocodeSearch).mockResolvedValueOnce([oimachiStaWire, oimachiTownWire]);
+  renderLocate("大井町");
+  await screen.findByText(/first match/i);
+  fireEvent.click(screen.getByRole("button", { name: /大井町/ }));
+  vi.mocked(geocodeSearch).mockResolvedValueOnce([shinjukuStaWire]);
+  const field = screen.getByPlaceholderText(/新宿駅/);
+  fireEvent.change(field, { target: { value: "新宿" } });
+  fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
+  fireEvent.click(await screen.findByRole("button", { name: shinjukuStaWire.display_name }));
+  expect(screen.queryByRole("listitem")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /大井町/ }));
+  expect(screen.getByPlaceholderText(/新宿駅/)).toHaveValue("新宿");
+  expect(screen.getByRole("button", { name: shinjukuStaWire.display_name })).toBeInTheDocument();
+  expect(screen.queryByText(oimachiStaWire.display_name)).toBeNull();
+});
