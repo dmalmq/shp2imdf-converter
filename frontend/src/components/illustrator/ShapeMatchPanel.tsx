@@ -24,6 +24,7 @@ export type ShapeMatchPanelModel = {
   onToggleRegions: () => void;
   onFind: () => void;
   onPreview: (rank: number) => void;
+  onInspect: (rank: number | null) => void;
   onApply: () => void;
   onClear: () => void;
 };
@@ -62,7 +63,9 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
   const canMatch = referenceLayers.length > 0 || otherFloors.length > 0;
   const hasTarget = Boolean(model.referenceName || model.referenceFloorLabel);
   const floorTarget = Boolean(model.referenceFloorLabel);
-  const groupBlocked = !floorTarget && mode === "group" && !activeFloor?.linked;
+  const pinnedBlocked = Boolean(activeFloor?.pinned);
+  const groupBlocked =
+    !pinnedBlocked && !floorTarget && mode === "group" && !activeFloor?.linked;
   const selectedMatch = model.matches.find((match) => match.rank === model.previewRank) ?? null;
   const selectedReference = referenceLayers.find((layer) => layer.name === model.referenceName);
   const selectedTarget = matchTargetValue(model.referenceName, model.referenceFloorLabel);
@@ -252,6 +255,15 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
           <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
             {t("Ranked candidates", "候補の順位")}
           </p>
+          <p
+            id="shape-match-candidate-help"
+            className="mt-1 text-[11px] leading-4 text-[var(--color-text-muted)]"
+          >
+            {t(
+              "Hover or focus a candidate to locate its area on the map. Select the correct area before applying.",
+              "候補にカーソルを合わせるかフォーカスすると、地図上の範囲を確認できます。正しい範囲を選んでから適用してください。"
+            )}
+          </p>
           <ol className="space-y-1.5">
             {model.matches.map((match) => {
               const active = match.rank === model.previewRank;
@@ -261,14 +273,19 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
                     type="button"
                     aria-pressed={active}
                     aria-label={t(
-                      `Preview candidate ${match.rank}`,
-                      `候補 ${match.rank} をプレビュー`
+                      `Select candidate ${match.rank}`,
+                      `候補 ${match.rank} を選択`
                     )}
-                    className={`w-full rounded-[var(--radius-md)] border p-2 text-left transition-colors ${
+                    aria-describedby="shape-match-candidate-help"
+                    className={`w-full rounded-[var(--radius-md)] border p-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb] focus-visible:ring-offset-1 ${
                       active
                         ? "border-[#2563eb] bg-blue-50"
-                        : "border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-muted)]"
+                        : "border-[var(--color-border)] bg-[var(--color-surface)] hover:border-[#f59e0b] hover:bg-amber-50"
                     }`}
+                    onMouseEnter={() => model.onInspect(match.rank)}
+                    onMouseLeave={() => model.onInspect(null)}
+                    onFocus={() => model.onInspect(match.rank)}
+                    onBlur={() => model.onInspect(null)}
                     onClick={() => model.onPreview(match.rank)}
                   >
                     <span className="flex items-center justify-between gap-2">
@@ -278,8 +295,15 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
                         </span>
                         {t(`Candidate ${match.rank}`, `候補 ${match.rank}`)}
                       </span>
-                      <span className="text-[11px] font-medium">
-                        {(match.overlap_iou * 100).toFixed(0)}% {t("overlap", "重なり")}
+                      <span className="flex flex-col items-end gap-0.5">
+                        <span className="text-[11px] font-medium">
+                          {(match.overlap_iou * 100).toFixed(0)}% {t("overlap", "重なり")}
+                        </span>
+                        {active ? (
+                          <span className="text-[10px] font-semibold text-[#2563eb]">
+                            {t("Selected", "選択中")}
+                          </span>
+                        ) : null}
                       </span>
                     </span>
                     <span className="mt-1 grid grid-cols-2 gap-x-2 text-[11px] text-[var(--color-text-muted)]">
@@ -318,10 +342,19 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
             </p>
           ) : null}
 
+          {pinnedBlocked ? (
+            <p className="text-xs text-[var(--color-error)]">
+              {t(
+                `Unpin ${activeFloor?.label ?? state.activeFloorLabel} before applying an alignment.`,
+                `位置合わせを適用する前に「${activeFloor?.label ?? state.activeFloorLabel}」の固定を解除してください。`
+              )}
+            </p>
+          ) : null}
+
           <Button
             size="sm"
             className="w-full"
-            disabled={!selectedMatch || groupBlocked}
+            disabled={!selectedMatch || groupBlocked || pinnedBlocked}
             onClick={model.onApply}
           >
             {floorTarget || mode === "individual"

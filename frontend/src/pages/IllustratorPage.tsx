@@ -127,6 +127,11 @@ function similarityTransform(payload: TransformPayload): SimilarityTransform {
   };
 }
 
+function previewForSuggestion(suggestion: IllustratorShapeMatchSuggestion | null) {
+  if (!suggestion) return null;
+  return { suggestion, transform: similarityTransform(suggestion.transform) };
+}
+
 /** The drawn corners as that floor's own artwork box, so it tracks the floor. */
 function artworkRegion(
   transform: SimilarityTransform,
@@ -225,6 +230,7 @@ function initialStateFromAssignment(
       return {
         label: region.label,
         linked: true,
+        pinned: false,
         artworkAnchor: [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2],
         mapAnchor: [139.7671, 35.6812],
         controlPoints: [],
@@ -242,6 +248,7 @@ const DEFAULT_STATE: PlacementState = {
     {
       label: "artwork",
       linked: true,
+      pinned: false,
       artworkAnchor: [50, 50],
       mapAnchor: [139.7671, 35.6812],
       controlPoints: [],
@@ -259,6 +266,8 @@ export function IllustratorPage() {
   const [error, setError] = useState<string | null>(null);
   const [pickSession, setPickSession] = useState<PickSession | null>(null);
   const [shapeMatch, setShapeMatch] = useState<ShapeMatchState>(EMPTY_SHAPE_MATCH);
+  const [inspectedMatch, setInspectedMatch] =
+    useState<IllustratorShapeMatchSuggestion | null>(null);
   const [outputCrs, setOutputCrs] = useState("EPSG:4326");
   const [formats, setFormats] = useState<ExportFormatsPayload>({
     geopackage: true,
@@ -294,11 +303,13 @@ export function IllustratorPage() {
     enabled: Boolean(preview) && assignment !== null,
     onEscape: () => {
       setPickSession(null);
+      setInspectedMatch(null);
       setShapeMatch((current) => ({ ...current, selecting: false, previewRank: null }));
     }
   });
 
   useEffect(() => {
+    setInspectedMatch(null);
     setPickSession(null);
     setShapeMatch((current) => {
       // Switching levels is how the user gets a clear look at the floor being
@@ -358,14 +369,18 @@ export function IllustratorPage() {
   const sourceFloorPlacement =
     state.floors.find((floor) => floor.label === shapeMatch.sourceFloorLabel) ?? null;
 
-  const previewSuggestion =
+  const selectedSuggestion =
     shapeMatch.matches.find((match) => match.rank === shapeMatch.previewRank) ?? null;
-  const shapeMatchPreview = previewSuggestion
-    ? {
-        suggestion: previewSuggestion,
-        transform: similarityTransform(previewSuggestion.transform)
-      }
-    : null;
+  const inspectedSuggestion =
+    inspectedMatch && shapeMatch.matches.includes(inspectedMatch) ? inspectedMatch : null;
+  const selectedShapeMatchPreview = useMemo(
+    () => previewForSuggestion(selectedSuggestion),
+    [selectedSuggestion]
+  );
+  const shapeMatchPreview = useMemo(
+    () => previewForSuggestion(inspectedSuggestion ?? selectedSuggestion),
+    [inspectedSuggestion, selectedSuggestion]
+  );
 
   /**
    * The API explains its own failures far better than this screen can guess, so
@@ -506,6 +521,7 @@ export function IllustratorPage() {
       return;
     }
 
+    setInspectedMatch(null);
     setShapeMatch((current) => ({ ...current, loading: true, searched: false, error: null }));
     const currentTransform = resolvedTransform(state, active);
     try {
@@ -576,6 +592,7 @@ export function IllustratorPage() {
     const targetRegion = shapeMatch.targetRegion;
     if (!preview || !sourceRegion || !targetRegion) return;
 
+    setInspectedMatch(null);
     setShapeMatch((current) => ({ ...current, loading: true, searched: false, error: null }));
     try {
       const response = await matchIllustratorRegions(preview.conversion_id, {
@@ -692,8 +709,18 @@ export function IllustratorPage() {
     },
     onFind: () => void findShapeMatches(),
     onPreview: (previewRank) => setShapeMatch((current) => ({ ...current, previewRank })),
+    onInspect: (rank) =>
+      setInspectedMatch(
+        rank === null ? null : (shapeMatch.matches.find((match) => match.rank === rank) ?? null)
+      ),
     onApply: () => {
-      if (!shapeMatchPreview) return;
+      if (!selectedShapeMatchPreview) return;
+      const sourceLabel =
+        shapeMatch.sourceFloorLabel ||
+        shapeMatch.selection?.floorLabel ||
+        state.activeFloorLabel;
+      const sourceFloor = state.floors.find((floor) => floor.label === sourceLabel);
+      if (sourceFloor?.pinned) return;
       // An apply always moves the floor the source area came from, even if the
       // user is currently looking at a different level.
       if (shapeMatch.sourceFloorLabel && shapeMatch.sourceFloorLabel !== state.activeFloorLabel) {
@@ -702,11 +729,15 @@ export function IllustratorPage() {
       dispatch({
         type: "applySimilarity",
         mode: shapeMatch.referenceFloorLabel ? "individual" : adjustmentMode,
-        transform: shapeMatchPreview.transform
+        transform: selectedShapeMatchPreview.transform
       });
+      setInspectedMatch(null);
       setShapeMatch((current) => keptMatchTarget(current));
     },
-    onClear: () => setShapeMatch((current) => keptMatchTarget(current))
+    onClear: () => {
+      setInspectedMatch(null);
+      setShapeMatch((current) => keptMatchTarget(current));
+    }
   };
 
   const convert = async (file: File) => {

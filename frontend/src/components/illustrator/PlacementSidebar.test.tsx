@@ -13,7 +13,10 @@ vi.mock("../../api/client", () => ({
   uploadReferenceLayers: vi.fn()
 }));
 
-function stateWith(floors: { label: string; linked: boolean }[], active: string): PlacementState {
+function stateWith(
+  floors: { label: string; linked: boolean; pinned?: boolean }[],
+  active: string
+): PlacementState {
   return {
     frame: { rotationDeg: 0, metresPerPoint: DEFAULT_METRES_PER_POINT, workingCrs: "EPSG:6677" },
     activeFloorLabel: active,
@@ -21,6 +24,7 @@ function stateWith(floors: { label: string; linked: boolean }[], active: string)
     floors: floors.map((floor) => ({
       label: floor.label,
       linked: floor.linked,
+      pinned: floor.pinned ?? false,
       artworkAnchor: [50, 50] as [number, number],
       mapAnchor: [139.7671, 35.6812] as [number, number],
       controlPoints: [],
@@ -74,6 +78,7 @@ function SidebarHarness({
         onToggleRegions: () => {},
         onFind: () => {},
         onPreview: () => {},
+        onInspect: () => {},
         onApply: () => {},
         onClear: () => {}
       }}

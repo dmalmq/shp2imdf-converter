@@ -46,6 +46,7 @@ export function ScaleAndFitPanel({
   const activeFloor =
     state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
   const activeTransform = activeFloor ? resolvedTransform(state, activeFloor) : null;
+  const pinned = Boolean(activeFloor?.pinned);
 
   return (
     <div className="space-y-4 text-sm">
@@ -65,13 +66,13 @@ export function ScaleAndFitPanel({
           <input
             type="number"
             className="w-24 rounded-[var(--radius-md)] border px-2 py-1"
+            disabled={state.scaleLocked || pinned}
             value={denominator}
-            disabled={state.scaleLocked}
             onChange={(event) => setDenominator(event.target.value)}
           />
           <Button
             size="sm"
-            disabled={state.scaleLocked}
+            disabled={state.scaleLocked || pinned}
             onClick={() => dispatch({ type: "setDrawingScale", denominator: Number(denominator) })}
           >
             {t("Apply", "適用")}
@@ -81,24 +82,24 @@ export function ScaleAndFitPanel({
           <input
             type="number"
             className="w-20 rounded-[var(--radius-md)] border px-2 py-1"
+            disabled={state.scaleLocked || pinned}
             placeholder="pt"
             value={artworkDistance}
-            disabled={state.scaleLocked}
             onChange={(event) => setArtworkDistance(event.target.value)}
           />
           <span className="text-xs">=</span>
           <input
             type="number"
             className="w-20 rounded-[var(--radius-md)] border px-2 py-1"
+            disabled={state.scaleLocked || pinned}
             placeholder="m"
             value={realMetres}
-            disabled={state.scaleLocked}
             onChange={(event) => setRealMetres(event.target.value)}
           />
           <Button
             size="sm"
             variant="secondary"
-            disabled={state.scaleLocked}
+            disabled={state.scaleLocked || pinned}
             onClick={() =>
               dispatch({
                 type: "calibrateDistance",

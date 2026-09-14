@@ -25,7 +25,8 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
   const floorLabel = activeFloor?.label ?? state.activeFloorLabel;
   const controlPoints = activeFloor?.controlPoints ?? [];
   const fit = currentResiduals(state);
-  const groupBlocked = mode === "group" && !activeFloor?.linked;
+  const pinnedBlocked = Boolean(activeFloor?.pinned);
+  const groupBlocked = !pinnedBlocked && mode === "group" && !activeFloor?.linked;
   const largestResidualIndex = fit
     ? fit.perPoint.reduce(
         (largest, residual, index, values) => (residual > values[largest] ? index : largest),
@@ -69,7 +70,7 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
         <Button
           size="sm"
           variant={pickStage ? "primary" : "secondary"}
-          disabled={groupBlocked}
+          disabled={groupBlocked || pinnedBlocked}
           onClick={onTogglePicking}
         >
           {pickStage === "artwork"
@@ -94,6 +95,15 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
           {t(
             `Relink ${floorLabel} before fitting all floors.`,
             `すべてのフロアを合わせる前に「${floorLabel}」を再リンクしてください。`
+          )}
+        </p>
+      ) : null}
+
+      {pinnedBlocked ? (
+        <p className="text-xs text-[var(--color-error)]">
+          {t(
+            `Unpin ${floorLabel} before fitting it with control points.`,
+            `基準点で合わせる前に「${floorLabel}」の固定を解除してください。`
           )}
         </p>
       ) : null}
@@ -151,7 +161,7 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
       <Button
         size="sm"
         className="w-full"
-        disabled={groupBlocked || controlPoints.length < MIN_CONTROL_POINTS}
+        disabled={pinnedBlocked || groupBlocked || controlPoints.length < MIN_CONTROL_POINTS}
         onClick={() => dispatch({ type: "fitControlPoints", mode })}
       >
         {mode === "group"

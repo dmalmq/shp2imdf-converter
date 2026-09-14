@@ -34,6 +34,8 @@ export type FloorPlacement = {
   label: string;
   /** True: scale/rotation follow the frame and the anchor is derived. */
   linked: boolean;
+  /** Pinned floors keep their resolved transform until explicitly unpinned. */
+  pinned: boolean;
   artworkAnchor: [number, number];
   mapAnchor: [number, number];
   controlPoints: ControlPoint[];
@@ -75,6 +77,7 @@ export type PlacementAction =
   | { type: "lockScale" }
   | { type: "unlockScale" }
   | { type: "unlockFloor"; label: string }
+  | { type: "setFloorPinned"; label: string; pinned: boolean }
   | { type: "relinkFloor"; label: string }
   | { type: "setActiveFloor"; label: string }
   | { type: "setWorkingCrs"; workingCrs: string }
@@ -103,10 +106,14 @@ export function resolvedTransform(
   return {
     artworkAnchor: floor.artworkAnchor,
     mapAnchor: floor.mapAnchor,
-    rotationDeg: floor.linked ? state.frame.rotationDeg : (floor.rotationDeg ?? state.frame.rotationDeg),
-    metresPerPoint: floor.linked
-      ? state.frame.metresPerPoint
-      : (floor.metresPerPoint ?? state.frame.metresPerPoint),
+    rotationDeg:
+      floor.linked && !floor.pinned
+        ? state.frame.rotationDeg
+        : (floor.rotationDeg ?? state.frame.rotationDeg),
+    metresPerPoint:
+      floor.linked && !floor.pinned
+        ? state.frame.metresPerPoint
+        : (floor.metresPerPoint ?? state.frame.metresPerPoint),
     workingCrs: state.frame.workingCrs
   };
 }
@@ -134,7 +141,9 @@ function recomputeLinked(state: PlacementState): PlacementState {
   return {
     ...state,
     floors: state.floors.map((f) =>
-      f.label === active.label || !f.linked ? f : { ...f, mapAnchor: deriveAnchor(state, f) }
+      f.label === active.label || !f.linked || f.pinned
+        ? f
+        : { ...f, mapAnchor: deriveAnchor(state, f) }
     )
   };
 }
@@ -175,6 +184,7 @@ export function floorPayloadsToState(
     activeFloorLabel: active,
     scaleLocked: true,
     floors: current.floors.map((f) => {
+      if (f.pinned) return f;
       const saved = byLabel.get(f.label);
       return saved
         ? {
@@ -194,7 +204,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
   switch (action.type) {
     case "positionBuilding": {
       const active = activeFloor(state);
-      if (!active) return state;
+      if (!active || active.pinned) return state;
       const moved = {
         ...state,
         stationPin: action.mapAnchor,
@@ -209,6 +219,8 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
     }
 
     case "dragFloor": {
+      const target = state.floors.find((floor) => floor.label === action.label);
+      if (!target || target.pinned) return state;
       const single = state.floors.length === 1;
       return {
         ...state,
@@ -231,6 +243,8 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
     }
 
     case "rotateFloor": {
+      const target = state.floors.find((floor) => floor.label === action.label);
+      if (!target || target.pinned) return state;
       const rotationDeg = normaliseRotation(action.rotationDeg);
       return {
         ...state,
@@ -247,7 +261,10 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
     }
 
     case "scaleFloor": {
-      if (state.scaleLocked || !(action.metresPerPoint > 0)) return state;
+      const target = state.floors.find((floor) => floor.label === action.label);
+      if (!target || target.pinned || state.scaleLocked || !(action.metresPerPoint > 0)) {
+        return state;
+      }
       return {
         ...state,
         floors: state.floors.map((f) =>
@@ -262,12 +279,20 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
 
     case "rotateFrame": {
       const rotationDeg = normaliseRotation(action.rotationDeg);
-      if (!state.floors.some((f) => f.linked)) return state;
+      if (activeFloor(state)?.pinned || !state.floors.some((f) => f.linked && !f.pinned)) {
+        return state;
+      }
       return recomputeLinked({ ...state, frame: { ...state.frame, rotationDeg } });
     }
 
     case "scaleFrame": {
-      if (state.scaleLocked || !(action.metresPerPoint > 0)) return state;
+      if (
+        activeFloor(state)?.pinned ||
+        state.scaleLocked ||
+        !(action.metresPerPoint > 0)
+      ) {
+        return state;
+      }
       return recomputeLinked({
         ...state,
         frame: { ...state.frame, metresPerPoint: action.metresPerPoint }
@@ -275,7 +300,9 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
     }
 
     case "setDrawingScale": {
-      if (state.scaleLocked || !(action.denominator > 0)) return state;
+      if (activeFloor(state)?.pinned || state.scaleLocked || !(action.denominator > 0)) {
+        return state;
+      }
       return recomputeLinked({
         ...state,
         scaleLocked: true,
@@ -284,7 +311,14 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
     }
 
     case "calibrateDistance": {
-      if (state.scaleLocked || !(action.artworkDistance > 0) || !(action.realMetres > 0)) return state;
+      if (
+        activeFloor(state)?.pinned ||
+        state.scaleLocked ||
+        !(action.artworkDistance > 0) ||
+        !(action.realMetres > 0)
+      ) {
+        return state;
+      }
       return recomputeLinked({
         ...state,
         scaleLocked: true,
@@ -301,7 +335,37 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
     case "setWorkingCrs":
       return { ...state, frame: { ...state.frame, workingCrs: action.workingCrs } };
 
-    case "unlockFloor":
+    case "setFloorPinned": {
+      const floor = state.floors.find((item) => item.label === action.label);
+      if (!floor || floor.pinned === action.pinned) return state;
+      if (!action.pinned) {
+        return {
+          ...state,
+          floors: state.floors.map((item) =>
+            item.label === action.label ? { ...item, pinned: false } : item
+          )
+        };
+      }
+      const transform = resolvedTransform(state, floor);
+      return {
+        ...state,
+        floors: state.floors.map((item) =>
+          item.label === action.label
+            ? {
+                ...item,
+                pinned: true,
+                linked: false,
+                rotationDeg: transform.rotationDeg,
+                metresPerPoint: transform.metresPerPoint
+              }
+            : item
+        )
+      };
+    }
+
+    case "unlockFloor": {
+      const floor = state.floors.find((item) => item.label === action.label);
+      if (!floor || floor.pinned) return state;
       return {
         ...state,
         floors: state.floors.map((f) =>
@@ -315,10 +379,11 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
             : f
         )
       };
+    }
 
     case "relinkFloor": {
       const floor = state.floors.find((f) => f.label === action.label);
-      if (!floor || floor.linked) return state;
+      if (!floor || floor.linked || floor.pinned) return state;
       const linked = {
         ...floor,
         linked: true,
@@ -358,6 +423,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
       const active = activeFloor(state);
       if (
         !active ||
+        active.pinned ||
         active.controlPoints.length < MIN_CONTROL_POINTS ||
         (action.mode === "group" && !active.linked)
       ) {
@@ -428,7 +494,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
 
     case "applySimilarity": {
       const active = activeFloor(state);
-      if (!active || (action.mode === "group" && !active.linked)) {
+      if (!active || active.pinned || (action.mode === "group" && !active.linked)) {
         return state;
       }
       const transform = action.transform;

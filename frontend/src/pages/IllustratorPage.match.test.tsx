@@ -142,6 +142,24 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
         Apply suggestion
       </button>
       <output data-testid="match-count">{shapeMatch.matches.length}</output>
+      <button
+        type="button"
+        disabled={!shapeMatch.matches.some((match) => match.rank === 2)}
+        onClick={() => shapeMatch.onInspect(2)}
+      >
+        Inspect suggestion 2
+      </button>
+      <button type="button" onClick={() => shapeMatch.onInspect(null)}>
+        Stop inspecting
+      </button>
+      <button
+        type="button"
+        disabled={!shapeMatch.matches.some((match) => match.rank === 2)}
+        onClick={() => shapeMatch.onPreview(2)}
+      >
+        Select suggestion 2
+      </button>
+      <output data-testid="selected-rank">{shapeMatch.previewRank ?? "none"}</output>
       <output data-testid="match-selection">{shapeMatch.selection ? "selected" : "empty"}</output>
       <output data-testid="match-target">
         {shapeMatch.referenceFloorLabel || shapeMatch.referenceName || "none"}
@@ -357,6 +375,34 @@ test("re-trimming the same layer name drops stale matches and preview", async ()
   expect(screen.getByTestId("match-count")).toHaveTextContent("0");
   expect(screen.getByTestId("preview-rank")).toHaveTextContent("none");
   expect(screen.getByTestId("match-target")).toHaveTextContent("building-footprints");
+});
+
+test("inspection is temporary and selecting another candidate changes the applied match", async () => {
+  matchShapes.mockResolvedValueOnce({
+    matches: MATCHES.map((match) => ({
+      ...match,
+      transform: { ...match.transform, rotation_deg: match.rank * 10 }
+    }))
+  });
+  await enterPlacementView();
+  await selectOutline();
+
+  fireEvent.click(screen.getByRole("button", { name: "Find matches" }));
+  await waitFor(() => expect(screen.getByTestId("match-count")).toHaveTextContent("3"));
+  expect(screen.getByTestId("selected-rank")).toHaveTextContent("1");
+  expect(screen.getByTestId("preview-rank")).toHaveTextContent("1");
+
+  fireEvent.click(screen.getByRole("button", { name: "Inspect suggestion 2" }));
+  expect(screen.getByTestId("selected-rank")).toHaveTextContent("1");
+  expect(screen.getByTestId("preview-rank")).toHaveTextContent("2");
+  fireEvent.click(screen.getByRole("button", { name: "Stop inspecting" }));
+  expect(screen.getByTestId("preview-rank")).toHaveTextContent("1");
+
+  fireEvent.click(screen.getByRole("button", { name: "Select suggestion 2" }));
+  expect(screen.getByTestId("selected-rank")).toHaveTextContent("2");
+  expect(screen.getByTestId("preview-rank")).toHaveTextContent("2");
+  fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
+  await waitFor(() => expect(screen.getByTestId("frame-rotation")).toHaveTextContent("20"));
 });
 
 test("matching another floor posts that floor and unlinks only the active floor", async () => {
