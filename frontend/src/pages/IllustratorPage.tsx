@@ -39,6 +39,12 @@ import {
   type ShapeMatchPanelModel
 } from "../components/illustrator/ShapeMatchPanel";
 import { Button, Card } from "../components/ui";
+import {
+  placementPoseReady,
+  sameSurveySnap,
+  type SurveyPose,
+  type SurveySnapTarget
+} from "../lib/placementPose";
 import { stationQueryFromFilename } from "../lib/siteName";
 import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
 import {
@@ -275,10 +281,13 @@ export function IllustratorPage() {
   const [referenceLayers, setReferenceLayers] = useState<ReferenceLayer[]>([]);
   const [placementTab, setPlacementTab] = useState<PlacementTab>("fit");
   const [surveyNotice, setSurveyNotice] = useState<string | null>(null);
-  // The Station_pg collection last sent for a snap. A re-trimmed layer is a new
-  // object and snaps again; a frame nudge or a lock toggle leaves it alone. The
-  // counter drops a response that lands after a newer snap or a new conversion.
-  const snappedRef = useRef<FeatureCollection | null>(null);
+  const [surveyPose, setSurveyPose] = useState<SurveyPose>("idle");
+  const [locateSettled, setLocateSettled] = useState(false);
+  // The Station_pg collection last sent for a snap, keyed with the pin it used.
+  // A re-trimmed layer is a new object and snaps again; a frame nudge or a lock
+  // toggle leaves it alone. The counter drops a response that lands after a
+  // newer snap or a new conversion.
+  const snappedRef = useRef<SurveySnapTarget | null>(null);
   const surveySnapGen = useRef(0);
   // Floors start grouped: the whole building is aligned first, then the user
   // switches to individual mode for final per-floor nudges. UI-level only —
@@ -388,13 +397,29 @@ export function IllustratorPage() {
   const surveyName = surveyLayerName(referenceLayers);
   const surveyCollection =
     referenceLayers.find((layer) => layer.name === surveyName)?.data ?? null;
+  const surveyHasFeatures = Boolean(surveyCollection && surveyCollection.features.length > 0);
+  const snapMatchesCurrent = sameSurveySnap(
+    snappedRef.current,
+    surveyCollection,
+    state.stationPin
+  );
+  const poseReady = placementPoseReady(Boolean(state.stationPin), surveyHasFeatures, surveyPose, {
+    locateSettled,
+    snapMatchesCurrent
+  });
   const snapToSurvey = async (reference: FeatureCollection) => {
     // A group apply moves the linked floors through the active floor, so an
     // unlinked active floor hands the anchor to the first floor still linked.
     const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
     const anchor = active?.linked ? active : state.floors.find((floor) => floor.linked);
-    if (!preview || !anchor) return;
-    snappedRef.current = reference;
+    const pin = state.stationPin;
+    setSurveyPose("pending");
+    if (!preview || !anchor || !pin) {
+      if (pin) snappedRef.current = { collection: reference, pin };
+      setSurveyPose("ready");
+      return;
+    }
+    snappedRef.current = { collection: reference, pin };
     const gen = ++surveySnapGen.current;
     try {
       const { match } = await snapIllustratorSurvey(preview.conversion_id, {
@@ -432,13 +457,15 @@ export function IllustratorPage() {
           t("Could not snap to Station_pg.", "Station_pg にスナップできませんでした。")
         )
       );
+    } finally {
+      if (gen === surveySnapGen.current) setSurveyPose("ready");
     }
   };
 
   useEffect(() => {
     if (!preview || assignment === null || !state.stationPin || !state.scaleLocked) return;
     if (!surveyCollection || surveyCollection.features.length === 0) return;
-    if (snappedRef.current === surveyCollection) return;
+    if (sameSurveySnap(snappedRef.current, surveyCollection, state.stationPin)) return;
     void snapToSurvey(surveyCollection);
   }, [preview, assignment, state.stationPin, state.scaleLocked, surveyCollection]);
 
@@ -723,6 +750,9 @@ export function IllustratorPage() {
       setRecenterTo(null);
       setReferenceLayers([]);
       setSurveyNotice(null);
+      setSurveyPose("idle");
+      setLocateSettled(false);
+      snappedRef.current = null;
       surveySnapGen.current += 1;
       setLastFile(file);
       setOutputCrs(response.suggested_crs);
@@ -891,6 +921,7 @@ export function IllustratorPage() {
         siteName={siteName}
         conversionId={preview.conversion_id}
         onLocate={setRecenterTo}
+        onLookupSettled={() => setLocateSettled(true)}
         canUndo={history.past.length > 0}
         canRedo={history.future.length > 0}
         tab={placementTab}
@@ -927,12 +958,23 @@ export function IllustratorPage() {
         error={error}
       />
 
-      <div className="min-h-0 flex-1 overflow-hidden rounded-[var(--radius-md)] border">
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-[var(--radius-md)] border">
+        {!poseReady ? (
+          <p
+            data-testid="placement-hold"
+            className="pointer-events-none absolute inset-x-0 top-3 z-30 mx-auto w-fit rounded-[var(--radius-md)] bg-white/90 px-3 py-1 text-xs shadow"
+          >
+            {state.stationPin
+              ? t("Snapping to Station_pg…", "Station_pg に合わせています…")
+              : t("Locating the station…", "駅を検索しています…")}
+          </p>
+        ) : null}
         <PlacementMap
           floors={floorLayers}
           state={state}
           dispatch={dispatch}
           mode={adjustmentMode}
+          artworkVisible={poseReady}
           onModeChange={(mode) => {
             setPickSession(null);
             setShapeMatch((current) => keptMatchTarget(current));
