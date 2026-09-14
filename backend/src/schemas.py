@@ -723,6 +723,24 @@ class ReferenceLayersResponse(BaseModel):
     layers: list[ReferenceLayerItem] = Field(default_factory=list)
 
 
+class PreloadedReferenceOverlayInfo(BaseModel):
+    """Whether the shared-PC 駅データ extract is configured and on disk."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    available: bool
+    label: str = "駅データ"
+
+
+class PreloadedReferenceLayersRequest(BaseModel):
+    """Bbox query against the preloaded extract. No file upload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    focus_bounds: str
+    include_lines: bool = False
+
+
 class FloorExportPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

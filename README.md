@@ -125,6 +125,8 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8310
 
 Colleagues can access `http://<pc-hostname>:8310`.
 
+Set `REFERENCE_OVERLAY_PATH` in `.env` to the 駅データ zip (or unpacked folder) on this PC so Illustrator placement can load that overlay without a 60 MB upload. Leave it unset to hide **Load 駅データ**; **Add shapefile** still works for other files.
+
 ---
 
 ## Tests
