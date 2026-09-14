@@ -101,6 +101,19 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
       <button type="button" onClick={() => onReferenceLayersChange([referenceLayer])}>
         Add reference
       </button>
+      <button
+        type="button"
+        onClick={() =>
+          onReferenceLayersChange([
+            {
+              ...referenceLayer,
+              data: { ...referenceLayer.data, features: [...referenceLayer.data.features] }
+            }
+          ])
+        }
+      >
+        Replace reference
+      </button>
       <button type="button" onClick={shapeMatch.onToggleSelection}>
         Choose outline
       </button>
@@ -332,6 +345,18 @@ test("ranks and previews shapes without moving floors until explicit apply", asy
   await waitFor(() => expect(screen.getByTestId("frame-rotation")).toHaveTextContent("25"));
   expect(screen.getByTestId("linked-floors")).toHaveTextContent("true,true,true");
   expect(screen.getByTestId("frame-metres")).toHaveTextContent(String(DEFAULT_METRES_PER_POINT));
+});
+
+test("re-trimming the same layer name drops stale matches and preview", async () => {
+  await enterPlacementView();
+  await selectOutline();
+  fireEvent.click(screen.getByRole("button", { name: "Find matches" }));
+  await waitFor(() => expect(screen.getByTestId("match-count")).toHaveTextContent("3"));
+  expect(screen.getByTestId("preview-rank")).toHaveTextContent("1");
+  fireEvent.click(screen.getByRole("button", { name: "Replace reference" }));
+  expect(screen.getByTestId("match-count")).toHaveTextContent("0");
+  expect(screen.getByTestId("preview-rank")).toHaveTextContent("none");
+  expect(screen.getByTestId("match-target")).toHaveTextContent("building-footprints");
 });
 
 test("matching another floor posts that floor and unlinks only the active floor", async () => {

@@ -104,6 +104,132 @@ test("keeps a floor target, auto-selects the only other floor, and prefers a sin
   ).toEqual({ referenceName: "", referenceFloorLabel: "2F" });
 });
 
+test("Add shapefile is disabled until a station pin supplies focus bounds", () => {
+  render(<ListHarness />);
+  expect(screen.getByRole("button", { name: /add shapefile/i })).toBeDisabled();
+  expect(screen.getByText(/identify the station/i)).toBeInTheDocument();
+  addFile();
+  expect(upload).not.toHaveBeenCalled();
+});
+
+test("changing the pin re-reads the archived zip around the new bounds", async () => {
+  upload.mockResolvedValue([layer("station", 12139, 331)]);
+  function PinHarness() {
+    const [bounds, setBounds] = useState<[number, number, number, number] | null>(FOCUS);
+    const [layers, setLayers] = useState<ReferenceLayer[]>([]);
+    return (
+      <>
+        <button type="button" onClick={() => setBounds([140.11, 35.61, 140.11, 35.61])}>
+          move pin
+        </button>
+        <ReferenceLayerList
+          layers={layers}
+          onChange={setLayers}
+          matchTargetName=""
+          onMatchTargetChange={() => {}}
+          focusBounds={bounds}
+        />
+      </>
+    );
+  }
+  render(<PinHarness />);
+  addFile();
+  await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+  expect(upload.mock.calls[0][1]).toEqual(FOCUS);
+  fireEvent.click(screen.getByRole("button", { name: /move pin/i }));
+  await waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+  expect(upload.mock.calls[1][1]).toEqual([140.11, 35.61, 140.11, 35.61]);
+});
+
+test("a pin move re-reads every shapefile that was added, not only the last", async () => {
+  upload.mockResolvedValue([layer("station", 4, 4)]);
+  function PinHarness() {
+    const [bounds, setBounds] = useState<[number, number, number, number] | null>(FOCUS);
+    const [layers, setLayers] = useState<ReferenceLayer[]>([]);
+    return (
+      <>
+        <button type="button" onClick={() => setBounds([140.11, 35.61, 140.11, 35.61])}>
+          move pin
+        </button>
+        <ReferenceLayerList
+          layers={layers}
+          onChange={setLayers}
+          matchTargetName=""
+          onMatchTargetChange={() => {}}
+          focusBounds={bounds}
+        />
+      </>
+    );
+  }
+  render(<PinHarness />);
+  addFile();
+  await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+  addFile();
+  await waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+  expect(upload.mock.calls[1][0]).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: /move pin/i }));
+  await waitFor(() => expect(upload).toHaveBeenCalledTimes(3));
+  expect(upload.mock.calls[2][0]).toHaveLength(2);
+});
+
+test("a failed add is not archived, so a pin move does not retry it", async () => {
+  upload.mockRejectedValue(buildApiClientError(422, JSON.stringify({ detail: "Not a readable shapefile." })));
+  function PinHarness() {
+    const [bounds, setBounds] = useState<[number, number, number, number] | null>(FOCUS);
+    const [layers, setLayers] = useState<ReferenceLayer[]>([]);
+    return (
+      <>
+        <button type="button" onClick={() => setBounds([140.11, 35.61, 140.11, 35.61])}>
+          move pin
+        </button>
+        <ReferenceLayerList
+          layers={layers}
+          onChange={setLayers}
+          matchTargetName=""
+          onMatchTargetChange={() => {}}
+          focusBounds={bounds}
+        />
+      </>
+    );
+  }
+  render(<PinHarness />);
+  addFile();
+  await waitFor(() => expect(screen.getByText("Not a readable shapefile.")).toBeInTheDocument());
+  upload.mockResolvedValue([layer("station", 4, 4)]);
+  fireEvent.click(screen.getByRole("button", { name: /move pin/i }));
+  expect(upload).toHaveBeenCalledTimes(1);
+});
+
+test("removing a layer keeps it off after a pin move", async () => {
+  upload.mockResolvedValue([layer("station", 4, 4)]);
+  function PinHarness() {
+    const [bounds, setBounds] = useState<[number, number, number, number] | null>(FOCUS);
+    const [layers, setLayers] = useState<ReferenceLayer[]>([]);
+    return (
+      <>
+        <button type="button" onClick={() => setBounds([140.11, 35.61, 140.11, 35.61])}>
+          move pin
+        </button>
+        <ReferenceLayerList
+          layers={layers}
+          onChange={setLayers}
+          matchTargetName=""
+          onMatchTargetChange={() => {}}
+          focusBounds={bounds}
+        />
+      </>
+    );
+  }
+  render(<PinHarness />);
+  addFile();
+  await waitFor(() => expect(screen.getByText("station")).toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: /remove/i }));
+  expect(screen.queryByText("station")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /move pin/i }));
+  await waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+  expect(screen.queryByText("station")).toBeNull();
+});
+
 test("shows the kept count over the source total when a spatial trim happened", async () => {
   upload.mockResolvedValue([layer("station", 12139, 842)]);
 
@@ -111,7 +237,6 @@ test("shows the kept count over the source total when a spatial trim happened", 
   addFile();
 
   await waitFor(() => expect(screen.getByText("842 / 12139")).toBeInTheDocument());
-  // The trim is announced up front, so the count is not a surprise.
   expect(screen.getByText(/trimmed to about 1 km/i)).toBeInTheDocument();
 });
 
@@ -141,7 +266,7 @@ test("a zero-feature response says nothing was found instead of adding a ghost l
   addFile();
 
   await waitFor(() =>
-    expect(screen.getByText(/nothing was found near the artwork/i)).toBeInTheDocument()
+    expect(screen.getByText(/nothing was found near the station/i)).toBeInTheDocument()
   );
   expect(onChange).not.toHaveBeenCalled();
   expect(screen.queryByText("station")).toBeNull();
@@ -157,6 +282,7 @@ test("a stopped backend is reported as unreachable, not as a corrupt file", asyn
       onChange={() => {}}
       matchTargetName=""
       onMatchTargetChange={() => {}}
+      focusBounds={FOCUS}
     />
   );
   addFile();
@@ -179,6 +305,7 @@ test("a real API error message is shown verbatim", async () => {
       onChange={() => {}}
       matchTargetName=""
       onMatchTargetChange={() => {}}
+      focusBounds={FOCUS}
     />
   );
   addFile();

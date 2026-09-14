@@ -1,4 +1,4 @@
-import { siteNameFromFilename } from "./siteName";
+import { siteNameFromFilename, stationQueryFromFilename } from "./siteName";
 
 test("drops the work-order number and extension", () => {
   expect(siteNameFromFilename("0307_大井町.ai")).toBe("大井町");
@@ -29,4 +29,13 @@ test("a path is reduced to its file name", () => {
 test("a purely numeric name yields no search term", () => {
   expect(siteNameFromFilename("12345.ai")).toBe("");
   expect(siteNameFromFilename("0307_.ai")).toBe("");
+});
+
+test("stationQueryFromFilename appends 駅 unless the leftover already names a station", () => {
+  expect(stationQueryFromFilename("0989_千葉.ai")).toBe("千葉駅");
+  expect(stationQueryFromFilename("0307_大井町.ai")).toBe("大井町駅");
+  expect(stationQueryFromFilename("東京駅.ai")).toBe("東京駅");
+  expect(stationQueryFromFilename("JRShinjukuSta_6677.ai")).toBe("JRShinjukuSta");
+  expect(stationQueryFromFilename("0307_Tokyo_Station.ai")).toBe("Tokyo Station");
+  expect(stationQueryFromFilename("12345.ai")).toBe("");
 });

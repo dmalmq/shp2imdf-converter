@@ -388,6 +388,7 @@ class GeocodeResultItem(BaseModel):
     longitude: float
     source: str = "nominatim"
     address: GeocodeAddressInput = Field(default_factory=GeocodeAddressInput)
+    working_crs: str
 
 
 class AddressSearchResponse(BaseModel):

@@ -218,6 +218,7 @@ export type GeocodeResultItem = {
   longitude: number;
   source: string;
   address: GeocodeAddressParts;
+  working_crs?: string;
 };
 
 export type AddressSearchResponse = {

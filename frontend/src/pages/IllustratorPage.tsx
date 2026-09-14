@@ -29,13 +29,13 @@ import {
   type ShapeMatchPanelModel
 } from "../components/illustrator/ShapeMatchPanel";
 import { Button, Card } from "../components/ui";
-import { siteNameFromFilename } from "../lib/siteName";
+import { stationQueryFromFilename } from "../lib/siteName";
 import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
 import {
   DEFAULT_METRES_PER_POINT,
   MIN_CONTROL_POINTS,
   initialPlacementHistory,
-  placedBoundsWgs84,
+  pinFocusBounds,
   placementHistoryReducer,
   resolvedTransform,
   toFloorPayloads,
@@ -298,9 +298,7 @@ export function IllustratorPage() {
   const bounds: [number, number, number, number] =
     preview?.artwork_bounds ?? ([0, 0, 100, 100] as [number, number, number, number]);
 
-  // Drawings are named after the building (e.g. 0307_大井町.ai), so the panel can
-  // search for it and open the map on the right place instead of a city centre.
-  const siteName = siteNameFromFilename(preview?.report?.source_name ?? "");
+  const siteName = stationQueryFromFilename(preview?.report?.source_name ?? "");
 
   const floorLayers: FloorLayer[] = useMemo(() => {
     if (!preview) return [];
@@ -324,16 +322,9 @@ export function IllustratorPage() {
     }));
   }, [preview, assignment]);
 
-  // Reference uploads are trimmed to ~1 km around the placed artwork; the box
-  // comes from the same transforms that place the floors on the map, so the
-  // trim follows every drag, rotate and scale.
   const focusBounds = useMemo(
-    () =>
-      placedBoundsWgs84(
-        state,
-        floorLayers.map((floor) => ({ label: floor.label, bounds: floor.bounds }))
-      ),
-    [state, floorLayers]
+    () => (state.stationPin ? pinFocusBounds(state.stationPin) : null),
+    [state.stationPin]
   );
 
   const referenceFloorPlacement =
@@ -371,6 +362,10 @@ export function IllustratorPage() {
       : toErrorMessage(error, fallback);
 
   const updateReferenceLayers = (layers: ReferenceLayer[]) => {
+    const geometryReplaced = referenceLayers.some((old) => {
+      const next = layers.find((layer) => layer.name === old.name);
+      return next !== undefined && next.data !== old.data;
+    });
     setReferenceLayers(layers);
     setShapeMatch((current) => {
       const next = nextMatchTarget(
@@ -379,17 +374,21 @@ export function IllustratorPage() {
         state.activeFloorLabel,
         current
       );
-      return next.referenceName === current.referenceName &&
+      if (
+        !geometryReplaced &&
+        next.referenceName === current.referenceName &&
         next.referenceFloorLabel === current.referenceFloorLabel
-        ? current
-        : {
-            ...current,
-            ...next,
-            matches: [],
-            previewRank: null,
-            searched: false,
-            error: null
-          };
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        ...next,
+        matches: [],
+        previewRank: null,
+        searched: false,
+        error: null
+      };
     });
   };
 
@@ -633,6 +632,7 @@ export function IllustratorPage() {
       setPreview(response);
       setAssignment(null);
       setRecenterTo(null);
+      setReferenceLayers([]);
       setLastFile(file);
       setOutputCrs(response.suggested_crs);
       // New conversions start locked at 1:1000; assignment reset does the same.
@@ -791,6 +791,7 @@ export function IllustratorPage() {
         dispatch={dispatch}
         mode={adjustmentMode}
         siteName={siteName}
+        conversionId={preview.conversion_id}
         onLocate={setRecenterTo}
         canUndo={history.past.length > 0}
         canRedo={history.future.length > 0}

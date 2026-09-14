@@ -4,6 +4,7 @@ import {
   currentResiduals,
   floorPayloadsToState,
   initialPlacementHistory,
+  pinFocusBounds,
   placedBoundsWgs84,
   placementHistoryReducer,
   placementReducer,
@@ -54,6 +55,30 @@ test("positioning the active floor moves every linked floor by derivation", () =
   );
   expect(e).toBeCloseTo(200 * 0.176389, 6);
   expect(n).toBeCloseTo(0, 6);
+});
+
+test("positionBuilding can set the working CRS with the pin", () => {
+  const next = placementReducer(BASE, {
+    type: "positionBuilding",
+    mapAnchor: [140.1134, 35.6132],
+    workingCrs: "EPSG:6676"
+  });
+  expect(next.frame.workingCrs).toBe("EPSG:6676");
+  expect(next.floors[0].mapAnchor).toEqual([140.1134, 35.6132]);
+  expect(next.stationPin).toEqual([140.1134, 35.6132]);
+});
+
+test("positionBuilding without workingCrs keeps the frame CRS", () => {
+  const next = placementReducer(BASE, {
+    type: "positionBuilding",
+    mapAnchor: [140.1134, 35.6132]
+  });
+  expect(next.frame.workingCrs).toBe(BASE.frame.workingCrs);
+  expect(next.floors[0].mapAnchor).toEqual([140.1134, 35.6132]);
+});
+
+test("pinFocusBounds is a degenerate box at the pin", () => {
+  expect(pinFocusBounds([140.1134, 35.6132])).toEqual([140.1134, 35.6132, 140.1134, 35.6132]);
 });
 
 test("rotateFrame rotates linked offsets about the active anchor", () => {
@@ -703,6 +728,7 @@ test("the auto-located baseline is the floor of the history, not an undo step", 
   });
   expect(history.past).toHaveLength(0);
   expect(history.present.floors[0].mapAnchor).toEqual([139.734, 35.606]);
+  expect(history.present.stationPin).toEqual([139.734, 35.606]);
   expect(placementHistoryReducer(history, { type: "undo" })).toBe(history);
 
   // A location the user picks afterwards is a normal, undoable edit.
@@ -711,8 +737,24 @@ test("the auto-located baseline is the floor of the history, not an undo step", 
     mapAnchor: [139.7, 35.69]
   });
   expect(history.past).toHaveLength(1);
+  expect(history.present.stationPin).toEqual([139.7, 35.69]);
   history = placementHistoryReducer(history, { type: "undo" });
   expect(history.present.floors[0].mapAnchor).toEqual([139.734, 35.606]);
+  expect(history.present.stationPin).toEqual([139.734, 35.606]);
+});
+
+test("dragging a floor does not move the station pin", () => {
+  const pinned = placementReducer(BASE, {
+    type: "positionBuilding",
+    mapAnchor: [140.11, 35.61]
+  });
+  const dragged = placementReducer(pinned, {
+    type: "dragFloor",
+    label: "1F",
+    mapAnchor: [140.12, 35.62]
+  });
+  expect(dragged.stationPin).toEqual([140.11, 35.61]);
+  expect(dragged.floors[0].mapAnchor).toEqual([140.12, 35.62]);
 });
 
 // The golden fixture: the same transform constants

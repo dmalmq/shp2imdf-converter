@@ -2,6 +2,7 @@ import {
   INITIAL_LOCATE,
   acceptsGuess,
   locateReducer,
+  preferStationHits,
   samePlace,
   toPlace,
   type LocateState,
@@ -169,4 +170,24 @@ test("acceptsGuess, samePlace, and toPlace", () => {
   expect(
     toPlace({ display_name: "大井町駅", longitude: 139.7286, latitude: 35.6063 })
   ).toEqual({ name: "大井町駅", lngLat: [139.7286, 35.6063] });
+  expect(
+    toPlace({
+      display_name: "大井町駅",
+      longitude: 139.7286,
+      latitude: 35.6063,
+      working_crs: "EPSG:6677"
+    })
+  ).toEqual({ name: "大井町駅", lngLat: [139.7286, 35.6063], workingCrs: "EPSG:6677" });
+});
+
+test("preferStationHits ranks 駅 names first and leaves a station-only list alone", () => {
+  expect(preferStationHits([oimachiTown, oimachiSta])).toEqual([oimachiSta, oimachiTown]);
+  expect(preferStationHits([oimachiSta, oimachiTown])).toEqual([oimachiSta, oimachiTown]);
+  expect(preferStationHits([oimachiTown])).toEqual([oimachiTown]);
+  expect(
+    preferStationHits([
+      { name: "Chiba, Chiba Prefecture" },
+      { name: "Chiba Station, Chuo-ku" }
+    ])
+  ).toEqual([{ name: "Chiba Station, Chuo-ku" }, { name: "Chiba, Chiba Prefecture" }]);
 });

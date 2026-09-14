@@ -63,6 +63,32 @@ test("empty siteName does not search and the row is Find the building", () => {
   expect(screen.queryByRole("listitem")).toBeNull();
 });
 
+test("filename auto-locate prefers a 駅 hit even when Nominatim ranked the town first", async () => {
+  vi.mocked(geocodeSearch).mockResolvedValue([oimachiTownWire, oimachiStaWire]);
+  const { seen } = renderLocate("大井町駅");
+  await screen.findByText(/first match/i);
+  expect(geocodeSearch).toHaveBeenCalledWith("大井町駅", expect.anything());
+  expect(seen).toEqual([
+    { type: "positionBuilding", mapAnchor: [139.7286, 35.6063], baseline: true }
+  ]);
+});
+
+test("a working_crs on the hit is applied with the pin", async () => {
+  vi.mocked(geocodeSearch).mockResolvedValue([
+    { ...oimachiStaWire, working_crs: "EPSG:6676" }
+  ]);
+  const { seen } = renderLocate("千葉駅");
+  await screen.findByText(/first match/i);
+  expect(seen).toEqual([
+    {
+      type: "positionBuilding",
+      mapAnchor: [139.7286, 35.6063],
+      workingCrs: "EPSG:6676",
+      baseline: true
+    }
+  ]);
+});
+
 test("filename auto-locate places the first hit without opening the list", async () => {
   vi.mocked(geocodeSearch).mockResolvedValue([oimachiStaWire, oimachiTownWire]);
   const { seen, recenter } = renderLocate("大井町");

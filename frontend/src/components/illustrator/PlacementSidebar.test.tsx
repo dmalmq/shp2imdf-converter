@@ -46,6 +46,7 @@ function SidebarHarness({
       dispatch={() => {}}
       mode="group"
       siteName={siteName}
+      conversionId="conversion-1"
       onLocate={() => {}}
       canUndo={false}
       canRedo={false}

@@ -21,3 +21,10 @@ export function siteNameFromFilename(filename: string): string {
     .trim();
   return /^\d*$/.test(name) ? "" : name;
 }
+
+export function stationQueryFromFilename(filename: string): string {
+  const name = siteNameFromFilename(filename);
+  if (!name) return "";
+  if (/(?:駅|sta|station)$/i.test(name.replace(/\s+/g, ""))) return name;
+  return `${name}駅`;
+}
