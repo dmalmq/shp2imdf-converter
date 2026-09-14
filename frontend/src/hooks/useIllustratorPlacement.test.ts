@@ -96,6 +96,43 @@ test("the pin moves an unstacked floor and leaves a manually unlinked floor", ()
   expect(next.floors[1].mapAnchor).toEqual(ANCHOR);
 });
 
+test("the pin still moves the linked group when an unstacked floor is active", () => {
+  const start: PlacementState = {
+    ...BASE,
+    activeFloorLabel: "4F",
+    floors: [
+      floor("1F", ANCHOR, true),
+      floor("2F", ANCHOR, true),
+      floor("3F", ANCHOR, true),
+      { ...floor("4F", ANCHOR, false), artworkMatch: true }
+    ]
+  };
+  const target: [number, number] = [139.71, 35.7];
+  const next = placementReducer(start, { type: "positionBuilding", mapAnchor: target });
+  expect(next.activeFloorLabel).toBe("4F");
+  expect(next.floors[0].mapAnchor).toEqual(target);
+  expect(next.floors[3].mapAnchor).toEqual(target);
+  expect(next.floors[1].mapAnchor).not.toEqual(target);
+});
+
+test("dragging an unstacked floor keeps it off the next pin", () => {
+  let state: PlacementState = {
+    ...BASE,
+    activeFloorLabel: "4F",
+    floors: [
+      floor("1F", ANCHOR, true),
+      floor("2F", ANCHOR, true),
+      { ...floor("4F", ANCHOR, false), artworkMatch: true }
+    ]
+  };
+  const placed: [number, number] = [139.72, 35.71];
+  state = placementReducer(state, { type: "dragFloor", label: "4F", mapAnchor: placed });
+  expect(state.floors[2].artworkMatch).toBe(false);
+  state = placementReducer(state, { type: "positionBuilding", mapAnchor: [139.71, 35.7] });
+  expect(state.floors[2].mapAnchor).toEqual(placed);
+  expect(state.floors[0].mapAnchor).toEqual([139.71, 35.7]);
+});
+
 test("pinFocusBounds is a degenerate box at the pin", () => {
   expect(pinFocusBounds([140.1134, 35.6132])).toEqual([140.1134, 35.6132, 140.1134, 35.6132]);
 });
