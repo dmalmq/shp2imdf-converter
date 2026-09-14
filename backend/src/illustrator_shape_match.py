@@ -53,6 +53,7 @@ _REGION_CANDIDATE_LIMIT = 40
 _REGION_MIN_SCALE = 0.2
 _REGION_MAX_SCALE = 5.0
 _SHORTLIST_LIMIT = 48
+NO_ASSIGNMENT_ERROR = "No floor assignment is stored; assign floors before matching."
 _OUTLINE_ERROR = "The selected artwork feature is not a usable outline."
 _SAME_FLOOR_ERROR = "The reference floor must be different from the selected floor."
 _REFERENCE_FLOOR_TRANSFORM_ERROR = "A placement for the reference floor is required."
@@ -236,14 +237,7 @@ def match_regions(
 def _region_outlines(
     cached: CachedConversion, floor_label: str, region: Sequence[float]
 ) -> list:
-    stored = _floor_assignment(cached, floor_label)
-    export_floor = ExportFloor(
-        label=floor_label,
-        transform=_PLACEHOLDER_TRANSFORM,
-        region=stored.get("box"),
-        layer_names=stored.get("layer_names"),
-        pages=stored.get("pages"),
-    )
+    export_floor = assigned_floor(_floor_assignment(cached, floor_label))
     minx, miny, maxx, maxy = (float(value) for value in region)
     outlines = []
     for _spec, frame in _read_layers(cached):
@@ -383,14 +377,7 @@ def _resolve_artwork_polygon(
     if source_row < 0 or source_row >= len(frame):
         raise ValueError(f"Unknown source row: {source_row}.")
     row = frame.iloc[[source_row]]
-    export_floor = ExportFloor(
-        label=floor_label,
-        transform=_PLACEHOLDER_TRANSFORM,
-        region=stored.get("box"),
-        layer_names=stored.get("layer_names"),
-        pages=stored.get("pages"),
-    )
-    if not bool(_floor_mask(row, export_floor).iloc[0]):
+    if not bool(_floor_mask(row, assigned_floor(stored)).iloc[0]):
         raise ValueError(f"The selected outline is not assigned to floor '{floor_label}'.")
     geom = row.geometry.iloc[0]
     if geom is None or geom.is_empty:
@@ -448,25 +435,29 @@ def _polygon_from_line(line: LineString) -> Polygon | None:
 
 def _floor_assignment(cached: CachedConversion, floor_label: str) -> dict:
     if not cached.floors:
-        raise ValueError("No floor assignment is stored; assign floors before matching.")
+        raise ValueError(NO_ASSIGNMENT_ERROR)
     stored = next((floor for floor in cached.floors if floor.get("label") == floor_label), None)
     if stored is None:
         raise ValueError(f"Unknown floor label: {floor_label}.")
     return stored
 
 
-def reference_collection_for_floor(
-    cached: CachedConversion, floor_label: str, transform: SimilarityTransform
-) -> dict[str, Any]:
-    """Place that floor's usable outlines into a WGS84 FeatureCollection."""
-    stored = _floor_assignment(cached, floor_label)
-    export_floor = ExportFloor(
-        label=floor_label,
+def assigned_floor(stored: Mapping[str, Any]) -> ExportFloor:
+    """A stored assignment as the membership filter ``_floor_mask`` reads."""
+    return ExportFloor(
+        label=str(stored.get("label")),
         transform=_PLACEHOLDER_TRANSFORM,
         region=stored.get("box"),
         layer_names=stored.get("layer_names"),
         pages=stored.get("pages"),
     )
+
+
+def reference_collection_for_floor(
+    cached: CachedConversion, floor_label: str, transform: SimilarityTransform
+) -> dict[str, Any]:
+    """Place that floor's usable outlines into a WGS84 FeatureCollection."""
+    export_floor = assigned_floor(_floor_assignment(cached, floor_label))
     features: list[dict[str, Any]] = []
     for _spec, frame in _read_layers(cached):
         if frame.empty:
