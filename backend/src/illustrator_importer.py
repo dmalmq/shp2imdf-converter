@@ -686,6 +686,76 @@ def _align_pages(
     return alignment
 
 
+@dataclass(frozen=True)
+class PunchRule:
+    target: str
+    cutters: tuple[str, ...]
+
+
+PUNCH_RULES: tuple[PunchRule, ...] = (
+    PunchRule(target="在来線ラチ内", cutters=("建物・施設", "エスカレーター")),
+    PunchRule(target="建物・施設", cutters=("エスカレーター", "構内大型店舗", "みどりの窓口")),
+)
+
+
+def _geom_to_subpaths(geom: Any) -> list[list[tuple[float, float]]]:
+    parts = list(geom.geoms) if geom.geom_type == "MultiPolygon" else [geom]
+    subpaths: list[list[tuple[float, float]]] = []
+    for part in parts:
+        if part.geom_type != "Polygon":
+            continue
+        subpaths.append([(float(x), float(y)) for x, y in part.exterior.coords])
+        for interior in part.interiors:
+            subpaths.append([(float(x), float(y)) for x, y in interior.coords])
+    return subpaths
+
+
+def _punch_page_overlaps(records: list[_PathRecord]) -> None:
+    # Snapshot originals so a punched 建物 is never reused as a ラチ内 cutter (nested refill).
+    originals: dict[int, Any] = {}
+    by_page: dict[int, list[int]] = {}
+    for index, record in enumerate(records):
+        by_page.setdefault(record.page, []).append(index)
+        if record.role != "polygon":
+            continue
+        geom = _build_polygon(record.subpaths)
+        if geom is not None:
+            originals[index] = geom
+
+    for page_indices in by_page.values():
+        for rule in PUNCH_RULES:
+            cutter_geoms = [
+                originals[index]
+                for index in page_indices
+                if index in originals
+                and any(token in records[index].layer for token in rule.cutters)
+            ]
+            if not cutter_geoms:
+                continue
+            try:
+                cutter_union = unary_union(cutter_geoms)
+            except Exception:
+                continue
+            if cutter_union is None or cutter_union.is_empty:
+                continue
+
+            for index in page_indices:
+                record = records[index]
+                if record.role != "polygon" or rule.target not in record.layer:
+                    continue
+                original = originals.get(index)
+                if original is None:
+                    continue
+                try:
+                    carved = _polygonal_only(make_valid(original.difference(cutter_union)))
+                except Exception:
+                    continue
+                if carved is None or carved.is_empty or carved.area == 0:
+                    record.subpaths = []
+                else:
+                    record.subpaths = _geom_to_subpaths(carved)
+
+
 def _records_to_rows(records: list[_PathRecord], report: ConversionReport) -> tuple[list[dict], list]:
     rows: list[dict] = []
     geoms: list = []
@@ -837,6 +907,7 @@ def _convert(ai_bytes: bytes, source_name: str) -> _ConversionResult:
 
     report.layer_order = layer_order
     report.page_alignment = _align_pages(device.records, report.pages)
+    _punch_page_overlaps(device.records)
     gpkg_bytes, written = _write_geopackage(device.records, report)
     stem = Path(source_name).stem or "illustrator"
     return _ConversionResult(gpkg_bytes, written, layer_order, report, stem)
