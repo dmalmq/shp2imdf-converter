@@ -24,6 +24,8 @@ export type ShapeMatchPanelModel = {
   onToggleRegions: () => void;
   onFind: () => void;
   onPreview: (rank: number) => void;
+  artworkMatchTarget?: string;
+  onStartArtworkMatch?: () => void;
   onApply: () => void;
   onClear: () => void;
 };
@@ -96,6 +98,25 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
           "塗りつぶしまたは線で描かれた外周を1つ選択してください。参照シェープファイルまたは別フロアの似たポリゴンを順位付けします。結果を適用するまで図面は移動しません。"
         )}
       </p>
+
+      {model.artworkMatchTarget && activeFloor ? (
+        <div className="mt-2 space-y-1 rounded-[var(--radius-sm)] bg-[var(--color-surface-muted)] p-2">
+          <p className="text-xs text-[var(--color-text-muted)]">
+            {t(
+              `${activeFloor.label} did not stack. Match this floor to ${model.artworkMatchTarget}, not to Station_pg.`,
+              `「${activeFloor.label}」は他のフロアと一致しませんでした。「Station_pg」ではなく「${model.artworkMatchTarget}」に合わせてください。`
+            )}
+          </p>
+          {model.onStartArtworkMatch ? (
+            <Button size="sm" className="w-full" onClick={model.onStartArtworkMatch}>
+              {t(
+                `Match ${activeFloor.label} to ${model.artworkMatchTarget}`,
+                `「${activeFloor.label}」を「${model.artworkMatchTarget}」に合わせる`
+              )}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       {canMatch ? (
         <Select
