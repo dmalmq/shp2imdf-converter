@@ -42,7 +42,11 @@ export const TabsContent = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <TabsPrimitive.Content
     ref={ref}
-    className={cn("focus-visible:outline-none", className)}
+    // Radix only unmounts inactive content when `forceMount` is off; with it on,
+    // `present` is always true so it never sets `hidden`. Panels that must keep
+    // their local state therefore need to be hidden here, or all of them stay
+    // visible and every one is exposed to assistive tech at once.
+    className={cn("data-[state=inactive]:hidden focus-visible:outline-none", className)}
     {...props}
   />
 ));

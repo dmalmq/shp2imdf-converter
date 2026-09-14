@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { Redo2, Undo2 } from "lucide-react";
+import { HelpCircle, Redo2, Undo2 } from "lucide-react";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
@@ -9,7 +8,9 @@ import {
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
 import { drawingScaleDenominator } from "../../lib/similarity";
-import { Button } from "../legacy-ui";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 
 type Props = {
   state: PlacementState;
@@ -19,6 +20,13 @@ type Props = {
   canRedo?: boolean;
 };
 
+/**
+ * The pinned header of the placement sidebar: history, the keyboard reference,
+ * rotation, and the scale lock.
+ *
+ * The lock stays out of the tabs on purpose — it governs what dragging a corner
+ * does, so it has to be reachable while you are on Reference or Export.
+ */
 export function TransformPanel({
   state,
   dispatch,
@@ -27,60 +35,64 @@ export function TransformPanel({
   canRedo = false
 }: Props) {
   const { t } = useUiLanguage();
-  const [helpOpen, setHelpOpen] = useState(false);
 
   const activeFloor = state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
   const activeTransform = activeFloor ? resolvedTransform(state, activeFloor) : null;
   const editPerFloor = mode === "individual" || !activeFloor?.linked;
 
   return (
-    <div className="space-y-3 text-sm">
-      <section className="flex items-center gap-2">
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-1">
         <Button
-          size="sm"
-          variant="secondary"
+          variant="outline"
+          size="icon"
           disabled={!canUndo}
+          aria-label={t("Undo", "元に戻す")}
           onClick={() => dispatch({ type: "undo" })}
         >
-          <Undo2 size={13} className="mr-1" />
-          {t("Undo", "元に戻す")}
+          <Undo2 />
         </Button>
         <Button
-          size="sm"
-          variant="secondary"
+          variant="outline"
+          size="icon"
           disabled={!canRedo}
+          aria-label={t("Redo", "やり直す")}
           onClick={() => dispatch({ type: "redo" })}
         >
-          <Redo2 size={13} className="mr-1" />
-          {t("Redo", "やり直す")}
+          <Redo2 />
         </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="ml-auto"
-          aria-label={t("Keyboard and mouse help", "キーボードとマウスの操作")}
-          aria-expanded={helpOpen}
-          onClick={() => setHelpOpen((open) => !open)}
-        >
-          ?
-        </Button>
-      </section>
-      {helpOpen ? (
-        <div className="space-y-2 rounded-[var(--radius-md)] bg-[var(--color-surface-muted)] p-2 text-xs text-[var(--color-text-secondary)]">
-          <p>
-            {t(
-              "Drag to move. Corners scale only when unlocked. The top handle rotates. The map's Group/Individual switch sets whether gestures act on every floor or just this one.",
-              "ドラッグで移動。四隅での拡大縮小は固定を解除したときだけ。上のハンドルで回転。地図の「グループ／個別」スイッチで、全フロアかこの階だけかを選べます。"
-            )}
-          </p>
-          <p>
-            {t(
-              "Alt+drag reverses the Group/Individual switch for one drag. Ctrl+Z / Ctrl+Shift+Z undo and redo. Arrow keys nudge 1 m, Shift+arrows 10 m. Hold Shift while rotating to snap to 15°.",
-              "Alt＋ドラッグは「グループ／個別」スイッチと逆の操作を1回だけ行います。Ctrl+Z / Ctrl+Shift+Z で元に戻す・やり直す。矢印キーで1m、Shift＋矢印で10m移動。回転中に Shift で15度刻み。"
-            )}
-          </p>
-        </div>
-      ) : null}
+
+        {/* The keyboard reference is genuinely useful and was genuinely
+            undiscoverable. As an inline block it also shoved the whole panel
+            down 164px on open; a popover overlays instead. */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="ml-auto"
+              aria-label={t("Keyboard and mouse help", "キーボードとマウスの操作")}
+            >
+              <HelpCircle />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-72 space-y-2 text-xs leading-4 text-muted-foreground">
+            <p>
+              {t(
+                "Drag to move. Corners scale only when unlocked. The top handle rotates. The map's Group/Individual switch sets whether gestures act on every floor or just this one.",
+                "ドラッグで移動。四隅での拡大縮小は固定を解除したときだけ。上のハンドルで回転。地図の「グループ／個別」スイッチで、全フロアかこの階だけかを選べます。"
+              )}
+            </p>
+            <p>
+              {t(
+                "Alt+drag reverses the Group/Individual switch for one drag. Ctrl+Z / Ctrl+Shift+Z undo and redo. Arrow keys nudge 1 m, Shift+arrows 10 m. Hold Shift while rotating to snap to 15°.",
+                "Alt＋ドラッグは「グループ／個別」スイッチと逆の操作を1回だけ行います。Ctrl+Z / Ctrl+Shift+Z で元に戻す・やり直す。矢印キーで1m、Shift＋矢印で10m移動。回転中に Shift で15度刻み。"
+              )}
+            </p>
+          </PopoverContent>
+        </Popover>
+      </div>
+
       {activeFloor && !activeFloor.linked ? (
         <Button
           size="sm"
@@ -91,18 +103,18 @@ export function TransformPanel({
         </Button>
       ) : null}
 
-      <section>
-        <label className="block text-xs font-medium">
+      <div className="flex flex-col gap-1.5">
+        <label className="font-mono text-[11px] uppercase leading-[14px] tracking-[0.04em] text-muted-foreground">
           {t("Rotation (from true north)", "回転（真北基準）")}
           {activeFloor && editPerFloor ? (
-            <span className="text-[var(--color-text-muted)]">{t(" (this floor)", "（この階）")}</span>
+            <span className="normal-case tracking-normal">{t(" (this floor)", "（この階）")}</span>
           ) : null}
         </label>
-        <div className="mt-1 flex items-center gap-2">
-          <input
+        <div className="flex items-center gap-2">
+          <Input
             type="number"
             step="0.1"
-            className="w-24 rounded-[var(--radius-md)] border px-2 py-1"
+            className="w-24"
             value={activeTransform?.rotationDeg ?? state.frame.rotationDeg}
             onChange={(event) => {
               const rotationDeg = Number(event.target.value);
@@ -114,10 +126,11 @@ export function TransformPanel({
               }
             }}
           />
-          <span className="text-xs text-[var(--color-text-muted)]">°</span>
+          <span className="text-xs text-muted-foreground">°</span>
           <Button
             size="sm"
-            variant="secondary"
+            variant="outline"
+            className="ml-auto"
             onClick={() =>
               activeFloor &&
               (editPerFloor
@@ -128,29 +141,28 @@ export function TransformPanel({
             {t("Reset", "リセット")}
           </Button>
         </div>
-      </section>
+      </div>
 
-      <section>
-        <div className="flex items-center gap-2">
-          <p className="text-xs font-medium">
-            {t("Scale", "縮尺")} 1:
-            {Math.round(
-              drawingScaleDenominator(activeTransform?.metresPerPoint ?? state.frame.metresPerPoint)
-            )}
-            {state.scaleLocked ? (
-              <span className="text-[var(--color-success)]">{t(" (locked)", "（固定）")}</span>
-            ) : null}
-          </p>
-          <Button
-            size="sm"
-            variant="secondary"
-            className="ml-auto"
-            onClick={() => dispatch({ type: state.scaleLocked ? "unlockScale" : "lockScale" })}
-          >
-            {state.scaleLocked ? t("Unlock", "固定を解除") : t("Lock", "固定する")}
-          </Button>
-        </div>
-      </section>
+      <div className="flex items-center gap-2">
+        {/* One text node: the scale reading and its lock state are asserted together. */}
+        <p className="text-[13px] font-medium leading-[18px] text-foreground">
+          {t("Scale", "縮尺")} 1:
+          {Math.round(
+            drawingScaleDenominator(activeTransform?.metresPerPoint ?? state.frame.metresPerPoint)
+          )}
+          {state.scaleLocked ? (
+            <span className="font-normal text-success">{t(" (locked)", "（固定）")}</span>
+          ) : null}
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          className="ml-auto"
+          onClick={() => dispatch({ type: state.scaleLocked ? "unlockScale" : "lockScale" })}
+        >
+          {state.scaleLocked ? t("Unlock", "固定を解除") : t("Lock", "固定する")}
+        </Button>
+      </div>
     </div>
   );
 }

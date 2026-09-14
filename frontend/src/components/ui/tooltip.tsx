@@ -41,14 +41,19 @@ export function DisabledHint({
   children: React.ReactNode;
   className?: string;
 }) {
+  // Self-contained provider: a panel using this must work when rendered on its
+  // own (unit tests, storybook) and not only under the app shell. Radix supports
+  // nesting, so an outer provider still wins for delay grouping.
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span tabIndex={0} className={cn("inline-flex w-full", className)}>
-          {children}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{hint}</TooltipContent>
-    </Tooltip>
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span tabIndex={0} className={cn("inline-flex w-full", className)}>
+            {children}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{hint}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }

@@ -3,7 +3,9 @@ import type { Dispatch } from "react";
 import type { ExportFormatsPayload } from "../../api/client";
 import type { AdjustmentMode, PlacementAction, PlacementState } from "../../hooks/useIllustratorPlacement";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { Button, Card, Tabs, tabPanelProps } from "../legacy-ui";
+import { Button } from "../ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { DisabledHint } from "../ui/tooltip";
 import { ExportPanel } from "./ExportPanel";
 import { LocateControl } from "./LocateControl";
 import type { ReferenceLayer } from "./PlacementMap";
@@ -88,32 +90,56 @@ export function PlacementSidebar({
 }: Props) {
   const { t } = useUiLanguage();
 
+  const snapButton = (
+    <Button
+      variant="secondary"
+      className="w-full"
+      disabled={!surveySnap.layerName}
+      onClick={surveySnap.onSnap}
+    >
+      {t("Snap to Station_pg", "Station_pg に合わせる")}
+    </Button>
+  );
+
   return (
-    <div className="flex h-full min-h-0 w-80 shrink-0 flex-col overflow-hidden">
-      <Card padding="md" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <aside className="flex h-full min-h-0 w-[340px] shrink-0 flex-col border-r border-border bg-background">
+      <div className="flex flex-col gap-3 px-4 pt-4">
         <LocateControl key={conversionId} siteName={siteName} dispatch={dispatch} onLocate={onLocate} />
-        <div className="mt-2 shrink-0">
-          <TransformPanel
-            state={state}
-            dispatch={dispatch}
-            mode={mode}
-            canUndo={canUndo}
-            canRedo={canRedo}
-          />
-        </div>
-        <Tabs
-          tabs={[
-            { id: "fit", label: t("Scale & fit", "縮尺と調整") },
-            { id: "reference", label: t("Reference", "参照") },
-            { id: "export", label: t("Export", "書き出し") }
-          ]}
-          active={tab}
-          onChange={onTabChange}
-          idPrefix="placement"
-          className="mt-3 shrink-0"
+        <TransformPanel
+          state={state}
+          dispatch={dispatch}
+          mode={mode}
+          canUndo={canUndo}
+          canRedo={canRedo}
         />
-        <div className="min-h-0 flex-1 overflow-auto pt-3">
-          <div {...tabPanelProps("placement", "fit", tab === "fit")}>
+      </div>
+
+      {/* `forceMount` keeps all three panels in the DOM: each holds its own local
+          state (a half-typed drawing scale, a shape-match selection) and Radix
+          unmounts inactive content by default, which would throw that away on
+          every tab switch. `hidden` is passed explicitly because with forceMount
+          Radix considers every panel present and never sets it itself. */}
+      <Tabs
+        value={tab}
+        onValueChange={(value) => onTabChange(value as PlacementTab)}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <div className="px-4 pt-3">
+          <TabsList className="w-full">
+            <TabsTrigger value="fit" className="flex-1">
+              {t("Place", "配置")}
+            </TabsTrigger>
+            <TabsTrigger value="reference" className="flex-1">
+              {t("Reference", "参照")}
+            </TabsTrigger>
+            <TabsTrigger value="export" className="flex-1">
+              {t("Export", "書き出し")}
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto px-4 pb-4 pt-4">
+          <TabsContent value="fit" data-tab="fit" forceMount hidden={tab !== "fit"}>
             <ScaleAndFitPanel
               state={state}
               dispatch={dispatch}
@@ -123,31 +149,39 @@ export function PlacementSidebar({
               referenceLayers={referenceLayers}
               shapeMatch={shapeMatch}
             />
-          </div>
-          <div {...tabPanelProps("placement", "reference", tab === "reference")}>
-            <ReferenceLayerList
-              key={conversionId}
-              layers={referenceLayers}
-              onChange={onReferenceLayersChange}
-              matchTargetName={shapeMatch.referenceName}
-              onMatchTargetChange={shapeMatch.onReferenceChange}
-              focusBounds={focusBounds}
-            />
-            <div className="mt-3 space-y-1">
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={!surveySnap.layerName}
-                onClick={surveySnap.onSnap}
-              >
-                {t("Snap to Station_pg", "Station_pg に合わせる")}
-              </Button>
-              {surveySnap.notice ? (
-                <p className="text-xs text-[var(--color-text-muted)]">{surveySnap.notice}</p>
-              ) : null}
+          </TabsContent>
+
+          <TabsContent value="reference" data-tab="reference" forceMount hidden={tab !== "reference"}>
+            <div className="flex flex-col gap-3">
+              <ReferenceLayerList
+                key={conversionId}
+                layers={referenceLayers}
+                onChange={onReferenceLayersChange}
+                matchTargetName={shapeMatch.referenceName}
+                onMatchTargetChange={shapeMatch.onReferenceChange}
+                focusBounds={focusBounds}
+              />
+              <div className="flex flex-col gap-1.5">
+                {surveySnap.layerName ? (
+                  snapButton
+                ) : (
+                  <DisabledHint
+                    hint={t(
+                      "Add a Station_pg reference layer to enable",
+                      "Station_pg の参照レイヤーを追加すると有効になります"
+                    )}
+                  >
+                    {snapButton}
+                  </DisabledHint>
+                )}
+                {surveySnap.notice ? (
+                  <p className="text-xs leading-4 text-muted-foreground">{surveySnap.notice}</p>
+                ) : null}
+              </div>
             </div>
-          </div>
-          <div {...tabPanelProps("placement", "export", tab === "export")}>
+          </TabsContent>
+
+          <TabsContent value="export" data-tab="export" forceMount hidden={tab !== "export"}>
             <ExportPanel
               state={state}
               dispatch={dispatch}
@@ -162,9 +196,20 @@ export function PlacementSidebar({
               totalFeatures={totalFeatures}
               error={error}
             />
-          </div>
+          </TabsContent>
         </div>
-      </Card>
-    </div>
+      </Tabs>
+
+      <footer className="flex shrink-0 items-center justify-between gap-2 border-t border-border px-4 py-3">
+        <span className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
+          {previewFeatures === totalFeatures
+            ? t(`${totalFeatures} features`, `${totalFeatures} 図形`)
+            : `${previewFeatures} / ${totalFeatures}`}
+        </span>
+        <span className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
+          {outputCrs}
+        </span>
+      </footer>
+    </aside>
   );
 }
