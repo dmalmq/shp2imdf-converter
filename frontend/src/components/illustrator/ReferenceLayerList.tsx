@@ -17,16 +17,26 @@ type Props = {
 
 export const REFERENCE_TINTS = ["#0f766e", "#b45309", "#7e22ce", "#be123c", "#1d4ed8"];
 
-/**
- * Keep the current match target when it still exists, auto-select the only
- * remaining layer, and otherwise clear so the user picks explicitly.
- */
-export function nextMatchTargetName(
+const SURVEY_POLYGON_STEM = "Station_pg";
+const SURVEY_LINE_STEM = "Station_pl";
+
+function layerHasStem(name: string, stem: string): boolean {
+  return name === stem || name.startsWith(`${stem} `);
+}
+
+export function surveyLayerName(layers: readonly { name: string }[]): string {
+  return layers.find((layer) => layerHasStem(layer.name, SURVEY_POLYGON_STEM))?.name ?? "";
+}
+
+export function preferSurveyLayer(
   layers: readonly { name: string }[],
   current: string
 ): string {
   if (layers.some((layer) => layer.name === current)) return current;
-  return layers.length === 1 ? layers[0].name : "";
+  const survey = surveyLayerName(layers);
+  if (survey) return survey;
+  const candidates = layers.filter((layer) => !layerHasStem(layer.name, SURVEY_LINE_STEM));
+  return candidates.length === 1 ? candidates[0].name : "";
 }
 
 export type ShapeMatchTarget = {
@@ -34,10 +44,6 @@ export type ShapeMatchTarget = {
   referenceFloorLabel: string;
 };
 
-/**
- * Keep a still-valid shapefile or other-floor target, auto-select when only
- * one candidate remains, and otherwise clear so the user picks explicitly.
- */
 export function nextMatchTarget(
   layers: readonly { name: string }[],
   floorLabels: readonly string[],
@@ -48,11 +54,9 @@ export function nextMatchTarget(
   if (current.referenceFloorLabel && otherFloors.includes(current.referenceFloorLabel)) {
     return { referenceName: "", referenceFloorLabel: current.referenceFloorLabel };
   }
-  if (current.referenceName && layers.some((layer) => layer.name === current.referenceName)) {
-    return { referenceName: current.referenceName, referenceFloorLabel: "" };
-  }
-  if (layers.length === 1) {
-    return { referenceName: layers[0].name, referenceFloorLabel: "" };
+  const referenceName = preferSurveyLayer(layers, current.referenceName);
+  if (referenceName) {
+    return { referenceName, referenceFloorLabel: "" };
   }
   if (otherFloors.length === 1) {
     return { referenceName: "", referenceFloorLabel: otherFloors[0] };

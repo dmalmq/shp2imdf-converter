@@ -1008,6 +1008,29 @@ export async function matchIllustratorShape(
   return handleJson<IllustratorShapeMatchResponse>(response);
 }
 
+export type IllustratorSurveySnapRequest = {
+  current_transform: TransformPayload;
+  scale_locked: boolean;
+  reference: { type: "FeatureCollection"; features: Feature[] };
+};
+
+export type IllustratorSurveySnapResponse = {
+  match: IllustratorShapeMatchSuggestion | null;
+  reason: "no_consensus" | null;
+};
+
+export async function snapIllustratorSurvey(
+  conversionId: string,
+  payload: IllustratorSurveySnapRequest
+): Promise<IllustratorSurveySnapResponse> {
+  const response = await fetch(`/api/convert/illustrator/${conversionId}/survey-snap`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  return handleJson<IllustratorSurveySnapResponse>(response);
+}
+
 export type ArtworkRegion = [number, number, number, number];
 
 export type ShapeMatchFloorRegionRef = {

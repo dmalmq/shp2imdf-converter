@@ -3,7 +3,7 @@ import type { Dispatch } from "react";
 import type { ExportFormatsPayload } from "../../api/client";
 import type { AdjustmentMode, PlacementAction, PlacementState } from "../../hooks/useIllustratorPlacement";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { Card, Tabs, tabPanelProps } from "../ui";
+import { Button, Card, Tabs, tabPanelProps } from "../ui";
 import { ExportPanel } from "./ExportPanel";
 import { LocateControl } from "./LocateControl";
 import type { ReferenceLayer } from "./PlacementMap";
@@ -13,6 +13,12 @@ import type { ShapeMatchPanelModel } from "./ShapeMatchPanel";
 import { TransformPanel } from "./TransformPanel";
 
 export type PlacementTab = "fit" | "reference" | "export";
+
+export type SurveySnapModel = {
+  layerName: string;
+  notice: string | null;
+  onSnap: () => void;
+};
 
 const CRS_CHOICES = (suggested: string, suggestedLabel: string) => [
   { value: suggested, label: suggestedLabel },
@@ -33,6 +39,7 @@ type Props = {
   pickStage: "artwork" | "map" | null;
   onTogglePicking: () => void;
   shapeMatch: ShapeMatchPanelModel;
+  surveySnap: SurveySnapModel;
   referenceLayers: ReferenceLayer[];
   onReferenceLayersChange: (layers: ReferenceLayer[]) => void;
   focusBounds?: [number, number, number, number] | null;
@@ -63,6 +70,7 @@ export function PlacementSidebar({
   pickStage,
   onTogglePicking,
   shapeMatch,
+  surveySnap,
   referenceLayers,
   onReferenceLayersChange,
   focusBounds,
@@ -125,6 +133,19 @@ export function PlacementSidebar({
               onMatchTargetChange={shapeMatch.onReferenceChange}
               focusBounds={focusBounds}
             />
+            <div className="mt-3 space-y-1">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={!surveySnap.layerName}
+                onClick={surveySnap.onSnap}
+              >
+                {t("Snap to Station_pg", "Station_pg に合わせる")}
+              </Button>
+              {surveySnap.notice ? (
+                <p className="text-xs text-[var(--color-text-muted)]">{surveySnap.notice}</p>
+              ) : null}
+            </div>
           </div>
           <div {...tabPanelProps("placement", "export", tab === "export")}>
             <ExportPanel

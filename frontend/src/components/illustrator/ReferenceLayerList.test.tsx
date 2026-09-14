@@ -6,7 +6,12 @@ import { uploadReferenceLayers } from "../../api/client";
 import type * as ApiClient from "../../api/client";
 import { buildApiClientError } from "../../api/errors";
 import type { ReferenceLayer } from "./PlacementMap";
-import { nextMatchTarget, nextMatchTargetName, ReferenceLayerList } from "./ReferenceLayerList";
+import {
+  nextMatchTarget,
+  preferSurveyLayer,
+  ReferenceLayerList,
+  surveyLayerName
+} from "./ReferenceLayerList";
 
 vi.mock("../../api/client", async (importOriginal) => ({
   ...(await importOriginal<typeof ApiClient>()),
@@ -58,7 +63,7 @@ function ListHarness({
   const [matchTargetName, setMatchTargetName] = useState("");
   const update = (next: ReferenceLayer[]) => {
     setLayers(next);
-    setMatchTargetName((current) => nextMatchTargetName(next, current));
+    setMatchTargetName((current) => preferSurveyLayer(next, current));
   };
   return (
     <ReferenceLayerList
@@ -72,13 +77,44 @@ function ListHarness({
 }
 
 test("keeps the current match target, auto-selects a single layer, and otherwise clears", () => {
-  expect(nextMatchTargetName([{ name: "station" }], "")).toBe("station");
+  expect(preferSurveyLayer([{ name: "station" }], "")).toBe("station");
   expect(
-    nextMatchTargetName([{ name: "station" }, { name: "parcels" }], "station")
+    preferSurveyLayer([{ name: "station" }, { name: "parcels" }], "station")
   ).toBe("station");
-  expect(nextMatchTargetName([{ name: "parcels" }, { name: "roads" }], "station")).toBe("");
-  expect(nextMatchTargetName([{ name: "parcels" }], "station")).toBe("parcels");
-  expect(nextMatchTargetName([], "station")).toBe("");
+  expect(preferSurveyLayer([{ name: "parcels" }, { name: "roads" }], "station")).toBe("");
+  expect(preferSurveyLayer([{ name: "parcels" }], "station")).toBe("parcels");
+  expect(preferSurveyLayer([], "station")).toBe("");
+});
+
+const EKI_DATA = [
+  { name: "Station_pg" },
+  { name: "Station_pl" },
+  { name: "Station_pt" },
+  { name: "StationUse" }
+];
+
+test("prefers Station_pg among the 駅データ layers and never defaults to Station_pl", () => {
+  expect(preferSurveyLayer(EKI_DATA, "")).toBe("Station_pg");
+  expect(preferSurveyLayer(EKI_DATA, "StationUse")).toBe("StationUse");
+  expect(preferSurveyLayer([{ name: "Station_pl" }, { name: "Station_pg (2)" }], "")).toBe(
+    "Station_pg (2)"
+  );
+  expect(preferSurveyLayer([{ name: "Station_pl" }], "")).toBe("");
+  expect(preferSurveyLayer([{ name: "Station_pl" }, { name: "parcels" }], "")).toBe("parcels");
+  expect(surveyLayerName(EKI_DATA)).toBe("Station_pg");
+  expect(surveyLayerName([{ name: "Station_pl" }, { name: "parcels" }])).toBe("");
+});
+
+test("a fresh match target lands on Station_pg even when other floors exist", () => {
+  expect(
+    nextMatchTarget(EKI_DATA, ["1F", "2F"], "1F", { referenceName: "", referenceFloorLabel: "" })
+  ).toEqual({ referenceName: "Station_pg", referenceFloorLabel: "" });
+  expect(
+    nextMatchTarget([{ name: "Station_pl" }], ["1F", "2F"], "1F", {
+      referenceName: "",
+      referenceFloorLabel: ""
+    })
+  ).toEqual({ referenceName: "", referenceFloorLabel: "2F" });
 });
 
 test("keeps a floor target, auto-selects the only other floor, and prefers a single shapefile", () => {

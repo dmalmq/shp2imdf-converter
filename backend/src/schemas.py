@@ -813,3 +813,18 @@ class IllustratorShapeMatchResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     matches: list[IllustratorShapeMatchSuggestion] = Field(max_length=3)
+
+
+class IllustratorSurveySnapRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    current_transform: TransformPayload
+    scale_locked: bool
+    reference: GeoJsonFeatureCollection
+
+
+class IllustratorSurveySnapResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    match: IllustratorShapeMatchSuggestion | None = None
+    reason: Literal["no_consensus"] | None = None

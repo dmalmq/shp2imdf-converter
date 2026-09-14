@@ -33,6 +33,7 @@ from backend.src.illustrator_importer import convert_ai_to_geopackage_bundle, pa
 from backend.src.illustrator_shape_match import match_regions
 from backend.src.illustrator_shape_match import match_shapes
 from backend.src.illustrator_store import ConversionStore
+from backend.src.illustrator_survey_snap import match_survey_consensus
 from backend.src.imdf_reader import read_imdf_zip
 from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
 from backend.src.importer import import_file_blobs, read_reference_layers
@@ -56,6 +57,8 @@ from backend.src.schemas import (
     IllustratorRegionMatchRequest,
     IllustratorShapeMatchRequest,
     IllustratorShapeMatchResponse,
+    IllustratorSurveySnapRequest,
+    IllustratorSurveySnapResponse,
     TransformPayload,
 )
 from backend.src.session import SessionManager
@@ -377,6 +380,27 @@ async def match_illustrator_region(
         reference_region=payload.reference_floor.region,
     )
     return IllustratorShapeMatchResponse(matches=matches)
+
+
+@router.post(
+    "/convert/illustrator/{conversion_id}/survey-snap",
+    response_model=IllustratorSurveySnapResponse,
+)
+async def snap_illustrator_survey(
+    conversion_id: str,
+    request: Request,
+    payload: IllustratorSurveySnapRequest,
+) -> IllustratorSurveySnapResponse:
+    """Snap the drawing onto posted survey polygons where enough outlines agree."""
+    cached = _illustrator_store(request).get(conversion_id)
+    match = match_survey_consensus(
+        cached,
+        reference=payload.reference.model_dump(),
+        current=_transform_from_payload(payload.current_transform),
+    )
+    if match is None:
+        return IllustratorSurveySnapResponse(match=None, reason="no_consensus")
+    return IllustratorSurveySnapResponse(match=match)
 
 
 @router.post("/convert/illustrator/{conversion_id}/assign", response_model=AssignFloorsResponse)
