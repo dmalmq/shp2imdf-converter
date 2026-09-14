@@ -3,6 +3,7 @@ import type { Dispatch } from "react";
 import type { ExportFormatsPayload } from "../../api/client";
 import type { AdjustmentMode, PlacementAction, PlacementState } from "../../hooks/useIllustratorPlacement";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { workingCrsLabel } from "../../lib/workingCrs";
 import { Button, Card, Tabs, tabPanelProps } from "../ui";
 import { ExportPanel } from "./ExportPanel";
 import { LocateControl } from "./LocateControl";
@@ -44,8 +45,6 @@ type Props = {
   onReferenceLayersChange: (layers: ReferenceLayer[]) => void;
   focusBounds?: [number, number, number, number] | null;
   bounds: [number, number, number, number];
-  suggestedCrs: string;
-  suggestedCrsLabel: string;
   outputCrs: string;
   onOutputCrsChange: (value: string) => void;
   formats: ExportFormatsPayload;
@@ -75,8 +74,6 @@ export function PlacementSidebar({
   onReferenceLayersChange,
   focusBounds,
   bounds,
-  suggestedCrs,
-  suggestedCrsLabel,
   outputCrs,
   onOutputCrsChange,
   formats,
@@ -152,7 +149,10 @@ export function PlacementSidebar({
               state={state}
               dispatch={dispatch}
               artworkBounds={bounds}
-              crsChoices={CRS_CHOICES(suggestedCrs, suggestedCrsLabel)}
+              crsChoices={CRS_CHOICES(
+                state.frame.workingCrs,
+                workingCrsLabel(state.frame.workingCrs)
+              )}
               outputCrs={outputCrs}
               onOutputCrsChange={onOutputCrsChange}
               formats={formats}

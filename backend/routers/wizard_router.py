@@ -14,6 +14,7 @@ from shapely.ops import unary_union
 from backend.src.generator import _close_gaps
 from backend.src.geocoding import GeocodeMatch, GeocoderClient, GeocodingError
 from backend.src.illustrator_georeference import resolve_working_crs
+from backend.src.iso_subdivisions import jp_prefecture_code
 from backend.src.mapper import (
     build_unit_code_preview,
     detect_candidate_columns,
@@ -56,9 +57,7 @@ def _geocoder(request: Request) -> GeocoderClient | None:
 
 
 def _prefecture_code(province: str | None) -> str | None:
-    if province and province.startswith("JP-"):
-        return province
-    return None
+    return jp_prefecture_code(province)
 
 
 def _match_to_schema(match: GeocodeMatch) -> GeocodeResultItem:

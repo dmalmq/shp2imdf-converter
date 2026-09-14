@@ -293,8 +293,8 @@ async def preview_illustrator(
 
     cached = _illustrator_store(request).put(parse_ai(payload, name))
     preview = build_preview(cached)
-    # Placement has no location yet; the client re-resolves the zone once the
-    # user picks a search result, passing the prefecture code from Nominatim.
+    # No pin yet. Export and the frame take the zone from the locate hit
+    # (``working_crs`` on /geocode). This seed is only the no-pin fallback.
     suggested = resolve_working_crs(139.7671, 35.6812, None)
     return IllustratorPreviewResponse(
         conversion_id=cached.conversion_id,
