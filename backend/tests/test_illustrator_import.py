@@ -556,6 +556,10 @@ def test_one_outline_per_page_is_not_enough_to_move_artwork() -> None:
     assert {tuple(entry["offset"]) for entry in report.page_alignment} == {(0.0, 0.0)}
 
 
+def _rect(x: float, y: float, w: float, h: float) -> list[tuple[float, float]]:
+    return [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
+
+
 def _outline_record(
     page: int,
     points: list[tuple[float, float]],
@@ -685,3 +689,215 @@ def test_two_matching_outlines_are_insufficient_to_move_a_page() -> None:
     assert report[0]["aligned"] is False
     assert report[0]["offset"] == [0.0, 0.0]
     assert records[2].subpaths[0][0] == before
+
+
+def _punch(records: list[_PathRecord]) -> None:
+    from backend.src.illustrator_importer import _punch_page_overlaps
+
+    _punch_page_overlaps(records)
+
+
+def _utf16be_ocg_name(text: str) -> bytes:
+    return b"<FEFF" + text.encode("utf-16-be").hex().upper().encode("ascii") + b">"
+
+
+def _oc_filled_rect(mc: str, x: int, y: int, w: int, h: int) -> bytes:
+    return (
+        f"/OC /{mc} BDC\n".encode()
+        + b"0 1 1 0 k\n"
+        + f"{x} {y} {w} {h} re\n".encode()
+        + b"f\n"
+        + b"EMC\n"
+    )
+
+
+def _build_punch_ai_pdf() -> bytes:
+    """Two pages of nested ラチ内 / 建物 / エスカレーター fills.
+
+    Page 2 uses a larger 建物 on the same artwork origin. Punching across pages
+    would shrink page 1's ラチ内 below 6400.
+    """
+    content1 = (
+        _oc_filled_rect("MC0", 0, 0, 100, 100)
+        + _oc_filled_rect("MC1", 10, 10, 60, 60)
+        + _oc_filled_rect("MC2", 20, 20, 10, 10)
+    )
+    content2 = (
+        _oc_filled_rect("MC0", 0, 0, 100, 100)
+        + _oc_filled_rect("MC1", 10, 10, 80, 80)
+        + _oc_filled_rect("MC2", 20, 20, 10, 10)
+    )
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R "
+        b"/OCProperties << /OCGs [3 0 R 4 0 R 5 0 R] "
+        b"/D << /Order [3 0 R 4 0 R 5 0 R] >> >> >>",
+        b"<< /Type /Pages /Kids [6 0 R 8 0 R] /Count 2 >>",
+        b"<< /Type /OCG /Name " + _utf16be_ocg_name("在来線ラチ内") + b" >>",
+        b"<< /Type /OCG /Name " + _utf16be_ocg_name("建物・施設") + b" >>",
+        b"<< /Type /OCG /Name " + _utf16be_ocg_name("エスカレーター") + b" >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+        b"/Resources << /Properties << /MC0 3 0 R /MC1 4 0 R /MC2 5 0 R >> >> "
+        b"/Contents 7 0 R >>",
+        b"<< /Length " + str(len(content1)).encode() + b" >>\nstream\n" + content1 + b"endstream",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+        b"/Resources << /Properties << /MC0 3 0 R /MC1 4 0 R /MC2 5 0 R >> >> "
+        b"/Contents 9 0 R >>",
+        b"<< /Length " + str(len(content2)).encode() + b" >>\nstream\n" + content2 + b"endstream",
+    ]
+    out = bytearray(b"%PDF-1.6\n")
+    offsets = [0]
+    for i, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref_pos = len(out)
+    n = len(objects) + 1
+    out += f"xref\n0 {n}\n".encode()
+    out += b"0000000000 65535 f \n"
+    for off in offsets[1:]:
+        out += f"{off:010d} 00000 n \n".encode()
+    out += f"trailer\n<< /Size {n} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+@pytest.mark.georef
+def test_nested_punch_subtracts_building_and_outer_escalator() -> None:
+    rachi = _outline_record(1, _rect(0, 0, 100, 100), layer="コンコース連絡通路 ： 在来線ラチ内")
+    building = _outline_record(1, _rect(10, 10, 60, 60), layer="建物・施設")
+    esc_in = _outline_record(1, _rect(20, 20, 10, 10), layer="エスカレーター")
+    esc_out = _outline_record(1, _rect(80, 80, 10, 10), layer="エスカレーター")
+    shop = _outline_record(1, _rect(40, 40, 10, 10), layer="構内大型店舗 建物")
+    midori = _outline_record(1, _rect(12, 12, 6, 6), layer="みどりの窓口・びゅうプラザ")
+    original_building = _build_polygon(building.subpaths)
+    original_esc_in = _build_polygon(esc_in.subpaths)
+    original_shop = _build_polygon(shop.subpaths)
+    original_midori = _build_polygon(midori.subpaths)
+    assert original_building is not None
+    assert original_esc_in is not None
+    assert original_shop is not None
+    assert original_midori is not None
+
+    _punch([rachi, building, esc_in, esc_out, shop, midori])
+
+    punched_rachi = _build_polygon(rachi.subpaths)
+    punched_building = _build_polygon(building.subpaths)
+    assert punched_rachi is not None
+    assert punched_building is not None
+    assert punched_rachi.area == pytest.approx(6300.0)
+    assert punched_building.area == pytest.approx(3364.0)
+    assert punched_rachi.covers(punched_building) is False
+    assert punched_rachi.intersection(original_building).area == pytest.approx(0.0)
+    assert punched_building.intersection(original_esc_in).area == pytest.approx(0.0)
+    assert punched_building.intersection(original_shop).area == pytest.approx(0.0)
+    assert punched_building.intersection(original_midori).area == pytest.approx(0.0)
+
+
+@pytest.mark.georef
+def test_punch_uses_original_building_so_shop_stays_cut_from_concourse() -> None:
+    rachi = _outline_record(1, _rect(0, 0, 100, 100), layer="在来線ラチ内")
+    building = _outline_record(1, _rect(10, 10, 60, 60), layer="建物・施設")
+    shop = _outline_record(1, _rect(40, 40, 10, 10), layer="構内大型店舗")
+    _punch([rachi, building, shop])
+    punched_rachi = _build_polygon(rachi.subpaths)
+    assert punched_rachi is not None
+    assert punched_rachi.area == pytest.approx(6400.0)
+
+
+@pytest.mark.georef
+def test_punch_stays_on_the_same_pdf_page() -> None:
+    rachi1 = _outline_record(1, _rect(0, 0, 100, 100), layer="在来線ラチ内")
+    building1 = _outline_record(1, _rect(10, 10, 60, 60), layer="建物・施設")
+    poison1 = _outline_record(1, _rect(270, 270, 20, 20), layer="建物・施設")
+    rachi2 = _outline_record(2, _rect(200, 200, 100, 100), layer="在来線ラチ内")
+    building2 = _outline_record(2, _rect(210, 210, 40, 40), layer="建物・施設")
+    poison2 = _outline_record(2, _rect(70, 70, 20, 20), layer="建物・施設")
+    _punch([rachi1, building1, poison1, rachi2, building2, poison2])
+    assert _build_polygon(rachi1.subpaths).area == pytest.approx(6400.0)
+    assert _build_polygon(rachi2.subpaths).area == pytest.approx(8400.0)
+
+
+@pytest.mark.georef
+def test_shinkansen_concourse_is_not_punched() -> None:
+    rachi = _outline_record(1, _rect(0, 0, 100, 100), layer="新幹線ラチ内")
+    building = _outline_record(1, _rect(10, 10, 60, 60), layer="建物・施設")
+    _punch([rachi, building])
+    assert _build_polygon(rachi.subpaths).area == pytest.approx(10000.0)
+
+
+@pytest.mark.georef
+def test_other_line_is_not_a_cutter() -> None:
+    rachi = _outline_record(1, _rect(0, 0, 100, 100), layer="在来線ラチ内")
+    other = _outline_record(1, _rect(10, 10, 60, 60), layer="その他線")
+    _punch([rachi, other])
+    assert _build_polygon(rachi.subpaths).area == pytest.approx(10000.0)
+
+
+@pytest.mark.georef
+def test_line_records_do_not_punch_or_get_punched() -> None:
+    building = _outline_record(1, _rect(10, 10, 60, 60), layer="建物・施設")
+    line_esc = _outline_record(
+        1,
+        [(15, 15), (55, 55)],
+        role="line",
+        layer="エスカレーター",
+        closed=False,
+    )
+    poly_esc = _outline_record(1, _rect(20, 20, 10, 10), layer="エスカレーター")
+    line_before = [list(pts) for pts in line_esc.subpaths]
+    _punch([building, line_esc, poly_esc])
+    assert line_esc.subpaths == line_before
+    assert _build_polygon(building.subpaths).area == pytest.approx(3500.0)
+
+
+@pytest.mark.georef
+def test_empty_cutters_leave_concourse_unchanged() -> None:
+    rachi = _outline_record(1, _rect(0, 0, 100, 100), layer="在来線ラチ内")
+    _punch([rachi])
+    assert _build_polygon(rachi.subpaths).area == pytest.approx(10000.0)
+
+
+@pytest.mark.georef
+def test_fully_covered_concourse_is_dropped() -> None:
+    rachi = _outline_record(1, _rect(0, 0, 100, 100), layer="在来線ラチ内")
+    building = _outline_record(1, _rect(0, 0, 100, 100), layer="建物・施設")
+    _punch([rachi, building])
+    assert rachi.subpaths == []
+    assert _build_polygon(rachi.subpaths) is None
+    assert _build_polygon(building.subpaths).area == pytest.approx(10000.0)
+
+
+@pytest.mark.georef
+def test_cutter_crossing_an_edge_leaves_a_notch() -> None:
+    rachi = _outline_record(1, _rect(0, 0, 100, 100), layer="在来線ラチ内")
+    building = _outline_record(1, _rect(90, 40, 20, 20), layer="建物・施設")
+    _punch([rachi, building])
+    punched = _build_polygon(rachi.subpaths)
+    assert punched is not None
+    assert punched.is_empty is False
+    assert punched.area == pytest.approx(9800.0)
+
+
+@pytest.mark.georef
+def test_convert_writes_punched_polygons_into_the_geopackage() -> None:
+    import fiona
+
+    gpkg, _name, report = convert_ai_to_geopackage(_build_punch_ai_pdf(), "punch.ai")
+    assert report.page_count == 2
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "punch.gpkg"
+        path.write_bytes(gpkg)
+        layers = set(fiona.listlayers(path))
+    assert "在来線ラチ内" in layers
+    assert "建物・施設" in layers
+    assert "エスカレーター" in layers
+
+    rachi = _read_layer(gpkg, "在来線ラチ内")
+    building = _read_layer(gpkg, "建物・施設")
+    escalator = _read_layer(gpkg, "エスカレーター")
+    page1_rachi = rachi[rachi["page"] == 1].geometry.iloc[0]
+    page2_rachi = rachi[rachi["page"] == 2].geometry.iloc[0]
+    page1_building = building[building["page"] == 1].geometry.iloc[0]
+    page1_escalator = escalator[escalator["page"] == 1].geometry.iloc[0]
+    assert page1_rachi.area == pytest.approx(6400.0)
+    assert page2_rachi.area == pytest.approx(3600.0)
+    assert page1_building.covers(page1_escalator) is False
+    assert page1_building.intersection(page1_escalator).area == pytest.approx(0.0)
