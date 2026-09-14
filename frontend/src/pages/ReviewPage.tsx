@@ -8,6 +8,7 @@ import {
   exportSessionArchive,
   exportSessionQgisProject,
   exportSessionShapefiles,
+  fetchFeatureTypeCatalog,
   fetchSessionFiles,
   fetchSessionFeatures,
   generateSessionDraft,
@@ -16,6 +17,7 @@ import {
   resolveSessionUnitOverlap,
   resolveSessionUnitOverlapsSafe,
   snapOpening,
+  type FeatureTypeOption,
   type ShapefileExportEncoding,
   type ShapefileExportRequest,
   type WizardState,
@@ -34,12 +36,13 @@ import {
 import { LayerTree } from "../components/review/LayerTree";
 import { VenueDetailsPanel, type AddressParts } from "../components/review/VenueDetailsPanel";
 import { MapPanel } from "../components/review/MapPanel";
+import { compatibleFeatureTypes, geometryKindOf, typeIsCompatible } from "../components/review/featureTypeOptions";
 import { PropertiesPanel } from "../components/review/PropertiesPanel";
 import { ValidationBar } from "../components/review/ValidationBar";
 import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
-import { type ReviewFeature, featureName, layerKeyBaseType, orderedLayerKeys } from "../components/review/types";
+import { type ReviewFeature, featureLayerKey, featureName, layerKeyBaseType, orderedLayerKeys } from "../components/review/types";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
@@ -210,6 +213,8 @@ export function ReviewPage() {
   const [mapFloorFilter, setMapFloorFilter] = useState<string | null>(null);
   const [bulkLevel, setBulkLevel] = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
+  const [bulkFeatureType, setBulkFeatureType] = useState("");
+  const [featureTypes, setFeatureTypes] = useState<FeatureTypeOption[]>([]);
   const [mergeName, setMergeName] = useState("");
   const [validation, setValidation] = useState<ValidationResponse | null>(null);
   const [overlayVisibility, setOverlayVisibility] = useState<Record<string, boolean>>({
@@ -288,6 +293,16 @@ export function ReviewPage() {
     void loadFeatures();
   }, [sessionId]);
 
+  useEffect(() => {
+    void fetchFeatureTypeCatalog()
+      .then((types) => {
+        setFeatureTypes(types);
+      })
+      .catch(() => {
+        setFeatureTypes([]);
+      });
+  }, []);
+
   // The viewer filters by floor so a floor split across several Level features
   // (新宿 1F is eight platforms plus 1F and 1F屋外) is shown in one piece.
   const floorOptions = useMemo(() => buildFloorGroups(features), [features]);
@@ -363,13 +378,27 @@ export function ReviewPage() {
     return features.find((item) => item.id === selectedFeatureIds[0]) ?? null;
   }, [features, selectedFeatureIds]);
 
+  const bulkTypeOptions = useMemo(() => {
+    const selected = features.filter((item) => selectedFeatureIds.includes(item.id));
+    if (selected.length === 0) {
+      return [] as FeatureTypeOption[];
+    }
+    return compatibleFeatureTypes(featureTypes, selected[0].geometry).filter((option) =>
+      selected.every((item) => typeIsCompatible(option, geometryKindOf(item.geometry)))
+    );
+  }, [features, featureTypes, selectedFeatureIds]);
+
   // Auto-show right sidebar when a feature is selected
   useEffect(() => {
     setRightSidebarOpen(Boolean(selectedFeature));
     setActiveIssueIndex(null);
   }, [selectedFeature]);
 
-  const saveFeatureProperties = async (featureId: string, properties: Record<string, unknown>) => {
+  const saveFeatureProperties = async (
+    featureId: string,
+    properties: Record<string, unknown>,
+    featureType?: string
+  ) => {
     if (!sessionId) {
       return;
     }
@@ -383,20 +412,27 @@ export function ReviewPage() {
     });
 
     try {
-      const updated = await patchSessionFeature(sessionId, featureId, { properties });
-      setFeatures((prev) =>
-        prev.map((item) =>
-          item.id === updated.id
-            ? {
-                type: updated.type,
-                id: updated.id,
-                feature_type: updated.feature_type,
-                geometry: updated.geometry as { type: string; coordinates: unknown } | null,
-                properties: updated.properties as Record<string, unknown>
-              }
-            : item
-        )
+      const updated = await patchSessionFeature(
+        sessionId,
+        featureId,
+        featureType ? { properties, feature_type: featureType } : { properties }
       );
+      const nextFeature: ReviewFeature = {
+        type: updated.type,
+        id: updated.id,
+        feature_type: updated.feature_type,
+        geometry: updated.geometry as { type: string; coordinates: unknown } | null,
+        properties: updated.properties as Record<string, unknown>
+      };
+      setFeatures((prev) =>
+        prev.map((item) => (item.id === updated.id ? nextFeature : item))
+      );
+      if (updated.feature_type !== previous.feature_type) {
+        const key = featureLayerKey(nextFeature);
+        if (layerVisibility[key] !== true) {
+          setLayerVisibility({ ...layerVisibility, [key]: true });
+        }
+      }
     } catch (caught) {
       captureError(caught, "Failed to save feature", "Save failed");
     }
@@ -482,6 +518,39 @@ export function ReviewPage() {
       });
     } catch (caught) {
       captureError(caught, t("Bulk category update failed", "カテゴリの一括更新に失敗しました"), t("Bulk edit failed", "一括編集失敗"));
+    }
+  };
+
+  const applyBulkFeatureType = async () => {
+    if (!sessionId || !bulkFeatureType || selectedFeatureIds.length === 0) {
+      return;
+    }
+    const targetType = bulkFeatureType;
+    const sample = features.find((item) => selectedFeatureIds.includes(item.id));
+    try {
+      await patchSessionFeaturesBulk(sessionId, {
+        feature_ids: selectedFeatureIds,
+        action: "patch",
+        feature_type: targetType
+      });
+      await loadFeatures();
+      const key = sample
+        ? featureLayerKey({ ...sample, feature_type: targetType })
+        : targetType;
+      if (layerVisibility[key] !== true) {
+        setLayerVisibility({ ...layerVisibility, [key]: true });
+      }
+      setBulkFeatureType("");
+      pushToast({
+        title: t("Feature type changed", "フィーチャー種別を変更しました"),
+        variant: "success"
+      });
+    } catch (caught) {
+      captureError(
+        caught,
+        t("Bulk feature type change failed", "フィーチャー種別の一括変更に失敗しました"),
+        t("Bulk edit failed", "一括編集失敗")
+      );
     }
   };
 
@@ -1158,6 +1227,21 @@ export function ReviewPage() {
                   <Button variant="secondary" size="sm" onClick={() => void applyBulkCategory()} disabled={!bulkCategory}>
                     {t("Apply", "適用")}
                   </Button>
+                  <select
+                    className="h-6 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1.5 text-[11px]"
+                    value={bulkFeatureType}
+                    onChange={(e) => setBulkFeatureType(e.target.value)}
+                  >
+                    <option value="">{t("Type...", "種別...")}</option>
+                    {bulkTypeOptions.map((option) => (
+                      <option key={option.feature_type} value={option.feature_type}>
+                        {option.feature_type}
+                      </option>
+                    ))}
+                  </select>
+                  <Button variant="secondary" size="sm" onClick={() => void applyBulkFeatureType()} disabled={!bulkFeatureType}>
+                    {t("Apply", "適用")}
+                  </Button>
                   <input
                     className="h-6 w-20 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1.5 text-[11px]"
                     placeholder={t("Merge name", "結合名")}
@@ -1240,7 +1324,8 @@ export function ReviewPage() {
                 language={wizardState?.project?.language ?? "en"}
                 levelOptions={levelOptions}
                 addressOptions={addressOptions}
-                onSave={(featureId, properties) => void saveFeatureProperties(featureId, properties)}
+                featureTypes={featureTypes}
+                onSave={(featureId, properties, featureType) => void saveFeatureProperties(featureId, properties, featureType)}
                 onDelete={(featureId) => void deleteFeature(featureId)}
               />
             </div>

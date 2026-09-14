@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 
+import type { FeatureTypeOption } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import {
+  categoryOptionsFor,
+  compatibleFeatureTypes,
+  geometryKindOf
+} from "./featureTypeOptions";
 import { type ReviewFeature, featureName } from "./types";
 
 
@@ -11,7 +17,8 @@ type Props = {
   language: string;
   levelOptions: Array<{ id: string; label: string }>;
   addressOptions: Array<{ id: string; label: string }>;
-  onSave: (featureId: string, properties: Record<string, unknown>) => void;
+  featureTypes: FeatureTypeOption[];
+  onSave: (featureId: string, properties: Record<string, unknown>, featureType?: string) => void;
   onDelete: (featureId: string) => void;
 };
 
@@ -56,24 +63,30 @@ export function PropertiesPanel({
   language,
   levelOptions,
   addressOptions,
+  featureTypes,
   onSave,
   onDelete
 }: Props) {
   const { t } = useUiLanguage();
   const [form, setForm] = useState<Record<string, unknown>>({});
+  const [pendingType, setPendingType] = useState(feature?.feature_type ?? "");
 
   useEffect(() => {
     setForm(feature?.properties ? { ...feature.properties } : {});
+    setPendingType(feature?.feature_type ?? "");
   }, [feature]);
 
   const editableKeys = useMemo(() => {
     if (!feature) {
       return [] as string[];
     }
-    return Object.keys(feature.properties)
-      .filter((key) => !NON_EDITABLE_KEYS.has(key))
-      .sort((a, b) => a.localeCompare(b));
-  }, [feature]);
+    const keys = Object.keys(feature.properties).filter((key) => !NON_EDITABLE_KEYS.has(key));
+    const pending = featureTypes.find((option) => option.feature_type === pendingType);
+    if (pending?.has_category && !keys.includes("category")) {
+      keys.push("category");
+    }
+    return keys.sort((a, b) => a.localeCompare(b));
+  }, [feature, featureTypes, pendingType]);
 
   if (!feature) {
     return (
@@ -83,13 +96,64 @@ export function PropertiesPanel({
     );
   }
 
+  const compatibleTypes = compatibleFeatureTypes(featureTypes, feature.geometry);
+  const typeOptions = compatibleTypes.some((option) => option.feature_type === feature.feature_type)
+    ? compatibleTypes
+    : [
+        {
+          feature_type: feature.feature_type,
+          geometry: geometryKindOf(feature.geometry),
+          has_category: false,
+          categories: null,
+          default_category: null
+        },
+        ...compatibleTypes
+      ];
+
   return (
     <div className="space-y-3 rounded border bg-white p-3">
       <div>
         <h3 className="text-sm font-semibold">{t("Properties", "プロパティ")}</h3>
-        <p className="text-xs text-slate-600">
-          {feature.feature_type} <span className="font-mono">{feature.id.slice(0, 8)}</span>
+        <label className="mt-1 block text-xs">
+          <span className="mb-1 block text-slate-600">{t("Feature type", "フィーチャー種別")}</span>
+          <select
+            className="w-full rounded border px-2 py-1.5 text-sm"
+            value={pendingType}
+            onChange={(event) => {
+              const nextType = event.target.value;
+              setPendingType(nextType);
+              const nextOption = featureTypes.find((option) => option.feature_type === nextType);
+              const categories = nextOption?.categories ?? null;
+              if (categories === null) {
+                return;
+              }
+              setForm((prev) => {
+                const current = typeof prev.category === "string" ? prev.category : "";
+                if (current && categories.includes(current)) {
+                  return prev;
+                }
+                return { ...prev, category: nextOption?.default_category ?? null };
+              });
+            }}
+          >
+            {typeOptions.map((option) => (
+              <option key={option.feature_type} value={option.feature_type}>
+                {option.feature_type}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="mt-1 text-xs text-slate-600">
+          <span className="font-mono">{feature.id.slice(0, 8)}</span>
         </p>
+        {pendingType !== feature.feature_type ? (
+          <p className="mt-1 text-xs text-slate-600">
+            {t(
+              `Saving converts this feature to ${pendingType} and drops properties that type does not use.`,
+              `保存すると ${pendingType} に変換され、この種別で使用しないプロパティは削除されます。`
+            )}
+          </p>
+        ) : null}
       </div>
 
       <div className="grid gap-2">
@@ -160,6 +224,51 @@ export function PropertiesPanel({
                     </option>
                   ))}
                 </select>
+              </label>
+            );
+          }
+
+          if (key === "category") {
+            const categories = categoryOptionsFor(featureTypes, pendingType);
+            if (categories !== null) {
+              const current = typeof value === "string" ? value : "";
+              const options = current && !categories.includes(current) ? [current, ...categories] : categories;
+              return (
+                <label key={key} className="text-xs">
+                  <span className="mb-1 block text-slate-600">category</span>
+                  <select
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                    value={current}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        category: event.target.value || null
+                      }))
+                    }
+                  >
+                    <option value="">{t("(none)", "（なし）")}</option>
+                    {options.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              );
+            }
+            return (
+              <label key={key} className="text-xs">
+                <span className="mb-1 block text-slate-600">category</span>
+                <input
+                  className="w-full rounded border px-2 py-1.5 text-sm"
+                  value={toStringValue(value)}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      category: event.target.value || null
+                    }))
+                  }
+                />
               </label>
             );
           }
@@ -248,7 +357,7 @@ export function PropertiesPanel({
         <button
           type="button"
           className="rounded bg-blue-600 px-3 py-1.5 text-xs text-white"
-          onClick={() => onSave(feature.id, form)}
+          onClick={() => onSave(feature.id, form, pendingType !== feature.feature_type ? pendingType : undefined)}
         >
           {t("Save Changes", "変更を保存")}
         </button>

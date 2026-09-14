@@ -273,9 +273,20 @@ export type FeatureItem = {
   properties: Record<string, unknown>;
 };
 
+export type FeatureTypeGeometry = "polygon" | "line" | "point" | "null" | "any";
+
+export type FeatureTypeOption = {
+  feature_type: string;
+  geometry: FeatureTypeGeometry;
+  has_category: boolean;
+  categories: string[] | null;
+  default_category: string | null;
+};
+
 export type FeaturePatchRequest = {
   properties?: Record<string, unknown>;
   geometry?: Record<string, unknown> | null;
+  feature_type?: string;
 };
 
 export type BulkFeaturePatchRequest = {
@@ -283,6 +294,7 @@ export type BulkFeaturePatchRequest = {
   action?: "patch" | "delete" | "merge_units";
   properties?: Record<string, unknown>;
   merge_name?: string | null;
+  feature_type?: string;
 };
 
 export type BulkFeaturePatchResponse = {
@@ -536,6 +548,12 @@ export async function fetchSessionFeatures(
 ): Promise<{ type: "FeatureCollection"; features: Record<string, unknown>[] }> {
   const response = await fetch(`/api/session/${sessionId}/features`);
   return handleJson<{ type: "FeatureCollection"; features: Record<string, unknown>[] }>(response);
+}
+
+export async function fetchFeatureTypeCatalog(): Promise<FeatureTypeOption[]> {
+  const response = await fetch("/api/reference/feature-types");
+  const payload = await handleJson<{ feature_types: FeatureTypeOption[] }>(response);
+  return payload.feature_types;
 }
 
 export async function fetchSessionFeature(sessionId: string, featureId: string): Promise<FeatureItem> {
