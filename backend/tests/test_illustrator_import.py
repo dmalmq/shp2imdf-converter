@@ -18,6 +18,7 @@ from backend.src.illustrator_importer import (
     _PathRecord,
     _align_pages,
     _build_polygon,
+    _punch_page_overlaps,
     convert_ai_to_geopackage,
     convert_ai_to_geopackage_bundle,
 )
@@ -691,12 +692,6 @@ def test_two_matching_outlines_are_insufficient_to_move_a_page() -> None:
     assert records[2].subpaths[0][0] == before
 
 
-def _punch(records: list[_PathRecord]) -> None:
-    from backend.src.illustrator_importer import _punch_page_overlaps
-
-    _punch_page_overlaps(records)
-
-
 def _utf16be_ocg_name(text: str) -> bytes:
     return b"<FEFF" + text.encode("utf-16-be").hex().upper().encode("ascii") + b">"
 
@@ -776,7 +771,7 @@ def test_nested_punch_subtracts_building_and_outer_escalator() -> None:
     assert original_shop is not None
     assert original_midori is not None
 
-    _punch([rachi, building, esc_in, esc_out, shop, midori])
+    _punch_page_overlaps([rachi, building, esc_in, esc_out, shop, midori])
 
     punched_rachi = _build_polygon(rachi.subpaths)
     punched_building = _build_polygon(building.subpaths)
@@ -796,7 +791,7 @@ def test_punch_uses_original_building_so_shop_stays_cut_from_concourse() -> None
     rachi = _outline_record(1, _rect(0, 0, 100, 100), layer="在来線ラチ内")
     building = _outline_record(1, _rect(10, 10, 60, 60), layer="建物・施設")
     shop = _outline_record(1, _rect(40, 40, 10, 10), layer="構内大型店舗")
-    _punch([rachi, building, shop])
+    _punch_page_overlaps([rachi, building, shop])
     punched_rachi = _build_polygon(rachi.subpaths)
     assert punched_rachi is not None
     assert punched_rachi.area == pytest.approx(6400.0)
@@ -810,7 +805,7 @@ def test_punch_stays_on_the_same_pdf_page() -> None:
     rachi2 = _outline_record(2, _rect(200, 200, 100, 100), layer="在来線ラチ内")
     building2 = _outline_record(2, _rect(210, 210, 40, 40), layer="建物・施設")
     poison2 = _outline_record(2, _rect(70, 70, 20, 20), layer="建物・施設")
-    _punch([rachi1, building1, poison1, rachi2, building2, poison2])
+    _punch_page_overlaps([rachi1, building1, poison1, rachi2, building2, poison2])
     assert _build_polygon(rachi1.subpaths).area == pytest.approx(6400.0)
     assert _build_polygon(rachi2.subpaths).area == pytest.approx(8400.0)
 
@@ -819,7 +814,7 @@ def test_punch_stays_on_the_same_pdf_page() -> None:
 def test_shinkansen_concourse_is_not_punched() -> None:
     rachi = _outline_record(1, _rect(0, 0, 100, 100), layer="新幹線ラチ内")
     building = _outline_record(1, _rect(10, 10, 60, 60), layer="建物・施設")
-    _punch([rachi, building])
+    _punch_page_overlaps([rachi, building])
     assert _build_polygon(rachi.subpaths).area == pytest.approx(10000.0)
 
 
@@ -827,7 +822,7 @@ def test_shinkansen_concourse_is_not_punched() -> None:
 def test_other_line_is_not_a_cutter() -> None:
     rachi = _outline_record(1, _rect(0, 0, 100, 100), layer="在来線ラチ内")
     other = _outline_record(1, _rect(10, 10, 60, 60), layer="その他線")
-    _punch([rachi, other])
+    _punch_page_overlaps([rachi, other])
     assert _build_polygon(rachi.subpaths).area == pytest.approx(10000.0)
 
 
@@ -843,7 +838,7 @@ def test_line_records_do_not_punch_or_get_punched() -> None:
     )
     poly_esc = _outline_record(1, _rect(20, 20, 10, 10), layer="エスカレーター")
     line_before = [list(pts) for pts in line_esc.subpaths]
-    _punch([building, line_esc, poly_esc])
+    _punch_page_overlaps([building, line_esc, poly_esc])
     assert line_esc.subpaths == line_before
     assert _build_polygon(building.subpaths).area == pytest.approx(3500.0)
 
@@ -851,7 +846,7 @@ def test_line_records_do_not_punch_or_get_punched() -> None:
 @pytest.mark.georef
 def test_empty_cutters_leave_concourse_unchanged() -> None:
     rachi = _outline_record(1, _rect(0, 0, 100, 100), layer="在来線ラチ内")
-    _punch([rachi])
+    _punch_page_overlaps([rachi])
     assert _build_polygon(rachi.subpaths).area == pytest.approx(10000.0)
 
 
@@ -859,7 +854,7 @@ def test_empty_cutters_leave_concourse_unchanged() -> None:
 def test_fully_covered_concourse_is_dropped() -> None:
     rachi = _outline_record(1, _rect(0, 0, 100, 100), layer="在来線ラチ内")
     building = _outline_record(1, _rect(0, 0, 100, 100), layer="建物・施設")
-    _punch([rachi, building])
+    _punch_page_overlaps([rachi, building])
     assert rachi.subpaths == []
     assert _build_polygon(rachi.subpaths) is None
     assert _build_polygon(building.subpaths).area == pytest.approx(10000.0)
@@ -869,7 +864,7 @@ def test_fully_covered_concourse_is_dropped() -> None:
 def test_cutter_crossing_an_edge_leaves_a_notch() -> None:
     rachi = _outline_record(1, _rect(0, 0, 100, 100), layer="在来線ラチ内")
     building = _outline_record(1, _rect(90, 40, 20, 20), layer="建物・施設")
-    _punch([rachi, building])
+    _punch_page_overlaps([rachi, building])
     punched = _build_polygon(rachi.subpaths)
     assert punched is not None
     assert punched.is_empty is False
