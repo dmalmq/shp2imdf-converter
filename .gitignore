@@ -33,3 +33,7 @@ Thumbs.db
 
 # Git worktrees
 .worktrees/
+
+# Verification skill runtime (keep proof artifacts on disk, not in git)
+artifacts/verify-shp2imdf/
+.cursor/skills/verify-shp2imdf/.run/
