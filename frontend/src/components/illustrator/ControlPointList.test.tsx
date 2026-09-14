@@ -161,11 +161,18 @@ test("labels the current RMSE and the largest pair mismatch", () => {
   expect(screen.getByText(/#2 /)).not.toHaveTextContent("Largest mismatch");
 });
 
-test("shows the map overlay legend", () => {
-  renderList();
+test("shows the map overlay legend once pairs exist", () => {
+  renderList({ count: 1 });
   expect(screen.getByText("Artwork position")).toBeInTheDocument();
   expect(screen.getByText("Reference target")).toBeInTheDocument();
   expect(screen.getByText("Residual")).toBeInTheDocument();
+});
+
+test("no legend before the first pair — it describes markers that are not on the map yet", () => {
+  renderList({ count: 0 });
+  expect(screen.queryByText("Artwork position")).toBeNull();
+  expect(screen.queryByText("Reference target")).toBeNull();
+  expect(screen.queryByText("Residual")).toBeNull();
 });
 
 test("blocks group registration from an unlinked active floor", () => {

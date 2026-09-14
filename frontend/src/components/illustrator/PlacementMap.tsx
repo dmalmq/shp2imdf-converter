@@ -44,6 +44,7 @@ import {
   type ArtworkView
 } from "./artworkView";
 import { TransformHandles } from "./TransformHandles";
+import { OVERLAY_COLORS } from "./overlayColors";
 import {
   ARTWORK_SLOT_LAYER_ID,
   ARTWORK_SLOT_SOURCE_ID,
@@ -629,7 +630,8 @@ export function PlacementMap({
                 `Artwork point ${activeFloor.controlPoints.length + 1}`,
                 `図面上の点 ${activeFloor.controlPoints.length + 1}`
               )}
-              className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-[#2563eb] text-[10px] font-semibold text-white shadow"
+              className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-white text-[10px] font-semibold text-white shadow"
+              style={{ backgroundColor: OVERLAY_COLORS.artwork }}
             >
               {activeFloor.controlPoints.length + 1}
             </div>
@@ -641,7 +643,7 @@ export function PlacementMap({
             id="placement-control-point-residuals"
             type="line"
             filter={["==", ["get", "kind"], "residual"]}
-            paint={{ "line-color": "#dc2626", "line-width": 2 }}
+            paint={{ "line-color": OVERLAY_COLORS.residual, "line-width": 2 }}
           />
           <Layer
             id="placement-control-point-artwork"
@@ -649,8 +651,8 @@ export function PlacementMap({
             filter={["==", ["get", "kind"], "artwork"]}
             paint={{
               "circle-radius": 5,
-              "circle-color": "#2563eb",
-              "circle-stroke-color": "#ffffff",
+              "circle-color": OVERLAY_COLORS.artwork,
+              "circle-stroke-color": OVERLAY_COLORS.halo,
               "circle-stroke-width": 2
             }}
           />
@@ -660,8 +662,8 @@ export function PlacementMap({
             filter={["==", ["get", "kind"], "reference"]}
             paint={{
               "circle-radius": 6,
-              "circle-color": "#f59e0b",
-              "circle-stroke-color": "#ffffff",
+              "circle-color": OVERLAY_COLORS.reference,
+              "circle-stroke-color": OVERLAY_COLORS.halo,
               "circle-stroke-width": 2
             }}
           />
@@ -676,7 +678,7 @@ export function PlacementMap({
               "text-anchor": "center",
               "text-allow-overlap": true
             }}
-            paint={{ "text-color": "#ffffff" }}
+            paint={{ "text-color": OVERLAY_COLORS.halo }}
           />
         </Source>
 
@@ -685,7 +687,7 @@ export function PlacementMap({
             id="placement-shape-match-residuals"
             type="line"
             filter={["==", ["get", "kind"], "residual"]}
-            paint={{ "line-color": "#dc2626", "line-width": 1.5, "line-opacity": 0.9 }}
+            paint={{ "line-color": OVERLAY_COLORS.residual, "line-width": 1.5, "line-opacity": 0.9 }}
           />
           <Layer
             id="placement-shape-match-selected-fill"
