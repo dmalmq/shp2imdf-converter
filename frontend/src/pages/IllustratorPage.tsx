@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useState } from "react";
 
 import {
   assignFloors,
@@ -253,11 +253,6 @@ export function IllustratorPage() {
   const state = history.present;
   const [recenterTo, setRecenterTo] = useState<[number, number] | null>(null);
   const [referenceLayers, setReferenceLayers] = useState<ReferenceLayer[]>([]);
-  const [stationPin, setStationPin] = useState<[number, number] | null>(null);
-  const handleLocate = useCallback((lngLat: [number, number]) => {
-    setStationPin(lngLat);
-    setRecenterTo(lngLat);
-  }, []);
   const [placementTab, setPlacementTab] = useState<PlacementTab>("fit");
   // Floors start grouped: the whole building is aligned first, then the user
   // switches to individual mode for final per-floor nudges. UI-level only —
@@ -328,8 +323,8 @@ export function IllustratorPage() {
   }, [preview, assignment]);
 
   const focusBounds = useMemo(
-    () => (stationPin ? pinFocusBounds(stationPin) : null),
-    [stationPin]
+    () => (state.stationPin ? pinFocusBounds(state.stationPin) : null),
+    [state.stationPin]
   );
 
   const referenceFloorPlacement =
@@ -367,6 +362,10 @@ export function IllustratorPage() {
       : toErrorMessage(error, fallback);
 
   const updateReferenceLayers = (layers: ReferenceLayer[]) => {
+    const geometryReplaced = referenceLayers.some((old) => {
+      const next = layers.find((layer) => layer.name === old.name);
+      return next !== undefined && next.data !== old.data;
+    });
     setReferenceLayers(layers);
     setShapeMatch((current) => {
       const next = nextMatchTarget(
@@ -375,17 +374,21 @@ export function IllustratorPage() {
         state.activeFloorLabel,
         current
       );
-      return next.referenceName === current.referenceName &&
+      if (
+        !geometryReplaced &&
+        next.referenceName === current.referenceName &&
         next.referenceFloorLabel === current.referenceFloorLabel
-        ? current
-        : {
-            ...current,
-            ...next,
-            matches: [],
-            previewRank: null,
-            searched: false,
-            error: null
-          };
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        ...next,
+        matches: [],
+        previewRank: null,
+        searched: false,
+        error: null
+      };
     });
   };
 
@@ -629,7 +632,6 @@ export function IllustratorPage() {
       setPreview(response);
       setAssignment(null);
       setRecenterTo(null);
-      setStationPin(null);
       setReferenceLayers([]);
       setLastFile(file);
       setOutputCrs(response.suggested_crs);
@@ -790,7 +792,7 @@ export function IllustratorPage() {
         mode={adjustmentMode}
         siteName={siteName}
         conversionId={preview.conversion_id}
-        onLocate={handleLocate}
+        onLocate={setRecenterTo}
         canUndo={history.past.length > 0}
         canRedo={history.future.length > 0}
         tab={placementTab}

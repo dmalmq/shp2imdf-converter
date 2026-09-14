@@ -172,6 +172,64 @@ test("a pin move re-reads every shapefile that was added, not only the last", as
   expect(upload.mock.calls[2][0]).toHaveLength(2);
 });
 
+test("a failed add is not archived, so a pin move does not retry it", async () => {
+  upload.mockRejectedValue(buildApiClientError(422, JSON.stringify({ detail: "Not a readable shapefile." })));
+  function PinHarness() {
+    const [bounds, setBounds] = useState<[number, number, number, number] | null>(FOCUS);
+    const [layers, setLayers] = useState<ReferenceLayer[]>([]);
+    return (
+      <>
+        <button type="button" onClick={() => setBounds([140.11, 35.61, 140.11, 35.61])}>
+          move pin
+        </button>
+        <ReferenceLayerList
+          layers={layers}
+          onChange={setLayers}
+          matchTargetName=""
+          onMatchTargetChange={() => {}}
+          focusBounds={bounds}
+        />
+      </>
+    );
+  }
+  render(<PinHarness />);
+  addFile();
+  await waitFor(() => expect(screen.getByText("Not a readable shapefile.")).toBeInTheDocument());
+  upload.mockResolvedValue([layer("station", 4, 4)]);
+  fireEvent.click(screen.getByRole("button", { name: /move pin/i }));
+  expect(upload).toHaveBeenCalledTimes(1);
+});
+
+test("removing a layer keeps it off after a pin move", async () => {
+  upload.mockResolvedValue([layer("station", 4, 4)]);
+  function PinHarness() {
+    const [bounds, setBounds] = useState<[number, number, number, number] | null>(FOCUS);
+    const [layers, setLayers] = useState<ReferenceLayer[]>([]);
+    return (
+      <>
+        <button type="button" onClick={() => setBounds([140.11, 35.61, 140.11, 35.61])}>
+          move pin
+        </button>
+        <ReferenceLayerList
+          layers={layers}
+          onChange={setLayers}
+          matchTargetName=""
+          onMatchTargetChange={() => {}}
+          focusBounds={bounds}
+        />
+      </>
+    );
+  }
+  render(<PinHarness />);
+  addFile();
+  await waitFor(() => expect(screen.getByText("station")).toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: /remove/i }));
+  expect(screen.queryByText("station")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /move pin/i }));
+  await waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+  expect(screen.queryByText("station")).toBeNull();
+});
+
 test("shows the kept count over the source total when a spatial trim happened", async () => {
   upload.mockResolvedValue([layer("station", 12139, 842)]);
 

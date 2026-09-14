@@ -76,6 +76,7 @@ export function ReferenceLayerList({
   const { t } = useUiLanguage();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const archiveRef = useRef<File[]>([]);
+  const omittedRef = useRef<Set<string>>(new Set());
   const boundsKeyRef = useRef(focusBounds?.join(",") ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,9 +86,6 @@ export function ReferenceLayerList({
   const add = useCallback(
     async (files: File[], mode: "append" | "replace") => {
       if (!focusBounds) return;
-      if (mode === "append") {
-        archiveRef.current = [...archiveRef.current, ...files];
-      }
       const batch = mode === "replace" ? archiveRef.current : files;
       if (batch.length === 0) return;
       boundsKeyRef.current = focusBounds.join(",");
@@ -118,6 +116,12 @@ export function ReferenceLayerList({
             truncated: layer.truncated
           });
         }
+        if (mode === "append") {
+          archiveRef.current = [...archiveRef.current, ...files];
+          for (const layer of added) omittedRef.current.delete(layer.name);
+        }
+        const visible =
+          mode === "replace" ? added.filter((layer) => !omittedRef.current.has(layer.name)) : added;
         if (empty.length > 0) {
           setNotice(
             t(
@@ -127,9 +131,9 @@ export function ReferenceLayerList({
           );
         }
         if (mode === "replace") {
-          onChange(added);
-        } else if (added.length > 0) {
-          onChange([...layers, ...added]);
+          onChange(visible);
+        } else if (visible.length > 0) {
+          onChange([...layers, ...visible]);
         }
       } catch (error) {
         setError(
@@ -248,7 +252,10 @@ export function ReferenceLayerList({
               <button
                 type="button"
                 className="ml-auto text-[var(--color-error)]"
-                onClick={() => onChange(layers.filter((_, i) => i !== index))}
+                onClick={() => {
+                  omittedRef.current.add(layer.name);
+                  onChange(layers.filter((_, i) => i !== index));
+                }}
               >
                 {t("Remove", "削除")}
               </button>

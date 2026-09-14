@@ -48,6 +48,7 @@ export type PlacementState = {
   floors: FloorPlacement[];
   activeFloorLabel: string | null;
   scaleLocked: boolean;
+  stationPin?: [number, number] | null;
 };
 
 /**
@@ -196,6 +197,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
       if (!active) return state;
       const moved = {
         ...state,
+        stationPin: action.mapAnchor,
         frame: action.workingCrs
           ? { ...state.frame, workingCrs: action.workingCrs }
           : state.frame,
