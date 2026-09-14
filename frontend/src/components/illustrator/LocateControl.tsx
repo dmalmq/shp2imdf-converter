@@ -58,12 +58,13 @@ export function LocateControl({ siteName, dispatch, onLocate, onLookupSettled }:
     void geocodeSearch(name, uiLanguage)
       .then((found) => {
         const candidates = preferStationHits(found.map(toPlace));
-        if (!acceptsGuess(locateRef.current)) return;
-        if (candidates[0]) {
-          dispatch(positionFromPlace(candidates[0], true));
-          onLocate(candidates[0].lngLat);
+        if (acceptsGuess(locateRef.current)) {
+          if (candidates[0]) {
+            dispatch(positionFromPlace(candidates[0], true));
+            onLocate(candidates[0].lngLat);
+          }
+          send({ type: "guessed", candidates });
         }
-        send({ type: "guessed", candidates });
         onLookupSettledRef.current?.();
       })
       .catch(() => {
@@ -84,9 +85,11 @@ export function LocateControl({ siteName, dispatch, onLocate, onLookupSettled }:
     void geocodeSearch(trimmed, uiLanguage)
       .then((found) => {
         send({ type: "settled", query: trimmed, places: preferStationHits(found.map(toPlace)) });
+        onLookupSettledRef.current?.();
       })
       .catch(() => {
         send({ type: "faulted", query: trimmed });
+        onLookupSettledRef.current?.();
       });
   };
 

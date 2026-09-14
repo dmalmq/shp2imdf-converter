@@ -335,6 +335,10 @@ test("changing station hides the drawing until Station_pg snaps at the new pin",
   );
   fireEvent.click(screen.getByRole("button", { name: "Pin elsewhere" }));
   await waitFor(() => expect(screen.getByTestId("placement-hold")).toHaveTextContent(/snapping/i));
+  expect(snap).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Re-trim Station_pg" }));
+  await waitFor(() => expect(snap).toHaveBeenCalledTimes(2));
   expect(finish).toBeDefined();
   finish!({ match: MATCH, reason: null });
   await waitFor(() => expect(screen.queryByTestId("placement-hold")).toBeNull());

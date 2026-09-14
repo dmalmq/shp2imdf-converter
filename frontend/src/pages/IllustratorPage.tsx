@@ -46,6 +46,7 @@ import {
 import {
   placementPoseReady,
   sameSurveySnap,
+  surveySnapAwaitingRetrim,
   type SurveyPose,
   type SurveySnapTarget
 } from "../lib/placementPose";
@@ -482,6 +483,7 @@ export function IllustratorPage() {
     if (!preview || assignment === null || !state.stationPin || !state.scaleLocked) return;
     if (!surveyCollection || surveyCollection.features.length === 0) return;
     if (sameSurveySnap(snappedRef.current, surveyCollection, state.stationPin)) return;
+    if (surveySnapAwaitingRetrim(snappedRef.current, surveyCollection, state.stationPin)) return;
     void snapToSurvey(surveyCollection);
   }, [preview, assignment, state.stationPin, state.scaleLocked, surveyCollection]);
 

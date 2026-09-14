@@ -115,6 +115,23 @@ test("a filename lookup that finds nothing still settles", async () => {
   expect(geocodeSearch).toHaveBeenCalledWith("mystery", expect.anything());
 });
 
+test("opening search before the filename lookup returns still settles", async () => {
+  let finish: ((value: GeocodeResultItem[]) => void) | undefined;
+  vi.mocked(geocodeSearch).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  const settled = vi.fn();
+  const { seen } = renderLocate("大井町", settled);
+  fireEvent.click(await screen.findByRole("button", { name: /locating 大井町/i }));
+  expect(finish).toBeDefined();
+  finish!([oimachiStaWire]);
+  await waitFor(() => expect(settled).toHaveBeenCalledOnce());
+  expect(seen).toEqual([]);
+});
+
 test("an unavailable geocoder settles so the drawing can be placed by hand", async () => {
   vi.mocked(geocodeSearch).mockRejectedValue(new Error("offline"));
   const settled = vi.fn();

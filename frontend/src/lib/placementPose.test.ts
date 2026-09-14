@@ -1,4 +1,4 @@
-import { placementPoseReady, sameSurveySnap } from "./placementPose";
+import { placementPoseReady, sameSurveySnap, surveySnapAwaitingRetrim } from "./placementPose";
 import type { FeatureCollection } from "geojson";
 
 const LAYER: FeatureCollection = { type: "FeatureCollection", features: [] };
@@ -35,4 +35,8 @@ test("a ready pose still waits if the snap belongs to another pin or layer", () 
     sameSurveySnap({ collection: LAYER, pin: PIN }, LAYER, [140.12, 35.62])
   ).toBe(false);
   expect(sameSurveySnap({ collection: LAYER, pin: PIN }, { ...LAYER }, PIN)).toBe(false);
+  expect(surveySnapAwaitingRetrim({ collection: LAYER, pin: PIN }, LAYER, PIN)).toBe(false);
+  expect(surveySnapAwaitingRetrim({ collection: LAYER, pin: PIN }, LAYER, [140.12, 35.62])).toBe(
+    true
+  );
 });

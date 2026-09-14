@@ -133,6 +133,28 @@ test("dragging an unstacked floor keeps it off the next pin", () => {
   expect(state.floors[0].mapAnchor).toEqual([139.71, 35.7]);
 });
 
+test("frame rotation still derives linked floors when an unstacked floor is active", () => {
+  const start: PlacementState = {
+    ...BASE,
+    activeFloorLabel: "4F",
+    floors: [
+      floor("1F", ANCHOR, true),
+      floor("2F", ANCHOR, true),
+      { ...floor("4F", ANCHOR, false), artworkMatch: true }
+    ]
+  };
+  const next = placementReducer(start, { type: "rotateFrame", rotationDeg: 90 });
+  const [e, n] = lngLatToEnu(
+    next.floors[1].mapAnchor[0],
+    next.floors[1].mapAnchor[1],
+    ANCHOR[0],
+    ANCHOR[1]
+  );
+  expect(e).toBeCloseTo(0, 6);
+  expect(n).toBeCloseTo(200 * 0.176389, 6);
+  expect(next.floors[2].mapAnchor).toEqual(ANCHOR);
+});
+
 test("pinFocusBounds is a degenerate box at the pin", () => {
   expect(pinFocusBounds([140.1134, 35.6132])).toEqual([140.1134, 35.6132, 140.1134, 35.6132]);
 });

@@ -137,11 +137,14 @@ function recomputeLinked(
   state: PlacementState,
   origin: FloorPlacement | null = activeFloor(state)
 ): PlacementState {
-  if (!origin?.linked) return state;
+  const registration = origin?.linked ? origin : state.floors.find((f) => f.linked);
+  if (!registration?.linked) return state;
   return {
     ...state,
     floors: state.floors.map((f) =>
-      f.label === origin.label || !f.linked ? f : { ...f, mapAnchor: deriveAnchor(state, f, origin) }
+      f.label === registration.label || !f.linked
+        ? f
+        : { ...f, mapAnchor: deriveAnchor(state, f, registration) }
     )
   };
 }

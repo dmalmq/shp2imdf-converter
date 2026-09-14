@@ -22,6 +22,20 @@ export function sameSurveySnap(
   );
 }
 
+export function surveySnapAwaitingRetrim(
+  snapped: SurveySnapTarget | null,
+  collection: FeatureCollection | null,
+  pin: [number, number] | null | undefined
+): boolean {
+  return Boolean(
+    snapped &&
+      collection &&
+      pin &&
+      snapped.collection === collection &&
+      (snapped.pin[0] !== pin[0] || snapped.pin[1] !== pin[1])
+  );
+}
+
 export function placementPoseReady(
   hasPin: boolean,
   surveyHasFeatures: boolean,
