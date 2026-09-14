@@ -77,6 +77,62 @@ test("positionBuilding without workingCrs keeps the frame CRS", () => {
   expect(next.floors[0].mapAnchor).toEqual([140.1134, 35.6132]);
 });
 
+test("the pin moves an unstacked floor and leaves a manually unlinked floor", () => {
+  const start: PlacementState = {
+    ...BASE,
+    floors: [
+      floor("1F", ANCHOR, true),
+      floor("2F", ANCHOR, false),
+      floor("3F", ANCHOR, true),
+      { ...floor("4F", ANCHOR, false), artworkMatch: true }
+    ]
+  };
+  const target: [number, number] = [139.71, 35.7];
+  const next = placementReducer(start, { type: "positionBuilding", mapAnchor: target });
+  expect(next.floors[0].mapAnchor).toEqual(target);
+  expect(next.floors[3].mapAnchor).toEqual(target);
+  expect(next.floors[3].linked).toBe(false);
+  // 2F was unlinked by the operator, not because stacking failed.
+  expect(next.floors[1].mapAnchor).toEqual(ANCHOR);
+});
+
+test("the pin still moves the linked group when an unstacked floor is active", () => {
+  const start: PlacementState = {
+    ...BASE,
+    activeFloorLabel: "4F",
+    floors: [
+      floor("1F", ANCHOR, true),
+      floor("2F", ANCHOR, true),
+      floor("3F", ANCHOR, true),
+      { ...floor("4F", ANCHOR, false), artworkMatch: true }
+    ]
+  };
+  const target: [number, number] = [139.71, 35.7];
+  const next = placementReducer(start, { type: "positionBuilding", mapAnchor: target });
+  expect(next.activeFloorLabel).toBe("4F");
+  expect(next.floors[0].mapAnchor).toEqual(target);
+  expect(next.floors[3].mapAnchor).toEqual(target);
+  expect(next.floors[1].mapAnchor).not.toEqual(target);
+});
+
+test("dragging an unstacked floor keeps it off the next pin", () => {
+  let state: PlacementState = {
+    ...BASE,
+    activeFloorLabel: "4F",
+    floors: [
+      floor("1F", ANCHOR, true),
+      floor("2F", ANCHOR, true),
+      { ...floor("4F", ANCHOR, false), artworkMatch: true }
+    ]
+  };
+  const placed: [number, number] = [139.72, 35.71];
+  state = placementReducer(state, { type: "dragFloor", label: "4F", mapAnchor: placed });
+  expect(state.floors[2].artworkMatch).toBe(false);
+  state = placementReducer(state, { type: "positionBuilding", mapAnchor: [139.71, 35.7] });
+  expect(state.floors[2].mapAnchor).toEqual(placed);
+  expect(state.floors[0].mapAnchor).toEqual([139.71, 35.7]);
+});
+
 test("pinFocusBounds is a degenerate box at the pin", () => {
   expect(pinFocusBounds([140.1134, 35.6132])).toEqual([140.1134, 35.6132, 140.1134, 35.6132]);
 });
@@ -539,6 +595,24 @@ test("an individual applySimilarity changes and unlinks only the active floor", 
   expect(fitted.controlPoints).toEqual(before.floors[0].controlPoints);
   expect(next.floors[1]).toEqual(before.floors[1]);
   expect(next.frame).toEqual(before.frame);
+});
+
+test("an individual apply clears the unstacked-match flag", () => {
+  const start: PlacementState = {
+    ...BASE,
+    activeFloorLabel: "2F",
+    floors: [
+      floor("1F", ANCHOR, true),
+      { ...floor("2F", ANCHOR, false), artworkMatch: true }
+    ]
+  };
+  const next = placementReducer(start, {
+    type: "applySimilarity",
+    mode: "individual",
+    transform: sampleSimilarity()
+  });
+  expect(next.floors[1].artworkMatch).toBe(false);
+  expect(next.floors[0].artworkMatch).toBeUndefined();
 });
 
 test("group applySimilarity is a no-op when the registration floor is unlinked", () => {

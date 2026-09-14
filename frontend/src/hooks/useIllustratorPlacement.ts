@@ -41,6 +41,8 @@ export type FloorPlacement = {
   /** Own scale/rotation once unlinked; undefined while linked (frame is used). */
   rotationDeg?: number;
   metresPerPoint?: number;
+  /** True when convert could not stack this floor onto the others. */
+  artworkMatch?: boolean;
 };
 
 export type PlacementState = {
@@ -115,28 +117,37 @@ function activeFloor(state: PlacementState): FloorPlacement | null {
   return state.floors.find((f) => f.label === state.activeFloorLabel) ?? null;
 }
 
-/** Derived anchor: active anchor + the frame applied to the artwork offset. */
-function deriveAnchor(state: PlacementState, floor: FloorPlacement): [number, number] {
-  const active = activeFloor(state);
-  if (!active) return floor.mapAnchor;
-  const dx = floor.artworkAnchor[0] - active.artworkAnchor[0];
-  const dy = floor.artworkAnchor[1] - active.artworkAnchor[1];
+/** Derived anchor: origin anchor + the frame applied to the artwork offset. */
+function deriveAnchor(
+  state: PlacementState,
+  floor: FloorPlacement,
+  origin: FloorPlacement | null = activeFloor(state)
+): [number, number] {
+  if (!origin) return floor.mapAnchor;
+  const dx = floor.artworkAnchor[0] - origin.artworkAnchor[0];
+  const dy = floor.artworkAnchor[1] - origin.artworkAnchor[1];
   const theta = (state.frame.rotationDeg * Math.PI) / 180;
   const s = state.frame.metresPerPoint;
   const east = s * (Math.cos(theta) * dx - Math.sin(theta) * dy);
   const north = s * (Math.sin(theta) * dx + Math.cos(theta) * dy);
-  return enuToLngLat(east, north, active.mapAnchor[0], active.mapAnchor[1]);
+  return enuToLngLat(east, north, origin.mapAnchor[0], origin.mapAnchor[1]);
 }
 
-function recomputeLinked(state: PlacementState): PlacementState {
-  const active = activeFloor(state);
-  if (!active) return state;
+function recomputeLinked(
+  state: PlacementState,
+  origin: FloorPlacement | null = activeFloor(state)
+): PlacementState {
+  if (!origin?.linked) return state;
   return {
     ...state,
     floors: state.floors.map((f) =>
-      f.label === active.label || !f.linked ? f : { ...f, mapAnchor: deriveAnchor(state, f) }
+      f.label === origin.label || !f.linked ? f : { ...f, mapAnchor: deriveAnchor(state, f, origin) }
     )
   };
+}
+
+function clearArtworkMatch(floor: FloorPlacement): FloorPlacement {
+  return floor.artworkMatch ? { ...floor, artworkMatch: false } : floor;
 }
 
 /** One full transform payload per floor, for the export request. */
@@ -181,6 +192,7 @@ export function floorPayloadsToState(
             ...f,
             linked: true,
             mapAnchor: [saved.map_anchor[0], saved.map_anchor[1]] as [number, number],
+            artworkMatch: false,
             rotationDeg: undefined,
             metresPerPoint: undefined,
             controlPoints: []
@@ -195,6 +207,9 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
     case "positionBuilding": {
       const active = activeFloor(state);
       if (!active) return state;
+      const registration = active.linked
+        ? active
+        : (state.floors.find((f) => f.linked) ?? active);
       const moved = {
         ...state,
         stationPin: action.mapAnchor,
@@ -202,10 +217,13 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
           ? { ...state.frame, workingCrs: action.workingCrs }
           : state.frame,
         floors: state.floors.map((f) =>
-          f.label === active.label ? { ...f, mapAnchor: action.mapAnchor } : f
+          f.label === registration.label || f.artworkMatch
+            ? { ...f, mapAnchor: action.mapAnchor }
+            : f
         )
       };
-      return active.linked ? recomputeLinked(moved) : moved;
+      const origin = moved.floors.find((f) => f.label === registration.label) ?? registration;
+      return origin.linked ? recomputeLinked(moved, origin) : moved;
     }
 
     case "dragFloor": {
@@ -214,17 +232,19 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
         ...state,
         floors: state.floors.map((f) =>
           f.label === action.label
-            ? single || !f.linked
-              ? { ...f, mapAnchor: action.mapAnchor }
-              : {
-                  ...f,
-                  mapAnchor: action.mapAnchor,
-                  linked: false,
-                  // Freeze the frame values into the floor now, so later frame
-                  // operations cannot drag an independently-placed floor along.
-                  rotationDeg: state.frame.rotationDeg,
-                  metresPerPoint: state.frame.metresPerPoint
-                }
+            ? clearArtworkMatch(
+                single || !f.linked
+                  ? { ...f, mapAnchor: action.mapAnchor }
+                  : {
+                      ...f,
+                      mapAnchor: action.mapAnchor,
+                      linked: false,
+                      // Freeze the frame values into the floor now, so later frame
+                      // operations cannot drag an independently-placed floor along.
+                      rotationDeg: state.frame.rotationDeg,
+                      metresPerPoint: state.frame.metresPerPoint
+                    }
+              )
             : f
         )
       };
@@ -239,8 +259,13 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
             ? f.linked
               ? // Detach with the frame values frozen in, so later frame
                 // operations cannot drag an independently-placed floor along.
-                { ...f, linked: false, rotationDeg, metresPerPoint: state.frame.metresPerPoint }
-              : { ...f, rotationDeg }
+                clearArtworkMatch({
+                  ...f,
+                  linked: false,
+                  rotationDeg,
+                  metresPerPoint: state.frame.metresPerPoint
+                })
+              : clearArtworkMatch({ ...f, rotationDeg })
             : f
         )
       };
@@ -253,8 +278,13 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
         floors: state.floors.map((f) =>
           f.label === action.label
             ? f.linked
-              ? { ...f, linked: false, rotationDeg: state.frame.rotationDeg, metresPerPoint: action.metresPerPoint }
-              : { ...f, metresPerPoint: action.metresPerPoint }
+              ? clearArtworkMatch({
+                  ...f,
+                  linked: false,
+                  rotationDeg: state.frame.rotationDeg,
+                  metresPerPoint: action.metresPerPoint
+                })
+              : clearArtworkMatch({ ...f, metresPerPoint: action.metresPerPoint })
             : f
         )
       };
@@ -322,6 +352,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
       const linked = {
         ...floor,
         linked: true,
+        artworkMatch: false,
         rotationDeg: undefined,
         metresPerPoint: undefined
       };
@@ -416,6 +447,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
             ? {
                 ...f,
                 linked: false,
+                artworkMatch: false,
                 artworkAnchor: [fitted.artworkAnchor[0], fitted.artworkAnchor[1]],
                 mapAnchor: [lon, lat],
                 rotationDeg: fitted.rotationDeg,
@@ -470,6 +502,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
             ? {
                 ...f,
                 linked: false,
+                artworkMatch: false,
                 artworkAnchor: [transform.artworkAnchor[0], transform.artworkAnchor[1]],
                 mapAnchor: [transform.mapAnchor[0], transform.mapAnchor[1]],
                 rotationDeg: transform.rotationDeg,
