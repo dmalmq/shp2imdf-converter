@@ -23,9 +23,7 @@ type Props = {
   state: PlacementState;
   dispatch: Dispatch<PlacementAction>;
   mode: AdjustmentMode;
-  /** Building name from the drawing's file name; searched once to pre-locate. */
   siteName: string;
-  /** Remount locate and overlay when a new conversion starts, so a previous zip is not re-trimmed. */
   conversionId: string;
   onLocate: (lngLat: [number, number]) => void;
   canUndo: boolean;
@@ -37,7 +35,6 @@ type Props = {
   shapeMatch: ShapeMatchPanelModel;
   referenceLayers: ReferenceLayer[];
   onReferenceLayersChange: (layers: ReferenceLayer[]) => void;
-  /** WGS84 box of the station pin; reference uploads are trimmed to ~1 km. */
   focusBounds?: [number, number, number, number] | null;
   bounds: [number, number, number, number];
   suggestedCrs: string;

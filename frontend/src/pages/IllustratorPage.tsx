@@ -303,8 +303,6 @@ export function IllustratorPage() {
   const bounds: [number, number, number, number] =
     preview?.artwork_bounds ?? ([0, 0, 100, 100] as [number, number, number, number]);
 
-  // Drawings are named after the building (e.g. 0307_大井町.ai), so the panel can
-  // search for it and open the map on the right place instead of a city centre.
   const siteName = stationQueryFromFilename(preview?.report?.source_name ?? "");
 
   const floorLayers: FloorLayer[] = useMemo(() => {
@@ -329,7 +327,6 @@ export function IllustratorPage() {
     }));
   }, [preview, assignment]);
 
-  // Overlay trim follows the station pin, not the Tokyo-seeded artwork box.
   const focusBounds = useMemo(
     () => (stationPin ? pinFocusBounds(stationPin) : null),
     [stationPin]

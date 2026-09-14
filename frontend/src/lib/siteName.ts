@@ -22,10 +22,6 @@ export function siteNameFromFilename(filename: string): string {
   return /^\d*$/.test(name) ? "" : name;
 }
 
-/**
- * Search term for the station, not the city. `0989_千葉.ai` becomes `千葉駅`.
- * Names that already end in 駅, Sta, or Station are left alone.
- */
 export function stationQueryFromFilename(filename: string): string {
   const name = siteNameFromFilename(filename);
   if (!name) return "";

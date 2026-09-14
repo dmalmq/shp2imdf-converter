@@ -656,7 +656,6 @@ export function placedBoundsWgs84(
   return union;
 }
 
-/** Degenerate WGS84 box at a station pin. The backend expands it by 1 km. */
 export function pinFocusBounds(
   lngLat: [number, number]
 ): [number, number, number, number] {

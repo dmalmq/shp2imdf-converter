@@ -12,7 +12,6 @@ type Props = {
   /** Layer used for shape matching; owned by the placement page. */
   matchTargetName: string;
   onMatchTargetChange: (name: string) => void;
-  /** WGS84 box of the station pin; uploads are trimmed to ~1 km around it. */
   focusBounds?: [number, number, number, number] | null;
 };
 

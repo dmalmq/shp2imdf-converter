@@ -1086,8 +1086,7 @@ export type ReferenceLayerItem = {
  *
  * `focusBounds` (WGS84 minLon,minLat,maxLon,maxLat) asks the backend to keep
  * only features within 1 km of it, so a regional extract does not ship its
- * full 12k-1.5M features to the browser. Pass the station pin as a degenerate
- * box. The backend expands it by 1 km.
+ * full 12k-1.5M features to the browser.
  */
 export async function uploadReferenceLayers(
   files: File[],

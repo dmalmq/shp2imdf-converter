@@ -85,7 +85,6 @@ export function looksLikeStation(name: string): boolean {
   return /駅/u.test(name) || /\bstation\b/i.test(name);
 }
 
-/** Stations first, original order preserved within each group. */
 export function preferStationHits<T extends { name: string }>(places: readonly T[]): T[] {
   const stations = places.filter((place) => looksLikeStation(place.name));
   if (stations.length === 0) return [...places];
