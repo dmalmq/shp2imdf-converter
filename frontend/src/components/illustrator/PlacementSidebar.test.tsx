@@ -32,11 +32,17 @@ function stateWith(floors: { label: string; linked: boolean }[], active: string)
 const STATE = stateWith([{ label: "1F", linked: true }], "1F");
 const FORMATS = { geopackage: true, shapefile: true, qgis: true };
 
-function SidebarHarness({ siteName = "" }: { siteName?: string }) {
+function SidebarHarness({
+  siteName = "",
+  placement = STATE
+}: {
+  siteName?: string;
+  placement?: PlacementState;
+}) {
   const [tab, setTab] = useState<PlacementTab>("fit");
   return (
     <PlacementSidebar
-      state={STATE}
+      state={placement}
       dispatch={() => {}}
       mode="group"
       siteName={siteName}
@@ -113,6 +119,21 @@ test("a typed drawing scale survives a tab round trip", () => {
   fireEvent.click(screen.getByRole("tab", { name: "Reference" }));
   fireEvent.click(screen.getByRole("tab", { name: "Scale & fit" }));
   expect(scaleInput()).toHaveValue(1234);
+});
+
+test("the pinned scale lock stays visible on the Export tab", () => {
+  render(<SidebarHarness placement={{ ...STATE, scaleLocked: true }} />);
+  expect(screen.getByRole("button", { name: /^Unlock$/ })).toBeInTheDocument();
+  expect(screen.getByText(/scale 1:1000/i)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: "Export" }));
+  expect(screen.getByRole("button", { name: /^Unlock$/ })).toBeInTheDocument();
+  expect(screen.getByText(/scale 1:1000/i)).toBeInTheDocument();
+});
+
+test("Scale & fit apply and calibrate are disabled while locked", () => {
+  render(<SidebarHarness placement={{ ...STATE, scaleLocked: true }} />);
+  expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Calibrate" })).toBeDisabled();
 });
 
 const EMPTY_ADDRESS = {

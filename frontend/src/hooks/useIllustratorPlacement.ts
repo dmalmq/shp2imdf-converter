@@ -71,6 +71,7 @@ export type PlacementAction =
   | { type: "scaleFloor"; label: string; metresPerPoint: number }
   | { type: "setDrawingScale"; denominator: number }
   | { type: "calibrateDistance"; artworkDistance: number; realMetres: number }
+  | { type: "lockScale" }
   | { type: "unlockScale" }
   | { type: "unlockFloor"; label: string }
   | { type: "relinkFloor"; label: string }
@@ -241,7 +242,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
     }
 
     case "scaleFloor": {
-      if (!(action.metresPerPoint > 0)) return state;
+      if (state.scaleLocked || !(action.metresPerPoint > 0)) return state;
       return {
         ...state,
         floors: state.floors.map((f) =>
@@ -269,7 +270,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
     }
 
     case "setDrawingScale": {
-      if (!(action.denominator > 0)) return state;
+      if (state.scaleLocked || !(action.denominator > 0)) return state;
       return recomputeLinked({
         ...state,
         scaleLocked: true,
@@ -278,7 +279,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
     }
 
     case "calibrateDistance": {
-      if (!(action.artworkDistance > 0) || !(action.realMetres > 0)) return state;
+      if (state.scaleLocked || !(action.artworkDistance > 0) || !(action.realMetres > 0)) return state;
       return recomputeLinked({
         ...state,
         scaleLocked: true,
@@ -286,8 +287,11 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
       });
     }
 
+    case "lockScale":
+      return state.scaleLocked ? state : { ...state, scaleLocked: true };
+
     case "unlockScale":
-      return { ...state, scaleLocked: false };
+      return state.scaleLocked ? { ...state, scaleLocked: false } : state;
 
     case "setWorkingCrs":
       return { ...state, frame: { ...state.frame, workingCrs: action.workingCrs } };
@@ -357,11 +361,14 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
       const [lon0, lat0] = active.mapAnchor;
       const enu = active.controlPoints.map((p) => lngLatToEnu(p.map[0], p.map[1], lon0, lat0));
       const frameFit = action.mode === "group";
+      const lockedMetres = state.scaleLocked
+        ? resolvedTransform(state, active).metresPerPoint
+        : undefined;
       const fitted = fitHelmert(
         active.controlPoints.map((p) => p.artwork),
         enu,
         state.frame.workingCrs,
-        frameFit && state.scaleLocked ? state.frame.metresPerPoint : undefined
+        lockedMetres
       );
       if (frameFit) {
         // The frame takes the fitted rotation and scale; the active floor's
@@ -386,9 +393,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
           frame: {
             ...state.frame,
             rotationDeg: fitted.rotationDeg,
-            metresPerPoint: state.scaleLocked
-              ? state.frame.metresPerPoint
-              : fitted.metresPerPoint
+            metresPerPoint: lockedMetres ?? fitted.metresPerPoint
           },
           floors: state.floors.map((f) =>
             f.label === active.label ? { ...f, mapAnchor: [lon, lat] } : f
@@ -409,7 +414,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
                 artworkAnchor: [fitted.artworkAnchor[0], fitted.artworkAnchor[1]],
                 mapAnchor: [lon, lat],
                 rotationDeg: fitted.rotationDeg,
-                metresPerPoint: fitted.metresPerPoint
+                metresPerPoint: lockedMetres ?? fitted.metresPerPoint
               }
             : f
         )
@@ -449,7 +454,10 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
           )
         });
       }
-      if (!(transform.metresPerPoint > 0)) return state;
+      const metresPerPoint = state.scaleLocked
+        ? resolvedTransform(state, active).metresPerPoint
+        : transform.metresPerPoint;
+      if (!(metresPerPoint > 0)) return state;
       return {
         ...state,
         floors: state.floors.map((f) =>
@@ -460,7 +468,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
                 artworkAnchor: [transform.artworkAnchor[0], transform.artworkAnchor[1]],
                 mapAnchor: [transform.mapAnchor[0], transform.mapAnchor[1]],
                 rotationDeg: transform.rotationDeg,
-                metresPerPoint: transform.metresPerPoint
+                metresPerPoint
               }
             : f
         )

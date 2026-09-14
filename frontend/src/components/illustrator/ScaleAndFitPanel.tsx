@@ -66,10 +66,12 @@ export function ScaleAndFitPanel({
             type="number"
             className="w-24 rounded-[var(--radius-md)] border px-2 py-1"
             value={denominator}
+            disabled={state.scaleLocked}
             onChange={(event) => setDenominator(event.target.value)}
           />
           <Button
             size="sm"
+            disabled={state.scaleLocked}
             onClick={() => dispatch({ type: "setDrawingScale", denominator: Number(denominator) })}
           >
             {t("Apply", "適用")}
@@ -81,6 +83,7 @@ export function ScaleAndFitPanel({
             className="w-20 rounded-[var(--radius-md)] border px-2 py-1"
             placeholder="pt"
             value={artworkDistance}
+            disabled={state.scaleLocked}
             onChange={(event) => setArtworkDistance(event.target.value)}
           />
           <span className="text-xs">=</span>
@@ -89,11 +92,13 @@ export function ScaleAndFitPanel({
             className="w-20 rounded-[var(--radius-md)] border px-2 py-1"
             placeholder="m"
             value={realMetres}
+            disabled={state.scaleLocked}
             onChange={(event) => setRealMetres(event.target.value)}
           />
           <Button
             size="sm"
             variant="secondary"
+            disabled={state.scaleLocked}
             onClick={() =>
               dispatch({
                 type: "calibrateDistance",
@@ -106,15 +111,22 @@ export function ScaleAndFitPanel({
           </Button>
         </div>
         {state.scaleLocked ? (
+          <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+            {t(
+              "Unlock above to change the drawing scale. Corners scale only when unlocked.",
+              "縮尺を変えるには上の固定を解除してください。四隅での拡大縮小は固定を解除したときだけです。"
+            )}
+          </p>
+        ) : (
           <Button
             size="sm"
             variant="secondary"
             className="mt-2"
-            onClick={() => dispatch({ type: "unlockScale" })}
+            onClick={() => dispatch({ type: "lockScale" })}
           >
-            {t("Unlock scale", "縮尺の固定を解除")}
+            {t("Lock scale", "縮尺を固定")}
           </Button>
-        ) : null}
+        )}
       </section>
 
       <ControlPointList

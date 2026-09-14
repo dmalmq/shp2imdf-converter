@@ -7,6 +7,7 @@ import {
   gizmoFrame,
   lngLatToEnu,
   geometryPositions,
+  drawingScaleDenominator,
   metresPerPointForScale,
   nearestVertex,
   residuals,
@@ -50,6 +51,12 @@ test("drawing scale converts to metres per point exactly", () => {
 
 test("a non-positive drawing scale is rejected", () => {
   expect(() => metresPerPointForScale(0)).toThrow();
+});
+
+test("drawingScaleDenominator inverts metresPerPointForScale", () => {
+  expect(drawingScaleDenominator(metresPerPointForScale(1000))).toBeCloseTo(1000, 9);
+  expect(drawingScaleDenominator(metresPerPointForScale(500))).toBeCloseTo(500, 9);
+  expect(() => drawingScaleDenominator(0)).toThrow();
 });
 
 test("the golden fixture matches the backend constants", () => {

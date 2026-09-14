@@ -58,8 +58,17 @@ export function TransformHandles({
 }: Props) {
     // Read by long-lived map listeners: a drag must survive the re-renders its own
     // dispatches cause, so the listeners are never resubscribed mid-gesture.
-    const latest = useRef({ transform, frame, dispatch, floorLabel, bodyLayerIds, linked, mode });
-    latest.current = { transform, frame, dispatch, floorLabel, bodyLayerIds, linked, mode };
+    const latest = useRef({
+      transform,
+      frame,
+      dispatch,
+      floorLabel,
+      bodyLayerIds,
+      linked,
+      mode,
+      scaleLocked
+    });
+    latest.current = { transform, frame, dispatch, floorLabel, bodyLayerIds, linked, mode, scaleLocked };
   const shiftHeld = useRef(false);
 
   useEffect(() => {
@@ -186,6 +195,7 @@ export function TransformHandles({
   };
 
   const onCornerDrag = (corner: GizmoCorner) => (event: MarkerDragEvent) => {
+    if (latest.current.scaleLocked) return;
     const { transform: current } = latest.current;
     const [lng0, lat0] = current.mapAnchor;
     const [east, north] = lngLatToEnu(event.lngLat.lng, event.lngLat.lat, lng0, lat0);

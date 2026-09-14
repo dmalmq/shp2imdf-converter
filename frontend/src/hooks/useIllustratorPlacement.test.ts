@@ -135,6 +135,33 @@ test("scaleFloor on a linked floor freezes the frame rotation in and unlinks it"
   expect(state.floors[0].linked).toBe(true);
 });
 
+test("a locked scale rejects scaleFloor without unlinking", () => {
+  const locked = placementReducer(BASE, { type: "lockScale" });
+  const next = placementReducer(locked, { type: "scaleFloor", label: "2F", metresPerPoint: 0.5 });
+  expect(next).toBe(locked);
+  expect(next.floors[1].linked).toBe(true);
+});
+
+test("lockScale locks without changing metres per point or unlinking", () => {
+  const next = placementReducer(BASE, { type: "lockScale" });
+  expect(next.scaleLocked).toBe(true);
+  expect(next.frame.metresPerPoint).toBe(BASE.frame.metresPerPoint);
+  expect(next.floors.map((floorPlacement) => floorPlacement.linked)).toEqual([true, true]);
+});
+
+test("unlockScale does not unlink floors", () => {
+  const locked = placementReducer(BASE, { type: "lockScale" });
+  const next = placementReducer(locked, { type: "unlockScale" });
+  expect(next.scaleLocked).toBe(false);
+  expect(next.floors.map((floorPlacement) => floorPlacement.linked)).toEqual([true, true]);
+});
+
+test("lockScale and unlockScale are no-ops when already in that state", () => {
+  expect(placementReducer(BASE, { type: "unlockScale" })).toBe(BASE);
+  const locked = placementReducer(BASE, { type: "lockScale" });
+  expect(placementReducer(locked, { type: "lockScale" })).toBe(locked);
+});
+
 test("frame operations ignore unlinked floors", () => {
   const dragged: [number, number] = [139.72, 35.71];
   let state = placementReducer(BASE, { type: "dragFloor", label: "2F", mapAnchor: dragged });
@@ -325,6 +352,18 @@ test("unlocking the scale lets scaleFrame work again", () => {
   expect(state.frame.metresPerPoint).toBe(0.5);
 });
 
+test("setting a drawing scale is a no-op while locked", () => {
+  const locked = placementReducer(BASE, { type: "lockScale" });
+  expect(placementReducer(locked, { type: "setDrawingScale", denominator: 2000 })).toBe(locked);
+});
+
+test("distance calibration is a no-op while locked", () => {
+  const locked = placementReducer(BASE, { type: "lockScale" });
+  expect(
+    placementReducer(locked, { type: "calibrateDistance", artworkDistance: 400, realMetres: 100 })
+  ).toBe(locked);
+});
+
 test("distance calibration locks the scale", () => {
   const next = placementReducer(BASE, {
     type: "calibrateDistance",
@@ -393,6 +432,16 @@ test("a three-point individual fit changes and unlinks only the active floor", (
   expect(fitted.linked).toBe(false);
   expect(fitted.rotationDeg).toBeCloseTo(90, 6);
   expect(fitted.metresPerPoint).toBeCloseTo(0.5, 9);
+  expect(state.floors[1]).toEqual(before.floors[1]);
+});
+
+test("an individual fit respects the locked scale", () => {
+  const before = placementReducer(controlPointState(3), { type: "lockScale" });
+  const state = placementReducer(before, { type: "fitControlPoints", mode: "individual" });
+  const fitted = state.floors[0];
+  expect(fitted.linked).toBe(false);
+  expect(fitted.rotationDeg).toBeCloseTo(90, 6);
+  expect(fitted.metresPerPoint).toBeCloseTo(before.frame.metresPerPoint, 9);
   expect(state.floors[1]).toEqual(before.floors[1]);
 });
 
@@ -498,18 +547,16 @@ test("a group applySimilarity respects the locked scale like fitControlPoints", 
   expect(n).toBeCloseTo(200 * lockedScale, 6);
 });
 
-test("an individual applySimilarity ignores scale lock like fitControlPoints", () => {
-  const locked = placementReducer(stateWithControlPoints(), {
-    type: "setDrawingScale",
-    denominator: 500
-  });
+test("an individual applySimilarity respects the locked scale", () => {
+  const locked = placementReducer(stateWithControlPoints(), { type: "lockScale" });
   const next = placementReducer(locked, {
     type: "applySimilarity",
     mode: "individual",
     transform: sampleSimilarity()
   });
   expect(next.frame.metresPerPoint).toBeCloseTo(locked.frame.metresPerPoint, 9);
-  expect(next.floors[0].metresPerPoint).toBe(0.5);
+  expect(next.floors[0].metresPerPoint).toBeCloseTo(locked.frame.metresPerPoint, 9);
+  expect(next.floors[0].rotationDeg).toBe(90);
   expect(next.floors[0].linked).toBe(false);
   expect(next.floors[1]).toEqual(locked.floors[1]);
 });

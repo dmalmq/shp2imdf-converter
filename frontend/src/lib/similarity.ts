@@ -43,6 +43,14 @@ export function metresPerPointForScale(denominator: number): number {
   return ((MM_PER_INCH / POINTS_PER_INCH) * denominator) / 1000;
 }
 
+/** Inverse of {@link metresPerPointForScale}: the 1:N drawing scale. */
+export function drawingScaleDenominator(metresPerPoint: number): number {
+  if (!(metresPerPoint > 0)) {
+    throw new SimilarityError("Metres per point must be positive.");
+  }
+  return (metresPerPoint * 1000 * POINTS_PER_INCH) / MM_PER_INCH;
+}
+
 /** Meridian radius of curvature, metres per radian of latitude. */
 export function meridianRadius(latitude: number): number {
   const w = 1 - WGS84_E2 * Math.sin((latitude * Math.PI) / 180) ** 2;
