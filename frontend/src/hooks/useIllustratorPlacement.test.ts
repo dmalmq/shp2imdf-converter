@@ -4,6 +4,7 @@ import {
   currentResiduals,
   floorPayloadsToState,
   initialPlacementHistory,
+  pinFocusBounds,
   placedBoundsWgs84,
   placementHistoryReducer,
   placementReducer,
@@ -54,6 +55,29 @@ test("positioning the active floor moves every linked floor by derivation", () =
   );
   expect(e).toBeCloseTo(200 * 0.176389, 6);
   expect(n).toBeCloseTo(0, 6);
+});
+
+test("positionBuilding can set the working CRS with the pin", () => {
+  const next = placementReducer(BASE, {
+    type: "positionBuilding",
+    mapAnchor: [140.1134, 35.6132],
+    workingCrs: "EPSG:6676"
+  });
+  expect(next.frame.workingCrs).toBe("EPSG:6676");
+  expect(next.floors[0].mapAnchor).toEqual([140.1134, 35.6132]);
+});
+
+test("positionBuilding without workingCrs keeps the frame CRS", () => {
+  const next = placementReducer(BASE, {
+    type: "positionBuilding",
+    mapAnchor: [140.1134, 35.6132]
+  });
+  expect(next.frame.workingCrs).toBe(BASE.frame.workingCrs);
+  expect(next.floors[0].mapAnchor).toEqual([140.1134, 35.6132]);
+});
+
+test("pinFocusBounds is a degenerate box at the pin", () => {
+  expect(pinFocusBounds([140.1134, 35.6132])).toEqual([140.1134, 35.6132, 140.1134, 35.6132]);
 });
 
 test("rotateFrame rotates linked offsets about the active anchor", () => {

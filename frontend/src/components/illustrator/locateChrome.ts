@@ -1,4 +1,4 @@
-export type Place = { name: string; lngLat: [number, number] };
+export type Place = { name: string; lngLat: [number, number]; workingCrs?: string };
 
 export type NonEmpty<T> = readonly [T, ...T[]];
 
@@ -72,8 +72,25 @@ export function toPlace(item: {
   display_name: string;
   longitude: number;
   latitude: number;
+  working_crs?: string;
 }): Place {
-  return { name: item.display_name, lngLat: [item.longitude, item.latitude] };
+  return {
+    name: item.display_name,
+    lngLat: [item.longitude, item.latitude],
+    ...(item.working_crs ? { workingCrs: item.working_crs } : {})
+  };
+}
+
+export function looksLikeStation(name: string): boolean {
+  return /駅/u.test(name) || /\bstation\b/i.test(name);
+}
+
+/** Stations first, original order preserved within each group. */
+export function preferStationHits<T extends { name: string }>(places: readonly T[]): T[] {
+  const stations = places.filter((place) => looksLikeStation(place.name));
+  if (stations.length === 0) return [...places];
+  const rest = places.filter((place) => !looksLikeStation(place.name));
+  return [...stations, ...rest];
 }
 
 function pendingMatches(

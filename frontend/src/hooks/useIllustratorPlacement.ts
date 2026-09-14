@@ -62,7 +62,7 @@ export type PlacementAction =
    * `baseline` marks the initial placement (located from the file name), which
    * becomes the state undo returns to rather than an undoable edit of its own.
    */
-  | { type: "positionBuilding"; mapAnchor: [number, number]; baseline?: boolean }
+  | { type: "positionBuilding"; mapAnchor: [number, number]; workingCrs?: string; baseline?: boolean }
   | { type: "dragFloor"; label: string; mapAnchor: [number, number] }
   | { type: "rotateFrame"; rotationDeg: number }
   | { type: "scaleFrame"; metresPerPoint: number }
@@ -196,6 +196,9 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
       if (!active) return state;
       const moved = {
         ...state,
+        frame: action.workingCrs
+          ? { ...state.frame, workingCrs: action.workingCrs }
+          : state.frame,
         floors: state.floors.map((f) =>
           f.label === active.label ? { ...f, mapAnchor: action.mapAnchor } : f
         )
@@ -651,6 +654,14 @@ export function placedBoundsWgs84(
     }
   }
   return union;
+}
+
+/** Degenerate WGS84 box at a station pin. The backend expands it by 1 km. */
+export function pinFocusBounds(
+  lngLat: [number, number]
+): [number, number, number, number] {
+  const [lon, lat] = lngLat;
+  return [lon, lat, lon, lat];
 }
 
 export function useIllustratorPlacement(initial: PlacementState) {

@@ -9,6 +9,7 @@ import {
   acceptsGuess,
   locateReducer,
   locatedPlace,
+  preferStationHits,
   samePlace,
   toPlace,
   type Place
@@ -21,6 +22,15 @@ type Props = {
 };
 
 const FIELD = "w-full rounded-[var(--radius-md)] border px-2 py-1";
+
+function positionFromPlace(place: Place, baseline: boolean): PlacementAction {
+  return {
+    type: "positionBuilding",
+    mapAnchor: place.lngLat,
+    ...(place.workingCrs ? { workingCrs: place.workingCrs } : {}),
+    baseline
+  };
+}
 
 export function LocateControl({ siteName, dispatch, onLocate }: Props) {
   const { t, uiLanguage } = useUiLanguage();
@@ -39,14 +49,10 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
     send({ type: "armFilename", query: name });
     void geocodeSearch(name, uiLanguage)
       .then((found) => {
-        const candidates = found.map(toPlace);
+        const candidates = preferStationHits(found.map(toPlace));
         if (!acceptsGuess(locateRef.current)) return;
         if (candidates[0]) {
-          dispatch({
-            type: "positionBuilding",
-            mapAnchor: candidates[0].lngLat,
-            baseline: true
-          });
+          dispatch(positionFromPlace(candidates[0], true));
           onLocate(candidates[0].lngLat);
         }
         send({ type: "guessed", candidates });
@@ -67,7 +73,7 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
     send({ type: "submitted" });
     void geocodeSearch(trimmed, uiLanguage)
       .then((found) => {
-        send({ type: "settled", query: trimmed, places: found.map(toPlace) });
+        send({ type: "settled", query: trimmed, places: preferStationHits(found.map(toPlace)) });
       })
       .catch(() => {
         send({ type: "faulted", query: trimmed });
@@ -77,7 +83,7 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
   const pick = (place: Place) => {
     const current = locatedPlace(locate.located);
     if (!current || !samePlace(current, place)) {
-      dispatch({ type: "positionBuilding", mapAnchor: place.lngLat, baseline: false });
+      dispatch(positionFromPlace(place, false));
       onLocate(place.lngLat);
     }
     send({ type: "picked", place });

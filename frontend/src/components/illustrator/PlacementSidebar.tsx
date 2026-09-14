@@ -25,6 +25,8 @@ type Props = {
   mode: AdjustmentMode;
   /** Building name from the drawing's file name; searched once to pre-locate. */
   siteName: string;
+  /** Remount locate and overlay when a new conversion starts, so a previous zip is not re-trimmed. */
+  conversionId: string;
   onLocate: (lngLat: [number, number]) => void;
   canUndo: boolean;
   canRedo: boolean;
@@ -35,7 +37,7 @@ type Props = {
   shapeMatch: ShapeMatchPanelModel;
   referenceLayers: ReferenceLayer[];
   onReferenceLayersChange: (layers: ReferenceLayer[]) => void;
-  /** WGS84 box of the placed artwork; reference uploads are trimmed to ~1 km. */
+  /** WGS84 box of the station pin; reference uploads are trimmed to ~1 km. */
   focusBounds?: [number, number, number, number] | null;
   bounds: [number, number, number, number];
   suggestedCrs: string;
@@ -55,6 +57,7 @@ export function PlacementSidebar({
   dispatch,
   mode,
   siteName,
+  conversionId,
   onLocate,
   canUndo,
   canRedo,
@@ -83,7 +86,7 @@ export function PlacementSidebar({
   return (
     <div className="flex h-full min-h-0 w-80 shrink-0 flex-col overflow-hidden">
       <Card padding="md" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <LocateControl key={siteName} siteName={siteName} dispatch={dispatch} onLocate={onLocate} />
+        <LocateControl key={conversionId} siteName={siteName} dispatch={dispatch} onLocate={onLocate} />
         <div className="mt-2 shrink-0">
           <TransformPanel
             state={state}
@@ -118,6 +121,7 @@ export function PlacementSidebar({
           </div>
           <div {...tabPanelProps("placement", "reference", tab === "reference")}>
             <ReferenceLayerList
+              key={conversionId}
               layers={referenceLayers}
               onChange={onReferenceLayersChange}
               matchTargetName={shapeMatch.referenceName}

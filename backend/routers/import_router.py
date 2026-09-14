@@ -251,7 +251,8 @@ async def upload_reference_layers(
     Stateless on purpose: the layers are only drawn under the artwork to align
     it, so the response is the whole contract and nothing is cached or exported.
 
-    ``focus_bounds`` optionally pins the trim to the placed artwork's box.
+    ``focus_bounds`` optionally pins the trim to the station pin (a degenerate
+    WGS84 box is expanded by 1 km).
     """
     blobs: list[tuple[str, bytes]] = []
     total = 0

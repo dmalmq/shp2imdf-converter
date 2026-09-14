@@ -218,6 +218,7 @@ export type GeocodeResultItem = {
   longitude: number;
   source: string;
   address: GeocodeAddressParts;
+  working_crs?: string;
 };
 
 export type AddressSearchResponse = {
@@ -1085,7 +1086,8 @@ export type ReferenceLayerItem = {
  *
  * `focusBounds` (WGS84 minLon,minLat,maxLon,maxLat) asks the backend to keep
  * only features within 1 km of it, so a regional extract does not ship its
- * full 12k-1.5M features to the browser.
+ * full 12k-1.5M features to the browser. Pass the station pin as a degenerate
+ * box. The backend expands it by 1 km.
  */
 export async function uploadReferenceLayers(
   files: File[],

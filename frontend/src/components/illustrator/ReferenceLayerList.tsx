@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { uploadReferenceLayers } from "../../api/client";
 import { isBackendUnreachableError, toErrorMessage } from "../../api/errors";
@@ -12,7 +12,7 @@ type Props = {
   /** Layer used for shape matching; owned by the placement page. */
   matchTargetName: string;
   onMatchTargetChange: (name: string) => void;
-  /** WGS84 box of the placed artwork; uploads are trimmed to ~1 km around it. */
+  /** WGS84 box of the station pin; uploads are trimmed to ~1 km around it. */
   focusBounds?: [number, number, number, number] | null;
 };
 
@@ -76,83 +76,104 @@ export function ReferenceLayerList({
 }: Props) {
   const { t } = useUiLanguage();
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const archiveRef = useRef<File[]>([]);
+  const boundsKeyRef = useRef(focusBounds?.join(",") ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const pinReady = Boolean(focusBounds);
 
-  const add = async (files: File[]) => {
-    setLoading(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const loaded = await uploadReferenceLayers(files, focusBounds);
-      const taken = new Set(layers.map((layer) => layer.name));
-      const added: ReferenceLayer[] = [];
-      const empty: string[] = [];
-      for (const layer of loaded) {
-        const kept = layer.geojson.features.length;
-        // A layer with nothing inside the focus box renders as an invisible
-        // ghost row; say so instead of pretending the file is empty.
-        if (kept === 0) {
-          empty.push(layer.name);
-          continue;
+  const add = useCallback(
+    async (files: File[], mode: "append" | "replace") => {
+      if (!focusBounds) return;
+      if (mode === "append") {
+        archiveRef.current = [...archiveRef.current, ...files];
+      }
+      const batch = mode === "replace" ? archiveRef.current : files;
+      if (batch.length === 0) return;
+      boundsKeyRef.current = focusBounds.join(",");
+      setLoading(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const loaded = await uploadReferenceLayers(batch, focusBounds);
+        const taken = new Set(mode === "replace" ? [] : layers.map((layer) => layer.name));
+        const added: ReferenceLayer[] = [];
+        const empty: string[] = [];
+        const colorBase = mode === "replace" ? 0 : layers.length;
+        for (const layer of loaded) {
+          const kept = layer.geojson.features.length;
+          if (kept === 0) {
+            empty.push(layer.name);
+            continue;
+          }
+          let name = layer.name;
+          for (let n = 2; taken.has(name); n += 1) name = `${layer.name} (${n})`;
+          taken.add(name);
+          added.push({
+            name,
+            data: layer.geojson,
+            color: REFERENCE_TINTS[(colorBase + added.length) % REFERENCE_TINTS.length],
+            visible: true,
+            featureCount: layer.feature_count,
+            truncated: layer.truncated
+          });
         }
-        // Same file twice is a real workflow (re-export); keep names unique.
-        let name = layer.name;
-        for (let n = 2; taken.has(name); n += 1) name = `${layer.name} (${n})`;
-        taken.add(name);
-        added.push({
-          name,
-          data: layer.geojson,
-          color: REFERENCE_TINTS[(layers.length + added.length) % REFERENCE_TINTS.length],
-          visible: true,
-          featureCount: layer.feature_count,
-          truncated: layer.truncated
-        });
-      }
-      if (empty.length > 0) {
-        setNotice(
-          t(
-            `Nothing was found near the artwork in ${empty.join(", ")}.`,
-            `アートワーク周辺では見つかりませんでした：${empty.join("、")}。`
-          )
-        );
-      }
-      if (added.length > 0) {
-        onChange([...layers, ...added]);
-      }
-    } catch (error) {
-      setError(
-        isBackendUnreachableError(error)
-          ? t(
-              "Could not reach the converter. The server may be down or restarting - check it is running, then try again.",
-              "コンバーターに接続できません。サーバーが停止または再起動中の可能性があります。稼働状況を確認してから、もう一度お試しください。"
+        if (empty.length > 0) {
+          setNotice(
+            t(
+              `Nothing was found near the station in ${empty.join(", ")}.`,
+              `駅周辺では見つかりませんでした：${empty.join("、")}。`
             )
-          : toErrorMessage(
-              error,
-              t(
-                "Could not read that file. Select the .shp with its .dbf/.shx/.prj, a .zip of them, or a .gpkg.",
-                "読み込めませんでした。.shp と .dbf/.shx/.prj、それらの .zip、または .gpkg を選択してください。"
+          );
+        }
+        if (mode === "replace") {
+          onChange(added);
+        } else if (added.length > 0) {
+          onChange([...layers, ...added]);
+        }
+      } catch (error) {
+        setError(
+          isBackendUnreachableError(error)
+            ? t(
+                "Could not reach the converter. The server may be down or restarting - check it is running, then try again.",
+                "コンバーターに接続できません。サーバーが停止または再起動中の可能性があります。稼働状況を確認してから、もう一度お試しください。"
               )
-            )
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+            : toErrorMessage(
+                error,
+                t(
+                  "Could not read that file. Select the .shp with its .dbf/.shx/.prj, a .zip of them, or a .gpkg.",
+                  "読み込めませんでした。.shp と .dbf/.shx/.prj、それらの .zip、または .gpkg を選択してください。"
+                )
+              )
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [focusBounds, layers, onChange, t]
+  );
+
+  useEffect(() => {
+    const key = focusBounds?.join(",") ?? "";
+    if (boundsKeyRef.current === key) return;
+    boundsKeyRef.current = key;
+    if (!focusBounds || archiveRef.current.length === 0) return;
+    void add(archiveRef.current, "replace");
+  }, [add, focusBounds]);
 
   return (
     <div className="space-y-2 text-sm">
       <span className="text-xs font-medium">{t("Reference layers", "参照レイヤー")}</span>
       <p className="text-xs text-[var(--color-text-muted)]">
-        {focusBounds
+        {pinReady
           ? t(
-              "Existing shapefiles drawn under the artwork to align against. Layers are trimmed to about 1 km around the artwork. Not exported.",
-              "既存のシェープファイルを図面の下に表示して位置合わせに使います。アートワーク周辺約1kmに絞り込んで表示します。書き出しには含まれません。"
+              "Existing shapefiles drawn under the artwork to align against. Layers are trimmed to about 1 km around the station pin. Not exported.",
+              "既存のシェープファイルを図面の下に表示して位置合わせに使います。駅ピン周辺約1kmに絞り込んで表示します。書き出しには含まれません。"
             )
           : t(
-              "Existing shapefiles drawn under the artwork to align against. Not exported.",
-              "既存のシェープファイルを図面の下に表示して位置合わせに使います。書き出しには含まれません。"
+              "Identify the station before adding 駅データ. The overlay is trimmed to about 1 km around that pin.",
+              "駅データを追加する前に駅を特定してください。オーバーレイはそのピン周辺約1kmに絞り込まれます。"
             )}
       </p>
       <input
@@ -163,11 +184,15 @@ export function ReferenceLayerList({
         className="hidden"
         onChange={(event) => {
           const files = Array.from(event.target.files ?? []);
-          if (files.length) void add(files);
+          if (files.length) void add(files, "append");
           event.target.value = "";
         }}
       />
-      <Button size="sm" disabled={loading} onClick={() => inputRef.current?.click()}>
+      <Button
+        size="sm"
+        disabled={loading || !pinReady}
+        onClick={() => inputRef.current?.click()}
+      >
         {loading ? t("Loading...", "読み込み中...") : t("Add shapefile", "シェープファイルを追加")}
       </Button>
       {error ? <p className="text-xs text-[var(--color-error)]">{error}</p> : null}
