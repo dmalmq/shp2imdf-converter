@@ -117,6 +117,25 @@ test("a fresh match target lands on Station_pg even when other floors exist", ()
   ).toEqual({ referenceName: "", referenceFloorLabel: "2F" });
 });
 
+test("an unstacked floor defaults to the previous stacked floor, not Station_pg", () => {
+  const empty = { referenceName: "", referenceFloorLabel: "" };
+  expect(
+    nextMatchTarget(EKI_DATA, ["1F", "2F", "3F", "4F"], "4F", empty, ["4F"])
+  ).toEqual({ referenceName: "", referenceFloorLabel: "3F" });
+  expect(
+    nextMatchTarget(
+      EKI_DATA,
+      ["1F", "2F", "3F", "4F"],
+      "4F",
+      { referenceName: "Station_pg", referenceFloorLabel: "" },
+      ["4F"]
+    )
+  ).toEqual({ referenceName: "", referenceFloorLabel: "3F" });
+  expect(
+    nextMatchTarget(EKI_DATA, ["1F", "2F", "3F", "4F"], "1F", empty, ["4F"])
+  ).toEqual({ referenceName: "Station_pg", referenceFloorLabel: "" });
+});
+
 test("keeps a floor target, auto-selects the only other floor, and prefers a single shapefile", () => {
   const empty = { referenceName: "", referenceFloorLabel: "" };
   expect(nextMatchTarget([], ["1F", "2F"], "1F", empty)).toEqual({
