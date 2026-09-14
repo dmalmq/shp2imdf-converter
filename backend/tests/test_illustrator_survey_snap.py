@@ -196,6 +196,24 @@ def test_largest_pair_overlaps_poorly_and_does_not_decide(tmp_path: Path) -> Non
 
 
 @pytest.mark.georef
+def test_page_copies_of_the_platforms_are_not_a_rival_pose(tmp_path: Path) -> None:
+    """Station plans repeat the platform strokes on every page. 千葉 draws them
+    three times a hair apart, so the copies agree with the winning pose and
+    must not read as an equally supported rival that vetoes it."""
+    copies = [translate(platform, 0.02, -0.01) for platform in PLATFORMS]
+    cached = _cached_shapes(
+        tmp_path,
+        [*PLATFORMS, *copies, STATION_OUTLINE],
+        floors=_page_floors("1F", "2F"),
+        pages=[1] * 5 + [2] * 6,
+    )
+    match = match_survey_consensus(cached, reference=_survey_collection(), current=_current())
+    assert match is not None
+    assert match["transform"]["rotation_deg"] == pytest.approx(SURVEY_ROTATION, abs=0.5)
+    assert _anchor_error_m(match["transform"]) < 3.0
+
+
+@pytest.mark.georef
 def test_two_agreeing_platforms_are_not_a_consensus(tmp_path: Path) -> None:
     cached = _station_artwork(tmp_path)
     reference = _survey_collection(PLATFORMS[:2])
