@@ -10,10 +10,11 @@ import {
 } from "../api/client";
 import type * as ApiClient from "../api/client";
 import type { ShapeMatchPanelModel } from "../components/illustrator/ShapeMatchPanel";
-import type {
-  AdjustmentMode,
-  PlacementAction,
-  PlacementState
+import {
+  DEFAULT_METRES_PER_POINT,
+  type AdjustmentMode,
+  type PlacementAction,
+  type PlacementState
 } from "../hooks/useIllustratorPlacement";
 import { IllustratorPage } from "./IllustratorPage";
 
@@ -89,7 +90,13 @@ type MapProps = {
 };
 
 vi.mock("../components/illustrator/PlacementSidebar", () => ({
-  PlacementSidebar: ({ state, shapeMatch, onReferenceLayersChange }: SidebarProps) => (
+  PlacementSidebar: ({ state, shapeMatch, onReferenceLayersChange }: SidebarProps) => {
+    const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
+    const metres =
+      !active || active.linked
+        ? state.frame.metresPerPoint
+        : (active.metresPerPoint ?? state.frame.metresPerPoint);
+    return (
     <section>
       <button type="button" onClick={() => onReferenceLayersChange([referenceLayer])}>
         Add reference
@@ -127,6 +134,9 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
         {shapeMatch.referenceFloorLabel || shapeMatch.referenceName || "none"}
       </output>
       <output data-testid="frame-rotation">{state.frame.rotationDeg}</output>
+      <output data-testid="frame-metres">{state.frame.metresPerPoint}</output>
+      <output data-testid="active-metres">{metres}</output>
+      <output data-testid="scale-locked">{String(state.scaleLocked)}</output>
       <output data-testid="active-rotation">
         {String(
           state.floors.find((floor) => floor.label === state.activeFloorLabel)?.rotationDeg ??
@@ -137,7 +147,8 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
         {state.floors.map((floor) => String(floor.linked)).join(",")}
       </output>
     </section>
-  )
+    );
+  }
 }));
 
 vi.mock("../components/illustrator/PlacementMap", () => ({
@@ -306,12 +317,13 @@ test("ranks and previews shapes without moving floors until explicit apply", asy
   await waitFor(() => expect(screen.getByTestId("match-count")).toHaveTextContent("3"));
   expect(screen.getByTestId("preview-rank")).toHaveTextContent("1");
   expect(screen.getByTestId("frame-rotation")).toHaveTextContent("0");
+  expect(screen.getByTestId("scale-locked")).toHaveTextContent("true");
   expect(matchShapes).toHaveBeenCalledWith(
     "shape-match-test",
     expect.objectContaining({
       floor_label: "1F",
       artwork: { source_table: "Fill_Layer", source_row: 0 },
-      scale_locked: false,
+      scale_locked: true,
       reference: referenceLayer.data
     })
   );
@@ -319,6 +331,7 @@ test("ranks and previews shapes without moving floors until explicit apply", asy
   fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
   await waitFor(() => expect(screen.getByTestId("frame-rotation")).toHaveTextContent("25"));
   expect(screen.getByTestId("linked-floors")).toHaveTextContent("true,true,true");
+  expect(screen.getByTestId("frame-metres")).toHaveTextContent(String(DEFAULT_METRES_PER_POINT));
 });
 
 test("matching another floor posts that floor and unlinks only the active floor", async () => {
@@ -335,6 +348,7 @@ test("matching another floor posts that floor and unlinks only the active floor"
     expect.objectContaining({
       floor_label: "1F",
       artwork: { source_table: "Fill_Layer", source_row: 0 },
+      scale_locked: true,
       reference_floor: expect.objectContaining({ label: "2F" })
     })
   );
@@ -345,6 +359,7 @@ test("matching another floor posts that floor and unlinks only the active floor"
   await waitFor(() => expect(screen.getByTestId("linked-floors")).toHaveTextContent("false,true,true"));
   expect(screen.getByTestId("frame-rotation")).toHaveTextContent("0");
   expect(screen.getByTestId("active-rotation")).toHaveTextContent("25");
+  expect(screen.getByTestId("active-metres")).toHaveTextContent(String(DEFAULT_METRES_PER_POINT));
 });
 
 test("changing floor or mode discards an uncommitted shape selection", async () => {
@@ -386,6 +401,7 @@ test("two drawn areas are compared through the region endpoint", async () => {
     expect.objectContaining({
       floor_label: "1F",
       region: expect.arrayContaining([expect.any(Number)]),
+      scale_locked: true,
       reference_floor: expect.objectContaining({ label: "2F" })
     })
   );

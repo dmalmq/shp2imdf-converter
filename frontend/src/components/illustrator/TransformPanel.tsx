@@ -8,6 +8,7 @@ import {
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
+import { drawingScaleDenominator } from "../../lib/similarity";
 import { Button } from "../ui";
 
 type Props = {
@@ -68,8 +69,8 @@ export function TransformPanel({
         <div className="space-y-2 rounded-[var(--radius-md)] bg-[var(--color-surface-muted)] p-2 text-xs text-[var(--color-text-secondary)]">
           <p>
             {t(
-              "Drag to move. Corners scale, top handle rotates. The map's Group/Individual switch sets whether gestures act on every floor or just this one.",
-              "ドラッグで移動。四隅で拡大縮小、上のハンドルで回転。地図の「グループ／個別」スイッチで、全フロアかこの階だけかを選べます。"
+              "Drag to move. Corners scale only when unlocked. The top handle rotates. The map's Group/Individual switch sets whether gestures act on every floor or just this one.",
+              "ドラッグで移動。四隅での拡大縮小は固定を解除したときだけ。上のハンドルで回転。地図の「グループ／個別」スイッチで、全フロアかこの階だけかを選べます。"
             )}
           </p>
           <p>
@@ -125,6 +126,28 @@ export function TransformPanel({
             }
           >
             {t("Reset", "リセット")}
+          </Button>
+        </div>
+      </section>
+
+      <section>
+        <div className="flex items-center gap-2">
+          <p className="text-xs font-medium">
+            {t("Scale", "縮尺")} 1:
+            {Math.round(
+              drawingScaleDenominator(activeTransform?.metresPerPoint ?? state.frame.metresPerPoint)
+            )}
+            {state.scaleLocked ? (
+              <span className="text-[var(--color-success)]">{t(" (locked)", "（固定）")}</span>
+            ) : null}
+          </p>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="ml-auto"
+            onClick={() => dispatch({ type: state.scaleLocked ? "unlockScale" : "lockScale" })}
+          >
+            {state.scaleLocked ? t("Unlock", "固定を解除") : t("Lock", "固定する")}
           </Button>
         </div>
       </section>

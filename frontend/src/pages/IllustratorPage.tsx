@@ -199,7 +199,7 @@ function initialStateFromAssignment(
       workingCrs: preview.suggested_crs
     },
     activeFloorLabel: first.label,
-    scaleLocked: false,
+    scaleLocked: true,
     floors: regions.map((region) => {
       const bounds = boundsFor(preview, region, summary);
       return {
@@ -217,7 +217,7 @@ function initialStateFromAssignment(
 const DEFAULT_STATE: PlacementState = {
   frame: { rotationDeg: 0, metresPerPoint: DEFAULT_METRES_PER_POINT, workingCrs: "EPSG:6677" },
   activeFloorLabel: "artwork",
-  scaleLocked: false,
+  scaleLocked: true,
   floors: [
     {
       label: "artwork",
@@ -432,7 +432,7 @@ export function IllustratorPage() {
           source_row: selection.sourceRow
         },
         current_transform: transformPayload(currentTransform),
-        scale_locked: adjustmentMode === "group" && state.scaleLocked,
+        scale_locked: state.scaleLocked,
         ...(referenceFloor
           ? {
               reference_floor: {
@@ -498,10 +498,7 @@ export function IllustratorPage() {
         floor_label: sourceFloor.label,
         region: sourceRegion,
         current_transform: transformPayload(resolvedTransform(state, sourceFloor)),
-        // The result is applied to this floor alone, and an individual apply
-        // ignores the scale lock, so constraining the fit would only reject
-        // correspondences the two areas actually agree on.
-        scale_locked: false,
+        scale_locked: state.scaleLocked,
         reference_floor: {
           label: referenceFloor.label,
           transform: transformPayload(resolvedTransform(state, referenceFloor)),
@@ -638,7 +635,7 @@ export function IllustratorPage() {
       setRecenterTo(null);
       setLastFile(file);
       setOutputCrs(response.suggested_crs);
-      // The state carries scaleLocked: false already, so no unlockScale follow-up.
+      // New conversions start locked at 1:1000; assignment reset does the same.
       dispatch({ type: "resetPlacement", state: initialStateFromAssignment(response, []) });
     } catch (error) {
       setError(
