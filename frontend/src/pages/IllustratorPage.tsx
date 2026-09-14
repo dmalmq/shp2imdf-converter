@@ -353,6 +353,10 @@ export function IllustratorPage() {
     [state.stationPin]
   );
 
+  useEffect(() => {
+    setOutputCrs(state.frame.workingCrs);
+  }, [state.frame.workingCrs]);
+
   const referenceFloorPlacement =
     state.floors.find((floor) => floor.label === shapeMatch.referenceFloorLabel) ?? null;
   const sourceFloorPlacement =
@@ -913,8 +917,6 @@ export function IllustratorPage() {
         onReferenceLayersChange={updateReferenceLayers}
         focusBounds={focusBounds}
         bounds={bounds}
-        suggestedCrs={preview.suggested_crs}
-        suggestedCrsLabel={preview.suggested_crs_label}
         outputCrs={outputCrs}
         onOutputCrsChange={setOutputCrs}
         formats={formats}
