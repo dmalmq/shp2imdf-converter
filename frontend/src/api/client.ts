@@ -998,12 +998,14 @@ export type IllustratorShapeMatchResponse = {
 
 export async function matchIllustratorShape(
   conversionId: string,
-  payload: IllustratorShapeMatchRequest
+  payload: IllustratorShapeMatchRequest,
+  signal?: AbortSignal
 ): Promise<IllustratorShapeMatchResponse> {
   const response = await fetch(`/api/convert/illustrator/${conversionId}/shape-matches`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal
   });
   return handleJson<IllustratorShapeMatchResponse>(response);
 }
@@ -1049,12 +1051,14 @@ export type IllustratorRegionMatchRequest = {
 
 export async function matchIllustratorRegions(
   conversionId: string,
-  payload: IllustratorRegionMatchRequest
+  payload: IllustratorRegionMatchRequest,
+  signal?: AbortSignal
 ): Promise<IllustratorShapeMatchResponse> {
   const response = await fetch(`/api/convert/illustrator/${conversionId}/region-matches`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal
   });
   return handleJson<IllustratorShapeMatchResponse>(response);
 }

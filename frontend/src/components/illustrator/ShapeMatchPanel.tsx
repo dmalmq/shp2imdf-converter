@@ -1,4 +1,4 @@
-import { HelpCircle } from "lucide-react";
+import { HelpCircle, Loader2 } from "lucide-react";
 
 import type { IllustratorShapeMatchSuggestion } from "../../api/client";
 import type { AdjustmentMode, PlacementState } from "../../hooks/useIllustratorPlacement";
@@ -32,6 +32,8 @@ export type ShapeMatchPanelModel = {
   onPreview: (rank: number) => void;
   onApply: () => void;
   onClear: () => void;
+  /** Stop an in-flight comparison. */
+  onCancel: () => void;
 };
 
 type Props = {
@@ -235,6 +237,18 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
           findButton
         )}
       </div>
+
+      {model.loading ? (
+        <div className="flex items-center justify-between gap-2 rounded-md bg-muted px-2 py-1.5">
+          <span className="flex items-center gap-2 text-xs leading-4 text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            {t("Comparing outlines…", "外周を比較中…")}
+          </span>
+          <Button size="sm" variant="ghost" className="h-6 px-2" onClick={model.onCancel}>
+            {t("Cancel", "中止")}
+          </Button>
+        </div>
+      ) : null}
 
       {floorTarget ? (
         <Button

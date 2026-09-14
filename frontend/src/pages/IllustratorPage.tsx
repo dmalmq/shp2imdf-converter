@@ -92,6 +92,8 @@ type ShapeMatchState = {
   targetRegion: ArtworkRegion | null;
 };
 
+const SHAPE_MATCH_TIMEOUT_MS = 120_000;
+
 const EMPTY_SHAPE_MATCH: ShapeMatchState = {
   referenceName: "",
   referenceFloorLabel: "",
@@ -281,6 +283,54 @@ export function IllustratorPage() {
   // The Station_pg collection last sent for a snap. A re-trimmed layer is a new
   // object and snaps again; a frame nudge or a lock toggle leaves it alone. The
   // counter drops a response that lands after a newer snap or a new conversion.
+  // A shape match against a station-sized reference layer is a long request, and
+  // an unbounded one is indistinguishable from a hang. Bound it, let the user
+  // stop it, and make a superseded request abandon quietly.
+  const matchAbortRef = useRef<AbortController | null>(null);
+  const matchTimedOutRef = useRef(false);
+
+  const beginMatch = () => {
+    matchAbortRef.current?.abort();
+    matchTimedOutRef.current = false;
+    const controller = new AbortController();
+    matchAbortRef.current = controller;
+    const timer = window.setTimeout(() => {
+      matchTimedOutRef.current = true;
+      controller.abort();
+    }, SHAPE_MATCH_TIMEOUT_MS);
+    return { controller, timer };
+  };
+
+  const endMatch = (handle: { controller: AbortController; timer: number }) => {
+    window.clearTimeout(handle.timer);
+    if (matchAbortRef.current === handle.controller) matchAbortRef.current = null;
+  };
+
+  /** True when the throw was an abort we caused, so the state is someone else's. */
+  const handledAbort = (error: unknown) => {
+    if (!(error instanceof DOMException) || error.name !== "AbortError") return false;
+    if (matchTimedOutRef.current) {
+      matchTimedOutRef.current = false;
+      setShapeMatch((current) => ({
+        ...current,
+        loading: false,
+        searched: true,
+        error: t(
+          "The comparison ran too long and was stopped. Try a more distinctive outline, or trim the reference layer.",
+          "比較に時間がかかりすぎたため中止しました。より特徴的な外周を選ぶか、参照レイヤーを絞り込んでください。"
+        )
+      }));
+    }
+    return true;
+  };
+
+  const cancelShapeMatch = () => {
+    matchAbortRef.current?.abort();
+    matchAbortRef.current = null;
+    matchTimedOutRef.current = false;
+    setShapeMatch((current) => ({ ...current, loading: false, searched: false, error: null }));
+  };
+
   const snappedRef = useRef<FeatureCollection | null>(null);
   const surveySnapGen = useRef(0);
   // Floors start grouped: the whole building is aligned first, then the user
@@ -518,6 +568,7 @@ export function IllustratorPage() {
 
     setShapeMatch((current) => ({ ...current, loading: true, searched: false, error: null }));
     const currentTransform = resolvedTransform(state, active);
+    const handle = beginMatch();
     try {
       const response = await matchIllustratorShape(preview.conversion_id, {
         floor_label: active.label,
@@ -535,7 +586,8 @@ export function IllustratorPage() {
               }
             }
           : { reference: reference!.data })
-      });
+      }, handle.controller.signal);
+      endMatch(handle);
       setShapeMatch((current) =>
         current.selection?.floorLabel === selection.floorLabel &&
         current.selection.sourceTable === selection.sourceTable &&
@@ -551,9 +603,11 @@ export function IllustratorPage() {
               searched: true,
               error: null
             }
-          : current
+          : { ...current, loading: false }
       );
     } catch (error) {
+      endMatch(handle);
+      if (handledAbort(error)) return;
       setShapeMatch((current) =>
         current.selection?.floorLabel === selection.floorLabel &&
         current.selection.sourceTable === selection.sourceTable &&
@@ -573,7 +627,7 @@ export function IllustratorPage() {
                 )
               )
             }
-          : current
+          : { ...current, loading: false }
       );
     }
   };
@@ -587,6 +641,7 @@ export function IllustratorPage() {
     if (!preview || !sourceRegion || !targetRegion) return;
 
     setShapeMatch((current) => ({ ...current, loading: true, searched: false, error: null }));
+    const handle = beginMatch();
     try {
       const response = await matchIllustratorRegions(preview.conversion_id, {
         floor_label: sourceFloor.label,
@@ -598,7 +653,8 @@ export function IllustratorPage() {
           transform: transformPayload(resolvedTransform(state, referenceFloor)),
           region: targetRegion
         }
-      });
+      }, handle.controller.signal);
+      endMatch(handle);
       setShapeMatch((current) =>
         current.sourceRegion === sourceRegion && current.targetRegion === targetRegion
           ? {
@@ -609,9 +665,11 @@ export function IllustratorPage() {
               searched: true,
               error: null
             }
-          : current
+          : { ...current, loading: false }
       );
     } catch (error) {
+      endMatch(handle);
+      if (handledAbort(error)) return;
       setShapeMatch((current) =>
         current.sourceRegion === sourceRegion && current.targetRegion === targetRegion
           ? {
@@ -626,7 +684,7 @@ export function IllustratorPage() {
                 )
               )
             }
-          : current
+          : { ...current, loading: false }
       );
     }
   };
@@ -701,6 +759,7 @@ export function IllustratorPage() {
       );
     },
     onFind: () => void findShapeMatches(),
+    onCancel: cancelShapeMatch,
     onPreview: (previewRank) => setShapeMatch((current) => ({ ...current, previewRank })),
     onApply: () => {
       if (!shapeMatchPreview) return;
