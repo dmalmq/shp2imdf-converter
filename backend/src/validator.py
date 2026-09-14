@@ -441,24 +441,27 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 auto_fixable=True,
                 fix_description="Round coordinates to 7 decimal places.",
             )
+        # Holes are legitimate in venue data (a concourse cut out around
+        # buildings, an atrium void). Flag them so they are visible, but do not
+        # claim they are artifacts and do not let the fix run unconfirmed.
         if ftype in POLYGON_TYPES and isinstance(geom, Polygon) and list(geom.interiors):
             add_issue(
                 "warning",
                 "polygon_has_interior_rings",
-                f"Polygon has {len(list(geom.interiors))} interior ring(s) — likely a geometry artifact.",
+                f"Polygon has {len(list(geom.interiors))} interior ring(s). Confirm they are intended.",
                 feature_id=fid,
                 auto_fixable=True,
-                fix_description="Remove interior rings, keeping only the exterior boundary.",
+                fix_description="Fill the interior rings, keeping only the exterior boundary. Cannot be undone.",
             )
         elif ftype in POLYGON_TYPES and isinstance(geom, MultiPolygon) and any(list(p.interiors) for p in geom.geoms):
             total = sum(len(list(p.interiors)) for p in geom.geoms)
             add_issue(
                 "warning",
                 "polygon_has_interior_rings",
-                f"MultiPolygon has {total} interior ring(s) — likely a geometry artifact.",
+                f"MultiPolygon has {total} interior ring(s). Confirm they are intended.",
                 feature_id=fid,
                 auto_fixable=True,
-                fix_description="Remove interior rings, keeping only the exterior boundaries.",
+                fix_description="Fill the interior rings, keeping only the exterior boundaries. Cannot be undone.",
             )
         if fid:
             geoms_by_id[fid] = geom

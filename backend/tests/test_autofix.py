@@ -120,3 +120,66 @@ def test_autofix_removes_empty_geometry_units_without_prompt(test_client, sample
 
     after = validate_feature_collection(fixed)
     assert not any(issue.check == "empty_geometry" for issue in after.errors)
+
+
+def _punch_hole(feature: dict) -> tuple[float, float]:
+    """Cut a square void out of a polygon feature. Returns (before, after) area."""
+    from shapely.geometry import Polygon, mapping, shape
+
+    shell = shape(feature["geometry"])
+    centre = shell.representative_point()
+    size = (shell.bounds[2] - shell.bounds[0]) / 10
+    hole = Polygon(
+        [
+            (centre.x - size, centre.y - size),
+            (centre.x + size, centre.y - size),
+            (centre.x + size, centre.y + size),
+            (centre.x - size, centre.y + size),
+        ]
+    )
+    holed = shell.difference(hole)
+    feature["geometry"] = mapping(holed)
+    return shell.area, holed.area
+
+
+@pytest.mark.phase5
+def test_autofix_never_fills_interior_rings_without_confirmation(test_client, sample_dir: Path) -> None:
+    """A courtyard is real geometry. Filling it grows the polygon over its
+    neighbours and cannot be undone, so it must not happen on a plain auto-fix."""
+    collection = _generated_collection(test_client, sample_dir)
+    mutated = copy.deepcopy(collection)
+    unit = next(item for item in mutated["features"] if item["feature_type"] == "unit")
+    _, holed_area = _punch_hole(unit)
+
+    validation = validate_feature_collection(mutated)
+    assert any(issue.check == "polygon_has_interior_rings" for issue in validation.warnings)
+
+    fixed, fixes_applied, prompts = apply_autofix(mutated, validation, apply_prompted=False)
+
+    assert not any(item.action == "remove_interior_rings" for item in fixes_applied)
+    assert any(prompt.check == "polygon_has_interior_rings" for prompt in prompts)
+
+    from shapely.geometry import shape
+
+    survivor = next(item for item in fixed["features"] if item["id"] == unit["id"])
+    assert len(survivor["geometry"]["coordinates"]) == 2
+    assert shape(survivor["geometry"]).area == pytest.approx(holed_area)
+
+
+@pytest.mark.phase5
+def test_autofix_fills_interior_rings_once_confirmed(test_client, sample_dir: Path) -> None:
+    collection = _generated_collection(test_client, sample_dir)
+    mutated = copy.deepcopy(collection)
+    unit = next(item for item in mutated["features"] if item["feature_type"] == "unit")
+    shell_area, _ = _punch_hole(unit)
+
+    validation = validate_feature_collection(mutated)
+    fixed, fixes_applied, _ = apply_autofix(mutated, validation, apply_prompted=True)
+
+    assert any(item.action == "remove_interior_rings" for item in fixes_applied)
+
+    from shapely.geometry import shape
+
+    survivor = next(item for item in fixed["features"] if item["id"] == unit["id"])
+    assert len(survivor["geometry"]["coordinates"]) == 1
+    assert shape(survivor["geometry"]).area == pytest.approx(shell_area)
