@@ -443,7 +443,6 @@ def _floor_assignment(cached: CachedConversion, floor_label: str) -> dict:
 
 
 def assigned_floor(stored: Mapping[str, Any]) -> ExportFloor:
-    """A stored assignment as the membership filter ``_floor_mask`` reads."""
     return ExportFloor(
         label=str(stored.get("label")),
         transform=_PLACEHOLDER_TRANSFORM,

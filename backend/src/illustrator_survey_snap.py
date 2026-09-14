@@ -1,11 +1,4 @@
-"""Consensus placement of a whole drawing onto surveyed Station_pg polygons.
-
-Every large closed or closable artwork outline on every assigned floor is
-fitted against every survey polygon at the locked drawing scale. Fits that
-agree on one pose form a cluster, and the drawing snaps to the largest
-cluster only when it clearly outvotes the runner-up. A single pair, however
-good, never moves the drawing.
-"""
+"""Consensus snap of assigned-floor outlines onto posted Station_pg polygons."""
 
 from __future__ import annotations
 
@@ -68,10 +61,8 @@ SURVEY_CONSENSUS = SurveyConsensusSpec()
 
 @dataclass(slots=True, frozen=True)
 class _Vote:
-    """One fitted artwork/survey pair and where it puts the drawing's centre."""
-
     match: OutlineMatch
-    centre: tuple[float, float]
+    mapped_centre: tuple[float, float]
 
 
 def match_survey_consensus(
@@ -81,12 +72,7 @@ def match_survey_consensus(
     current: SimilarityTransform,
     spec: SurveyConsensusSpec = SURVEY_CONSENSUS,
 ) -> dict[str, Any] | None:
-    """The pose most artwork outlines agree on, as one suggestion, or ``None``.
-
-    ``current`` supplies the locked ``metres_per_point``, the working CRS and
-    the artwork anchor the result is expressed at. Its position is not used.
-    Raises ``ValueError`` when no floor assignment is stored.
-    """
+    """The pose most artwork outlines agree on, as one suggestion, or ``None``."""
     sources = _artwork_candidates(cached, current.metres_per_point, spec)
     targets, origins = _reference_candidates(reference, current.working_crs, spec)
     if not sources or not targets:
@@ -162,6 +148,10 @@ def _pivot(sources: list[OutlineCandidate]) -> tuple[float, float]:
     return ((minx + maxx) / 2.0, (miny + maxy) / 2.0)
 
 
+def _iou_possible(source_area: float, target_area: float, min_iou: float) -> bool:
+    return min(source_area, target_area) >= min_iou * max(source_area, target_area)
+
+
 def _votes(
     sources: list[OutlineCandidate],
     targets: list[OutlineCandidate],
@@ -176,9 +166,7 @@ def _votes(
     for source in sources:
         source_area = source.area * metres_per_point * metres_per_point
         for target in targets:
-            # Overlap over union can never beat the smaller area over the
-            # larger, so this skips only pairs the IoU gate would reject anyway.
-            if min(source_area, target.area) < spec.min_iou * max(source_area, target.area):
+            if not _iou_possible(source_area, target.area, spec.min_iou):
                 continue
             match = outline_match(
                 source,
@@ -189,19 +177,17 @@ def _votes(
                 max_normalized_rmse=spec.max_normalized_rmse,
             )
             if match is not None:
-                votes.append(_Vote(match=match, centre=_apply_matrix(list(match.matrix), pivot)))
+                votes.append(
+                    _Vote(match=match, mapped_centre=_apply_matrix(list(match.matrix), pivot))
+                )
     return votes
 
 
-# Clustering compares the mapped sheet centre in working-CRS metres rather
-# than reusing match_clusters: its translation tolerance is a fraction of the
-# sheet diagonal in artwork points, and OutlineMatch.center_shift subtracts a
-# point pivot from a metre position when the target is a projected survey.
 def _agrees(left: _Vote, right: _Vote, spec: SurveyConsensusSpec) -> bool:
     return (
         rotation_difference(left.match.rotation_deg, right.match.rotation_deg)
         <= spec.rotation_tolerance_deg
-        and math.dist(left.centre, right.centre) <= spec.centre_tolerance_m
+        and math.dist(left.mapped_centre, right.mapped_centre) <= spec.centre_tolerance_m
     )
 
 
@@ -209,7 +195,7 @@ def _pose_distance(left: _Vote, right: _Vote, spec: SurveyConsensusSpec) -> floa
     return (
         rotation_difference(left.match.rotation_deg, right.match.rotation_deg)
         / spec.rotation_tolerance_deg
-        + math.dist(left.centre, right.centre) / spec.centre_tolerance_m
+        + math.dist(left.mapped_centre, right.mapped_centre) / spec.centre_tolerance_m
     )
 
 

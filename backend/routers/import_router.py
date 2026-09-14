@@ -391,11 +391,7 @@ async def snap_illustrator_survey(
     request: Request,
     payload: IllustratorSurveySnapRequest,
 ) -> IllustratorSurveySnapResponse:
-    """Snap the drawing onto posted survey polygons where enough outlines agree.
-
-    The scale stays at ``current_transform.metres_per_point`` whether or not the
-    caller reports it locked; only the pose is fitted.
-    """
+    """Snap the drawing onto posted survey polygons where enough outlines agree."""
     cached = _illustrator_store(request).get(conversion_id)
     match = match_survey_consensus(
         cached,

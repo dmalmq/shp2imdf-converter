@@ -816,8 +816,6 @@ class IllustratorShapeMatchResponse(BaseModel):
 
 
 class IllustratorSurveySnapRequest(BaseModel):
-    """Snap every assigned floor onto the surveyed station polygons at the locked scale."""
-
     model_config = ConfigDict(extra="forbid")
 
     current_transform: TransformPayload
