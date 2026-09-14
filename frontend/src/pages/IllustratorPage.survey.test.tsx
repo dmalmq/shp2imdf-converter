@@ -266,3 +266,26 @@ test("a layer that is not Station_pg never snaps, and a failed consensus only no
   await waitFor(() => expect(screen.getByTestId("frame-rotation")).toHaveTextContent("-36.4"));
   expect(snap).toHaveBeenCalledTimes(2);
 });
+
+test("artwork stays off the map until the pin and Station_pg snap have landed", async () => {
+  let finish: ((value: { match: typeof MATCH; reason: null }) => void) | undefined;
+  snap.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  await enterPlacementView();
+  expect(screen.getByTestId("placement-hold")).toHaveTextContent(/locating/i);
+  fireEvent.click(screen.getByRole("button", { name: "Pin station" }));
+  expect(screen.queryByTestId("placement-hold")).toBeNull();
+  expect(screen.getByTestId("frame-rotation")).toHaveTextContent("0");
+
+  fireEvent.click(screen.getByRole("button", { name: "Add Station_pg" }));
+  await waitFor(() => expect(screen.getByTestId("placement-hold")).toHaveTextContent(/snapping/i));
+  expect(screen.getByTestId("frame-rotation")).toHaveTextContent("0");
+  expect(finish).toBeDefined();
+  finish!({ match: MATCH, reason: null });
+  await waitFor(() => expect(screen.getByTestId("frame-rotation")).toHaveTextContent("-36.4"));
+  expect(screen.queryByTestId("placement-hold")).toBeNull();
+});
