@@ -297,6 +297,37 @@ test("areas are offered only against another floor, and guide each drag", () => 
   expect(screen.queryByRole("button", { name: /Match areas instead/ })).toBeNull();
 });
 
+test("offers matching an unstacked floor onto the previous stacked floor", () => {
+  const onStartArtworkMatch = vi.fn();
+  const state: PlacementState = {
+    ...placementState(true, ["1F", "2F", "3F", "4F"]),
+    activeFloorLabel: "4F",
+    floors: [
+      floorPlacement("1F", true),
+      floorPlacement("2F", true),
+      floorPlacement("3F", true),
+      { ...floorPlacement("4F", false), artworkMatch: true }
+    ]
+  };
+  render(
+    <ShapeMatchPanel
+      state={state}
+      mode="group"
+      referenceLayers={referenceLayers}
+      model={model({
+        referenceName: "Station_pg",
+        artworkMatchTarget: "3F",
+        onStartArtworkMatch
+      })}
+    />
+  );
+  expect(
+    screen.getByText("4F did not stack. Match this floor to 3F, not to Station_pg.")
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Match 4F to 3F" }));
+  expect(onStartArtworkMatch).toHaveBeenCalledOnce();
+});
+
 test("two picked areas can be compared without selecting any outline", () => {
   const onFind = vi.fn();
   render(

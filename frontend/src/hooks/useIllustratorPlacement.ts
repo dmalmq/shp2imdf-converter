@@ -41,6 +41,8 @@ export type FloorPlacement = {
   /** Own scale/rotation once unlinked; undefined while linked (frame is used). */
   rotationDeg?: number;
   metresPerPoint?: number;
+  /** True when convert could not stack this floor onto the others. */
+  artworkMatch?: boolean;
 };
 
 export type PlacementState = {
@@ -202,7 +204,9 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
           ? { ...state.frame, workingCrs: action.workingCrs }
           : state.frame,
         floors: state.floors.map((f) =>
-          f.label === active.label ? { ...f, mapAnchor: action.mapAnchor } : f
+          f.label === active.label || f.artworkMatch
+            ? { ...f, mapAnchor: action.mapAnchor }
+            : f
         )
       };
       return active.linked ? recomputeLinked(moved) : moved;
@@ -470,6 +474,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
             ? {
                 ...f,
                 linked: false,
+                artworkMatch: false,
                 artworkAnchor: [transform.artworkAnchor[0], transform.artworkAnchor[1]],
                 mapAnchor: [transform.mapAnchor[0], transform.mapAnchor[1]],
                 rotationDeg: transform.rotationDeg,

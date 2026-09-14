@@ -40,6 +40,10 @@ import {
 } from "../components/illustrator/ShapeMatchPanel";
 import { Button, Card } from "../components/ui";
 import {
+  floorsNeedingArtworkMatch,
+  preferredArtworkMatchTarget
+} from "../lib/artworkMatch";
+import {
   placementPoseReady,
   sameSurveySnap,
   type SurveyPose,
@@ -157,6 +161,10 @@ function regionCorners(
   ];
 }
 
+function artworkMatchLabels(floors: PlacementState["floors"]): string[] {
+  return floors.filter((floor) => floor.artworkMatch).map((floor) => floor.label);
+}
+
 function keptMatchTarget(current: Pick<ShapeMatchState, "referenceName" | "referenceFloorLabel">): ShapeMatchState {
   return {
     ...EMPTY_SHAPE_MATCH,
@@ -215,9 +223,9 @@ function initialStateFromAssignment(
     ? assignment
     : [{ label: "artwork", box: preview.artwork_bounds, pages: null, layer_names: null }];
   const first = regions[0];
-  // The server already computed each floor's bounds from the geometry it
-  // matched, which is exact for page floors (no box) and tighter than the
-  // drawn box for box floors.
+  const artworkMatch = new Set(
+    floorsNeedingArtworkMatch(regions, preview.report.page_alignment ?? [])
+  );
   return {
     frame: {
       rotationDeg: 0,
@@ -228,13 +236,18 @@ function initialStateFromAssignment(
     scaleLocked: true,
     floors: regions.map((region) => {
       const bounds = boundsFor(preview, region, summary);
+      const needsMatch = artworkMatch.has(region.label);
       return {
         label: region.label,
-        linked: true,
+        linked: !needsMatch,
+        artworkMatch: needsMatch,
         artworkAnchor: [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2],
         mapAnchor: [139.7671, 35.6812],
         controlPoints: [],
-        artworkBounds: bounds
+        artworkBounds: bounds,
+        ...(needsMatch
+          ? { rotationDeg: 0, metresPerPoint: DEFAULT_METRES_PER_POINT }
+          : {})
       };
     })
   };
@@ -312,7 +325,9 @@ export function IllustratorPage() {
     setShapeMatch((current) => {
       // Switching levels is how the user gets a clear look at the floor being
       // boxed, so an area pick has to survive it. Only the outline selection,
-      // which belongs to one floor, is discarded.
+      // which belongs to one floor, is discarded. Mode changes go through the
+      // map toggle (which already drops the outline) or Match-to-floor, which
+      // starts a pick and must not wipe it.
       if (current.regionStage || current.sourceRegion || current.targetRegion) {
         return { ...current, selecting: false, selection: null };
       }
@@ -322,11 +337,12 @@ export function IllustratorPage() {
           referenceLayers,
           state.floors.map((floor) => floor.label),
           state.activeFloorLabel,
-          current
+          current,
+          artworkMatchLabels(state.floors)
         )
       };
     });
-  }, [state.activeFloorLabel, adjustmentMode]);
+  }, [state.activeFloorLabel]);
 
   // Computed unconditionally so the hook order is stable across the early
   // returns below (a conditional hook here crashes the placement view).
@@ -488,7 +504,8 @@ export function IllustratorPage() {
         layers,
         state.floors.map((floor) => floor.label),
         state.activeFloorLabel,
-        current
+        current,
+        artworkMatchLabels(state.floors)
       );
       if (
         !geometryReplaced &&
@@ -723,6 +740,25 @@ export function IllustratorPage() {
     },
     onFind: () => void findShapeMatches(),
     onPreview: (previewRank) => setShapeMatch((current) => ({ ...current, previewRank })),
+    artworkMatchTarget:
+      state.floors.find((floor) => floor.label === state.activeFloorLabel)?.artworkMatch
+        ? preferredArtworkMatchTarget(state.activeFloorLabel ?? "", state.floors)
+        : "",
+    onStartArtworkMatch: () => {
+      const active = state.activeFloorLabel;
+      if (!active) return;
+      const target = preferredArtworkMatchTarget(active, state.floors);
+      if (!target) return;
+      setAdjustmentMode("individual");
+      setPlacementTab("fit");
+      setPickSession(null);
+      setShapeMatch({
+        ...EMPTY_SHAPE_MATCH,
+        sourceFloorLabel: active,
+        referenceFloorLabel: target,
+        selecting: true
+      });
+    },
     onApply: () => {
       if (!shapeMatchPreview) return;
       // An apply always moves the floor the source area came from, even if the
