@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import type { FeatureCollection } from "geojson";
 
 import {
   assignFloors,
@@ -6,11 +7,13 @@ import {
   matchIllustratorRegions,
   matchIllustratorShape,
   previewIllustrator,
+  snapIllustratorSurvey,
   type AssignFloorsResponse,
   type ExportFormatsPayload,
   type IllustratorPreviewResponse,
   type ArtworkRegion,
-  type IllustratorShapeMatchSuggestion
+  type IllustratorShapeMatchSuggestion,
+  type TransformPayload
 } from "../api/client";
 import { isApiClientError, isBackendUnreachableError, toErrorMessage } from "../api/errors";
 import { AssignmentPanel } from "../components/illustrator/AssignmentPanel";
@@ -22,8 +25,15 @@ import {
   type ReferenceLayer
 } from "../components/illustrator/PlacementMap";
 import { PlacementMap } from "../components/illustrator/PlacementMap";
-import { PlacementSidebar, type PlacementTab } from "../components/illustrator/PlacementSidebar";
-import { nextMatchTarget } from "../components/illustrator/ReferenceLayerList";
+import {
+  PlacementSidebar,
+  type PlacementTab,
+  type SurveySnapModel
+} from "../components/illustrator/PlacementSidebar";
+import {
+  nextMatchTarget,
+  surveyLayerName
+} from "../components/illustrator/ReferenceLayerList";
 import {
   parseMatchTarget,
   type ShapeMatchPanelModel
@@ -97,13 +107,23 @@ const EMPTY_SHAPE_MATCH: ShapeMatchState = {
   targetRegion: null,
 };
 
-function transformPayload(transform: SimilarityTransform) {
+function transformPayload(transform: SimilarityTransform): TransformPayload {
   return {
     artwork_anchor: transform.artworkAnchor,
     map_anchor: transform.mapAnchor,
     rotation_deg: transform.rotationDeg,
     metres_per_point: transform.metresPerPoint,
     working_crs: transform.workingCrs
+  };
+}
+
+function similarityTransform(payload: TransformPayload): SimilarityTransform {
+  return {
+    artworkAnchor: payload.artwork_anchor,
+    mapAnchor: payload.map_anchor,
+    rotationDeg: payload.rotation_deg,
+    metresPerPoint: payload.metres_per_point,
+    workingCrs: payload.working_crs
   };
 }
 
@@ -254,6 +274,12 @@ export function IllustratorPage() {
   const [recenterTo, setRecenterTo] = useState<[number, number] | null>(null);
   const [referenceLayers, setReferenceLayers] = useState<ReferenceLayer[]>([]);
   const [placementTab, setPlacementTab] = useState<PlacementTab>("fit");
+  const [surveyNotice, setSurveyNotice] = useState<string | null>(null);
+  // The Station_pg collection last sent for a snap. A re-trimmed layer is a new
+  // object and snaps again; a frame nudge or a lock toggle leaves it alone. The
+  // counter drops a response that lands after a newer snap or a new conversion.
+  const snappedRef = useRef<FeatureCollection | null>(null);
+  const surveySnapGen = useRef(0);
   // Floors start grouped: the whole building is aligned first, then the user
   // switches to individual mode for final per-floor nudges. UI-level only —
   // never an undo step.
@@ -337,13 +363,7 @@ export function IllustratorPage() {
   const shapeMatchPreview = previewSuggestion
     ? {
         suggestion: previewSuggestion,
-        transform: {
-          artworkAnchor: previewSuggestion.transform.artwork_anchor,
-          mapAnchor: previewSuggestion.transform.map_anchor,
-          rotationDeg: previewSuggestion.transform.rotation_deg,
-          metresPerPoint: previewSuggestion.transform.metres_per_point,
-          workingCrs: previewSuggestion.transform.working_crs
-        } satisfies SimilarityTransform
+        transform: similarityTransform(previewSuggestion.transform)
       }
     : null;
 
@@ -360,6 +380,71 @@ export function IllustratorPage() {
           "コンバーターに接続できません。サーバーが停止または再起動中の可能性があります。稼働状況を確認してから、もう一度お試しください。"
         )
       : toErrorMessage(error, fallback);
+
+  const surveyName = surveyLayerName(referenceLayers);
+  const surveyCollection =
+    referenceLayers.find((layer) => layer.name === surveyName)?.data ?? null;
+  const snapToSurvey = async (reference: FeatureCollection) => {
+    // A group apply moves the linked floors through the active floor, so an
+    // unlinked active floor hands the anchor to the first floor still linked.
+    const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
+    const anchor = active?.linked ? active : state.floors.find((floor) => floor.linked);
+    if (!preview || !anchor) return;
+    snappedRef.current = reference;
+    const gen = ++surveySnapGen.current;
+    try {
+      const { match } = await snapIllustratorSurvey(preview.conversion_id, {
+        current_transform: transformPayload(resolvedTransform(state, anchor)),
+        scale_locked: state.scaleLocked,
+        reference
+      });
+      if (gen !== surveySnapGen.current) return;
+      if (!match) {
+        setSurveyNotice(
+          t(
+            "No consensus among the Station_pg outlines, so the drawing stayed put.",
+            "Station_pg の外周で合意が取れなかったため、図面はそのままです。"
+          )
+        );
+        return;
+      }
+      if (anchor.label !== state.activeFloorLabel) {
+        dispatch({ type: "setActiveFloor", label: anchor.label });
+      }
+      dispatch({
+        type: "applySimilarity",
+        mode: "group",
+        transform: similarityTransform(match.transform)
+      });
+      const percent = Math.round(match.overlap_iou * 100);
+      setSurveyNotice(
+        t(`Snapped at ${percent}% overlap.`, `重なり ${percent}% でスナップしました。`)
+      );
+    } catch (error) {
+      if (gen !== surveySnapGen.current) return;
+      setSurveyNotice(
+        describeFailure(
+          error,
+          t("Could not snap to Station_pg.", "Station_pg にスナップできませんでした。")
+        )
+      );
+    }
+  };
+
+  useEffect(() => {
+    if (!preview || assignment === null || !state.stationPin || !state.scaleLocked) return;
+    if (!surveyCollection || surveyCollection.features.length === 0) return;
+    if (snappedRef.current === surveyCollection) return;
+    void snapToSurvey(surveyCollection);
+  }, [preview, assignment, state.stationPin, state.scaleLocked, surveyCollection]);
+
+  const surveySnapModel: SurveySnapModel = {
+    layerName: surveyName,
+    notice: surveyNotice,
+    onSnap: () => {
+      if (surveyCollection) void snapToSurvey(surveyCollection);
+    }
+  };
 
   const updateReferenceLayers = (layers: ReferenceLayer[]) => {
     const geometryReplaced = referenceLayers.some((old) => {
@@ -633,6 +718,8 @@ export function IllustratorPage() {
       setAssignment(null);
       setRecenterTo(null);
       setReferenceLayers([]);
+      setSurveyNotice(null);
+      surveySnapGen.current += 1;
       setLastFile(file);
       setOutputCrs(response.suggested_crs);
       // New conversions start locked at 1:1000; assignment reset does the same.
@@ -753,6 +840,13 @@ export function IllustratorPage() {
         );
       }
     };
+    // Skip is an assignment too, so the server can find the outlines to snap.
+    const wholeArtwork: PartitionFloor = {
+      label: "artwork",
+      box: preview.artwork_bounds,
+      pages: null,
+      layerNames: null
+    };
 
     return (
       <div className="flex flex-1 items-start justify-center px-4 py-10">
@@ -766,7 +860,7 @@ export function IllustratorPage() {
               pages={preview.pages}
               layerSummaries={preview.layers}
               alignment={preview.report.page_alignment ?? []}
-              onSkip={() => setAssignment([])}
+              onSkip={() => void commitAssignment([wholeArtwork])}
               onAssigned={commitAssignment}
             />
           ) : (
@@ -774,7 +868,7 @@ export function IllustratorPage() {
               preview={preview.preview}
               artworkBounds={preview.artwork_bounds}
               layerSummaries={preview.layers}
-              onSkip={() => setAssignment([])}
+              onSkip={() => void commitAssignment([wholeArtwork])}
               onAssigned={commitAssignment}
             />
           )}
@@ -814,6 +908,7 @@ export function IllustratorPage() {
           });
         }}
         shapeMatch={shapeMatchModel}
+        surveySnap={surveySnapModel}
         referenceLayers={referenceLayers}
         onReferenceLayersChange={updateReferenceLayers}
         focusBounds={focusBounds}

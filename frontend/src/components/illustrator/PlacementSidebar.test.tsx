@@ -77,6 +77,7 @@ function SidebarHarness({
         onApply: () => {},
         onClear: () => {}
       }}
+      surveySnap={{ layerName: "", notice: null, onSnap: () => {} }}
       referenceLayers={[]}
       onReferenceLayersChange={() => {}}
       bounds={[0, 0, 100, 100]}
