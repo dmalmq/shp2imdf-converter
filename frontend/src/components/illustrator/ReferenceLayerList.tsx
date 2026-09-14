@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { uploadReferenceLayers } from "../../api/client";
 import { isBackendUnreachableError, toErrorMessage } from "../../api/errors";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { Button } from "../ui";
+import { Button } from "../legacy-ui";
 import type { ReferenceLayer } from "./PlacementMap";
 
 type Props = {

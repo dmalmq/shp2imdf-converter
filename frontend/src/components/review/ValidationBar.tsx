@@ -1,5 +1,5 @@
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { Button, Badge, StatusDot } from "../ui";
+import { Button, Badge, StatusDot } from "../legacy-ui";
 import type { ValidationResponse } from "../../api/client";
 
 

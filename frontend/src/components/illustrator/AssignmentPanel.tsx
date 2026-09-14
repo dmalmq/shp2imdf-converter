@@ -8,7 +8,7 @@ import {
   partitionByFloors,
   type PartitionFloor
 } from "../../lib/svgPreview";
-import { Button } from "../ui";
+import { Button } from "../legacy-ui";
 
 type Props = {
   preview: FeatureCollection;

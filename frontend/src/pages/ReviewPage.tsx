@@ -43,7 +43,7 @@ import { type ReviewFeature, featureName, layerKeyBaseType, orderedLayerKeys } f
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
-import { Button } from "../components/ui";
+import { Button } from "../components/legacy-ui";
 import { StepIndicator } from "../components/shell/StepIndicator";
 
 

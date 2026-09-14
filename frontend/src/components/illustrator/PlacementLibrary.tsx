@@ -12,7 +12,7 @@ import {
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
-import { Button } from "../ui";
+import { Button } from "../legacy-ui";
 
 type Props = {
   state: PlacementState;

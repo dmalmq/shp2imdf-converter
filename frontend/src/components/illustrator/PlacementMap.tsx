@@ -35,7 +35,7 @@ import {
   basemapLabel,
   type BasemapId
 } from "../shared/basemapStyles";
-import { Button } from "../ui";
+import { Button } from "../legacy-ui";
 import {
   DEFAULT_ARTWORK_VIEW,
   floorPaint,

@@ -1,7 +1,7 @@
 import type { IllustratorShapeMatchSuggestion } from "../../api/client";
 import type { AdjustmentMode, PlacementState } from "../../hooks/useIllustratorPlacement";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { Button, Select } from "../ui";
+import { Button, Select } from "../legacy-ui";
 import type { ArtworkShapeSelection, ReferenceLayer } from "./PlacementMap";
 
 export type ShapeMatchPanelModel = {

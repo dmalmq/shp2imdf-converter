@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { EmptyState } from "../shared/EmptyState";
-import { FeatureTypeIcon } from "../ui";
+import { FeatureTypeIcon } from "../legacy-ui";
 import { DEFAULT_LOCATED_FEATURE_ORDER, featureName, type ReviewFeature, type ReviewIssue } from "./types";
 
 

@@ -9,7 +9,7 @@ import {
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
 import { drawingScaleDenominator } from "../../lib/similarity";
-import { Button } from "../ui";
+import { Button } from "../legacy-ui";
 
 type Props = {
   state: PlacementState;

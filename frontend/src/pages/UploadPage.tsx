@@ -12,7 +12,7 @@ import { useToast } from "../components/shared/ToastProvider";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
-import { Button, Card, Badge } from "../components/ui";
+import { Button, Card, Badge } from "../components/legacy-ui";
 
 type QueuedUploadFile = {
   id: string;

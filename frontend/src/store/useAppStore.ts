@@ -3,6 +3,8 @@ import { create } from "zustand";
 import type { CleanupSummary, ImportedFile, LearningSuggestion, WizardState } from "../api/client";
 
 type Screen = "upload" | "wizard" | "review";
+/** The Illustrator route has its own three stages, unrelated to the wizard's. */
+export type IllustratorStage = 1 | 2 | 3;
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 export type UiLanguage = "en" | "ja";
 type ImportProfile = "standard" | "imdf_shapefile";
@@ -26,6 +28,7 @@ type AppState = {
   importProfile: ImportProfile;
   sessionExpiredMessage: string | null;
   currentScreen: Screen;
+  illustratorStage: IllustratorStage;
   wizardStep: number;
   wizardData: Record<string, unknown>;
   geojsonData: Record<string, unknown> | null;
@@ -48,6 +51,7 @@ type AppState = {
   setSessionExpiredMessage: (message: string | null) => void;
   clearSession: () => void;
   setCurrentScreen: (screen: Screen) => void;
+  setIllustratorStage: (stage: IllustratorStage) => void;
   setWizardStep: (step: number) => void;
   mergeWizardData: (payload: Record<string, unknown>) => void;
   setGeojsonData: (payload: Record<string, unknown> | null) => void;
@@ -88,6 +92,7 @@ const INITIAL_STATE = {
   importProfile: "standard" as ImportProfile,
   sessionExpiredMessage: null,
   currentScreen: "upload" as Screen,
+  illustratorStage: 1 as IllustratorStage,
   wizardStep: 0,
   wizardData: {} as Record<string, unknown>,
   geojsonData: null as Record<string, unknown> | null,
@@ -125,6 +130,7 @@ export const useAppStore = create<AppState>((set) => ({
       sessionExpiredMessage: null
     })),
   setCurrentScreen: (currentScreen) => set({ currentScreen }),
+  setIllustratorStage: (illustratorStage) => set({ illustratorStage }),
   setWizardStep: (wizardStep) => set({ wizardStep }),
   mergeWizardData: (payload) =>
     set((state) => ({ wizardData: { ...state.wizardData, ...payload } })),

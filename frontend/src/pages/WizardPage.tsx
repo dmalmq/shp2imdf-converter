@@ -42,7 +42,7 @@ import { UnitMapStep } from "../components/wizard/UnitMapStep";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
-import { Button, Badge } from "../components/ui";
+import { Button, Badge } from "../components/legacy-ui";
 
 const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail", "kiosk", "section"]);
 

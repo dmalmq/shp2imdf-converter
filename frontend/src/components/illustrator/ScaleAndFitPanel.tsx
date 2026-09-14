@@ -8,7 +8,7 @@ import {
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
-import { Button } from "../ui";
+import { Button } from "../legacy-ui";
 import { ControlPointList } from "./ControlPointList";
 import type { ReferenceLayer } from "./PlacementMap";
 import { ShapeMatchPanel, type ShapeMatchPanelModel } from "./ShapeMatchPanel";

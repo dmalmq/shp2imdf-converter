@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { Button } from "../ui";
+import { Button } from "../legacy-ui";
 import type { ReviewFeature } from "./types";
 
 /**

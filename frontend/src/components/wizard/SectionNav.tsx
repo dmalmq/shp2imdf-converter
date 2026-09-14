@@ -1,5 +1,5 @@
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { StatusDot } from "../ui";
+import { StatusDot } from "../legacy-ui";
 
 
 export type SectionDef = {

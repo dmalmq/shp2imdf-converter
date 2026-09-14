@@ -8,7 +8,7 @@ import MapGL, {
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { attachMapHealth } from "../../lib/mapHealth";
-import { Button } from "../ui";
+import { Button } from "../legacy-ui";
 
 const MAP_LIB = import("maplibre-gl");
 const MAX_RECOVERY_ATTEMPTS = 3;

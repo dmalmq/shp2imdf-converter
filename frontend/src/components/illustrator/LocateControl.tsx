@@ -3,7 +3,7 @@ import { useEffect, useReducer, useRef } from "react";
 import { geocodeSearch } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import type { PlacementAction } from "../../hooks/useIllustratorPlacement";
-import { Button } from "../ui";
+import { Button } from "../legacy-ui";
 import {
   INITIAL_LOCATE,
   acceptsGuess,

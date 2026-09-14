@@ -3,7 +3,7 @@ import type { Dispatch } from "react";
 import type { ExportFormatsPayload } from "../../api/client";
 import type { AdjustmentMode, PlacementAction, PlacementState } from "../../hooks/useIllustratorPlacement";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { Button, Card, Tabs, tabPanelProps } from "../ui";
+import { Button, Card, Tabs, tabPanelProps } from "../legacy-ui";
 import { ExportPanel } from "./ExportPanel";
 import { LocateControl } from "./LocateControl";
 import type { ReferenceLayer } from "./PlacementMap";

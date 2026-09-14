@@ -1,10 +1,11 @@
+import { AlertTriangle } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { FeatureCollection } from "geojson";
 
 import type { IllustratorPageAlignment, IllustratorPagePreview } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { buildSvgPaths, splitByPage, type PartitionFloor } from "../../lib/svgPreview";
-import { Button } from "../ui";
+import { Button } from "../legacy-ui";
 import { AssignmentPanel } from "./AssignmentPanel";
 
 type Props = {
@@ -158,13 +159,6 @@ export function PageAssignmentPanel({
 
   return (
     <div className="space-y-3 text-sm">
-      <p className="text-xs text-[var(--color-text-muted)]">
-        {t(
-          "Name the floor on each page. Pages given the same name become one floor; untick a cover sheet or legend to leave it out.",
-          "各ページのフロア名を入力してください。同じ名前のページは1つのフロアにまとまります。表紙や凡例はチェックを外して除外できます。"
-        )}
-      </p>
-
       {movedPages.length > 0 ? (
         <p data-testid="page-alignment-note" className="text-xs text-[var(--color-text-muted)]">
           {movedPages.length === 1
@@ -179,30 +173,35 @@ export function PageAssignmentPanel({
         </p>
       ) : null}
 
-      {failedPages.length > 0 ? (
-        <p data-testid="page-alignment-warning" className="text-xs text-[var(--color-warning)]">
-          {failedPages.length === 1
-            ? t(
-                `Page ${failedPages[0].page} did not match page ${anchor}; align that floor yourself.`,
-                `ページ ${failedPages[0].page} はページ ${anchor} と一致しませんでした。該当フロアは手動で合わせてください。`
-              )
-            : t(
-                `Pages ${failedPages.map((entry) => entry.page).join(", ")} did not match page ${anchor}; align those floors yourself.`,
-                `ページ ${failedPages.map((entry) => entry.page).join("、")} はページ ${anchor} と一致しませんでした。該当フロアは手動で合わせてください。`
-              )}
-        </p>
-      ) : null}
-
-      {sizesDiffer ? (
-        <p
-          data-testid="page-size-warning"
-          className="rounded-[var(--radius-md)] border border-amber-400 bg-amber-50 p-2 text-xs"
-        >
-          {t(
-            "The pages are not all the same size, so their floor plans may land offset from each other. Align the building as a group first, then switch to Individual on the map to adjust any floor that needs its own position.",
-            "ページのサイズが揃っていないため、各階の位置がずれる場合があります。まずグループで建物全体を合わせてから、地図の「個別」に切り替えて位置が合わないフロアを調整してください。"
-          )}
-        </p>
+      {/* One warning region, not two. The alignment failure and the size mismatch
+          are the same problem to the reader — stacked separately they competed. */}
+      {failedPages.length > 0 || sizesDiffer ? (
+        <div className="flex items-start gap-2 rounded-lg border border-warning bg-signal-muted p-3">
+          <AlertTriangle className="mt-px h-4 w-4 shrink-0 text-warning" />
+          <div className="flex flex-col gap-1">
+            {failedPages.length > 0 ? (
+              <p data-testid="page-alignment-warning" className="text-[13px] leading-[18px] text-foreground">
+                {failedPages.length === 1
+                  ? t(
+                      `Page ${failedPages[0].page} did not match page ${anchor}; align that floor yourself.`,
+                      `ページ ${failedPages[0].page} はページ ${anchor} と一致しませんでした。該当フロアは手動で合わせてください。`
+                    )
+                  : t(
+                      `Pages ${failedPages.map((entry) => entry.page).join(", ")} did not match page ${anchor}; align those floors yourself.`,
+                      `ページ ${failedPages.map((entry) => entry.page).join("、")} はページ ${anchor} と一致しませんでした。該当フロアは手動で合わせてください。`
+                    )}
+              </p>
+            ) : null}
+            {sizesDiffer ? (
+              <p data-testid="page-size-warning" className="text-[13px] leading-[18px] text-foreground">
+                {t(
+                  "The pages are not all the same size, so their floor plans may land offset from each other. Align the building as a group first, then switch to Individual on the map to adjust any floor that needs its own position.",
+                  "ページのサイズが揃っていないため、各階の位置がずれる場合があります。まずグループで建物全体を合わせてから、地図の「個別」に切り替えて位置が合わないフロアを調整してください。"
+                )}
+              </p>
+            ) : null}
+          </div>
+        </div>
       ) : null}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">

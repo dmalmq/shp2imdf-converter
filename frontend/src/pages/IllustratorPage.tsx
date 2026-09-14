@@ -16,6 +16,7 @@ import {
   type TransformPayload
 } from "../api/client";
 import { isApiClientError, isBackendUnreachableError, toErrorMessage } from "../api/errors";
+import { ArtworkDropzone } from "../components/illustrator/ArtworkDropzone";
 import { AssignmentPanel } from "../components/illustrator/AssignmentPanel";
 import { PageAssignmentPanel } from "../components/illustrator/PageAssignmentPanel";
 import {
@@ -38,9 +39,9 @@ import {
   parseMatchTarget,
   type ShapeMatchPanelModel
 } from "../components/illustrator/ShapeMatchPanel";
-import { Button, Card } from "../components/ui";
 import { stationQueryFromFilename } from "../lib/siteName";
 import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
+import { useAppStore } from "../store/useAppStore";
 import {
   DEFAULT_METRES_PER_POINT,
   MIN_CONTROL_POINTS,
@@ -260,10 +261,12 @@ export function IllustratorPage() {
   const [pickSession, setPickSession] = useState<PickSession | null>(null);
   const [shapeMatch, setShapeMatch] = useState<ShapeMatchState>(EMPTY_SHAPE_MATCH);
   const [outputCrs, setOutputCrs] = useState("EPSG:4326");
+  // Shapefile only by default. This route's job is Illustrator -> shapefiles;
+  // defaulting all three handed the user two artifacts they never asked for.
   const [formats, setFormats] = useState<ExportFormatsPayload>({
-    geopackage: true,
+    geopackage: false,
     shapefile: true,
-    qgis: true
+    qgis: false
   });
   const [history, dispatch] = useReducer(
     placementHistoryReducer,
@@ -284,6 +287,13 @@ export function IllustratorPage() {
   // switches to individual mode for final per-floor nudges. UI-level only —
   // never an undo step.
   const [adjustmentMode, setAdjustmentMode] = useState<AdjustmentMode>("group");
+
+  // Publish the stage so the header rail can show THIS route's progress. Derived
+  // rather than stored so it can never disagree with what is on screen.
+  const setIllustratorStage = useAppStore((s) => s.setIllustratorStage);
+  useEffect(() => {
+    setIllustratorStage(!preview ? 1 : assignment === null ? 2 : 3);
+  }, [preview, assignment, setIllustratorStage]);
 
   // Only on the placement view: the upload and assignment screens have their own
   // keyboard behaviour and no floor to nudge.
@@ -779,41 +789,7 @@ export function IllustratorPage() {
   };
 
   if (!preview) {
-    return (
-      <div className="flex flex-1 items-start justify-center px-4 py-10">
-        <Card padding="lg" className="w-full max-w-2xl">
-          <h1 className="text-lg font-semibold">
-            {t("Place Illustrator artwork", "Illustrator図面の配置")}
-          </h1>
-          <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-            {t(
-              "Convert an .ai file, position it on the map, then export georeferenced files.",
-              ".ai を変換し、地図上に配置してから、座標付きファイルを書き出します。"
-            )}
-          </p>
-          <input
-            type="file"
-            accept=".ai,.pdf"
-            className="hidden"
-            id="illustrator-georef-input"
-            disabled={loading}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void convert(file);
-              event.target.value = "";
-            }}
-          />
-          <Button
-            className="mt-4 w-full"
-            disabled={loading}
-            onClick={() => document.getElementById("illustrator-georef-input")?.click()}
-          >
-            {loading ? t("Converting...", "変換中...") : t("Choose .ai file", ".ai を選択")}
-          </Button>
-          {error ? <p className="mt-2 text-xs text-[var(--color-error)]">{error}</p> : null}
-        </Card>
-      </div>
-    );
+    return <ArtworkDropzone loading={loading} error={error} onFile={(file) => void convert(file)} />;
   }
 
   if (assignment === null) {
@@ -849,11 +825,19 @@ export function IllustratorPage() {
     };
 
     return (
-      <div className="flex flex-1 items-start justify-center px-4 py-10">
-        <Card padding="lg" className="w-full max-w-4xl">
-          <h1 className="text-lg font-semibold">
-            {t("Assign floors", "フロアを割り当て")}
+      <div className="mx-auto w-full max-w-[1120px] px-10 py-10">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-semibold leading-8 tracking-tight text-foreground">
+            {t("Name each floor", "フロア名を入力")}
           </h1>
+          <p className="text-sm leading-5 text-muted-foreground">
+            {t(
+              "Pages given the same name become one floor. Untick a cover sheet or legend to leave it out.",
+              "同じ名前を付けたページは1つのフロアになります。表紙や凡例は除外してください。"
+            )}
+          </p>
+        </div>
+        <div className="mt-5">
           {preview.pages.length > 1 ? (
             <PageAssignmentPanel
               preview={preview.preview}
@@ -872,8 +856,12 @@ export function IllustratorPage() {
               onAssigned={commitAssignment}
             />
           )}
-          {error ? <p className="mt-2 text-xs text-[var(--color-error)]">{error}</p> : null}
-        </Card>
+        </div>
+        {error ? (
+          <p role="alert" className="mt-3 text-[13px] leading-[18px] text-destructive">
+            {error}
+          </p>
+        ) : null}
       </div>
     );
   }
