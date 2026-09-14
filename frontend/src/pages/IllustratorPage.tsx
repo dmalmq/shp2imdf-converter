@@ -885,16 +885,22 @@ export function IllustratorPage() {
 
     return (
       <div className="mx-auto w-full max-w-[1120px] px-10 py-10">
+        {/* Two different jobs behind one stage: naming pages, or drawing boxes on
+            a single sheet. The heading has to say which one you are doing. */}
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold leading-8 tracking-tight text-foreground">
-            {t("Name each floor", "フロア名を入力")}
+            {preview.pages.length > 1
+              ? t("Name each floor", "フロア名を入力")
+              : t("Mark each floor", "フロアを囲む")}
           </h1>
-          <p className="text-sm leading-5 text-muted-foreground">
-            {t(
-              "Pages given the same name become one floor. Untick a cover sheet or legend to leave it out.",
-              "同じ名前を付けたページは1つのフロアになります。表紙や凡例は除外してください。"
-            )}
-          </p>
+          {preview.pages.length > 1 ? (
+            <p className="text-sm leading-5 text-muted-foreground">
+              {t(
+                "Pages given the same name become one floor. Untick a cover sheet or legend to leave it out.",
+                "同じ名前を付けたページは1つのフロアになります。表紙や凡例は除外してください。"
+              )}
+            </p>
+          ) : null}
         </div>
         <div className="mt-5">
           {preview.pages.length > 1 ? (

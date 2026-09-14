@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { FeatureCollection } from "geojson";
 
 import { uploadReferenceLayers } from "../../api/client";
@@ -400,8 +400,10 @@ test("removing the selected layer among several clears the match target", async 
   addFile();
   await waitFor(() => expect(screen.getByRole("radio", { name: "Match with roads" })).toBeInTheDocument());
 
+  // Target the remove control by name: the row also carries a visibility
+  // toggle, so "the first button in the row" is no longer a safe handle.
   const stationRow = screen.getByRole("radio", { name: "Match with station" }).closest("li")!;
-  fireEvent.click(stationRow.querySelector("button")!);
+  fireEvent.click(within(stationRow).getByRole("button", { name: /remove/i }));
 
   expect(screen.queryByRole("radio", { name: "Match with station" })).toBeNull();
   expect(screen.getByRole("radio", { name: "Match with parcels" })).not.toBeChecked();
