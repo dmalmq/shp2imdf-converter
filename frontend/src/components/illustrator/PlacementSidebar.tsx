@@ -33,6 +33,7 @@ type Props = {
   siteName: string;
   conversionId: string;
   onLocate: (lngLat: [number, number]) => void;
+  onLookupSettled?: () => void;
   canUndo: boolean;
   canRedo: boolean;
   tab: PlacementTab;
@@ -62,6 +63,7 @@ export function PlacementSidebar({
   siteName,
   conversionId,
   onLocate,
+  onLookupSettled,
   canUndo,
   canRedo,
   tab,
@@ -88,7 +90,13 @@ export function PlacementSidebar({
   return (
     <div className="flex h-full min-h-0 w-80 shrink-0 flex-col overflow-hidden">
       <Card padding="md" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <LocateControl key={conversionId} siteName={siteName} dispatch={dispatch} onLocate={onLocate} />
+        <LocateControl
+          key={conversionId}
+          siteName={siteName}
+          dispatch={dispatch}
+          onLocate={onLocate}
+          onLookupSettled={onLookupSettled}
+        />
         <div className="mt-2 shrink-0">
           <TransformPanel
             state={state}

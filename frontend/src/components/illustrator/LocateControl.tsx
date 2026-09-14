@@ -19,6 +19,8 @@ type Props = {
   siteName: string;
   dispatch: (action: PlacementAction) => void;
   onLocate: (lngLat: [number, number]) => void;
+  /** Filename lookup finished without a pin, or there was nothing to look up. */
+  onLookupSettled?: () => void;
 };
 
 const FIELD = "w-full rounded-[var(--radius-md)] border px-2 py-1";
@@ -32,17 +34,23 @@ function positionFromPlace(place: Place, baseline: boolean): PlacementAction {
   };
 }
 
-export function LocateControl({ siteName, dispatch, onLocate }: Props) {
+export function LocateControl({ siteName, dispatch, onLocate, onLookupSettled }: Props) {
   const { t, uiLanguage } = useUiLanguage();
   const [locate, send] = useReducer(locateReducer, INITIAL_LOCATE);
   const locateRef = useRef(locate);
   locateRef.current = locate;
   const searchedFor = useRef<string | null>(null);
   const queryInput = useRef<HTMLInputElement>(null);
+  const onLookupSettledRef = useRef(onLookupSettled);
+  onLookupSettledRef.current = onLookupSettled;
 
   useEffect(() => {
     const name = siteName.trim();
-    if (!name || searchedFor.current === name) return;
+    if (!name) {
+      onLookupSettledRef.current?.();
+      return;
+    }
+    if (searchedFor.current === name) return;
     searchedFor.current = name;
     const armed = locateReducer(locateRef.current, { type: "armFilename", query: name });
     locateRef.current = armed;
@@ -56,9 +64,11 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
           onLocate(candidates[0].lngLat);
         }
         send({ type: "guessed", candidates });
+        onLookupSettledRef.current?.();
       })
       .catch(() => {
         if (acceptsGuess(locateRef.current)) send({ type: "guessed", candidates: [] });
+        onLookupSettledRef.current?.();
       });
   }, [siteName, uiLanguage, dispatch, onLocate]);
 

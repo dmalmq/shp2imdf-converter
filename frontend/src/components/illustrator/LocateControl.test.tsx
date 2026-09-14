@@ -40,7 +40,7 @@ beforeEach(() => {
   vi.mocked(geocodeSearch).mockReset();
 });
 
-function renderLocate(siteName: string) {
+function renderLocate(siteName: string, onLookupSettled?: () => void) {
   const seen: PlacementAction[] = [];
   const recenter: [number, number][] = [];
   const view = render(
@@ -48,19 +48,22 @@ function renderLocate(siteName: string) {
       siteName={siteName}
       dispatch={(action) => seen.push(action)}
       onLocate={(lngLat) => recenter.push(lngLat)}
+      onLookupSettled={onLookupSettled}
     />
   );
   return { seen, recenter, ...view };
 }
 
 test("empty siteName does not search and the row is Find the building", () => {
-  renderLocate("");
+  const settled = vi.fn();
+  renderLocate("", settled);
   expect(geocodeSearch).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: /find the building/i })).toHaveAttribute(
     "aria-expanded",
     "false"
   );
   expect(screen.queryByRole("listitem")).toBeNull();
+  expect(settled).toHaveBeenCalledOnce();
 });
 
 test("filename auto-locate prefers a 駅 hit even when Nominatim ranked the town first", async () => {
@@ -102,6 +105,21 @@ test("filename auto-locate places the first hit without opening the list", async
     { type: "positionBuilding", mapAnchor: [139.7286, 35.6063], baseline: true }
   ]);
   expect(recenter).toEqual([[139.7286, 35.6063]]);
+});
+
+test("a filename lookup that finds nothing still settles", async () => {
+  vi.mocked(geocodeSearch).mockResolvedValue([]);
+  const settled = vi.fn();
+  renderLocate("mystery", settled);
+  await waitFor(() => expect(settled).toHaveBeenCalledOnce());
+  expect(geocodeSearch).toHaveBeenCalledWith("mystery", expect.anything());
+});
+
+test("an unavailable geocoder settles so the drawing can be placed by hand", async () => {
+  vi.mocked(geocodeSearch).mockRejectedValue(new Error("offline"));
+  const settled = vi.fn();
+  renderLocate("千葉駅", settled);
+  await waitFor(() => expect(settled).toHaveBeenCalledOnce());
 });
 
 test("opening the row lists filename hits; picking one collapses and repositions", async () => {
