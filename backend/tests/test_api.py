@@ -681,6 +681,7 @@ def test_wizard_address_search_endpoint_returns_geocoder_results(test_client, sa
     assert payload["session_id"] == session_id
     assert payload["results"][0]["address"]["country"] == "JP"
     assert payload["results"][0]["source"] == "fake"
+    assert payload["results"][0]["working_crs"] == "EPSG:6677"
 
 
 @pytest.mark.phase3

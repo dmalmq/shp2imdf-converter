@@ -138,6 +138,7 @@ def test_geocode_endpoint_needs_no_session(test_client) -> None:
     results = response.json()["results"]
     assert results[0]["longitude"] == pytest.approx(139.700258)
     assert results[0]["address"]["province"] == "JP-13"
+    assert results[0]["working_crs"] == "EPSG:6677"
 
 
 @pytest.mark.georef

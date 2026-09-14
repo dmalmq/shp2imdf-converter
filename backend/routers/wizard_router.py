@@ -13,6 +13,7 @@ from shapely.ops import unary_union
 
 from backend.src.generator import _close_gaps
 from backend.src.geocoding import GeocodeMatch, GeocoderClient, GeocodingError
+from backend.src.illustrator_georeference import resolve_working_crs
 from backend.src.mapper import (
     build_unit_code_preview,
     detect_candidate_columns,
@@ -54,6 +55,12 @@ def _geocoder(request: Request) -> GeocoderClient | None:
     return getattr(request.app.state, "geocoder", None)
 
 
+def _prefecture_code(province: str | None) -> str | None:
+    if province and province.startswith("JP-"):
+        return province
+    return None
+
+
 def _match_to_schema(match: GeocodeMatch) -> GeocodeResultItem:
     return GeocodeResultItem(
         display_name=match.display_name,
@@ -70,6 +77,9 @@ def _match_to_schema(match: GeocodeMatch) -> GeocodeResultItem:
             "postal_code_ext": match.address.postal_code_ext,
             "postal_code_vanity": match.address.postal_code_vanity,
         },
+        working_crs=resolve_working_crs(
+            match.longitude, match.latitude, _prefecture_code(match.address.province)
+        ),
     )
 
 
