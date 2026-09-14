@@ -707,11 +707,6 @@ def _oc_filled_rect(mc: str, x: int, y: int, w: int, h: int) -> bytes:
 
 
 def _build_punch_ai_pdf() -> bytes:
-    """Two pages of nested ラチ内 / 建物 / エスカレーター fills.
-
-    Page 2 uses a larger 建物 on the same artwork origin. Punching across pages
-    would shrink page 1's ラチ内 below 6400.
-    """
     content1 = (
         _oc_filled_rect("MC0", 0, 0, 100, 100)
         + _oc_filled_rect("MC1", 10, 10, 60, 60)
