@@ -888,7 +888,7 @@ export function IllustratorPage() {
         {/* Two different jobs behind one stage: naming pages, or drawing boxes on
             a single sheet. The heading has to say which one you are doing. */}
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold leading-8 tracking-tight text-foreground">
+          <h1 className="text-2xl font-semibold leading-9 tracking-tight text-foreground">
             {preview.pages.length > 1
               ? t("Name each floor", "フロア名を入力")
               : t("Mark each floor", "フロアを囲む")}

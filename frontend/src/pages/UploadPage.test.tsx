@@ -53,16 +53,16 @@ test("the filename-floor option belongs to IMDF-schema import only", () => {
   renderPage();
   expect(screen.queryByText(FLOOR_CHECKBOX)).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByText("IMDF-schema shapefiles"));
+  fireEvent.click(screen.getByRole("button", { name: "IMDF schema" }));
   expect(screen.getByText(FLOOR_CHECKBOX)).toBeInTheDocument();
 
-  fireEvent.click(screen.getByText("Standard import"));
+  fireEvent.click(screen.getByRole("button", { name: "Standard" }));
   expect(screen.queryByText(FLOOR_CHECKBOX)).not.toBeInTheDocument();
 });
 
 test("the chosen filename-floor value reaches the import call", async () => {
   renderPage();
-  fireEvent.click(screen.getByText("IMDF-schema shapefiles"));
+  fireEvent.click(screen.getByRole("button", { name: "IMDF schema" }));
   queueShapefile();
   await waitFor(() => expect(screen.getByText(/Import to Review/)).toBeEnabled());
 

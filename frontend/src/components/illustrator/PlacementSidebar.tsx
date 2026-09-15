@@ -162,18 +162,18 @@ export function PlacementSidebar({
                 focusBounds={focusBounds}
               />
               <div className="flex flex-col gap-1.5">
-                {surveySnap.layerName ? (
-                  snapButton
-                ) : (
-                  <DisabledHint
-                    hint={t(
-                      "Add a Station_pg reference layer to enable",
-                      "Station_pg の参照レイヤーを追加すると有効になります"
-                    )}
-                  >
-                    {snapButton}
-                  </DisabledHint>
-                )}
+                <DisabledHint
+                  hint={
+                    surveySnap.layerName
+                      ? null
+                      : t(
+                          "Add a Station_pg reference layer to enable",
+                          "Station_pg の参照レイヤーを追加すると有効になります"
+                        )
+                  }
+                >
+                  {snapButton}
+                </DisabledHint>
                 {surveySnap.notice ? (
                   <p className="text-xs leading-4 text-muted-foreground">{surveySnap.notice}</p>
                 ) : null}

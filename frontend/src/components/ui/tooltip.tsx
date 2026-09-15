@@ -32,12 +32,20 @@ TooltipContent.displayName = TooltipPrimitive.Content.displayName;
  * Wrapping it in a focusable span is the standard escape hatch — without this a
  * disabled button's tooltip silently never opens.
  */
+/**
+ * Explains why the control it wraps is unavailable. A disabled button swallows
+ * its own pointer events, so the reason has to hang off a wrapper.
+ *
+ * Pass `hint={null}` once the control is usable rather than dropping the
+ * wrapper: conditionally wrapping remounts the child, which throws away focus
+ * mid-interaction at exactly the moment the button becomes clickable.
+ */
 export function DisabledHint({
   hint,
   children,
   className
 }: {
-  hint: string;
+  hint: string | null;
   children: React.ReactNode;
   className?: string;
 }) {
@@ -46,9 +54,12 @@ export function DisabledHint({
   // nesting, so an outer provider still wins for delay grouping.
   return (
     <TooltipProvider delayDuration={200}>
-      <Tooltip>
+      <Tooltip open={hint ? undefined : false}>
         <TooltipTrigger asChild>
-          <span tabIndex={0} className={cn("inline-flex w-full", className)}>
+          <span
+            tabIndex={hint ? 0 : undefined}
+            className={cn("inline-flex w-full", className)}
+          >
             {children}
           </span>
         </TooltipTrigger>

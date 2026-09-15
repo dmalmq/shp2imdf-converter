@@ -335,19 +335,19 @@ export function AssignmentPanel({
           </Button>
         )}
         <div className="ml-auto">
-          {drafts.length === 0 ? (
-            <DisabledHint
-              className="w-auto"
-              hint={t(
-                "Draw at least one box, or skip",
-                "四角を1つ以上描くか、スキップしてください"
-              )}
-            >
-              {doneButton}
-            </DisabledHint>
-          ) : (
-            doneButton
-          )}
+          <DisabledHint
+            className="w-auto"
+            hint={
+              drafts.length === 0
+                ? t(
+                    "Draw at least one box, or skip",
+                    "四角を1つ以上描くか、スキップしてください"
+                  )
+                : null
+            }
+          >
+            {doneButton}
+          </DisabledHint>
         </div>
       </div>
     </div>

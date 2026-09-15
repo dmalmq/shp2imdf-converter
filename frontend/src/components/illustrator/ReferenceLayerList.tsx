@@ -195,16 +195,12 @@ export function ReferenceLayerList({
         <h3 className="text-[13px] font-semibold leading-[18px] text-foreground">
           {t("Reference layers", "参照レイヤー")}
         </h3>
-        {pinReady ? (
-          addButton
-        ) : (
-          <DisabledHint
-            className="w-auto"
-            hint={t("Identify the station first", "先に駅を特定してください")}
-          >
-            {addButton}
-          </DisabledHint>
-        )}
+        <DisabledHint
+          className="w-auto"
+          hint={pinReady ? null : t("Identify the station first", "先に駅を特定してください")}
+        >
+          {addButton}
+        </DisabledHint>
       </div>
 
       <input

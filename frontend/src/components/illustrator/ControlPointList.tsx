@@ -118,19 +118,19 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
         <span className="text-[13px] font-medium leading-[18px] text-foreground">
           {t("Control points", "基準点")}
         </span>
-        {groupBlocked ? (
-          <DisabledHint
-            className="w-auto"
-            hint={t(
-              `Relink ${floorLabel} to add points for every floor`,
-              `全フロアに対応点を追加するには「${floorLabel}」を再リンクしてください`
-            )}
-          >
-            {addButton}
-          </DisabledHint>
-        ) : (
-          addButton
-        )}
+        <DisabledHint
+          className="w-auto"
+          hint={
+            groupBlocked
+              ? t(
+                  `Relink ${floorLabel} to add points for every floor`,
+                  `全フロアに対応点を追加するには「${floorLabel}」を再リンクしてください`
+                )
+              : null
+          }
+        >
+          {addButton}
+        </DisabledHint>
       </div>
 
       <p className="text-xs leading-4 text-muted-foreground">{scopeGuide}</p>
@@ -230,11 +230,9 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
         </p>
       ) : null}
 
-      {groupBlocked || !enoughPoints ? (
-        <DisabledHint hint={fitBlockedReason}>{fitButton}</DisabledHint>
-      ) : (
-        fitButton
-      )}
+      <DisabledHint hint={groupBlocked || !enoughPoints ? fitBlockedReason : null}>
+        {fitButton}
+      </DisabledHint>
     </div>
   );
 }

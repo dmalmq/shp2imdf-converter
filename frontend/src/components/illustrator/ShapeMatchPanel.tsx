@@ -219,23 +219,21 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
       ) : null}
 
       <div className="grid grid-cols-2 gap-2">
-        {canMatch ? (
-          chooseButton
-        ) : (
-          <DisabledHint
-            hint={t(
-              "Add a reference layer or a second floor first",
-              "先に参照レイヤーか2つ目のフロアを追加してください"
-            )}
-          >
-            {chooseButton}
-          </DisabledHint>
-        )}
-        {!canFind || !hasTarget ? (
-          <DisabledHint hint={findBlockedReason}>{findButton}</DisabledHint>
-        ) : (
-          findButton
-        )}
+        <DisabledHint
+          hint={
+            canMatch
+              ? null
+              : t(
+                  "Add a reference layer or a second floor first",
+                  "先に参照レイヤーか2つ目のフロアを追加してください"
+                )
+          }
+        >
+          {chooseButton}
+        </DisabledHint>
+        <DisabledHint hint={!canFind || !hasTarget ? findBlockedReason : null}>
+          {findButton}
+        </DisabledHint>
       </div>
 
       {model.loading ? (
@@ -414,11 +412,9 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
             </p>
           ) : null}
 
-          {!selectedMatch || groupBlocked ? (
-            <DisabledHint hint={applyBlockedReason}>{applyButton}</DisabledHint>
-          ) : (
-            applyButton
-          )}
+          <DisabledHint hint={!selectedMatch || groupBlocked ? applyBlockedReason : null}>
+            {applyButton}
+          </DisabledHint>
         </div>
       ) : null}
     </div>

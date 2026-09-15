@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
+import { X } from "lucide-react";
 import { useDropzone } from "react-dropzone";
 import { useNavigate } from "react-router-dom";
 
@@ -12,7 +13,114 @@ import { useToast } from "../components/shared/ToastProvider";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
-import { Button, Card, Badge } from "../components/ui";
+import { Button, Card, Badge, Checkbox, DisabledHint } from "../components/ui";
+import { cn } from "@/lib/utils";
+
+/**
+ * One of the ways into the app that is not "import shapefiles".
+ *
+ * Both used to be full-width secondary buttons stacked under the primary
+ * action, which left the Illustrator route — half the product — reading as a
+ * footnote. They are siblings, so they look like siblings.
+ */
+function EntryCard({
+  title,
+  description,
+  disabled,
+  onClick,
+  icon
+}: {
+  title: string;
+  description: string;
+  disabled?: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "flex flex-col gap-2 rounded-lg border border-border bg-card p-4 text-left transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        disabled ? "opacity-60" : "hover:bg-accent"
+      )}
+    >
+      <span className="text-muted-foreground">{icon}</span>
+      <span className="flex flex-col gap-0.5">
+        <span className="text-sm font-medium leading-5 text-foreground">{title}</span>
+        <span className="text-[13px] leading-[18px] text-muted-foreground">{description}</span>
+      </span>
+    </button>
+  );
+}
+
+/**
+ * One queued dataset.
+ *
+ * Shapefile stems, GeoPackages and archives used to be three near-identical
+ * blocks of pill markup tinted accent/green/amber by file kind, which spent
+ * colour on a distinction nobody acts on and hid both the checkbox (sr-only)
+ * and the remove button (hover-only). One row, one renderer, kind as a label.
+ */
+function QueuedRow({
+  name,
+  detail,
+  kind,
+  selected,
+  onToggle,
+  onRemove,
+  removeLabel
+}: {
+  name: string;
+  detail: string;
+  kind: string | null;
+  selected: boolean;
+  onToggle: () => void;
+  onRemove: () => void;
+  removeLabel: string;
+}) {
+  return (
+    <div className="flex items-center gap-2.5 border-b border-border px-2.5 py-2 last:border-b-0">
+      <Checkbox checked={selected} onCheckedChange={onToggle} aria-label={name} />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span
+          className={cn(
+            "truncate text-[13px] font-medium leading-[18px]",
+            selected ? "text-foreground" : "text-muted-foreground"
+          )}
+          title={name}
+        >
+          {name}
+        </span>
+        <span className="truncate font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
+          {detail}
+        </span>
+      </span>
+      {/* Only worth the row space when the queue actually mixes kinds. */}
+      {kind ? (
+        <Badge variant="outline" className="shrink-0 font-mono tracking-[0.04em]">
+          {kind}
+        </Badge>
+      ) : null}
+      <button
+        type="button"
+        aria-label={removeLabel}
+        onClick={onRemove}
+        className="shrink-0 rounded-sm p-0.5 text-muted-foreground transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 type QueuedUploadFile = {
   id: string;
@@ -215,6 +323,22 @@ export function UploadPage() {
     [stemRows]
   );
 
+  // Counted in datasets, not files: a shapefile is five files the user thinks
+  // of as one thing, so a file count reads as a wrong number.
+  const totalRowCount = stemRows.length + geoPackageRows.length + archiveRows.length;
+  const selectedRowCount =
+    selectedStemCount +
+    geoPackageRows.filter((item) => item.selected).length +
+    archiveRows.filter((item) => item.selected).length;
+  const showStemGroups =
+    groupedStemRows.length > 1 || (groupedStemRows.length === 1 && archiveRows.length + geoPackageRows.length > 0);
+  const mixedKinds =
+    [stemRows.length, geoPackageRows.length, archiveRows.length].filter((count) => count > 0).length > 1;
+
+  const setAllSelected = (selected: boolean) => {
+    setQueuedFiles((previous) => previous.map((item) => ({ ...item, selected })));
+  };
+
   const toggleStemGroup = (stemKey: string) => {
     const row = stemRows.find((item) => item.key === stemKey);
     if (!row) {
@@ -349,9 +473,46 @@ export function UploadPage() {
 
   const hasFiles = stemRows.length > 0 || geoPackageRows.length > 0 || archiveRows.length > 0;
 
+  const importButton = (
+    <Button
+      variant="default"
+      className="relative w-full overflow-hidden"
+      onClick={() => void runImportAndContinue()}
+      disabled={loading || selectedFileCount === 0}
+    >
+      {/* Progress bar overlay */}
+      {loading ? (
+        <span
+          className="absolute inset-y-0 left-0 bg-primary-foreground/20 transition-all duration-300"
+          style={{ width: `${progress}%` }}
+        />
+      ) : null}
+      <span className="relative">
+        {loading
+          ? t(`Importing… ${progress}%`, `インポート中… ${progress}%`)
+          : importMode === "imdf_shapefile"
+            ? t("Import to Review", "レビューへインポート")
+            : t("Import & Continue", "インポートして次へ")}
+      </span>
+    </Button>
+  );
+
   return (
     <div className="flex flex-1 items-start justify-center px-4 py-10">
-      <Card className="w-full max-w-2xl animate-fade-in-up p-6">
+      <div className="flex w-full max-w-2xl animate-fade-in-up flex-col gap-5">
+        <div className="flex flex-col items-center gap-1.5 text-center">
+          <h1 className="text-2xl font-semibold leading-9 tracking-tight text-foreground">
+            {t("Import shapefiles", "シェープファイルをインポート")}
+          </h1>
+          <p className="text-sm leading-5 text-muted-foreground">
+            {t(
+              "Classify and map source shapefiles, then review and export.",
+              "元データを分類・マッピングし、レビューして書き出します。"
+            )}
+          </p>
+        </div>
+
+        <Card className="p-6">
         {/* Cleanup summary banner (if exists from a previous import in same session) */}
         {lastCleanup && !loading ? (
           <div className="mb-5 rounded-md border border-primary/20 bg-accent px-3 py-2">
@@ -386,37 +547,46 @@ export function UploadPage() {
           </div>
         ) : null}
 
-        <div className="mb-5 grid gap-2 sm:grid-cols-2">
-          <button
-            type="button"
-            className={[
-              "rounded-md border px-3 py-2 text-left text-sm transition-colors",
-              importMode === "standard"
-                ? "border-primary/40 bg-accent text-primary"
-                : "border-border bg-card text-muted-foreground hover:bg-muted"
-            ].join(" ")}
-            onClick={() => setImportMode("standard")}
+        {/* One choice between two modes, so it reads as a switch rather than
+            two cards competing with the drop target below them. */}
+        <div className="mb-5 flex flex-col items-center gap-2">
+          <div
+            role="group"
+            aria-label={t("Import profile", "インポート形式")}
+            className="inline-flex gap-0.5 rounded-md bg-muted p-1"
           >
-            <span className="block font-medium">{t("Standard import", "標準インポート")}</span>
-            <span className="mt-0.5 block text-xs opacity-80">
-              {t("Classify and map source shapefiles in the wizard.", "ウィザードで元データを分類・マッピングします。")}
-            </span>
-          </button>
-          <button
-            type="button"
-            className={[
-              "rounded-md border px-3 py-2 text-left text-sm transition-colors",
-              importMode === "imdf_shapefile"
-                ? "border-primary/40 bg-accent text-primary"
-                : "border-border bg-card text-muted-foreground hover:bg-muted"
-            ].join(" ")}
-            onClick={() => setImportMode("imdf_shapefile")}
-          >
-            <span className="block font-medium">{t("IMDF-schema shapefiles", "IMDFスキーマのシェープファイル")}</span>
-            <span className="mt-0.5 block text-xs opacity-80">
-              {t("Open reviewed features directly and export Open Data Contest 2026 shapefiles.", "直接レビュー画面で開き、オープンデータコンテスト2026形式のシェープファイルを書き出します。")}
-            </span>
-          </button>
+            {([
+              ["standard", t("Standard", "標準")],
+              ["imdf_shapefile", t("IMDF schema", "IMDFスキーマ")]
+            ] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={importMode === mode}
+                onClick={() => setImportMode(mode)}
+                className={cn(
+                  "rounded-sm px-3 py-1.5 text-[13px] font-medium leading-[18px] transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  importMode === mode
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="text-center text-[13px] leading-[18px] text-muted-foreground">
+            {importMode === "standard"
+              ? t(
+                  "Source shapefiles are classified and mapped in the wizard.",
+                  "元データはウィザードで分類・マッピングされます。"
+                )
+              : t(
+                  "Already-reviewed features open straight in Review and export as Open Data Contest 2026 shapefiles.",
+                  "レビュー済みのフィーチャーを直接レビュー画面で開き、オープンデータコンテスト2026形式で書き出します。"
+                )}
+          </p>
         </div>
 
         {importMode === "imdf_shapefile" ? (
@@ -475,119 +645,75 @@ export function UploadPage() {
 
         {/* File chips */}
         {hasFiles ? (
-          <div className="mt-5">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-xs font-medium text-muted-foreground">
-                {selectedStemCount + geoPackageRows.filter((r) => r.selected).length + archiveRows.filter((r) => r.selected).length} {t("of", "/")} {stemRows.length + geoPackageRows.length + archiveRows.length} {t("datasets selected", "データセット選択")}
+          <div className="mt-5 flex flex-col gap-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
+                {t(
+                  `${selectedRowCount} of ${totalRowCount} datasets selected`,
+                  `${totalRowCount} 件中 ${selectedRowCount} 件を選択`
+                )}
               </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto px-1.5 py-0.5 text-xs font-normal text-muted-foreground"
+                onClick={() => setAllSelected(selectedRowCount < totalRowCount)}
+              >
+                {selectedRowCount < totalRowCount
+                  ? t("Select all", "すべて選択")
+                  : t("Select none", "選択を解除")}
+              </Button>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              {groupedStemRows.flatMap((group) =>
-                group.rows.map((row) => (
-                  <label
-                    key={row.key}
-                    className={[
-                      "group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors cursor-pointer",
-                      row.selected
-                        ? "border-primary/30 bg-accent text-primary"
-                        : "border-border bg-muted text-muted-foreground"
-                    ].join(" ")}
-                  >
-                    <input
-                      type="checkbox"
-                      className="sr-only"
-                      checked={row.selected}
-                      onChange={() => toggleStemGroup(row.key)}
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
+              {groupedStemRows.map((group) => (
+                <Fragment key={group.suffixGroup}>
+                  {/* The rows were already sorted by this token and the grouping
+                      was invisible; naming it is what makes the order legible. */}
+                  {showStemGroups ? (
+                    <p className="border-b border-border bg-muted/40 px-2.5 py-1 font-mono text-[10px] uppercase leading-[13px] tracking-[0.04em] text-muted-foreground">
+                      {group.suffixGroup}
+                    </p>
+                  ) : null}
+                  {group.rows.map((row) => (
+                    <QueuedRow
+                      key={row.key}
+                      name={row.stem}
+                      detail={row.extensions.map((extension) => `.${extension}`).join(", ")}
+                      kind={mixedKinds ? "SHP" : null}
+                      selected={row.selected}
+                      onToggle={() => toggleStemGroup(row.key)}
+                      onRemove={() => removeStemGroup(row.key)}
+                      removeLabel={t(`Remove ${row.stem}`, `${row.stem} を削除`)}
                     />
-                    <span className="truncate max-w-[180px]">{row.stem}</span>
-                    <Badge variant={row.selected ? "default" : "secondary"}>{row.extensions.map((e) => `.${e}`).join(", ")}</Badge>
-                    <button
-                      type="button"
-                      className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-current hover:text-destructive"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        removeStemGroup(row.key);
-                      }}
-                      title={t("Remove", "削除")}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                        <path d="M3 3l6 6M9 3l-6 6" />
-                      </svg>
-                    </button>
-                  </label>
-                ))
-              )}
+                  ))}
+                </Fragment>
+              ))}
 
               {geoPackageRows.map((item) => (
-                <label
+                <QueuedRow
                   key={item.id}
-                  className={[
-                    "group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors cursor-pointer",
-                    item.selected
-                      ? "border-success/30 bg-success/10 text-success"
-                      : "border-border bg-muted text-muted-foreground"
-                  ].join(" ")}
-                >
-                  <input
-                    type="checkbox"
-                    className="sr-only"
-                    checked={item.selected}
-                    onChange={() => toggleGeoPackage(item.id)}
-                  />
-                  <span className="truncate max-w-[180px]">{item.file.name}</span>
-                  <Badge variant={item.selected ? "success" : "default"}>.gpkg</Badge>
-                  <button
-                    type="button"
-                    className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-current hover:text-destructive"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      removeFile(item.id);
-                    }}
-                    title={t("Remove", "削除")}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                      <path d="M3 3l6 6M9 3l-6 6" />
-                    </svg>
-                  </button>
-                </label>
+                  name={item.file.name}
+                  detail={formatFileSize(item.file.size)}
+                  kind={mixedKinds ? "GPKG" : null}
+                  selected={item.selected}
+                  onToggle={() => toggleGeoPackage(item.id)}
+                  onRemove={() => removeFile(item.id)}
+                  removeLabel={t(`Remove ${item.file.name}`, `${item.file.name} を削除`)}
+                />
               ))}
 
               {archiveRows.map((item) => (
-                <label
+                <QueuedRow
                   key={item.id}
-                  className={[
-                    "group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors cursor-pointer",
-                    item.selected
-                      ? "border-warning/30 bg-warning/10 text-warning"
-                      : "border-border bg-muted text-muted-foreground"
-                  ].join(" ")}
-                >
-                  <input
-                    type="checkbox"
-                    className="sr-only"
-                    checked={item.selected}
-                    onChange={() => toggleArchive(item.id)}
-                  />
-                  <span className="truncate max-w-[180px]">{item.file.name}</span>
-                  <Badge variant={item.selected ? "warning" : "default"}>.zip</Badge>
-                  <button
-                    type="button"
-                    className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-current hover:text-destructive"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      removeFile(item.id);
-                    }}
-                    title={t("Remove", "削除")}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                      <path d="M3 3l6 6M9 3l-6 6" />
-                    </svg>
-                  </button>
-                </label>
+                  name={item.file.name}
+                  detail={formatFileSize(item.file.size)}
+                  kind={mixedKinds ? "ZIP" : null}
+                  selected={item.selected}
+                  onToggle={() => toggleArchive(item.id)}
+                  onRemove={() => removeFile(item.id)}
+                  removeLabel={t(`Remove ${item.file.name}`, `${item.file.name} を削除`)}
+                />
               ))}
             </div>
           </div>
@@ -600,91 +726,93 @@ export function UploadPage() {
           </div>
         ) : null}
 
-        {/* Import button */}
+        {/* Import button — says why it is unavailable rather than only greying out */}
         <div className="mt-6">
-          <Button
-            variant="default"
-            className="relative w-full overflow-hidden"
-            onClick={() => void runImportAndContinue()}
-            disabled={loading || selectedFileCount === 0}
+          <DisabledHint
+            hint={
+              selectedFileCount === 0 && !loading
+                ? t(
+                    "Add at least one shapefile to import",
+                    "インポートするシェープファイルを1つ以上追加してください"
+                  )
+                : null
+            }
           >
-            {/* Progress bar overlay */}
-            {loading ? (
-              <span
-                className="absolute inset-y-0 left-0 bg-card/20 transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
-            ) : null}
-            <span className="relative">
-              {loading
-                ? t(`Importing... ${progress}%`, `インポート中... ${progress}%`)
-                : hasFiles
-                  ? importMode === "imdf_shapefile"
-                    ? t("Import to Review", "レビューへインポート")
-                    : t("Import & Continue", "インポートして次へ")
-                  : importMode === "imdf_shapefile"
-                    ? t("Import to Review", "レビューへインポート")
-                    : t("Import & Continue", "インポートして次へ")}
-            </span>
-          </Button>
+            {importButton}
+          </DisabledHint>
         </div>
 
-        {/* IMDF re-open divider */}
-        <div className="mt-6 flex items-center gap-3">
-          <div className="h-px flex-1 bg-border" />
-          <span className="text-xs text-muted-foreground">{t("or", "または")}</span>
-          <div className="h-px flex-1 bg-border" />
-        </div>
-
-        <div className="mt-4">
-          <label className="block">
-            <span className="sr-only">{t("Open IMDF archive", "IMDFアーカイブを開く")}</span>
-            <input
-              type="file"
-              accept=".imdf,.zip"
-              className="hidden"
-              disabled={imdfLoading}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void runImdfImport(file);
-                e.target.value = "";
-              }}
-              id="imdf-file-input"
-            />
-            <Button
-              variant="outline"
-              className="w-full"
-              disabled={imdfLoading}
-              onClick={() => document.getElementById("imdf-file-input")?.click()}
-            >
-              {imdfLoading
-                ? t("Opening...", "開いています...")
-                : t("Open IMDF archive", "IMDFアーカイブを開く")}
-            </Button>
-          </label>
-          <p className="mt-1 text-center text-xs text-muted-foreground">
-            {t("Re-open a previously exported .imdf.zip for further editing", "以前エクスポートした .imdf.zip を再編集のために開く")}
-          </p>
-          {imdfError ? (
-            <div className="mt-2 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {imdfError}
-            </div>
-          ) : null}
-        </div>
-
-        {/* Illustrator (.ai) -> georeferenced export */}
-        <div className="mt-4">
-          <Button variant="outline" className="w-full" onClick={() => navigate("/illustrator")}>
-            {t("Illustrator (.ai) → place on map", "Illustrator (.ai) → 地図に配置")}
-          </Button>
-          <p className="mt-1 text-center text-xs text-muted-foreground">
-            {t(
-              "Convert .ai layers, position them on the map, then export GeoPackage, shapefiles and a QGIS project",
-              ".ai のレイヤーを変換し地図に配置して、GeoPackage・シェープファイル・QGISプロジェクトを書き出し"
-            )}
-          </p>
-        </div>
       </Card>
+
+        {/* ── the other ways in ──
+            An equal pair under one divider, rather than the primary action's
+            leftovers. The hidden input stays outside the card so the card can
+            be a plain button. */}
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-border" />
+          <span className="text-xs leading-4 text-muted-foreground">
+            {t("or start from", "または次から開始")}
+          </span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+
+        <input
+          type="file"
+          accept=".imdf,.zip"
+          className="hidden"
+          disabled={imdfLoading}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void runImdfImport(file);
+            e.target.value = "";
+          }}
+          id="imdf-file-input"
+        />
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <EntryCard
+            title={
+              imdfLoading
+                ? t("Opening…", "開いています…")
+                : t("Open IMDF archive", "IMDFアーカイブを開く")
+            }
+            description={t(
+              "Re-open an exported .imdf.zip and keep editing.",
+              "以前書き出した .imdf.zip を再編集のために開きます。"
+            )}
+            disabled={imdfLoading}
+            onClick={() => document.getElementById("imdf-file-input")?.click()}
+            icon={
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
+                <path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5v-9Z" />
+                <path d="m3 7.5 9 4.5 9-4.5M12 12v9" />
+              </svg>
+            }
+          />
+          <EntryCard
+            title={t("Illustrator artwork", "Illustrator 図面")}
+            description={t(
+              "Convert an .ai or .pdf and place it on the map.",
+              ".ai または .pdf を変換して地図上に配置します。"
+            )}
+            onClick={() => navigate("/illustrator")}
+            icon={
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 19l7-7 3 3-7 7-3-3Z" />
+                <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5Z" />
+                <path d="M2 2l7.586 7.586" />
+                <circle cx="11" cy="11" r="2" />
+              </svg>
+            }
+          />
+        </div>
+
+        {imdfError ? (
+          <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {imdfError}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

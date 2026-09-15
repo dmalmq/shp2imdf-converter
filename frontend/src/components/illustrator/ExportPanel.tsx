@@ -170,13 +170,15 @@ export function ExportPanel({
         <Metric label={t("FORMATS", "形式")} value={chosen} className="flex-1" />
       </div>
 
-      {chosen === 0 ? (
-        <DisabledHint hint={t("Choose at least one output format", "出力形式を1つ以上選択してください")}>
-          {exportButton}
-        </DisabledHint>
-      ) : (
-        exportButton
-      )}
+      <DisabledHint
+        hint={
+          chosen === 0
+            ? t("Choose at least one output format", "出力形式を1つ以上選択してください")
+            : null
+        }
+      >
+        {exportButton}
+      </DisabledHint>
 
       {error ? (
         <p role="alert" className="text-[13px] leading-[18px] text-destructive">

@@ -41,7 +41,7 @@ export function ArtworkDropzone({ loading, error, onFile }: Props) {
   return (
     <div className="mx-auto flex w-full max-w-[640px] flex-col items-center gap-6 px-4 py-16">
       <div className="flex flex-col items-center gap-1.5 text-center">
-        <h1 className="text-2xl font-semibold leading-8 tracking-tight text-foreground">
+        <h1 className="text-2xl font-semibold leading-9 tracking-tight text-foreground">
           {t("Place Illustrator artwork", "Illustrator図面の配置")}
         </h1>
         <p className="text-sm leading-5 text-muted-foreground">
