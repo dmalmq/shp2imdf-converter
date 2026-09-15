@@ -12,10 +12,16 @@ import { STREET_MAP_STYLE } from "./streetMapStyle";
  * building form from above almost everywhere. GSI layers require the
  * attribution 出典：国土地理院, Esri requires "Imagery © Esri". All endpoints
  * were verified serving tiles at z17.
+ *
+ * `blank` is the odd one out and carries no tiles at all. Aligning one floor
+ * against another is a question about the drawing, not about the world, and
+ * every other option answers it with a photograph behind the answer. Ghost
+ * floors sit at 6% fill, so on imagery the floor you are aligning to is the
+ * faintest thing on screen. Removing the ground is the whole feature.
  */
-export type BasemapId = "osm" | "gsi-photo" | "gsi-std" | "esri";
+export type BasemapId = "osm" | "gsi-photo" | "gsi-std" | "esri" | "blank";
 
-export const BASEMAP_ORDER: BasemapId[] = ["osm", "gsi-photo", "gsi-std", "esri"];
+export const BASEMAP_ORDER: BasemapId[] = ["osm", "gsi-photo", "gsi-std", "esri", "blank"];
 
 /**
  * True for the photographic basemaps.
@@ -70,12 +76,20 @@ export const BASEMAP_STYLES: Record<BasemapId, StyleSpecification> = {
     ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
     ESRI_ATTRIBUTION,
     19
-  )
+  ),
+  // White, not the #e8eef4 the raster styles paint. That grey means "tiles have
+  // not arrived"; this one is the chosen ground and must not read as a failure.
+  blank: {
+    version: 8,
+    sources: {},
+    layers: [{ id: "background", type: "background", paint: { "background-color": "#ffffff" } }]
+  }
 };
 
 export function basemapLabel(id: BasemapId, t: (en: string, ja: string) => string): string {
   if (id === "osm") return t("Street", "地図");
   if (id === "gsi-photo") return t("Aerial (GSI)", "写真（地理院）");
   if (id === "esri") return t("Satellite (Esri)", "衛星写真（Esri）");
+  if (id === "blank") return t("No map", "地図なし");
   return t("GSI map", "地理院地図");
 }
