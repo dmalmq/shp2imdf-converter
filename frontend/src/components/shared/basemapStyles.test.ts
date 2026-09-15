@@ -1,4 +1,4 @@
-import { BASEMAP_ORDER, BASEMAP_STYLES, basemapLabel } from "./basemapStyles";
+import { BASEMAP_ORDER, BASEMAP_STYLES, basemapLabel, isImageryBasemap } from "./basemapStyles";
 
 test("every basemap in the order has a style", () => {
   for (const id of BASEMAP_ORDER) {
@@ -56,4 +56,29 @@ test("labels are bilingual", () => {
   expect(basemapLabel("gsi-photo", ja)).toBe("写真（地理院）");
   expect(basemapLabel("esri", en)).toBe("Satellite (Esri)");
   expect(basemapLabel("esri", ja)).toBe("衛星写真（Esri）");
+});
+
+test("a blank ground is offered, because aligning two floors is not a question about the world", () => {
+  expect(BASEMAP_ORDER).toContain("blank");
+  expect(BASEMAP_ORDER[0]).not.toBe("blank");
+});
+
+test("the blank style fetches nothing, so the attribution and tile rules above pass it vacuously", () => {
+  expect(BASEMAP_STYLES.blank.sources).toEqual({});
+});
+
+test("blank paints white, not the grey that means tiles have not arrived", () => {
+  const background = BASEMAP_STYLES.blank.layers.find((layer) => layer.type === "background");
+  expect(background?.paint).toEqual({ "background-color": "#ffffff" });
+});
+
+test("blank is not imagery, so ghost floors stay ink rather than flipping to paper", () => {
+  expect(isImageryBasemap("blank")).toBe(false);
+});
+
+test("blank is named as an absence in both languages", () => {
+  const en = (a: string) => a;
+  const ja = (_a: string, b: string) => b;
+  expect(basemapLabel("blank", en)).toBe("No map");
+  expect(basemapLabel("blank", ja)).toBe("地図なし");
 });

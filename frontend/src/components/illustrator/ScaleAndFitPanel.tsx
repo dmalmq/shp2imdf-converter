@@ -44,6 +44,13 @@ type Method = "points" | "shape";
  * The numeric drawing scale and the pt-to-metre calibration sit behind
  * "Advanced": they are how you'd bootstrap a placement without a reference, not
  * something a first-time user should meet before the map.
+ *
+ * Opens on shape match when a floor failed to stack at import. That case has a
+ * banner naming both floors and a one-click fix, and it was unreachable: this
+ * panel defaulted to control points and nothing switched it, so the converter
+ * diagnosed the problem and then filed the answer behind a tab the user had no
+ * cue to open. The default is read once, not enforced. Switching to control
+ * points with a floor still unstacked is a legitimate choice.
  */
 export function ScaleAndFitPanel({
   state,
@@ -55,7 +62,9 @@ export function ScaleAndFitPanel({
   shapeMatch
 }: Props) {
   const { t } = useUiLanguage();
-  const [method, setMethod] = useState<Method>("points");
+  const [method, setMethod] = useState<Method>(() =>
+    state.floors.some((floor) => floor.artworkMatch) ? "shape" : "points"
+  );
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [denominator, setDenominator] = useState(String(DEFAULT_DRAWING_SCALE));
   const [artworkDistance, setArtworkDistance] = useState("");
