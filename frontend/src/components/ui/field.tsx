@@ -5,9 +5,10 @@ import { cn } from "@/lib/utils";
 /**
  * Label over control, the same way every time.
  *
- * The wizard had forty hand-rolled `<label><span/><input class="rounded border
- * px-2 py-1.5"/></label>` blocks, which is how the required marker, the label
- * colour and the input height drifted apart between steps.
+ * The wizard and the review properties panel had fifty hand-rolled
+ * `<label><span/><input class="rounded border px-2 py-1.5"/></label>` blocks
+ * between them, which is how the required marker, the label colour and the
+ * control height drifted apart from screen to screen.
  */
 export function Field({
   label,

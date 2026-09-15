@@ -1,10 +1,38 @@
+import { ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import {
+  Button,
+  Checkbox,
+  Field,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../ui";
 import { type ReviewFeature, featureName } from "./types";
 
 
 const NON_EDITABLE_KEYS = new Set(["metadata", "issues", "status", "source_file", "display_point"]);
+
+/** Radix Select has no empty-string value, so "unset" needs a sentinel. */
+const UNSET = "__none__";
+
+/**
+ * Keys the importer fills in and nobody edits by hand. They were mixed into
+ * the same alphabetical list as name and category, so the two fields you
+ * actually came to change sat between `restriction` and `source_feature_ref`.
+ */
+const PROVENANCE_KEYS = new Set([
+  "source_feature_ref",
+  "source_part_index",
+  "source_row_index",
+  "source_layer",
+  "source_stem"
+]);
 
 type Props = {
   feature: ReviewFeature | null;
@@ -66,7 +94,7 @@ export function PropertiesPanel({
     setForm(feature?.properties ? { ...feature.properties } : {});
   }, [feature]);
 
-  const editableKeys = useMemo(() => {
+  const allKeys = useMemo(() => {
     if (!feature) {
       return [] as string[];
     }
@@ -75,190 +103,181 @@ export function PropertiesPanel({
       .sort((a, b) => a.localeCompare(b));
   }, [feature]);
 
+  const editableKeys = useMemo(
+    () => allKeys.filter((key) => !PROVENANCE_KEYS.has(key)),
+    [allKeys]
+  );
+  const provenanceKeys = useMemo(
+    () => allKeys.filter((key) => PROVENANCE_KEYS.has(key)),
+    [allKeys]
+  );
+
   if (!feature) {
     return (
-      <div className="rounded border bg-card p-3 text-sm text-muted-foreground">
-        {t("Select a feature to inspect/edit its properties.", "フィーチャーを選択してプロパティを確認・編集してください。")}
-      </div>
+      <p className="text-[13px] leading-[18px] text-muted-foreground">
+        {t(
+          "Select a feature to inspect or edit its properties.",
+          "フィーチャーを選択するとプロパティを編集できます。"
+        )}
+      </p>
     );
   }
 
+  const renderField = (key: string) => {
+    const value = form[key];
+
+    if (key === "name" || key === "alt_name") {
+      return (
+        <Field key={key} label={key}>
+          {(id) => (
+            <Input
+              id={id}
+              value={asLabelText(value)}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...prev,
+                  [key]: event.target.value ? { [language]: event.target.value } : null
+                }))
+              }
+            />
+          )}
+        </Field>
+      );
+    }
+
+    if (key === "level_id" || key === "address_id") {
+      const options = key === "level_id" ? levelOptions : addressOptions;
+      return (
+        <Field key={key} label={key}>
+          {(id) => (
+            <Select
+              value={typeof value === "string" && value ? value : UNSET}
+              onValueChange={(next) =>
+                setForm((prev) => ({ ...prev, [key]: next === UNSET ? null : next }))
+              }
+            >
+              <SelectTrigger id={id}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={UNSET}>{t("Not set", "未設定")}</SelectItem>
+                {options.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </Field>
+      );
+    }
+
+    if (key === "building_ids") {
+      return (
+        <Field key={key} label={key} hint={t("Comma-separated", "カンマ区切り")}>
+          {(id) => (
+            <Input
+              id={id}
+              className="font-mono text-xs"
+              value={toStringValue(value)}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...prev,
+                  building_ids: event.target.value
+                    .split(",")
+                    .map((item) => item.trim())
+                    .filter(Boolean)
+                }))
+              }
+            />
+          )}
+        </Field>
+      );
+    }
+
+    if (typeof value === "boolean") {
+      return (
+        <label
+          key={key}
+          className="flex cursor-pointer items-center gap-2 py-1 text-[13px] leading-[18px] text-foreground"
+        >
+          <Checkbox
+            checked={value}
+            onCheckedChange={(checked) => setForm((prev) => ({ ...prev, [key]: checked === true }))}
+          />
+          <span>{key}</span>
+        </label>
+      );
+    }
+
+    if (typeof value === "number") {
+      return (
+        <Field key={key} label={key}>
+          {(id) => (
+            <Input
+              id={id}
+              type="number"
+              value={value}
+              onChange={(event) => setForm((prev) => ({ ...prev, [key]: Number(event.target.value) }))}
+            />
+          )}
+        </Field>
+      );
+    }
+
+    return (
+      <Field key={key} label={key}>
+        {(id) => (
+          <Input
+            id={id}
+            value={toStringValue(value)}
+            onChange={(event) =>
+              setForm((prev) => ({ ...prev, [key]: event.target.value || null }))
+            }
+          />
+        )}
+      </Field>
+    );
+  };
+
   return (
-    <div className="space-y-3 rounded border bg-card p-3">
-      <div>
-        <h3 className="text-sm font-semibold">{t("Properties", "プロパティ")}</h3>
-        <p className="text-xs text-muted-foreground">
-          {feature.feature_type} <span className="font-mono">{feature.id.slice(0, 8)}</span>
-        </p>
-      </div>
+    <div className="flex flex-col gap-4">
+      <p className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
+        {feature.feature_type} · {feature.id.slice(0, 8)}
+      </p>
 
-      <div className="grid gap-2">
-        {editableKeys.map((key) => {
-          const value = form[key];
+      <div className="flex flex-col gap-3">{editableKeys.map(renderField)}</div>
 
-          if (key === "name" || key === "alt_name") {
-            return (
-              <label key={key} className="text-xs">
-                <span className="mb-1 block text-muted-foreground">{key}</span>
-                <input
-                  className="w-full rounded border px-2 py-1.5 text-sm"
-                  value={asLabelText(value)}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      [key]: event.target.value ? { [language]: event.target.value } : null
-                    }))
-                  }
-                />
-              </label>
-            );
-          }
+      {provenanceKeys.length > 0 ? (
+        <details className="group">
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-[13px] font-medium leading-[18px] text-muted-foreground transition-colors hover:text-foreground">
+            <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+            {t("Where this came from", "元データ")}
+          </summary>
+          <div className="mt-3 flex flex-col gap-3">{provenanceKeys.map(renderField)}</div>
+        </details>
+      ) : null}
 
-          if (key === "level_id") {
-            return (
-              <label key={key} className="text-xs">
-                <span className="mb-1 block text-muted-foreground">level_id</span>
-                <select
-                  className="w-full rounded border px-2 py-1.5 text-sm"
-                  value={typeof value === "string" ? value : ""}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      level_id: event.target.value || null
-                    }))
-                  }
-                >
-                  <option value="">{t("(none)", "（なし）")}</option>
-                  {levelOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            );
-          }
-
-          if (key === "address_id") {
-            return (
-              <label key={key} className="text-xs">
-                <span className="mb-1 block text-muted-foreground">address_id</span>
-                <select
-                  className="w-full rounded border px-2 py-1.5 text-sm"
-                  value={typeof value === "string" ? value : ""}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      address_id: event.target.value || null
-                    }))
-                  }
-                >
-                  <option value="">{t("(none)", "（なし）")}</option>
-                  {addressOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            );
-          }
-
-          if (key === "building_ids") {
-            return (
-              <label key={key} className="text-xs">
-                <span className="mb-1 block text-muted-foreground">building_ids</span>
-                <input
-                  className="w-full rounded border px-2 py-1.5 text-sm"
-                  value={toStringValue(value)}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      building_ids: event.target.value
-                        .split(",")
-                        .map((item) => item.trim())
-                        .filter(Boolean)
-                    }))
-                  }
-                />
-              </label>
-            );
-          }
-
-          if (typeof value === "boolean") {
-            return (
-              <label key={key} className="flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={value}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      [key]: event.target.checked
-                    }))
-                  }
-                />
-                <span>{key}</span>
-              </label>
-            );
-          }
-
-          if (typeof value === "number") {
-            return (
-              <label key={key} className="text-xs">
-                <span className="mb-1 block text-muted-foreground">{key}</span>
-                <input
-                  type="number"
-                  className="w-full rounded border px-2 py-1.5 text-sm"
-                  value={value}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      [key]: Number(event.target.value)
-                    }))
-                  }
-                />
-              </label>
-            );
-          }
-
-          return (
-            <label key={key} className="text-xs">
-              <span className="mb-1 block text-muted-foreground">{key}</span>
-              <input
-                className="w-full rounded border px-2 py-1.5 text-sm"
-                value={toStringValue(value)}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    [key]: event.target.value || null
-                  }))
-                }
-              />
-            </label>
-          );
-        })}
-      </div>
-
-      <div className="text-xs text-muted-foreground">
-        {t("Name preview", "名称プレビュー")}: <span className="font-medium">{featureName({ ...feature, properties: form }) || "-"}</span>
-      </div>
+      <p className="text-xs leading-4 text-muted-foreground">
+        {t("Name preview", "名称プレビュー")}:{" "}
+        <span className="font-medium text-foreground">
+          {featureName({ ...feature, properties: form }) || "-"}
+        </span>
+      </p>
 
       <div className="flex gap-2">
-        <button
-          type="button"
-          className="rounded bg-primary px-3 py-1.5 text-xs text-primary-foreground"
-          onClick={() => onSave(feature.id, form)}
-        >
-          {t("Save Changes", "変更を保存")}
-        </button>
-        <button
-          type="button"
-          className="rounded border border-destructive/30 px-3 py-1.5 text-xs text-destructive"
+        <Button size="sm" onClick={() => onSave(feature.id, form)}>
+          {t("Save changes", "変更を保存")}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
           onClick={() => onDelete(feature.id)}
         >
-          {t("Delete Feature", "フィーチャーを削除")}
-        </button>
+          {t("Delete feature", "フィーチャーを削除")}
+        </Button>
       </div>
     </div>
   );

@@ -1,6 +1,15 @@
+import { ChevronRight } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import {
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../ui";
 import { EmptyState } from "../shared/EmptyState";
 import { FeatureTypeIcon } from "../shared/FeatureTypeIcon";
 import { DEFAULT_LOCATED_FEATURE_ORDER, featureName, type ReviewFeature, type ReviewIssue } from "./types";
@@ -24,6 +33,9 @@ function statusForFeature(
   if (warningIds.has(featureId)) return "warning";
   return "ok";
 }
+
+/** Radix Select has no empty-string value, so "no type filter" needs one. */
+const ALL_TYPES = "__all__";
 
 const STATUS_DOT: Record<string, string> = {
   error: "bg-destructive",
@@ -166,27 +178,34 @@ export function FeatureList({
 
   return (
     <div className="flex flex-col overflow-hidden">
-      <div className="flex items-center gap-1.5 border-b border-border px-3 py-2">
-        <input
-          type="text"
-          className="h-7 flex-1 rounded-sm border border-border bg-card px-2 text-xs focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring/20"
-          placeholder={t("Search...", "検索...")}
+      <div className="flex items-center gap-1.5 px-3 pb-2">
+        <Input
+          type="search"
+          className="h-8 flex-1"
+          placeholder={t("Search features", "フィーチャーを検索")}
+          aria-label={t("Search features", "フィーチャーを検索")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select
-          className="h-7 rounded-sm border border-border bg-card px-1.5 text-xs focus:border-primary focus:outline-none"
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
+        <Select
+          value={typeFilter || ALL_TYPES}
+          onValueChange={(value) => setTypeFilter(value === ALL_TYPES ? "" : value)}
         >
-          <option value="">{t("All types", "すべて")}</option>
-          {featureTypes.map((ft) => (
-            <option key={ft} value={ft}>{ft}</option>
-          ))}
-        </select>
+          <SelectTrigger className="h-8 w-[7.5rem]" aria-label={t("Feature type", "種別")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_TYPES}>{t("All types", "すべて")}</SelectItem>
+            {featureTypes.map((ft) => (
+              <SelectItem key={ft} value={ft}>
+                {ft}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
-      <div className="px-3 py-1.5 text-[11px] text-muted-foreground border-b border-border">
+      <div className="border-b border-border px-3 py-1.5 font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
         {filtered.length} {t("features", "件")}
         {selectedFeatureIds.length > 0 ? ` · ${selectedFeatureIds.length} ${t("selected", "選択中")}` : ""}
       </div>
@@ -204,15 +223,11 @@ export function FeatureList({
                 className="sticky top-0 z-[1] flex items-center gap-2 border-b border-border bg-muted px-3 py-1.5 cursor-pointer select-none text-xs font-medium text-foreground"
                 onClick={() => toggleCollapse(group.type)}
               >
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 10 10"
-                  className={`shrink-0 transition-transform ${isCollapsed ? "" : "rotate-90"}`}
-                  fill="currentColor"
-                >
-                  <path d="M3 1l4 4-4 4z" />
-                </svg>
+                <ChevronRight
+                  className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${
+                    isCollapsed ? "" : "rotate-90"
+                  }`}
+                />
                 <FeatureTypeIcon featureType={group.type} size="sm" />
                 <span className="capitalize">{group.type}</span>
                 <span className="ml-auto text-[10px] text-muted-foreground">{group.features.length}</span>

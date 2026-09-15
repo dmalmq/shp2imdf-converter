@@ -1,11 +1,11 @@
 import {
+  Field,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue
 } from "../ui";
-import { Field } from "./Field";
 
 /** Radix Select has no empty-string value, so "no column" needs a sentinel. */
 const NO_COLUMN = "__none__";

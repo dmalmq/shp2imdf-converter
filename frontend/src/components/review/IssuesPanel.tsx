@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { Button } from "../ui";
 import { type ReviewFeature, type ReviewIssue, featureName } from "./types";
 
 
@@ -101,14 +102,15 @@ export function IssuesPanel({
                 <p className="text-muted-foreground">{item.message}</p>
                 {item.fix_description ? <p className="text-warning">{item.fix_description}</p> : null}
                 {item.auto_fixable ? (
-                  <button
-                    type="button"
-                    className="mt-1 rounded border border-warning/30 px-2 py-0.5 text-[11px]"
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-1.5"
                     onClick={(e) => { e.stopPropagation(); onAutoFixSafe(); }}
                     disabled={autoFixing}
                   >
-                    {autoFixing ? t("Applying...", "適用中...") : t("Auto-fix", "自動修正")}
-                  </button>
+                    {autoFixing ? t("Applying…", "適用中…") : t("Auto-fix", "自動修正")}
+                  </Button>
                 ) : null}
                 {item.check === "overlapping_units" && item.related_feature_id ? (() => {
                   const otherFeature = allFeatures.find((f) => f.id === item.related_feature_id);
@@ -129,24 +131,24 @@ export function IssuesPanel({
                         </span>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
-                        <button
-                          type="button"
-                          className="flex items-center gap-1.5 rounded border border-primary/30 bg-accent px-2 py-0.5 text-[11px] text-foreground hover:bg-accent"
+                        <Button
+                          variant="outline"
+                          size="sm"
                           onClick={(e) => { e.stopPropagation(); onResolveUnitOverlap(feature.id, item.related_feature_id!); }}
                           disabled={overlapResolving}
                         >
-                          <span className="inline-block h-2 w-2 rounded-full bg-primary" />
-                          {overlapResolving ? t("Applying...", "適用中...") : t(`Keep "${thisLabel}"`, `「${thisLabel}」を残す`)}
-                        </button>
-                        <button
-                          type="button"
-                          className="flex items-center gap-1.5 rounded border border-warning/30 bg-warning/10 px-2 py-0.5 text-[11px] text-warning hover:bg-warning/20"
+                          <span className="h-2 w-2 shrink-0 rounded-full bg-primary" />
+                          {overlapResolving ? t("Applying…", "適用中…") : t(`Keep "${thisLabel}"`, `「${thisLabel}」を残す`)}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
                           onClick={(e) => { e.stopPropagation(); onResolveUnitOverlap(item.related_feature_id!, feature.id); }}
                           disabled={overlapResolving}
                         >
-                          <span className="inline-block h-2 w-2 rounded-full bg-warning" />
-                          {overlapResolving ? t("Applying...", "適用中...") : t(`Keep "${otherLabel}"`, `「${otherLabel}」を残す`)}
-                        </button>
+                          <span className="h-2 w-2 shrink-0 rounded-full bg-warning" />
+                          {overlapResolving ? t("Applying…", "適用中…") : t(`Keep "${otherLabel}"`, `「${otherLabel}」を残す`)}
+                        </Button>
                       </div>
                     </div>
                   );
@@ -159,16 +161,16 @@ export function IssuesPanel({
                         const candidateFeature = allFeatures.find((f) => f.id === unitId);
                         const label = candidateFeature ? (featureName(candidateFeature) || unitId.slice(0, 8)) : unitId.slice(0, 8);
                         return (
-                          <button
+                          <Button
                             key={unitId}
-                            type="button"
-                            className="flex items-center gap-1.5 rounded border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] text-success hover:bg-success/20 disabled:opacity-50"
+                            variant="outline"
+                            size="sm"
                             onClick={(e) => { e.stopPropagation(); onSnapOpening(feature.id, unitId); }}
                             disabled={openingSnapping}
                           >
-                            <span className="inline-block h-2 w-2 rounded-full bg-success" />
-                            {openingSnapping ? t("Snapping...", "スナップ中...") : label}
-                          </button>
+                            <span className="h-2 w-2 shrink-0 rounded-full bg-success" />
+                            {openingSnapping ? t("Snapping…", "スナップ中…") : label}
+                          </Button>
                         );
                       })}
                     </div>

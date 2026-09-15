@@ -4,7 +4,9 @@ import { Layer, type LayerProps, type MapLayerMouseEvent, type MapRef, Source } 
 import { type ReviewFeature, type ReviewIssue, featureLayerKey, isLocatedFeature } from "./types";
 import { MapView } from "../shared/MapView";
 import { isFeatureOnFloor } from "./floorGroups";
-import { STREET_MAP_STYLE } from "../shared/streetMapStyle";
+import { useAppStore } from "../../store/useAppStore";
+import { MAP_BACKGROUND, STREET_MAP_STYLE } from "../shared/streetMapStyle";
+import { featureColorMatchExpr, featureColorMatchTail } from "../shared/featureColors";
 import { buildUnitFillColorExpr, buildUnitLineColorExpr, buildUnitOpacityExpr } from "../shared/unitCategoryColors";
 
 
@@ -26,17 +28,7 @@ const POLYGON_FILL_LAYER: LayerProps = {
   type: "fill",
   filter: ["==", ["geometry-type"], "Polygon"],
   paint: {
-    "fill-color": buildUnitFillColorExpr("_feature_type", [
-      "venue", "#334155",
-      "footprint", "#7c3aed",
-      "level", "#2563eb",
-      "fixture", "#14b8a6",
-      "section", "#0f766e",
-      "geofence", "#16a34a",
-      "kiosk", "#f97316",
-      "facility", "#a855f7",
-      "#64748b"
-    ]),
+    "fill-color": buildUnitFillColorExpr("_feature_type", featureColorMatchTail("fill")),
     "fill-opacity": buildUnitOpacityExpr("_feature_type", 1.0, 0.7)
   }
 } as unknown as LayerProps;
@@ -46,17 +38,7 @@ const POLYGON_LINE_LAYER: LayerProps = {
   type: "line",
   filter: ["==", ["geometry-type"], "Polygon"],
   paint: {
-    "line-color": buildUnitLineColorExpr("_feature_type", [
-      "venue", "#1e293b",
-      "footprint", "#6d28d9",
-      "level", "#1d4ed8",
-      "fixture", "#0f766e",
-      "section", "#0f766e",
-      "geofence", "#15803d",
-      "kiosk", "#ea580c",
-      "facility", "#7e22ce",
-      "#475569"
-    ]),
+    "line-color": buildUnitLineColorExpr("_feature_type", featureColorMatchTail("line")),
     "line-width": 1.5
   }
 } as unknown as LayerProps;
@@ -66,17 +48,7 @@ const LINE_LAYER: LayerProps = {
   type: "line",
   filter: ["==", ["geometry-type"], "LineString"],
   paint: {
-    "line-color": [
-      "match",
-      ["get", "_feature_type"],
-      "opening",
-      "#ea580c",
-      "detail",
-      "#0f766e",
-      "relationship",
-      "#7c3aed",
-      "#2563eb"
-    ],
+    "line-color": featureColorMatchExpr("_feature_type", "line"),
     "line-width": 2.5
   }
 };
@@ -86,19 +58,7 @@ const POINT_LAYER: LayerProps = {
   type: "circle",
   filter: ["==", ["geometry-type"], "Point"],
   paint: {
-    "circle-color": [
-      "match",
-      ["get", "_feature_type"],
-      "amenity",
-      "#16a34a",
-      "anchor",
-      "#2563eb",
-      "kiosk",
-      "#f97316",
-      "facility",
-      "#a855f7",
-      "#0ea5e9"
-    ],
+    "circle-color": featureColorMatchExpr("_feature_type", "fill"),
     "circle-radius": 5,
     "circle-stroke-color": "#ffffff",
     "circle-stroke-width": 1.2
@@ -298,12 +258,25 @@ export function MapPanel({
   // it, and fitBounds is a no-op until the map exists: without this gate the
   // review map opened on the hardcoded initial view and never framed the data.
   const [mapReady, setMapReady] = useState(false);
+  const theme = useAppStore((state) => state.theme);
 
   useEffect(() => {
     const map = mapRef.current?.getMap();
     if (!map || !map.getLayer("osm-raster")) return;
     map.setLayoutProperty("osm-raster", "visibility", showBasemap ? "visible" : "none");
-  }, [showBasemap]);
+  }, [showBasemap, mapReady]);
+
+  // Set imperatively rather than through `mapStyle`: swapping the style object
+  // tears down and rebuilds every source and layer on the map.
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !map.getLayer("background")) return;
+    map.setPaintProperty(
+      "background",
+      "background-color",
+      theme === "dark" ? MAP_BACKGROUND.dark : MAP_BACKGROUND.light
+    );
+  }, [theme, mapReady]);
 
   const toGeoJsonFeature = (feature: ReviewFeature) => ({
     type: "Feature" as const,

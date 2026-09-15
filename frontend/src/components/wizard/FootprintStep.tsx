@@ -3,13 +3,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchFootprintPreview, type FootprintPreview, type FootprintWizardState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
+  Field,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue
 } from "../ui";
-import { Field } from "./Field";
 import { useRegisterSave } from "./wizardSave";
 import { useAppStore } from "../../store/useAppStore";
 

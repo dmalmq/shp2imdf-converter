@@ -13,6 +13,7 @@ export {
   DialogTitle,
   DialogTrigger
 } from "./dialog";
+export { Field } from "./field";
 export { Input, type InputProps } from "./input";
 export { Metric } from "./metric";
 export { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "./popover";

@@ -1,3 +1,4 @@
+import { Globe, Moon, PanelLeft, Sun, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -43,7 +44,19 @@ import { type ReviewFeature, featureName, layerKeyBaseType, orderedLayerKeys } f
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
-import { Button } from "../components/ui";
+import {
+  Button,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger
+} from "../components/ui";
 import { StepIndicator } from "../components/shell/StepIndicator";
 
 
@@ -180,6 +193,10 @@ function buildShapefileDefaultsFromWizard(wizardState: WizardState | null): {
 }
 
 
+/** Radix Select has no empty-string value, so "no level chosen" needs one. */
+const BULK_NO_LEVEL = "__none__";
+
+
 export function ReviewPage() {
   const navigate = useNavigate();
   const sessionId = useAppStore((state) => state.sessionId);
@@ -188,6 +205,8 @@ export function ReviewPage() {
   const files = useAppStore((state) => state.files);
   const setFiles = useAppStore((state) => state.setFiles);
   const wizardState = useAppStore((state) => state.wizardState);
+  const theme = useAppStore((state) => state.theme);
+  const setTheme = useAppStore((state) => state.setTheme);
   const selectedFeatureIds = useAppStore((state) => state.selectedFeatureIds);
   const setSelectedFeatureIds = useAppStore((state) => state.setSelectedFeatureIds);
   const toggleSelectedFeatureId = useAppStore((state) => state.toggleSelectedFeatureId);
@@ -234,6 +253,7 @@ export function ReviewPage() {
   const [shapefileExportName, setShapefileExportName] = useState("");
   const [exportOptionsError, setExportOptionsError] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState("features");
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [activeIssueIndex, setActiveIssueIndex] = useState<number | null>(null);
   const [issuesPanelCollapsed, setIssuesPanelCollapsed] = useState(false);
@@ -1011,42 +1031,50 @@ export function ReviewPage() {
   return (
     <div className="flex h-screen flex-col bg-muted">
       {/* Top bar — mirrors AppShell but inline since review opts out of shell */}
-      <header className="flex h-12 items-center justify-between border-b border-border bg-card px-4 shadow-sm">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            className="flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+      {/* Review opts out of AppShell for its full-bleed layout, so it has to
+          carry the shell's own controls — the theme toggle was simply missing
+          here, which left dark mode unreachable once you reached Review. */}
+      <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-background px-4">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => setSidebarCollapsed((prev) => !prev)}
+            aria-label={sidebarCollapsed ? t("Show sidebar", "サイドバーを表示") : t("Hide sidebar", "サイドバーを非表示")}
             title={sidebarCollapsed ? t("Show sidebar", "サイドバーを表示") : t("Hide sidebar", "サイドバーを非表示")}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
-              <line x1="5.5" y1="2.5" x2="5.5" y2="13.5" />
-            </svg>
-          </button>
-          <span className="text-sm font-bold tracking-tight text-foreground">IMDF Converter</span>
+            <PanelLeft />
+          </Button>
+          <span className="text-[13px] font-semibold leading-[18px] tracking-tight text-foreground">
+            IMDF Converter
+          </span>
         </div>
 
         <StepIndicator />
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
-            onClick={() => {
-              const next = uiLanguage === "en" ? "ja" : "en";
-              setUiLanguage(next);
-            }}
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            aria-label={t("Switch theme", "テーマを切り替え")}
+            title={
+              theme === "dark"
+                ? t("Switch to light", "ライトに切り替え")
+                : t("Switch to dark", "ダークに切り替え")
+            }
+          >
+            {theme === "dark" ? <Sun /> : <Moon />}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setUiLanguage(uiLanguage === "en" ? "ja" : "en")}
             title={t("Switch UI language", "表示言語を切り替え")}
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="8" cy="8" r="6.5" />
-              <path d="M1.5 8h13" />
-              <path d="M8 1.5c-1.8 2-2.7 4-2.7 6.5s.9 4.5 2.7 6.5" />
-              <path d="M8 1.5c1.8 2 2.7 4 2.7 6.5s-.9 4.5-2.7 6.5" />
-            </svg>
+            <Globe className="h-3.5 w-3.5" />
             {uiLanguage === "en" ? "日本語" : "EN"}
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -1058,15 +1086,83 @@ export function ReviewPage() {
 
       {/* Main area: left sidebar + map + right sidebar */}
       <div className="flex flex-1 overflow-hidden">
-        {/* ── Left sidebar: Layers + Features ── */}
+        {/* ── Left sidebar: Features / Layers ── */}
+        {/* Both used to be stacked in one scroller, so the layer panel ate the
+            top 300px and the feature list — the thing you came here to work
+            through — started below the fold. */}
         {!sidebarCollapsed ? (
           <aside
             className="flex flex-col border-r border-border bg-card"
             style={{ width: sidebarWidth, minWidth: sidebarWidth }}
           >
-            <div className="flex-1 overflow-y-auto">
-              {/* Layers section (compact) */}
-              <div className="border-b border-border p-3">
+            <Tabs
+              value={sidebarTab}
+              onValueChange={setSidebarTab}
+              className="flex min-h-0 flex-1 flex-col"
+            >
+              <TabsList className="mx-3 mt-3 grid grid-cols-2">
+                <TabsTrigger value="features">
+                  {t("Features", "フィーチャー")}
+                </TabsTrigger>
+                <TabsTrigger value="layers">{t("Layers", "レイヤー")}</TabsTrigger>
+              </TabsList>
+
+              <TabsContent
+                value="features"
+                className="flex min-h-0 flex-1 flex-col data-[state=active]:mt-3"
+              >
+                {importProfile === "imdf_shapefile" ? (
+                  <VenueDetailsPanel
+                    venue={venueFeature}
+                    building={buildingFeature}
+                    address={addressFeature}
+                    language={wizardState?.project?.language ?? "en"}
+                    onSave={(featureId, properties) => void saveFeatureProperties(featureId, properties)}
+                    onRequestAutofill={requestAddressAutofill}
+                  />
+                ) : null}
+
+                {loading ? (
+                  <div className="flex flex-col gap-2 p-3">
+                    <SkeletonBlock className="h-6 w-full" />
+                    <SkeletonBlock className="h-6 w-full" />
+                    <SkeletonBlock className="h-6 w-full" />
+                    <SkeletonBlock className="h-6 w-full" />
+                    <SkeletonBlock className="h-6 w-full" />
+                  </div>
+                ) : (
+                  <>
+                    {filters.status ? (
+                      <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs leading-4 text-muted-foreground">
+                        <span>
+                          {t("Showing", "表示中")}:{" "}
+                          <span className="font-medium capitalize text-foreground">{filters.status}</span>
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="ml-auto h-auto px-1.5 py-0.5 text-xs font-normal"
+                          onClick={() => setFilters({ ...filters, status: undefined })}
+                        >
+                          {t("Clear", "解除")}
+                        </Button>
+                      </div>
+                    ) : null}
+                    <FeatureList
+                      features={filteredFeatures}
+                      selectedFeatureIds={selectedFeatureIds}
+                      validationIssues={allValidationIssues}
+                      onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
+                      onSelectionChange={(ids) => setSelectedFeatureIds(ids)}
+                    />
+                  </>
+                )}
+              </TabsContent>
+
+              <TabsContent
+                value="layers"
+                className="min-h-0 flex-1 overflow-y-auto p-3 data-[state=active]:mt-1"
+              >
                 <LayerTree
                   featureTypes={layerKeys}
                   layerVisibility={layerVisibility}
@@ -1080,95 +1176,58 @@ export function ReviewPage() {
                   onOverlayVisibilityChange={setOverlayVisibility}
                   onShowBasemapChange={setShowBasemap}
                 />
-              </div>
-
-              {importProfile === "imdf_shapefile" ? (
-                <VenueDetailsPanel
-                  venue={venueFeature}
-                  building={buildingFeature}
-                  address={addressFeature}
-                  language={wizardState?.project?.language ?? "en"}
-                  onSave={(featureId, properties) => void saveFeatureProperties(featureId, properties)}
-                  onRequestAutofill={requestAddressAutofill}
-                />
-              ) : null}
-
-              {/* Features list */}
-              {loading ? (
-                <div className="space-y-2 p-3">
-                  <SkeletonBlock className="h-6 w-full" />
-                  <SkeletonBlock className="h-6 w-full" />
-                  <SkeletonBlock className="h-6 w-full" />
-                  <SkeletonBlock className="h-6 w-full" />
-                  <SkeletonBlock className="h-6 w-full" />
-                </div>
-              ) : (
-                <>
-                  {filters.status ? (
-                    <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
-                      <span>
-                        {t("Showing", "表示中")}: <span className="font-medium capitalize text-foreground">{filters.status}</span>
-                      </span>
-                      <button
-                        type="button"
-                        className="ml-auto rounded-sm px-1.5 py-0.5 text-[10px] hover:bg-muted"
-                        onClick={() => setFilters({ ...filters, status: undefined })}
-                      >
-                        {t("Clear", "解除")}
-                      </button>
-                    </div>
-                  ) : null}
-                  <FeatureList
-                    features={filteredFeatures}
-                    selectedFeatureIds={selectedFeatureIds}
-                    validationIssues={allValidationIssues}
-                    onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
-                    onSelectionChange={(ids) => setSelectedFeatureIds(ids)}
-                  />
-                </>
-              )}
-            </div>
+              </TabsContent>
+            </Tabs>
 
             {/* Bulk actions bar (when multiple selected) */}
             {selectedFeatureIds.length > 1 ? (
-              <div className="border-t border-border bg-muted p-2">
-                <div className="mb-1.5 text-[11px] font-medium text-muted-foreground">
+              <div className="shrink-0 border-t border-border bg-muted p-2.5">
+                <div className="mb-2 font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
                   {selectedFeatureIds.length} {t("selected", "選択中")}
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  <select
-                    className="h-6 rounded-sm border border-border px-1.5 text-[11px]"
-                    value={bulkLevel}
-                    onChange={(e) => setBulkLevel(e.target.value)}
-                  >
-                    <option value="">{t("Level...", "レベル...")}</option>
-                    {levelOptions.map((o) => (
-                      <option key={o.id} value={o.id}>{o.label}</option>
-                    ))}
-                  </select>
-                  <Button variant="outline" size="sm" onClick={() => void applyBulkLevel()} disabled={!bulkLevel}>
-                    {t("Apply", "適用")}
-                  </Button>
-                  <input
-                    className="h-6 w-20 rounded-sm border border-border px-1.5 text-[11px]"
-                    placeholder={t("Category", "カテゴリ")}
-                    value={bulkCategory}
-                    onChange={(e) => setBulkCategory(e.target.value)}
-                  />
-                  <Button variant="outline" size="sm" onClick={() => void applyBulkCategory()} disabled={!bulkCategory}>
-                    {t("Apply", "適用")}
-                  </Button>
-                  <input
-                    className="h-6 w-20 rounded-sm border border-border px-1.5 text-[11px]"
-                    placeholder={t("Merge name", "結合名")}
-                    value={mergeName}
-                    onChange={(e) => setMergeName(e.target.value)}
-                  />
-                  <Button variant="outline" size="sm" onClick={() => void mergeSelectedUnits()}>
-                    {t("Merge", "結合")}
-                  </Button>
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex gap-1.5">
+                    <Select value={bulkLevel || BULK_NO_LEVEL} onValueChange={(value) => setBulkLevel(value === BULK_NO_LEVEL ? "" : value)}>
+                      <SelectTrigger className="h-8 flex-1" aria-label={t("Level", "レベル")}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={BULK_NO_LEVEL}>{t("Level…", "レベル…")}</SelectItem>
+                        {levelOptions.map((o) => (
+                          <SelectItem key={o.id} value={o.id}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button variant="outline" size="sm" onClick={() => void applyBulkLevel()} disabled={!bulkLevel}>
+                      {t("Apply", "適用")}
+                    </Button>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <Input
+                      className="h-8 flex-1"
+                      placeholder={t("Category", "カテゴリ")}
+                      value={bulkCategory}
+                      onChange={(e) => setBulkCategory(e.target.value)}
+                    />
+                    <Button variant="outline" size="sm" onClick={() => void applyBulkCategory()} disabled={!bulkCategory}>
+                      {t("Apply", "適用")}
+                    </Button>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <Input
+                      className="h-8 flex-1"
+                      placeholder={t("Merge name", "結合名")}
+                      value={mergeName}
+                      onChange={(e) => setMergeName(e.target.value)}
+                    />
+                    <Button variant="outline" size="sm" onClick={() => void mergeSelectedUnits()}>
+                      {t("Merge", "結合")}
+                    </Button>
+                  </div>
                   <Button variant="destructive" size="sm" onClick={() => void deleteSelected()}>
-                    {t("Delete", "削除")}
+                    {t("Delete selected", "選択を削除")}
                   </Button>
                 </div>
               </div>
@@ -1205,19 +1264,21 @@ export function ReviewPage() {
             className="flex flex-col border-l border-border bg-card overflow-y-auto"
             style={{ width: 340, minWidth: 340 }}
           >
-            <div className="flex items-center justify-between border-b border-border px-3 py-2">
-              <span className="text-xs font-medium text-foreground">{t("Properties", "プロパティ")}</span>
-              <button
-                type="button"
-                className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
+              <span className="text-[13px] font-semibold leading-[18px] text-foreground">
+                {t("Properties", "プロパティ")}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                aria-label={t("Close properties", "プロパティを閉じる")}
                 onClick={() => setRightSidebarOpen(false)}
               >
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                  <path d="M2 2l6 6M8 2l-6 6" />
-                </svg>
-              </button>
+                <X className="h-3.5 w-3.5" />
+              </Button>
             </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3">
               {selectedFeatureIssues.length > 0 ? (
                 <IssuesPanel
                   issues={selectedFeatureIssues}

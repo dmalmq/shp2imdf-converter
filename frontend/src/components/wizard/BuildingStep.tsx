@@ -4,6 +4,7 @@ import type { AddressInput, BuildingWizardState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
   Button,
+  Field,
   Input,
   Select,
   SelectContent,
@@ -11,7 +12,6 @@ import {
   SelectTrigger,
   SelectValue
 } from "../ui";
-import { Field } from "./Field";
 import { ProvinceSelect } from "./ProvinceSelect";
 import { useRegisterSave } from "./wizardSave";
 
