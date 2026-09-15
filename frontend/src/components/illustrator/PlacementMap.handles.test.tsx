@@ -242,18 +242,19 @@ test("transform handles stay unmounted when the active floor is frozen in place"
 
 test("map off shows drawing-only mode and can switch back to streets", () => {
   renderMap();
-  const street = screen.getByRole("button", { name: "Street" });
-  const mapOff = screen.getByRole("button", { name: "Map off" });
+  fireEvent.click(screen.getByRole("button", { name: "Basemap" }));
+  expect(screen.getByRole("button", { name: "Street" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Map off" })).toHaveAttribute("aria-pressed", "false");
 
-  expect(street).toHaveAttribute("aria-pressed", "true");
-  expect(mapOff).toHaveAttribute("aria-pressed", "false");
-  fireEvent.click(mapOff);
-  expect(street).toHaveAttribute("aria-pressed", "false");
-  expect(mapOff).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "Map off" }));
+  fireEvent.click(screen.getByRole("button", { name: "Basemap" }));
+  expect(screen.getByRole("button", { name: "Street" })).toHaveAttribute("aria-pressed", "false");
+  expect(screen.getByRole("button", { name: "Map off" })).toHaveAttribute("aria-pressed", "true");
 
-  fireEvent.click(street);
-  expect(street).toHaveAttribute("aria-pressed", "true");
-  expect(mapOff).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(screen.getByRole("button", { name: "Street" }));
+  fireEvent.click(screen.getByRole("button", { name: "Basemap" }));
+  expect(screen.getByRole("button", { name: "Street" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Map off" })).toHaveAttribute("aria-pressed", "false");
 });
 
 test("artwork layers can be hidden independently for each floor", () => {

@@ -168,6 +168,15 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
         <p className="text-xs leading-4 text-muted-foreground">{nextStep}</p>
       </div>
 
+      {pinnedBlocked ? (
+        <p className="text-xs leading-4 text-destructive">
+          {t(
+            `Unpin ${floorLabel} before fitting it with control points.`,
+            `基準点で合わせる前に「${floorLabel}」の固定を解除してください。`
+          )}
+        </p>
+      ) : null}
+
       {groupBlocked ? (
         <p className="text-xs leading-4 text-destructive">
           {t(

@@ -444,6 +444,15 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
             })}
           </ol>
 
+          {pinnedBlocked ? (
+            <p className="text-xs leading-4 text-destructive">
+              {t(
+                `Unpin ${activeFloor?.label ?? state.activeFloorLabel} before applying an alignment.`,
+                `位置合わせを適用する前に「${activeFloor?.label ?? state.activeFloorLabel}」の固定を解除してください。`
+              )}
+            </p>
+          ) : null}
+
           {groupBlocked ? (
             <p className="text-xs leading-4 text-destructive">
               {t(
