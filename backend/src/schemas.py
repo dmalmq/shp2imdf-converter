@@ -45,6 +45,22 @@ class IsoSubdivisionsResponse(BaseModel):
     subdivisions: list[IsoSubdivision] = Field(default_factory=list)
 
 
+class FeatureTypeOption(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    feature_type: str
+    geometry: Literal["polygon", "line", "point", "null", "any"]
+    has_category: bool
+    categories: list[str] | None = None
+    default_category: str | None = None
+
+
+class FeatureTypeCatalogResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    feature_types: list[FeatureTypeOption] = Field(default_factory=list)
+
+
 class ImportedFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -498,6 +514,7 @@ class PatchFeatureRequest(BaseModel):
 
     properties: dict[str, Any] | None = None
     geometry: dict[str, Any] | None = None
+    feature_type: str | None = None
 
 
 class BulkPatchFeaturesRequest(BaseModel):
@@ -505,6 +522,7 @@ class BulkPatchFeaturesRequest(BaseModel):
 
     feature_ids: list[str] = Field(default_factory=list)
     properties: dict[str, Any] | None = None
+    feature_type: str | None = None
     action: Literal["patch", "delete", "merge_units"] = "patch"
     merge_name: str | None = None
 

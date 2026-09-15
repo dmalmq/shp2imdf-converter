@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Feature, FeatureCollection, LineString, MultiLineString, MultiPolygon, Polygon } from "geojson";
+import type {
+  Feature,
+  FeatureCollection,
+  Geometry,
+  LineString,
+  MultiLineString,
+  MultiPolygon,
+  Polygon
+} from "geojson";
+import { Pin } from "lucide-react";
 import {
   Layer,
   Marker,
@@ -55,6 +64,7 @@ import {
   EMPTY_FEATURE_COLLECTION,
   OVERLAY_SLOT_LAYER_ID,
   OVERLAY_SLOT_SOURCE_ID,
+  artworkLayerFilter,
   floorFillLayerId,
   floorLineLayerId,
   floorSourceId,
@@ -172,6 +182,39 @@ export type FloorLayer = {
   color: string;
 };
 
+type ArtworkLayerSummary = {
+  name: string;
+  featureCount: number;
+};
+
+type FloorArtworkLayers = {
+  floorLabel: string;
+  color: string;
+  layers: ArtworkLayerSummary[];
+};
+
+function artworkLayerName(feature: Feature): string {
+  const aiLayer = feature.properties?.ai_layer;
+  if (typeof aiLayer === "string") return aiLayer;
+  const sourceTable = feature.properties?.source_table;
+  return typeof sourceTable === "string" ? sourceTable : "";
+}
+
+function summarizeArtworkLayers(floors: FloorLayer[]): FloorArtworkLayers[] {
+  return floors.map((floor) => {
+    const counts = new Map<string, number>();
+    for (const feature of floor.features) {
+      const name = artworkLayerName(feature);
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return {
+      floorLabel: floor.label,
+      color: floor.color,
+      layers: [...counts].map(([name, featureCount]) => ({ name, featureCount }))
+    };
+  });
+}
+
 /** Existing GIS data drawn under the artwork purely to align against. */
 export type ReferenceLayer = {
   name: string;
@@ -190,43 +233,55 @@ export type ArtworkShapeSelection = {
 };
 
 export function buildShapeMatchOverlay(
-  selection: ArtworkShapeSelection,
-  currentTransform: SimilarityTransform,
+  selection: ArtworkShapeSelection | null,
+  currentTransform: SimilarityTransform | null,
   preview?: {
     suggestion: IllustratorShapeMatchSuggestion;
     transform: SimilarityTransform;
   } | null
 ): FeatureCollection {
-  const selected = transformGeoJson(
-    { type: "FeatureCollection", features: [selection.feature] },
-    currentTransform
-  ).features[0];
-  if (!selected?.geometry) return { type: "FeatureCollection", features: [] };
-  const features: Feature[] = [
-    {
-      type: "Feature",
-      properties: { kind: "selected" },
-      geometry: selected.geometry
+  const features: Feature[] = [];
+
+  if (selection && currentTransform) {
+    const selected = transformGeoJson(
+      { type: "FeatureCollection", features: [selection.feature] },
+      currentTransform
+    ).features[0];
+    if (selected?.geometry) {
+      features.push({
+        type: "Feature",
+        properties: { kind: "selected" },
+        geometry: selected.geometry
+      });
     }
-  ];
+  }
 
   if (preview) {
-    const proposed = transformGeoJson(
-      { type: "FeatureCollection", features: [selection.feature] },
-      preview.transform
-    ).features[0];
-    if (!proposed?.geometry) return { type: "FeatureCollection", features };
+    features.push({
+      type: "Feature",
+      properties: {
+        kind: "reference",
+        rank: preview.suggestion.rank,
+        label: `#${preview.suggestion.rank}`
+      },
+      geometry: preview.suggestion.reference_geometry
+    });
+
+    if (selection) {
+      const proposed = transformGeoJson(
+        { type: "FeatureCollection", features: [selection.feature] },
+        preview.transform
+      ).features[0];
+      if (proposed?.geometry) {
+        features.push({
+          type: "Feature",
+          properties: { kind: "preview" },
+          geometry: proposed.geometry
+        });
+      }
+    }
+
     features.push(
-      {
-        type: "Feature",
-        properties: { kind: "reference" },
-        geometry: preview.suggestion.reference_geometry
-      },
-      {
-        type: "Feature",
-        properties: { kind: "preview" },
-        geometry: proposed.geometry
-      },
       ...preview.suggestion.residual_vectors.map((vector) => ({
         type: "Feature" as const,
         properties: { kind: "residual", distance_m: vector.distance_m },
@@ -239,6 +294,27 @@ export function buildShapeMatchOverlay(
   }
 
   return { type: "FeatureCollection", features };
+}
+
+function geometryBounds(geometry: Geometry): [[number, number], [number, number]] | null {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const position of geometryPositions(geometry)) {
+    const [x, y] = position;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  return Number.isFinite(minX)
+    ? [
+        [minX, minY],
+        [maxX, maxY]
+      ]
+    : null;
 }
 
 export type RegionCorners = [number, number][];
@@ -376,6 +452,8 @@ export function PlacementMap({
   const [basemap, setBasemap] = useState<BasemapId>("osm");
   const [basemapOpen, setBasemapOpen] = useState(false);
   const [view, setView] = useState<ArtworkView>(DEFAULT_ARTWORK_VIEW);
+  const [artworkLayersOpen, setArtworkLayersOpen] = useState(false);
+  const [hiddenArtworkLayers, setHiddenArtworkLayers] = useState<Record<string, string[]>>({});
   const [rubber, setRubber] = useState<
     { x0: number; y0: number; x1: number; y1: number } | null
   >(null);
@@ -383,11 +461,45 @@ export function PlacementMap({
     () => ({ ...BASEMAP_STYLES[basemap], glyphs: PLACEMENT_GLYPHS }),
     [basemap]
   );
+  const artworkLayerGroups = useMemo(() => summarizeArtworkLayers(floors), [floors]);
+  const hiddenArtworkLayerCount = artworkLayerGroups.reduce(
+    (count, floor) =>
+      count +
+      floor.layers.filter((layer) =>
+        (hiddenArtworkLayers[floor.floorLabel] ?? []).includes(layer.name)
+      ).length,
+    0
+  );
 
   const activeFloor =
     state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
   const activeLayer = floors.find((f) => f.label === activeFloor?.label) ?? floors[0];
   const activeTransform = activeFloor ? resolvedTransform(state, activeFloor) : null;
+
+  const setArtworkLayerVisible = (floorLabel: string, layerName: string, visible: boolean) => {
+    setHiddenArtworkLayers((current) => {
+      const next = new Set(current[floorLabel] ?? []);
+      if (visible) next.delete(layerName);
+      else next.add(layerName);
+      if (next.size > 0) return { ...current, [floorLabel]: [...next] };
+      const remaining = { ...current };
+      delete remaining[floorLabel];
+      return remaining;
+    });
+  };
+
+  const setFloorArtworkLayersVisible = (
+    floorLabel: string,
+    layerNames: string[],
+    visible: boolean
+  ) => {
+    setHiddenArtworkLayers((current) => {
+      if (!visible) return { ...current, [floorLabel]: layerNames };
+      const remaining = { ...current };
+      delete remaining[floorLabel];
+      return remaining;
+    });
+  };
 
   // initialViewState only applies on mount, so a search result would otherwise
   // move the artwork off-screen while the camera stayed put.
@@ -446,12 +558,18 @@ export function PlacementMap({
   );
 
   const shapeMatchData = useMemo(
-    () =>
-      selectedShape && activeTransform
-        ? buildShapeMatchOverlay(selectedShape, activeTransform, shapeMatchPreview)
-        : EMPTY_FEATURE_COLLECTION,
+    () => buildShapeMatchOverlay(selectedShape, activeTransform, shapeMatchPreview),
     [selectedShape, activeTransform, shapeMatchPreview]
   );
+  const previewGeometry = shapeMatchPreview?.suggestion.reference_geometry ?? null;
+  const previewRank = shapeMatchPreview?.suggestion.rank ?? null;
+
+  useEffect(() => {
+    if (!ready || !previewGeometry) return;
+    const bounds = geometryBounds(previewGeometry);
+    if (!bounds) return;
+    mapRef.current?.fitBounds(bounds, { padding: 72, duration: 350, maxZoom: 19 });
+  }, [ready, previewGeometry, previewRank]);
 
   const regionData = useMemo(
     () => buildRegionOverlay(regionSource, regionTarget),
@@ -655,6 +773,7 @@ export function PlacementMap({
             floor.color,
             isImageryBasemap(basemap)
           );
+          const hiddenLayers = hiddenArtworkLayers[floor.label] ?? [];
           const layout = {
             visibility: artworkVisible ? paint.layout.visibility : ("none" as const)
           };
@@ -669,7 +788,7 @@ export function PlacementMap({
                 id={floorFillLayerId(floor.label)}
                 type="fill"
                 beforeId={OVERLAY_SLOT_LAYER_ID}
-                filter={["==", ["geometry-type"], "Polygon"]}
+                filter={artworkLayerFilter(hiddenLayers, true)}
                 layout={layout}
                 paint={paint.fill}
               />
@@ -677,6 +796,7 @@ export function PlacementMap({
                 id={floorLineLayerId(floor.label)}
                 type="line"
                 beforeId={OVERLAY_SLOT_LAYER_ID}
+                filter={artworkLayerFilter(hiddenLayers)}
                 layout={layout}
                 paint={paint.line}
               />
@@ -775,13 +895,30 @@ export function PlacementMap({
             id="placement-shape-match-reference-fill"
             type="fill"
             filter={["==", ["get", "kind"], "reference"]}
-            paint={{ "fill-color": "#f59e0b", "fill-opacity": 0.14 }}
+            paint={{ "fill-color": "#f59e0b", "fill-opacity": 0.2 }}
           />
           <Layer
             id="placement-shape-match-reference-line"
             type="line"
             filter={["==", ["get", "kind"], "reference"]}
             paint={{ "line-color": "#f59e0b", "line-width": 3 }}
+          />
+          <Layer
+            id="placement-shape-match-reference-label"
+            type="symbol"
+            filter={["==", ["get", "kind"], "reference"]}
+            layout={{
+              "text-field": ["get", "label"],
+              "text-font": ["Open Sans Semibold"],
+              "text-size": 12,
+              "text-allow-overlap": true,
+              "text-ignore-placement": true
+            }}
+            paint={{
+              "text-color": "#92400e",
+              "text-halo-color": "#fffbeb",
+              "text-halo-width": 3
+            }}
           />
           <Layer
             id="placement-shape-match-preview-fill"
@@ -857,6 +994,7 @@ export function PlacementMap({
         !shapePickActive &&
         !regionPickStage &&
         activeFloor &&
+        !activeFloor.pinned &&
         activeTransform &&
         activeLayer &&
         gizmo ? (
@@ -943,49 +1081,68 @@ export function PlacementMap({
           user gets a clear look at the floor being boxed. */}
       <div className="absolute left-3 top-3 z-20 flex flex-col gap-2">
         <div className="flex flex-wrap gap-1 rounded-md bg-popover/95 p-1 text-popover-foreground shadow-md">
+          {floors.map((floor) => {
+            const floorState = state.floors.find((item) => item.label === floor.label);
+            const linked = floorState?.linked ?? true;
+            const pinned = floorState?.pinned ?? false;
+            const status = pinned
+              ? t("(pinned)", "（固定）")
+              : linked
+                ? ""
+                : t("(unlinked)", "（非連動）");
+            return (
+              <div key={floor.label} className="flex items-center gap-0.5">
+                <Button
+                  size="sm"
+                  variant={floor.label === state.activeFloorLabel ? "default" : "ghost"}
+                  className={cn(
+                    floor.label === state.activeFloorLabel &&
+                      "bg-signal text-signal-foreground hover:bg-signal/90"
+                  )}
+                  aria-pressed={floor.label === state.activeFloorLabel}
+                  onClick={() => dispatch({ type: "setActiveFloor", label: floor.label })}
+                  aria-label={status ? `${floor.label} ${status}` : undefined}
+                  title={status ? `${floor.label} ${status}` : floor.label}
+                >
+                  {pinned ? (
+                    <Pin aria-hidden="true" size={10} className="mr-0.5 fill-current" />
+                  ) : linked ? null : (
+                    <span
+                      aria-hidden="true"
+                      className="mr-1 inline-block h-1 w-1 rounded-full bg-current"
+                    />
+                  )}
+                  {floor.label}
+                </Button>
+                <Button
+                  size="icon"
+                  className="h-8 w-8"
+                  variant={pinned ? "default" : "ghost"}
+                  aria-pressed={pinned}
+                  aria-label={t(
+                    `${pinned ? "Unpin" : "Pin"} ${floor.label}`,
+                    `${floor.label}を${pinned ? "固定解除" : "固定"}`
+                  )}
+                  title={t(
+                    pinned
+                      ? `Unpin ${floor.label} to allow placement changes`
+                      : `Pin ${floor.label} at its current position`,
+                    pinned
+                      ? `${floor.label}の固定を解除して位置変更を許可`
+                      : `${floor.label}を現在の位置に固定`
+                  )}
+                  onClick={() =>
+                    dispatch({ type: "setFloorPinned", label: floor.label, pinned: !pinned })
+                  }
+                >
+                  <Pin aria-hidden="true" size={12} fill={pinned ? "currentColor" : "none"} />
+                </Button>
+              </div>
+            );
+          })}
           {floors.length > 1 ? (
             <>
-              {floors.map((floor) => {
-                const linked = state.floors.find((f) => f.label === floor.label)?.linked ?? true;
-                return (
-                  <Button
-                    key={floor.label}
-                    size="sm"
-                    variant={floor.label === state.activeFloorLabel ? "default" : "ghost"}
-                    className={cn(
-                      floor.label === state.activeFloorLabel &&
-                        "bg-signal text-signal-foreground hover:bg-signal/90"
-                    )}
-                    // The deleted dropdown announced its current value; the
-                    // pills are the only floor control now, so the active one
-                    // must expose the state, not just the colour.
-                    aria-pressed={floor.label === state.activeFloorLabel}
-                    onClick={() => dispatch({ type: "setActiveFloor", label: floor.label })}
-                    aria-label={
-                      linked ? undefined : `${floor.label} ${t("(unlinked)", "（非連動）")}`
-                    }
-                    title={
-                      linked
-                        ? floor.label
-                        : `${floor.label} ${t("(unlinked)", "（非連動）")}`
-                    }
-                  >
-                    {/* A dot, not colour alone, so the state survives a
-                        colour-vision deficiency. */}
-                    {linked ? null : (
-                      <span
-                        aria-hidden="true"
-                        className="mr-1 inline-block h-1 w-1 rounded-full bg-current"
-                      />
-                    )}
-                    {floor.label}
-                  </Button>
-                );
-              })}
               <span aria-hidden="true" className="mx-1 w-px self-stretch bg-border" />
-              {/* What gestures act on: the whole linked group while aligning the
-                  building as one, or the selected floor for final per-floor
-                  nudges. Sits with the pills because it pairs with floor switching. */}
               <Button
                 size="sm"
                 variant={mode === "group" ? "default" : "ghost"}
@@ -1011,9 +1168,6 @@ export function PlacementMap({
                 {t("Individual", "個別")}
               </Button>
               <span aria-hidden="true" className="mx-1 w-px self-stretch bg-border" />
-              {/* Isolating the selected floor sits with the floor pills rather
-                  than in the sidebar: it is a view option reached for while
-                  watching the map, exactly like the basemap switcher below. */}
               <Button
                 size="sm"
                 variant={view.others === "hidden" ? "default" : "ghost"}
@@ -1029,6 +1183,143 @@ export function PlacementMap({
             </>
           ) : null}
         </div>
+        {artworkLayerGroups.some((floor) => floor.layers.length > 0) ? (
+          <div className="w-fit">
+            <Button
+              size="sm"
+              variant={artworkLayersOpen ? "default" : "ghost"}
+              aria-expanded={artworkLayersOpen}
+              aria-controls="placement-artwork-layers"
+              aria-label={
+                hiddenArtworkLayerCount > 0
+                  ? t(
+                      `Artwork layers, ${hiddenArtworkLayerCount} hidden`,
+                      `アートワークレイヤー、${hiddenArtworkLayerCount}件を非表示`
+                    )
+                  : t("Artwork layers", "アートワークレイヤー")
+              }
+              title={t(
+                "Show or hide Illustrator layers for each floor",
+                "各フロアのIllustratorレイヤーを表示・非表示にする"
+              )}
+              onClick={() => setArtworkLayersOpen((open) => !open)}
+            >
+              {t("Layers", "レイヤー")}
+              {hiddenArtworkLayerCount > 0 ? (
+                <span className="ml-1 rounded-full bg-white/25 px-1.5 text-[10px]">
+                  {hiddenArtworkLayerCount}
+                </span>
+              ) : null}
+            </Button>
+
+            {artworkLayersOpen ? (
+              <div
+                id="placement-artwork-layers"
+                className="mt-2 max-h-[55vh] w-72 overflow-y-auto rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-md"
+              >
+                <p className="text-xs font-semibold">{t("Artwork layers", "アートワークレイヤー")}</p>
+                <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+                  {t(
+                    "Hide layers to isolate the area you want to match. Export is unchanged.",
+                    "レイヤーを隠して照合したい範囲を見やすくします。書き出しには影響しません。"
+                  )}
+                </p>
+
+                <div className="mt-3 space-y-3">
+                  {artworkLayerGroups
+                    .filter((floor) => floor.layers.length > 0)
+                    .map((floor, index) => {
+                      const hidden = hiddenArtworkLayers[floor.floorLabel] ?? [];
+                      const allHidden = floor.layers.every((layer) => hidden.includes(layer.name));
+                      const floorHeadingId = `artwork-layer-floor-${index}`;
+                      return (
+                        <section
+                          key={floor.floorLabel}
+                          aria-labelledby={floorHeadingId}
+                          className="border-t border-border pt-2 first:border-t-0 first:pt-0"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <span
+                                aria-hidden="true"
+                                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                style={{ backgroundColor: floor.color }}
+                              />
+                              <span id={floorHeadingId} className="truncate text-xs font-semibold">
+                                {floor.floorLabel}
+                              </span>
+                              {floor.floorLabel === state.activeFloorLabel ? (
+                                <span className="text-[10px] text-muted-foreground">
+                                  {t("Active", "選択中")}
+                                </span>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              className="shrink-0 text-[10px] font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              aria-label={t(
+                                `${allHidden ? "Show" : "Hide"} all layers on ${floor.floorLabel}`,
+                                `${floor.floorLabel} の全レイヤーを${allHidden ? "表示" : "非表示"}`
+                              )}
+                              onClick={() =>
+                                setFloorArtworkLayersVisible(
+                                  floor.floorLabel,
+                                  floor.layers.map((layer) => layer.name),
+                                  allHidden
+                                )
+                              }
+                            >
+                              {allHidden ? t("Show all", "すべて表示") : t("Hide all", "すべて非表示")}
+                            </button>
+                          </div>
+
+                          <ul className="mt-1 space-y-0.5">
+                            {floor.layers.map((layer) => {
+                              const displayName =
+                                layer.name || t("Unlayered artwork", "レイヤーなし");
+                              const visible = !hidden.includes(layer.name);
+                              return (
+                                <li key={layer.name || "__unlayered"}>
+                                  <label
+                                    className={`flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-muted ${
+                                      visible ? "" : "opacity-55"
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      className="accent-[#2563eb]"
+                                      checked={visible}
+                                      aria-label={t(
+                                        `${displayName} on ${floor.floorLabel}`,
+                                        `${floor.floorLabel} の ${displayName}`
+                                      )}
+                                      onChange={(event) =>
+                                        setArtworkLayerVisible(
+                                          floor.floorLabel,
+                                          layer.name,
+                                          event.target.checked
+                                        )
+                                      }
+                                    />
+                                    <span className="min-w-0 flex-1 truncate" title={displayName}>
+                                      {displayName}
+                                    </span>
+                                    <span className="text-[10px] tabular-nums text-muted-foreground">
+                                      {layer.featureCount}
+                                    </span>
+                                  </label>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </section>
+                      );
+                    })}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {/* Tools, not geometry: things you reach for occasionally sit opposite the

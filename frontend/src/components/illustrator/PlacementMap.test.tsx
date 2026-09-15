@@ -22,7 +22,10 @@ import {
 } from "./PlacementMap";
 
 
-function stateWith(floors: { label: string; linked: boolean }[], active: string): PlacementState {
+function stateWith(
+  floors: { label: string; linked: boolean; pinned?: boolean }[],
+  active: string
+): PlacementState {
   return {
     frame: { rotationDeg: 0, metresPerPoint: DEFAULT_METRES_PER_POINT, workingCrs: "EPSG:6677" },
     activeFloorLabel: active,
@@ -30,6 +33,7 @@ function stateWith(floors: { label: string; linked: boolean }[], active: string)
     floors: floors.map((floor) => ({
       label: floor.label,
       linked: floor.linked,
+      pinned: floor.pinned ?? false,
       artworkAnchor: [50, 50] as [number, number],
       mapAnchor: [139.7671, 35.6812] as [number, number],
       controlPoints: [],
@@ -101,7 +105,10 @@ const ONE_LAYER: FloorLayer[] = [
   { label: "1F", features: [], bounds: [0, 0, 1, 1], color: "#3b82f6" }
 ];
 
-function renderMap(layers: FloorLayer[], floors: { label: string; linked: boolean }[]) {
+function renderMap(
+  layers: FloorLayer[],
+  floors: { label: string; linked: boolean; pinned?: boolean }[]
+) {
   render(
     <PlacementMap
       mode="group"
@@ -170,9 +177,62 @@ test("the Group/Individual switch reflects the mode and reports changes", () => 
   expect(seen).toEqual(["individual"]);
 });
 
+
 test("no mode switch with a single floor — there is nothing to group", () => {
   renderMap(ONE_LAYER, [{ label: "1F", linked: true }]);
   expect(screen.queryByRole("button", { name: "Individual" })).toBeNull();
+});
+
+test("a single floor still has a pin control", () => {
+  renderMap(ONE_LAYER, [{ label: "1F", linked: true }]);
+  expect(screen.getByRole("button", { name: "Pin 1F" })).toBeInTheDocument();
+});
+
+test("a frozen floor carries the pinned marker in its accessible name", () => {
+  render(
+    <PlacementMap
+      mode="group"
+      onModeChange={() => {}}
+      floors={LAYERS}
+      state={stateWith(
+        [
+          { label: "1F", linked: false, pinned: true },
+          { label: "2F", linked: true }
+        ],
+        "1F"
+      )}
+      dispatch={() => {}}
+      pickStage={null}
+      onPickArtwork={() => {}}
+      onPickMap={() => {}}
+    />
+  );
+  expect(screen.getByRole("button", { name: /pinned/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Unpin 1F" })).toBeEnabled();
+});
+
+test("the pin control dispatches setFloorPinned for that floor", () => {
+  const seen: { type: string; label?: string; pinned?: boolean }[] = [];
+  render(
+    <PlacementMap
+      mode="group"
+      onModeChange={() => {}}
+      floors={LAYERS}
+      state={stateWith(
+        [
+          { label: "1F", linked: true },
+          { label: "2F", linked: true }
+        ],
+        "1F"
+      )}
+      dispatch={(action) => seen.push(action as { type: string; label?: string; pinned?: boolean })}
+      pickStage={null}
+      onPickArtwork={() => {}}
+      onPickMap={() => {}}
+    />
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Pin 2F" }));
+  expect(seen).toEqual([{ type: "setFloorPinned", label: "2F", pinned: true }]);
 });
 
 
@@ -372,9 +432,9 @@ test("buildShapeMatchOverlay keeps current, proposed, reference, and residual ge
     "preview",
     "residual"
   ]);
-  expect(overlay.features.find((feature) => feature.properties?.kind === "reference")?.geometry).toEqual(
-    suggestion.reference_geometry
-  );
+  const reference = overlay.features.find((feature) => feature.properties?.kind === "reference");
+  expect(reference?.geometry).toEqual(suggestion.reference_geometry);
+  expect(reference?.properties).toEqual({ kind: "reference", rank: 1, label: "#1" });
   expect(overlay.features.find((feature) => feature.properties?.kind === "residual")?.geometry).toEqual({
     type: "LineString",
     coordinates: [
@@ -460,6 +520,45 @@ test("buildShapeMatchOverlay keeps a picked line as LineString selected geometry
   expect(overlay.features[0]?.geometry?.type).toBe("LineString");
 });
 
+
+
+test("region matching shows candidate geometry without an outline selection", () => {
+  const suggestion: IllustratorShapeMatchSuggestion = {
+    rank: 2,
+    score: 0.1,
+    relative_gap: null,
+    reference_feature_index: 3,
+    reference_part_index: 0,
+    transform: {
+      artwork_anchor: [50, 40],
+      map_anchor: [139.701, 35.691],
+      rotation_deg: 25,
+      metres_per_point: 0.45,
+      working_crs: "EPSG:6677"
+    },
+    boundary_rmse_m: 1,
+    boundary_p95_m: 2,
+    max_residual_m: 3,
+    overlap_iou: 0.9,
+    reference_geometry: {
+      type: "Polygon",
+      coordinates: [[[139.7, 35.69], [139.71, 35.69], [139.71, 35.7], [139.7, 35.69]]]
+    },
+    residual_vectors: []
+  };
+  const overlay = buildShapeMatchOverlay(null, null, {
+    suggestion,
+    transform: {
+      artworkAnchor: [50, 40],
+      mapAnchor: [139.701, 35.691],
+      rotationDeg: 25,
+      metresPerPoint: 0.45,
+      workingCrs: "EPSG:6677"
+    }
+  });
+  expect(overlay.features.map((feature) => feature.properties?.kind)).toEqual(["reference"]);
+  expect(overlay.features[0]?.properties).toEqual({ kind: "reference", rank: 2, label: "#2" });
+});
 
 test("buildRegionOverlay closes each picked area and tags which floor it came from", () => {
   const source: [number, number][] = [

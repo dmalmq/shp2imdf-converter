@@ -21,6 +21,7 @@ function floor(label: string, anchor: [number, number], linked = true): FloorPla
   return {
     label,
     linked,
+    pinned: false,
     artworkAnchor: label === "1F" ? [85, 80] : [285, 80],
     mapAnchor: anchor,
     controlPoints: [],
@@ -698,6 +699,122 @@ test("applySimilarity is one historic undo step", () => {
   expect(history.past).toHaveLength(0);
 });
 
+test("pinning a linked floor snapshots its pose and unlinks it", () => {
+  const state = placementReducer(BASE, { type: "setFloorPinned", label: "2F", pinned: true });
+  const frozen = state.floors[1];
+  expect(frozen.pinned).toBe(true);
+  expect(frozen.linked).toBe(false);
+  expect(frozen.rotationDeg).toBe(0);
+  expect(frozen.metresPerPoint).toBeCloseTo(0.176389, 9);
+  expect(frozen.mapAnchor).toEqual(ANCHOR);
+  expect(resolvedTransform(state, frozen).rotationDeg).toBe(0);
+  expect(resolvedTransform(state, frozen).metresPerPoint).toBeCloseTo(0.176389, 9);
+});
+
+test("a later group move leaves a frozen floor's pose unchanged", () => {
+  let state = placementReducer(BASE, { type: "setFloorPinned", label: "2F", pinned: true });
+  const frozen = state.floors[1];
+  const moved: [number, number] = [139.71, 35.7];
+  state = placementReducer(state, { type: "positionBuilding", mapAnchor: moved });
+  expect(state.floors[0].mapAnchor).toEqual(moved);
+  expect(state.floors[1]).toBe(frozen);
+
+  state = placementReducer(state, { type: "rotateFrame", rotationDeg: 45 });
+  expect(state.frame.rotationDeg).toBe(45);
+  expect(resolvedTransform(state, state.floors[0]).rotationDeg).toBe(45);
+  expect(state.floors[1]).toBe(frozen);
+  expect(resolvedTransform(state, frozen).rotationDeg).toBe(0);
+
+  state = placementReducer(state, { type: "setDrawingScale", denominator: 500 });
+  expect(state.floors[1]).toBe(frozen);
+  expect(resolvedTransform(state, frozen).metresPerPoint).toBeCloseTo(0.176389, 9);
+  expect(resolvedTransform(state, state.floors[0]).metresPerPoint).toBeCloseTo(0.1763888888, 9);
+});
+
+test("pose mutations are identity while the target floor is frozen", () => {
+  const state = placementReducer(BASE, { type: "setFloorPinned", label: "1F", pinned: true });
+  const transform = sampleSimilarity();
+  expect(placementReducer(state, { type: "positionBuilding", mapAnchor: [139.71, 35.7] })).toBe(
+    state
+  );
+  expect(placementReducer(state, { type: "rotateFrame", rotationDeg: 45 })).toBe(state);
+  expect(placementReducer(state, { type: "scaleFrame", metresPerPoint: 0.5 })).toBe(state);
+  expect(placementReducer(state, { type: "setDrawingScale", denominator: 500 })).toBe(state);
+  expect(
+    placementReducer(state, { type: "calibrateDistance", artworkDistance: 10, realMetres: 5 })
+  ).toBe(state);
+  expect(placementReducer(state, { type: "dragFloor", label: "1F", mapAnchor: [139.71, 35.7] })).toBe(
+    state
+  );
+  expect(placementReducer(state, { type: "rotateFloor", label: "1F", rotationDeg: 45 })).toBe(state);
+  expect(placementReducer(state, { type: "scaleFloor", label: "1F", metresPerPoint: 0.5 })).toBe(
+    state
+  );
+  expect(placementReducer(state, { type: "unlockFloor", label: "1F" })).toBe(state);
+  expect(placementReducer(state, { type: "relinkFloor", label: "1F" })).toBe(state);
+  expect(placementReducer(state, { type: "fitControlPoints", mode: "group" })).toBe(state);
+  expect(placementReducer(state, { type: "fitControlPoints", mode: "individual" })).toBe(state);
+  expect(
+    placementReducer(state, { type: "applySimilarity", mode: "group", transform })
+  ).toBe(state);
+  expect(
+    placementReducer(state, { type: "applySimilarity", mode: "individual", transform })
+  ).toBe(state);
+});
+
+test("unpinning restores movement only after the user relinks", () => {
+  let state = placementReducer(BASE, { type: "setFloorPinned", label: "2F", pinned: true });
+  state = placementReducer(state, { type: "setFloorPinned", label: "2F", pinned: false });
+  expect(state.floors[1].pinned).toBe(false);
+  expect(state.floors[1].linked).toBe(false);
+  expect(state.floors[1].rotationDeg).toBe(0);
+  expect(state.floors[1].metresPerPoint).toBeCloseTo(0.176389, 9);
+
+  const dragged: [number, number] = [139.72, 35.71];
+  const next = placementReducer(state, { type: "dragFloor", label: "2F", mapAnchor: dragged });
+  expect(next.floors[1].mapAnchor).toEqual(dragged);
+  expect(next.floors[1].linked).toBe(false);
+});
+
+test("repeating the same pin value is identity", () => {
+  expect(placementReducer(BASE, { type: "setFloorPinned", label: "2F", pinned: false })).toBe(BASE);
+  const pinned = placementReducer(BASE, { type: "setFloorPinned", label: "2F", pinned: true });
+  expect(placementReducer(pinned, { type: "setFloorPinned", label: "2F", pinned: true })).toBe(
+    pinned
+  );
+});
+
+test("saved placements leave a frozen floor where it is", () => {
+  const frozen = placementReducer(BASE, { type: "setFloorPinned", label: "2F", pinned: true });
+  const saved = toFloorPayloads(
+    placementReducer(BASE, { type: "positionBuilding", mapAnchor: [139.71, 35.7] })
+  );
+  const next = floorPayloadsToState(saved, frozen);
+  expect(next.floors[1]).toEqual(frozen.floors[1]);
+  expect(next.floors[0].mapAnchor).toEqual([139.71, 35.7]);
+});
+
+test("pinning is an undo step and later group rotation undoes without unpinning", () => {
+  let history = initialPlacementHistory(BASE);
+  history = placementHistoryReducer(history, { type: "setFloorPinned", label: "2F", pinned: true });
+  expect(history.past).toHaveLength(1);
+  expect(history.present.floors[1].pinned).toBe(true);
+  const frozen = history.present.floors[1];
+
+  history = placementHistoryReducer(history, { type: "rotateFrame", rotationDeg: 45 });
+  expect(history.present.frame.rotationDeg).toBe(45);
+  expect(history.present.floors[1]).toBe(frozen);
+
+  history = placementHistoryReducer(history, { type: "undo" });
+  expect(history.present.frame.rotationDeg).toBe(0);
+  expect(history.present.floors[1].pinned).toBe(true);
+  expect(history.present.floors[1].linked).toBe(false);
+
+  history = placementHistoryReducer(history, { type: "undo" });
+  expect(history.present.floors[1].pinned).toBe(false);
+  expect(history.present.floors[1].linked).toBe(true);
+});
+
 test("a whole drag collapses into one undo step", () => {
   // A drag dispatches one action per animation frame; undo must not step
   // through frames.
@@ -864,6 +981,7 @@ const GOLDEN_PLACEMENT: PlacementState = {
     {
       label: "1F",
       linked: true,
+      pinned: false,
       artworkAnchor: [100, 200],
       mapAnchor: ANCHOR,
       controlPoints: [],
@@ -899,6 +1017,7 @@ test("a rotated floor's box covers all four rotated corners", () => {
       {
         label: "1F",
         linked: true,
+        pinned: false,
         artworkAnchor: [100, 200],
         mapAnchor: ANCHOR,
         controlPoints: [],

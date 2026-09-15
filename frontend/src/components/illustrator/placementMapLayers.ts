@@ -1,4 +1,5 @@
 import type { FeatureCollection } from "geojson";
+import type { FilterSpecification } from "maplibre-gl";
 
 /**
  * MapLibre source and layer ids for the placement map.
@@ -52,4 +53,24 @@ export function referencePointLayerId(name: string): string {
 
 export function layerVisibility(visible: boolean): "visible" | "none" {
   return visible ? "visible" : "none";
+}
+
+export function artworkLayerFilter(
+  hiddenLayerNames: readonly string[],
+  polygonOnly = false
+): FilterSpecification | undefined {
+  const geometryFilter: FilterSpecification = ["==", ["geometry-type"], "Polygon"];
+  if (hiddenLayerNames.length === 0) return polygonOnly ? geometryFilter : undefined;
+
+  const visibleLayerFilter: FilterSpecification = [
+    "!",
+    [
+      "in",
+      ["coalesce", ["get", "ai_layer"], ["get", "source_table"], ""],
+      ["literal", [...hiddenLayerNames]]
+    ]
+  ];
+  return polygonOnly
+    ? ["all", geometryFilter, visibleLayerFilter]
+    : visibleLayerFilter;
 }

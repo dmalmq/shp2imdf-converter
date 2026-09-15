@@ -93,7 +93,18 @@ export function TransformPanel({
         </Popover>
       </div>
 
-      {activeFloor && !activeFloor.linked ? (
+      {activeFloor?.pinned ? (
+        <p
+          role="status"
+          className="rounded-md border border-border bg-muted p-2 text-xs leading-4 text-foreground"
+        >
+          {t(
+            `${activeFloor.label} is pinned. Unpin it on the map before changing its placement.`,
+            `${activeFloor.label}は固定されています。位置を変更するには地図上で固定を解除してください。`
+          )}
+        </p>
+      ) : null}
+      {activeFloor && !activeFloor.linked && !activeFloor.pinned ? (
         <Button
           size="sm"
           variant="secondary"
@@ -115,6 +126,7 @@ export function TransformPanel({
             type="number"
             step="0.1"
             className="w-24"
+            disabled={activeFloor?.pinned}
             value={activeTransform?.rotationDeg ?? state.frame.rotationDeg}
             onChange={(event) => {
               const rotationDeg = Number(event.target.value);
@@ -131,6 +143,7 @@ export function TransformPanel({
             size="sm"
             variant="outline"
             className="ml-auto"
+            disabled={activeFloor?.pinned}
             onClick={() =>
               activeFloor &&
               (editPerFloor

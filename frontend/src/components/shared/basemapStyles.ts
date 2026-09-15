@@ -13,9 +13,9 @@ import { STREET_MAP_STYLE } from "./streetMapStyle";
  * attribution 出典：国土地理院, Esri requires "Imagery © Esri". All endpoints
  * were verified serving tiles at z17.
  */
-export type BasemapId = "osm" | "gsi-photo" | "gsi-std" | "esri";
+export type BasemapId = "osm" | "gsi-photo" | "gsi-std" | "esri" | "none";
 
-export const BASEMAP_ORDER: BasemapId[] = ["osm", "gsi-photo", "gsi-std", "esri"];
+export const BASEMAP_ORDER: BasemapId[] = ["osm", "gsi-photo", "gsi-std", "esri", "none"];
 
 /**
  * True for the photographic basemaps.
@@ -51,7 +51,20 @@ function rasterStyle(
   };
 }
 
+const DRAWING_ONLY_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {},
+  layers: [
+    {
+      id: "background",
+      type: "background",
+      paint: { "background-color": "#f1f5f9" }
+    }
+  ]
+};
+
 export const BASEMAP_STYLES: Record<BasemapId, StyleSpecification> = {
+  none: DRAWING_ONLY_STYLE,
   osm: STREET_MAP_STYLE,
   "gsi-photo": rasterStyle(
     "gsi-photo",
@@ -74,6 +87,7 @@ export const BASEMAP_STYLES: Record<BasemapId, StyleSpecification> = {
 };
 
 export function basemapLabel(id: BasemapId, t: (en: string, ja: string) => string): string {
+  if (id === "none") return t("Map off", "地図なし");
   if (id === "osm") return t("Street", "地図");
   if (id === "gsi-photo") return t("Aerial (GSI)", "写真（地理院）");
   if (id === "esri") return t("Satellite (Esri)", "衛星写真（Esri）");

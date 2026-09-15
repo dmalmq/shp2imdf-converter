@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import type { FeatureTypeOption } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
   Button,
@@ -13,6 +14,11 @@ import {
   SelectTrigger,
   SelectValue
 } from "../ui";
+import {
+  categoryOptionsFor,
+  compatibleFeatureTypes,
+  geometryKindOf
+} from "./featureTypeOptions";
 import { type ReviewFeature, featureName } from "./types";
 
 
@@ -34,12 +40,16 @@ const PROVENANCE_KEYS = new Set([
   "source_stem"
 ]);
 
+const NATIVE_SELECT_CLASS =
+  "flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
+
 type Props = {
   feature: ReviewFeature | null;
   language: string;
   levelOptions: Array<{ id: string; label: string }>;
   addressOptions: Array<{ id: string; label: string }>;
-  onSave: (featureId: string, properties: Record<string, unknown>) => void;
+  featureTypes: FeatureTypeOption[];
+  onSave: (featureId: string, properties: Record<string, unknown>, featureType?: string) => void;
   onDelete: (featureId: string) => void;
 };
 
@@ -84,24 +94,30 @@ export function PropertiesPanel({
   language,
   levelOptions,
   addressOptions,
+  featureTypes,
   onSave,
   onDelete
 }: Props) {
   const { t } = useUiLanguage();
   const [form, setForm] = useState<Record<string, unknown>>({});
+  const [pendingType, setPendingType] = useState(feature?.feature_type ?? "");
 
   useEffect(() => {
     setForm(feature?.properties ? { ...feature.properties } : {});
+    setPendingType(feature?.feature_type ?? "");
   }, [feature]);
 
   const allKeys = useMemo(() => {
     if (!feature) {
       return [] as string[];
     }
-    return Object.keys(feature.properties)
-      .filter((key) => !NON_EDITABLE_KEYS.has(key))
-      .sort((a, b) => a.localeCompare(b));
-  }, [feature]);
+    const keys = Object.keys(feature.properties).filter((key) => !NON_EDITABLE_KEYS.has(key));
+    const pending = featureTypes.find((option) => option.feature_type === pendingType);
+    if (pending?.has_category && !keys.includes("category")) {
+      keys.push("category");
+    }
+    return keys.sort((a, b) => a.localeCompare(b));
+  }, [feature, featureTypes, pendingType]);
 
   const editableKeys = useMemo(
     () => allKeys.filter((key) => !PROVENANCE_KEYS.has(key)),
@@ -173,6 +189,36 @@ export function PropertiesPanel({
       );
     }
 
+    if (key === "category") {
+      const categories = categoryOptionsFor(featureTypes, pendingType);
+      if (categories !== null) {
+        const current = typeof value === "string" ? value : "";
+        const options =
+          current && !categories.includes(current) ? [current, ...categories] : categories;
+        return (
+          <Field key={key} label="category">
+            {(id) => (
+              <select
+                id={id}
+                className={NATIVE_SELECT_CLASS}
+                value={current}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, category: event.target.value || null }))
+                }
+              >
+                <option value="">{t("(none)", "（なし）")}</option>
+                {options.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        );
+      }
+    }
+
     if (key === "building_ids") {
       return (
         <Field key={key} label={key} hint={t("Comma-separated", "カンマ区切り")}>
@@ -241,11 +287,65 @@ export function PropertiesPanel({
     );
   };
 
+  const compatibleTypes = compatibleFeatureTypes(featureTypes, feature.geometry);
+  const typeOptions = compatibleTypes.some((option) => option.feature_type === feature.feature_type)
+    ? compatibleTypes
+    : [
+        {
+          feature_type: feature.feature_type,
+          geometry: geometryKindOf(feature.geometry),
+          has_category: false,
+          categories: null,
+          default_category: null
+        },
+        ...compatibleTypes
+      ];
+
   return (
     <div className="flex flex-col gap-4">
       <p className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
         {feature.feature_type} · {feature.id.slice(0, 8)}
       </p>
+
+      <Field label={t("Feature type", "フィーチャー種別")}>
+        {(id) => (
+          <select
+            id={id}
+            className={NATIVE_SELECT_CLASS}
+            value={pendingType}
+            onChange={(event) => {
+              const nextType = event.target.value;
+              setPendingType(nextType);
+              const nextOption = featureTypes.find((option) => option.feature_type === nextType);
+              const categories = nextOption?.categories ?? null;
+              if (categories === null) {
+                return;
+              }
+              setForm((prev) => {
+                const current = typeof prev.category === "string" ? prev.category : "";
+                if (current && categories.includes(current)) {
+                  return prev;
+                }
+                return { ...prev, category: nextOption?.default_category ?? null };
+              });
+            }}
+          >
+            {typeOptions.map((option) => (
+              <option key={option.feature_type} value={option.feature_type}>
+                {option.feature_type}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
+      {pendingType !== feature.feature_type ? (
+        <p className="text-xs leading-4 text-muted-foreground">
+          {t(
+            `Saving converts this feature to ${pendingType} and drops properties that type does not use.`,
+            `保存すると ${pendingType} に変換され、この種別で使用しないプロパティは削除されます。`
+          )}
+        </p>
+      ) : null}
 
       <div className="flex flex-col gap-3">{editableKeys.map(renderField)}</div>
 
@@ -267,7 +367,16 @@ export function PropertiesPanel({
       </p>
 
       <div className="flex gap-2">
-        <Button size="sm" onClick={() => onSave(feature.id, form)}>
+        <Button
+          size="sm"
+          onClick={() =>
+            onSave(
+              feature.id,
+              form,
+              pendingType !== feature.feature_type ? pendingType : undefined
+            )
+          }
+        >
           {t("Save changes", "変更を保存")}
         </Button>
         <Button

@@ -58,10 +58,11 @@ const referenceLayers: ReferenceLayer[] = [
   }
 ];
 
-function floorPlacement(label: string, linked: boolean) {
+function floorPlacement(label: string, linked: boolean, pinned = false) {
   return {
     label,
     linked,
+    pinned,
     artworkAnchor: [50, 40] as [number, number],
     mapAnchor: [139.7671, 35.6812] as [number, number],
     controlPoints: [],
@@ -70,7 +71,7 @@ function floorPlacement(label: string, linked: boolean) {
   };
 }
 
-function placementState(linked = true, labels: string[] = ["1F"]): PlacementState {
+function placementState(linked = true, labels: string[] = ["1F"], pinned = false): PlacementState {
   return {
     frame: {
       rotationDeg: 0,
@@ -79,7 +80,9 @@ function placementState(linked = true, labels: string[] = ["1F"]): PlacementStat
     },
     activeFloorLabel: labels[0],
     scaleLocked: false,
-    floors: labels.map((label) => floorPlacement(label, linked))
+    floors: labels.map((label, index) =>
+      floorPlacement(label, index === 0 ? linked : true, index === 0 ? pinned : false)
+    )
   };
 }
 
@@ -104,6 +107,7 @@ function model(overrides: Partial<ShapeMatchPanelModel> = {}): ShapeMatchPanelMo
     onToggleSelection: vi.fn(),
     onFind: vi.fn(),
     onPreview: vi.fn(),
+    onInspect: vi.fn(),
     onApply: vi.fn(),
     onClear: vi.fn(),
     ...overrides
@@ -197,7 +201,7 @@ test("selects an outline and searches only from explicit actions", () => {
   expect(onFind).toHaveBeenCalledOnce();
 });
 
-test("previews and applies a ranked suggestion only from explicit buttons", () => {
+test("selects and applies a ranked suggestion only from explicit buttons", () => {
   const onPreview = vi.fn();
   const onApply = vi.fn();
   render(
@@ -220,10 +224,52 @@ test("previews and applies a ranked suggestion only from explicit buttons", () =
   expect(screen.getByText("RMSE 1.25 m")).toBeInTheDocument();
   expect(screen.getByText("24% better than next")).toBeInTheDocument();
   expect(onApply).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Preview candidate 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select candidate 1" }));
   expect(onPreview).toHaveBeenCalledWith(1);
   fireEvent.click(screen.getByRole("button", { name: "Apply to this floor" }));
   expect(onApply).toHaveBeenCalledOnce();
+});
+
+test("inspects each candidate on hover or focus without changing the selection", () => {
+  const onInspect = vi.fn();
+  const onPreview = vi.fn();
+  const secondMatch: IllustratorShapeMatchSuggestion = {
+    ...match,
+    rank: 2,
+    reference_feature_index: 1,
+    overlap_iou: 0.87
+  };
+  render(
+    <ShapeMatchPanel
+      state={placementState()}
+      mode="individual"
+      referenceLayers={referenceLayers}
+      model={model({
+        selection,
+        matches: [match, secondMatch],
+        previewRank: 1,
+        searched: true,
+        onInspect,
+        onPreview
+      })}
+    />
+  );
+
+  const candidate = screen.getByRole("button", { name: "Select candidate 2" });
+  fireEvent.mouseEnter(candidate);
+  expect(onInspect).toHaveBeenLastCalledWith(2);
+  expect(onPreview).not.toHaveBeenCalled();
+  fireEvent.mouseLeave(candidate);
+  expect(onInspect).toHaveBeenLastCalledWith(null);
+
+  fireEvent.focus(candidate);
+  expect(onInspect).toHaveBeenLastCalledWith(2);
+  fireEvent.blur(candidate);
+  expect(onInspect).toHaveBeenLastCalledWith(null);
+
+  fireEvent.click(candidate);
+  expect(onPreview).toHaveBeenCalledWith(2);
+  expect(screen.getByText("Selected")).toBeInTheDocument();
 });
 
 test("blocks group apply while the registration floor is unlinked", () => {
@@ -237,6 +283,29 @@ test("blocks group apply while the registration floor is unlinked", () => {
   );
   expect(screen.getByRole("button", { name: "Apply to all linked floors" })).toBeDisabled();
   expect(screen.getByText("Relink 1F before applying to all floors.")).toBeInTheDocument();
+});
+
+test("blocks apply while the active floor is frozen in place", () => {
+  const onApply = vi.fn();
+  render(
+    <ShapeMatchPanel
+      state={placementState(false, ["1F"], true)}
+      mode="individual"
+      referenceLayers={referenceLayers}
+      model={model({
+        selection,
+        matches: [match],
+        previewRank: 1,
+        searched: true,
+        onApply
+      })}
+    />
+  );
+  const apply = screen.getByRole("button", { name: "Apply to this floor" });
+  expect(apply).toBeDisabled();
+  expect(screen.getByText("Unpin 1F before applying an alignment.")).toBeInTheDocument();
+  fireEvent.click(apply);
+  expect(onApply).not.toHaveBeenCalled();
 });
 
 

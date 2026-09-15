@@ -27,7 +27,8 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
   const floorLabel = activeFloor?.label ?? state.activeFloorLabel;
   const controlPoints = activeFloor?.controlPoints ?? [];
   const fit = currentResiduals(state);
-  const groupBlocked = mode === "group" && !activeFloor?.linked;
+  const pinnedBlocked = Boolean(activeFloor?.pinned);
+  const groupBlocked = !pinnedBlocked && mode === "group" && !activeFloor?.linked;
   const enoughPoints = controlPoints.length >= MIN_CONTROL_POINTS;
   const largestResidualIndex = fit
     ? fit.perPoint.reduce(
@@ -76,7 +77,7 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
     <Button
       size="sm"
       variant={pickStage ? "default" : "outline"}
-      disabled={groupBlocked}
+      disabled={groupBlocked || pinnedBlocked}
       onClick={onTogglePicking}
     >
       {addLabel}
@@ -91,7 +92,7 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
   const fitButton = (
     <Button
       className="w-full"
-      disabled={groupBlocked || !enoughPoints}
+      disabled={groupBlocked || pinnedBlocked || !enoughPoints}
       onClick={() => dispatch({ type: "fitControlPoints", mode })}
     >
       {fitLabel}
@@ -100,7 +101,12 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
 
   // Why the action is unavailable belongs on the action, not in a paragraph
   // further up the panel.
-  const fitBlockedReason = groupBlocked
+  const fitBlockedReason = pinnedBlocked
+    ? t(
+        `Unpin ${floorLabel} before fitting it with control points.`,
+        `基準点で合わせる前に「${floorLabel}」の固定を解除してください。`
+      )
+    : groupBlocked
     ? t(
         `Relink ${floorLabel} to fit all floors`,
         `すべてのフロアを合わせるには「${floorLabel}」を再リンクしてください`
@@ -121,7 +127,12 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
         <DisabledHint
           className="w-auto"
           hint={
-            groupBlocked
+            pinnedBlocked
+              ? t(
+                  `Unpin ${floorLabel} before adding control points`,
+                  `基準点を追加する前に「${floorLabel}」の固定を解除してください`
+                )
+              : groupBlocked
               ? t(
                   `Relink ${floorLabel} to add points for every floor`,
                   `全フロアに対応点を追加するには「${floorLabel}」を再リンクしてください`
@@ -156,6 +167,15 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
         </div>
         <p className="text-xs leading-4 text-muted-foreground">{nextStep}</p>
       </div>
+
+      {pinnedBlocked ? (
+        <p className="text-xs leading-4 text-destructive">
+          {t(
+            `Unpin ${floorLabel} before fitting it with control points.`,
+            `基準点で合わせる前に「${floorLabel}」の固定を解除してください。`
+          )}
+        </p>
+      ) : null}
 
       {groupBlocked ? (
         <p className="text-xs leading-4 text-destructive">
@@ -230,7 +250,7 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
         </p>
       ) : null}
 
-      <DisabledHint hint={groupBlocked || !enoughPoints ? fitBlockedReason : null}>
+      <DisabledHint hint={pinnedBlocked || groupBlocked || !enoughPoints ? fitBlockedReason : null}>
         {fitButton}
       </DisabledHint>
     </div>

@@ -64,6 +64,7 @@ export function ScaleAndFitPanel({
   const activeFloor =
     state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
   const activeTransform = activeFloor ? resolvedTransform(state, activeFloor) : null;
+  const pinned = Boolean(activeFloor?.pinned);
 
   return (
     <div className="flex flex-col gap-4">
@@ -134,13 +135,13 @@ export function ScaleAndFitPanel({
               className="w-24"
               aria-label={t("Drawing scale denominator", "図面縮尺の分母")}
               value={denominator}
-              disabled={state.scaleLocked}
+              disabled={state.scaleLocked || pinned}
               onChange={(event) => setDenominator(event.target.value)}
             />
             <Button
               size="sm"
               className="ml-auto"
-              disabled={state.scaleLocked}
+              disabled={state.scaleLocked || pinned}
               onClick={() => dispatch({ type: "setDrawingScale", denominator: Number(denominator) })}
             >
               {t("Apply", "適用")}
@@ -154,7 +155,7 @@ export function ScaleAndFitPanel({
               placeholder="pt"
               aria-label={t("Distance on the artwork", "図面上の距離")}
               value={artworkDistance}
-              disabled={state.scaleLocked}
+              disabled={state.scaleLocked || pinned}
               onChange={(event) => setArtworkDistance(event.target.value)}
             />
             <span className="text-xs text-muted-foreground">=</span>
@@ -164,14 +165,14 @@ export function ScaleAndFitPanel({
               placeholder="m"
               aria-label={t("Real-world metres", "実距離（m）")}
               value={realMetres}
-              disabled={state.scaleLocked}
+              disabled={state.scaleLocked || pinned}
               onChange={(event) => setRealMetres(event.target.value)}
             />
             <Button
               size="sm"
               variant="secondary"
               className="ml-auto"
-              disabled={state.scaleLocked}
+              disabled={state.scaleLocked || pinned}
               onClick={() =>
                 dispatch({
                   type: "calibrateDistance",

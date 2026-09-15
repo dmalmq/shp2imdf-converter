@@ -18,6 +18,12 @@ from backend.src.detector import (
     merge_learned_keywords,
     sync_feature_types,
 )
+from backend.src.feature_types import (
+    conform_properties,
+    geometry_is_compatible,
+    geometry_kind,
+    spec_for,
+)
 from backend.src.importer import rebuild_normalized_feature_collection
 from backend.src.schemas import (
     BulkPatchFeaturesRequest,
@@ -72,6 +78,31 @@ def _merge_properties(current: dict[str, Any], updates: dict[str, Any]) -> dict[
     for key, value in updates.items():
         merged[key] = value
     return merged
+
+
+def _retype_feature(feature: dict[str, Any], requested_type: str) -> bool:
+    """Move a feature onto another IMDF type, reshaping its properties.
+
+    Import classification is per source file, so a whole shapefile lands on one
+    type and reviewers need a way to correct individual features afterwards.
+    Returns whether the type actually changed.
+    """
+    spec = spec_for(requested_type)
+    if spec is None:
+        raise ValueError(f"Unknown IMDF feature type: {requested_type}")
+    if spec.feature_type == feature.get("feature_type"):
+        return False
+
+    geometry = feature.get("geometry")
+    if not geometry_is_compatible(geometry, spec.feature_type):
+        raise ValueError(
+            f"A feature with {geometry_kind(geometry)} geometry cannot become "
+            f"{spec.feature_type}, which requires {spec.geometry} geometry."
+        )
+
+    feature["properties"] = conform_properties(feature.get("properties"), spec.feature_type)
+    feature["feature_type"] = spec.feature_type
+    return True
 
 
 def _feature_by_id(features: list[dict[str, Any]], feature_id: str) -> tuple[int, dict[str, Any]] | None:
@@ -409,8 +440,8 @@ def patch_features_bulk(
         manager.save_session(session)
         return BulkPatchFeaturesResponse(updated_count=1, deleted_count=len(selected), merged_feature_id=template["id"])
 
-    if payload.properties is None:
-        raise ValueError("Bulk patch requires properties payload")
+    if payload.properties is None and payload.feature_type is None:
+        raise ValueError("Bulk patch requires a properties or feature_type payload")
 
     updated = 0
     next_features: list[dict[str, Any]] = []
@@ -419,7 +450,10 @@ def patch_features_bulk(
             next_features.append(item)
             continue
         copied = copy.deepcopy(item)
-        copied["properties"] = _merge_properties(copied.get("properties") or {}, payload.properties)
+        retyped = _retype_feature(copied, payload.feature_type) if payload.feature_type is not None else False
+        if payload.properties is not None:
+            merged = _merge_properties(copied.get("properties") or {}, payload.properties)
+            copied["properties"] = conform_properties(merged, copied["feature_type"]) if retyped else merged
         updated += 1
         next_features.append(copied)
     session.feature_collection["features"] = next_features
@@ -558,10 +592,18 @@ def patch_feature(
 
     updated = copy.deepcopy(features[index])
     changed_fields = payload.model_fields_set
-    if "properties" in changed_fields and payload.properties is not None:
-        updated["properties"] = _merge_properties(updated.get("properties") or {}, payload.properties)
+    # Order matters: the target type is validated against the incoming geometry,
+    # the re-type then reshapes properties, and an explicit properties payload
+    # merges last so one request can set the type and its new category together.
     if "geometry" in changed_fields:
         updated["geometry"] = payload.geometry
+    retyped = _retype_feature(updated, payload.feature_type) if payload.feature_type is not None else False
+    if "properties" in changed_fields and payload.properties is not None:
+        merged = _merge_properties(updated.get("properties") or {}, payload.properties)
+        # The editor posts the whole property bag it was showing, which still
+        # holds the old type's fields; re-conforming keeps the new type's schema
+        # authoritative instead of letting them leak back in.
+        updated["properties"] = conform_properties(merged, updated["feature_type"]) if retyped else merged
 
     features[index] = updated
     session.feature_collection["features"] = features

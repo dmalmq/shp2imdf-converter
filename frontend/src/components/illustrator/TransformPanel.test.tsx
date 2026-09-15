@@ -10,7 +10,10 @@ import {
 import { useAppStore } from "../../store/useAppStore";
 
 
-function stateWith(floors: { label: string; linked: boolean }[], active: string): PlacementState {
+function stateWith(
+  floors: { label: string; linked: boolean; pinned?: boolean }[],
+  active: string
+): PlacementState {
   return {
     frame: { rotationDeg: 0, metresPerPoint: DEFAULT_METRES_PER_POINT, workingCrs: "EPSG:6677" },
     activeFloorLabel: active,
@@ -18,6 +21,7 @@ function stateWith(floors: { label: string; linked: boolean }[], active: string)
     floors: floors.map((floor) => ({
       label: floor.label,
       linked: floor.linked,
+      pinned: floor.pinned ?? false,
       artworkAnchor: [50, 50] as [number, number],
       mapAnchor: [139.7671, 35.6812] as [number, number],
       controlPoints: [],
@@ -160,4 +164,13 @@ test("the (this floor) suffix follows what the controls edit, not just linking",
   expect(screen.queryByText(/this floor/)).toBeNull();
   rerender(<TransformPanel mode="individual" state={THREE_LINKED} dispatch={() => {}} />);
   expect(screen.getByText(/this floor/)).toBeInTheDocument();
+});
+
+test("a frozen active floor hides relink and disables rotation edits", () => {
+  const frozen = stateWith([{ label: "1F", linked: false, pinned: true }], "1F");
+  render(<TransformPanel mode="individual" state={frozen} dispatch={() => {}} />);
+  expect(screen.queryByRole("button", { name: /relink/i })).toBeNull();
+  expect(screen.getByRole("spinbutton")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Reset" })).toBeDisabled();
+  expect(screen.getByRole("status")).toHaveTextContent("1F is pinned");
 });

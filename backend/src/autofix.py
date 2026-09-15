@@ -15,8 +15,15 @@ from backend.src.validator import prune_empty_geometry_features
 
 
 # Checks that require explicit user confirmation before being applied.
-# Only destructive operations (feature deletion) belong here.
-PROMPTED_CHECKS = {"duplicate_geometry_warning", "unit_sliver"}
+# Irreversible loss of user data belongs here: deleting a feature, and filling
+# a polygon's interior rings. Holes are load-bearing in real venue data
+# (courtyards, atria, building cut-outs in a concourse), the session keeps no
+# copy of them, and a re-export cannot bring them back.
+PROMPTED_CHECKS = {
+    "duplicate_geometry_warning",
+    "polygon_has_interior_rings",
+    "unit_sliver",
+}
 
 
 def _round_value(value: Any, decimals: int) -> Any:
@@ -134,27 +141,6 @@ def apply_autofix(
                 )
             )
 
-        if issue.check == "polygon_has_interior_rings" and isinstance(geometry, dict):
-            try:
-                geom = shape(geometry)
-                if isinstance(geom, Polygon):
-                    stripped = Polygon(geom.exterior)
-                elif isinstance(geom, MultiPolygon):
-                    stripped = MultiPolygon([Polygon(p.exterior) for p in geom.geoms])
-                else:
-                    continue
-                row["geometry"] = mapping(stripped)
-                fixes_applied.append(
-                    AutofixApplied(
-                        feature_id=issue.feature_id,
-                        check=issue.check,
-                        action="remove_interior_rings",
-                        description="Removed interior rings, keeping only the exterior boundary.",
-                    )
-                )
-            except Exception:
-                continue
-
         if issue.check == "footprint_level_coverage" and issue.related_feature_id and isinstance(geometry, dict):
             level_row = by_id.get(issue.related_feature_id)
             level_geom_raw = level_row.get("geometry") if level_row else None
@@ -178,12 +164,15 @@ def apply_autofix(
 
     # Prompted fixes.
     duplicate_pairs: set[tuple[str, str]] = set()
+    interior_ring_ids: list[str] = []
     for issue in issues:
         if issue.check not in PROMPTED_CHECKS:
             continue
         if issue.check == "duplicate_geometry_warning" and issue.feature_id and issue.related_feature_id:
             pair = tuple(sorted([issue.feature_id, issue.related_feature_id]))
             duplicate_pairs.add(pair)
+        elif issue.check == "polygon_has_interior_rings" and issue.feature_id:
+            interior_ring_ids.append(issue.feature_id)
 
     for left, right in sorted(duplicate_pairs):
         prompts.append(
@@ -196,6 +185,16 @@ def apply_autofix(
             )
         )
 
+    for feature_id in interior_ring_ids:
+        prompts.append(
+            AutofixPrompt(
+                feature_id=feature_id,
+                check="polygon_has_interior_rings",
+                action="remove_interior_rings",
+                description="Fill the interior rings, keeping only the exterior boundary.",
+            )
+        )
+
     if apply_prompted:
         to_delete: set[str] = set()
         for left, right in duplicate_pairs:
@@ -205,6 +204,31 @@ def apply_autofix(
         for issue in issues:
             if issue.check == "unit_sliver" and issue.feature_id:
                 to_delete.add(issue.feature_id)
+
+        for feature_id in interior_ring_ids:
+            row = by_id.get(feature_id)
+            geometry = row.get("geometry") if row else None
+            if not isinstance(geometry, dict):
+                continue
+            try:
+                geom = shape(geometry)
+                if isinstance(geom, Polygon):
+                    stripped = Polygon(geom.exterior)
+                elif isinstance(geom, MultiPolygon):
+                    stripped = MultiPolygon([Polygon(part.exterior) for part in geom.geoms])
+                else:
+                    continue
+                row["geometry"] = mapping(stripped)
+                fixes_applied.append(
+                    AutofixApplied(
+                        feature_id=feature_id,
+                        check="polygon_has_interior_rings",
+                        action="remove_interior_rings",
+                        description="Filled interior rings after user confirmation.",
+                    )
+                )
+            except Exception:
+                continue
 
         if to_delete:
             kept: list[dict[str, Any]] = []

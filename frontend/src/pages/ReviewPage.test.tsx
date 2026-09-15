@@ -1,11 +1,12 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import {
   autofixSession,
   deleteSessionFeature,
   exportSessionArchive,
   exportSessionShapefiles,
+  fetchFeatureTypeCatalog,
   fetchSessionFeatures,
   fetchSessionFiles,
   generateSessionDraft,
@@ -26,6 +27,7 @@ vi.mock("../api/client", () => ({
   exportSessionArchive: vi.fn(),
   exportSessionQgisProject: vi.fn(),
   exportSessionShapefiles: vi.fn(),
+  fetchFeatureTypeCatalog: vi.fn(),
   fetchSessionFeatures: vi.fn(),
   fetchSessionFiles: vi.fn(),
   generateSessionDraft: vi.fn(),
@@ -58,6 +60,7 @@ vi.mock("../components/shared/SkeletonBlock", () => ({
 
 const fetchSessionFilesMock = vi.mocked(fetchSessionFiles);
 const fetchSessionFeaturesMock = vi.mocked(fetchSessionFeatures);
+const fetchFeatureTypeCatalogMock = vi.mocked(fetchFeatureTypeCatalog);
 const generateSessionDraftMock = vi.mocked(generateSessionDraft);
 const validateSessionMock = vi.mocked(validateSession);
 const exportSessionArchiveMock = vi.mocked(exportSessionArchive);
@@ -113,6 +116,22 @@ beforeEach(() => {
     editHistory: []
   });
 
+  fetchFeatureTypeCatalogMock.mockResolvedValue([
+    {
+      feature_type: "unit",
+      geometry: "polygon",
+      has_category: true,
+      categories: ["road"],
+      default_category: "unspecified"
+    },
+    {
+      feature_type: "geofence",
+      geometry: "polygon",
+      has_category: true,
+      categories: ["geofence"],
+      default_category: "geofence"
+    }
+  ]);
   fetchSessionFilesMock.mockResolvedValue({
     session_id: "session-123",
     import_profile: "standard",
@@ -311,6 +330,78 @@ test("requires an explicit prefix for open data export", async () => {
     )
   );
   anchorClick.mockRestore();
+});
+
+test("bulk retypes selected polygon units to geofence", async () => {
+  fetchSessionFeaturesMock.mockResolvedValue({
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        id: "level-1",
+        feature_type: "level",
+        geometry: null,
+        properties: {
+          name: { en: "Ground" },
+          short_name: { en: "G" },
+          ordinal: 0
+        }
+      },
+      {
+        type: "Feature",
+        id: "unit-1",
+        feature_type: "unit",
+        geometry: {
+          type: "Polygon",
+          coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+        },
+        properties: {
+          category: "road",
+          name: { en: "Road A" }
+        }
+      },
+      {
+        type: "Feature",
+        id: "unit-2",
+        feature_type: "unit",
+        geometry: {
+          type: "Polygon",
+          coordinates: [[[1, 0], [2, 0], [2, 1], [1, 1], [1, 0]]]
+        },
+        properties: {
+          category: "road",
+          name: { en: "Road B" }
+        }
+      }
+    ]
+  });
+
+  renderPage();
+  const exportButton = await screen.findByRole("button", { name: "Export" });
+  await waitFor(() => expect(exportButton).toBeEnabled());
+
+  act(() => {
+    useAppStore.setState({ selectedFeatureIds: ["unit-1", "unit-2"] });
+  });
+
+  const typeSelect = await screen.findByDisplayValue("Type...");
+  await waitFor(() => {
+    expect(screen.getByRole("option", { name: "geofence" })).toBeInTheDocument();
+  });
+  fireEvent.change(typeSelect, { target: { value: "geofence" } });
+  expect(typeSelect).toHaveValue("geofence");
+
+  const applyButton = typeSelect.nextElementSibling;
+  expect(applyButton).toBeInstanceOf(HTMLButtonElement);
+  fireEvent.click(applyButton as HTMLButtonElement);
+
+  await waitFor(() =>
+    expect(patchSessionFeaturesBulkMock).toHaveBeenCalledWith("session-123", {
+      feature_ids: ["unit-1", "unit-2"],
+      action: "patch",
+      feature_type: "geofence"
+    })
+  );
 });
 
 // The table view and its filter bar were built, tested in isolation, and then

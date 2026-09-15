@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import json
-from pathlib import Path
 import re
 from typing import Any
 from uuid import uuid4
@@ -13,6 +12,7 @@ from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, mapping,
 from shapely.ops import unary_union
 from shapely.validation import make_valid
 
+from backend.src.feature_types import load_category_set, load_occupant_category_pattern
 from backend.src.mapper import load_unit_categories, resolve_unit_category, wrap_labels
 from backend.src.schemas import BuildingWizardState, LevelWizardItem, SessionRecord
 from backend.src.wizard import build_address_feature, seed_wizard_state
@@ -43,7 +43,6 @@ SUPPORTED_SOURCE_FEATURE_TYPES = {
     "section",
     "facility",  # Compatibility alias for non-standard datasets.
 }
-CATEGORY_CONFIG_DIR = Path(__file__).resolve().parent.parent / "config" / "categories"
 DEFAULT_AMENITY_CATEGORY = "unspecified"
 DEFAULT_GEOFENCE_CATEGORY = "geofence"
 DEFAULT_SECTION_CATEGORY = "walkway"
@@ -75,39 +74,11 @@ def _close_gaps(geom: Any, gap_deg: float) -> Any:
     return closed if (closed is not None and not closed.is_empty) else geom
 
 
-def _load_category_set(filename: str) -> set[str]:
-    path = CATEGORY_CONFIG_DIR / filename
-    if not path.exists():
-        return set()
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return set()
-    categories = payload.get("categories", [])
-    if not isinstance(categories, list):
-        return set()
-    return {str(item).strip().lower() for item in categories if str(item).strip()}
-
-
-def _load_occupant_category_pattern() -> re.Pattern[str]:
-    path = CATEGORY_CONFIG_DIR / "occupant_categories.json"
-    if not path.exists():
-        return re.compile(r"^[a-z0-9]+(?:[._][a-z0-9]+)*$")
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return re.compile(r"^[a-z0-9]+(?:[._][a-z0-9]+)*$")
-    raw_pattern = payload.get("validation_pattern")
-    if not isinstance(raw_pattern, str) or not raw_pattern.strip():
-        return re.compile(r"^[a-z0-9]+(?:[._][a-z0-9]+)*$")
-    return re.compile(raw_pattern)
-
-
-AMENITY_CATEGORIES = _load_category_set("amenity_categories.json")
-GEOFENCE_CATEGORIES = _load_category_set("geofence_categories.json")
-SECTION_CATEGORIES = _load_category_set("section_categories.json")
-RELATIONSHIP_CATEGORIES = _load_category_set("relationship_categories.json")
-OCCUPANT_CATEGORY_PATTERN = _load_occupant_category_pattern()
+AMENITY_CATEGORIES = load_category_set("amenity_categories.json")
+GEOFENCE_CATEGORIES = load_category_set("geofence_categories.json")
+SECTION_CATEGORIES = load_category_set("section_categories.json")
+RELATIONSHIP_CATEGORIES = load_category_set("relationship_categories.json")
+OCCUPANT_CATEGORY_PATTERN = load_occupant_category_pattern()
 
 
 def _default_short_name(ordinal: int) -> str:

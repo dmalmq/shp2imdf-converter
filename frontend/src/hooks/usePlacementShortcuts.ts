@@ -70,7 +70,7 @@ export function usePlacementShortcuts({ state, dispatch, mode, enabled, onEscape
       if (!offset || accel) return;
       const active =
         state.floors.find((floor) => floor.label === state.activeFloorLabel) ?? state.floors[0];
-      if (!active) return;
+      if (!active || active.pinned) return;
 
       event.preventDefault();
       const step = event.shiftKey ? NUDGE_COARSE : NUDGE_METRES;

@@ -30,6 +30,7 @@ export type ShapeMatchPanelModel = {
   onToggleRegions: () => void;
   onFind: () => void;
   onPreview: (rank: number) => void;
+  onInspect: (rank: number | null) => void;
   artworkMatchTarget?: string;
   onStartArtworkMatch?: () => void;
   onApply: () => void;
@@ -75,7 +76,9 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
   const canMatch = referenceLayers.length > 0 || otherFloors.length > 0;
   const hasTarget = Boolean(model.referenceName || model.referenceFloorLabel);
   const floorTarget = Boolean(model.referenceFloorLabel);
-  const groupBlocked = !floorTarget && mode === "group" && !activeFloor?.linked;
+  const pinnedBlocked = Boolean(activeFloor?.pinned);
+  const groupBlocked =
+    !pinnedBlocked && !floorTarget && mode === "group" && !activeFloor?.linked;
   const selectedMatch = model.matches.find((match) => match.rank === model.previewRank) ?? null;
   const selectedReference = referenceLayers.find((layer) => layer.name === model.referenceName);
   const selectedTarget = matchTargetValue(model.referenceName, model.referenceFloorLabel);
@@ -117,7 +120,7 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
   const applyButton = (
     <Button
       className="w-full"
-      disabled={!selectedMatch || groupBlocked}
+      disabled={!selectedMatch || groupBlocked || pinnedBlocked}
       onClick={model.onApply}
     >
       {floorTarget || mode === "individual"
@@ -126,7 +129,12 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
     </Button>
   );
 
-  const applyBlockedReason = groupBlocked
+  const applyBlockedReason = pinnedBlocked
+    ? t(
+        `Unpin ${activeFloor?.label ?? state.activeFloorLabel} before applying an alignment.`,
+        `位置合わせを適用する前に「${activeFloor?.label ?? state.activeFloorLabel}」の固定を解除してください。`
+      )
+    : groupBlocked
     ? t(
         `Relink ${activeFloor?.label ?? state.activeFloorLabel} to apply to all floors`,
         `全フロアに適用するには「${activeFloor?.label ?? state.activeFloorLabel}」を再リンクしてください`
@@ -366,6 +374,12 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
       {model.matches.length > 0 ? (
         <div className="flex flex-col gap-2">
           <p className={MONO_LABEL}>{t("Ranked candidates", "候補の順位")}</p>
+          <p id="shape-match-candidate-help" className="text-[11px] leading-4 text-muted-foreground">
+            {t(
+              "Hover or focus a candidate to locate its area on the map. Select the correct area before applying.",
+              "候補にカーソルを合わせるかフォーカスすると、地図上の範囲を確認できます。正しい範囲を選んでから適用してください。"
+            )}
+          </p>
           <ol className="flex flex-col gap-1.5">
             {model.matches.map((match) => {
               const active = match.rank === model.previewRank;
@@ -375,15 +389,20 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
                     type="button"
                     aria-pressed={active}
                     aria-label={t(
-                      `Preview candidate ${match.rank}`,
-                      `候補 ${match.rank} をプレビュー`
+                      `Select candidate ${match.rank}`,
+                      `候補 ${match.rank} を選択`
                     )}
+                    aria-describedby="shape-match-candidate-help"
                     className={cn(
                       "w-full rounded-md border p-2 text-left transition-colors",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       active ? "bg-accent" : "border-border bg-card hover:bg-accent"
                     )}
                     style={active ? { borderColor: OVERLAY_COLORS.artwork } : undefined}
+                    onMouseEnter={() => model.onInspect(match.rank)}
+                    onMouseLeave={() => model.onInspect(null)}
+                    onFocus={() => model.onInspect(match.rank)}
+                    onBlur={() => model.onInspect(null)}
                     onClick={() => model.onPreview(match.rank)}
                   >
                     <span className="flex items-center justify-between gap-2">
@@ -396,8 +415,15 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
                         </span>
                         {t(`Candidate ${match.rank}`, `候補 ${match.rank}`)}
                       </span>
-                      <span className="font-mono text-[11px] font-medium">
-                        {(match.overlap_iou * 100).toFixed(0)}% {t("overlap", "重なり")}
+                      <span className="flex flex-col items-end gap-0.5">
+                        <span className="font-mono text-[11px] font-medium">
+                          {(match.overlap_iou * 100).toFixed(0)}% {t("overlap", "重なり")}
+                        </span>
+                        {active ? (
+                          <span className="text-[10px] font-semibold text-foreground">
+                            {t("Selected", "選択中")}
+                          </span>
+                        ) : null}
                       </span>
                     </span>
                     <span className="mt-1 grid grid-cols-2 gap-x-2 font-mono text-[11px] text-muted-foreground">
@@ -418,6 +444,15 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
             })}
           </ol>
 
+          {pinnedBlocked ? (
+            <p className="text-xs leading-4 text-destructive">
+              {t(
+                `Unpin ${activeFloor?.label ?? state.activeFloorLabel} before applying an alignment.`,
+                `位置合わせを適用する前に「${activeFloor?.label ?? state.activeFloorLabel}」の固定を解除してください。`
+              )}
+            </p>
+          ) : null}
+
           {groupBlocked ? (
             <p className="text-xs leading-4 text-destructive">
               {t(
@@ -436,7 +471,7 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
             </p>
           ) : null}
 
-          <DisabledHint hint={!selectedMatch || groupBlocked ? applyBlockedReason : null}>
+          <DisabledHint hint={!selectedMatch || groupBlocked || pinnedBlocked ? applyBlockedReason : null}>
             {applyButton}
           </DisabledHint>
         </div>

@@ -32,7 +32,7 @@ function controlPoints(count: number): ControlPoint[] {
   });
 }
 
-function placementState(count = 0, activeLinked = true): PlacementState {
+function placementState(count = 0, activeLinked = true, activePinned = false): PlacementState {
   return {
     frame: {
       rotationDeg: 0,
@@ -43,7 +43,8 @@ function placementState(count = 0, activeLinked = true): PlacementState {
     scaleLocked: false,
     floors: ["1F", "2F"].map((label) => ({
       label,
-      linked: label === "1F" ? activeLinked : true,
+      linked: label === "1F" ? activeLinked && !activePinned : true,
+      pinned: label === "1F" ? activePinned : false,
       artworkAnchor: ARTWORK_ANCHOR,
       mapAnchor: ANCHOR,
       controlPoints: label === "1F" ? controlPoints(count) : [],
@@ -59,18 +60,20 @@ function renderList({
   count = 0,
   mode = "individual",
   activeLinked = true,
+  activePinned = false,
   pickStage = null,
   dispatch = () => {}
 }: {
   count?: number;
   mode?: AdjustmentMode;
   activeLinked?: boolean;
+  activePinned?: boolean;
   pickStage?: "artwork" | "map" | null;
   dispatch?: (action: PlacementAction) => void;
 } = {}) {
   render(
     <ControlPointList
-      state={placementState(count, activeLinked)}
+      state={placementState(count, activeLinked, activePinned)}
       dispatch={dispatch}
       pickStage={pickStage}
       mode={mode}
@@ -180,4 +183,11 @@ test("blocks group registration from an unlinked active floor", () => {
   expect(screen.getByRole("button", { name: "Add matching pair" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Fit all linked floors" })).toBeDisabled();
   expect(screen.getByText("Relink 1F before fitting all floors.")).toBeInTheDocument();
+});
+
+test("blocks fitting while the active floor is frozen in place", () => {
+  renderList({ count: 3, mode: "individual", activePinned: true });
+  expect(screen.getByRole("button", { name: "Add matching pair" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Fit this floor" })).toBeDisabled();
+  expect(screen.getByText("Unpin 1F before fitting it with control points.")).toBeInTheDocument();
 });

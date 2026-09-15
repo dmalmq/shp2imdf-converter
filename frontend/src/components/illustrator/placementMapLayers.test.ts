@@ -1,5 +1,6 @@
 import {
   ARTWORK_SLOT_LAYER_ID,
+  artworkLayerFilter,
   OVERLAY_SLOT_LAYER_ID,
   floorFillLayerId,
   floorLineLayerId,
@@ -36,6 +37,28 @@ test("isolate-this-floor is a visibility flag, not a different layer id", () => 
   expect(layerVisibility(true)).toBe("visible");
   expect(layerVisibility(false)).toBe("none");
   expect(floorSourceId("1F")).toBe(floorSourceId("1F"));
+});
+
+test("artwork layer filters hide names without changing floor sources", () => {
+  expect(artworkLayerFilter([], false)).toBeUndefined();
+  expect(artworkLayerFilter([], true)).toEqual(["==", ["geometry-type"], "Polygon"]);
+
+  const hidden = ["Walls", "Labels"];
+  const visibility = [
+    "!",
+    [
+      "in",
+      ["coalesce", ["get", "ai_layer"], ["get", "source_table"], ""],
+      ["literal", hidden]
+    ]
+  ];
+  expect(artworkLayerFilter(hidden, false)).toEqual(visibility);
+  expect(artworkLayerFilter(hidden, true)).toEqual([
+    "all",
+    ["==", ["geometry-type"], "Polygon"],
+    visibility
+  ]);
+  expect(floorSourceId("1F")).toBe("floor-1F");
 });
 
 test("slot layers have stable ids so beforeId never points at a missing layer", () => {

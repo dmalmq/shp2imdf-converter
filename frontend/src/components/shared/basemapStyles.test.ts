@@ -14,6 +14,18 @@ test("aerial imagery is offered, because OSM often lacks the footprint", () => {
   expect(BASEMAP_ORDER).toContain("gsi-photo");
 });
 
+test("map off keeps only a neutral canvas for the floor drawings", () => {
+  expect(BASEMAP_ORDER).toContain("none");
+  expect(BASEMAP_STYLES.none.sources).toEqual({});
+  expect(BASEMAP_STYLES.none.layers).toEqual([
+    {
+      id: "background",
+      type: "background",
+      paint: { "background-color": "#f1f5f9" }
+    }
+  ]);
+});
+
 test("every style carries an attribution", () => {
   for (const id of BASEMAP_ORDER) {
     const sources = Object.values(BASEMAP_STYLES[id].sources) as { attribution?: string }[];
@@ -56,4 +68,6 @@ test("labels are bilingual", () => {
   expect(basemapLabel("gsi-photo", ja)).toBe("写真（地理院）");
   expect(basemapLabel("esri", en)).toBe("Satellite (Esri)");
   expect(basemapLabel("esri", ja)).toBe("衛星写真（Esri）");
+  expect(basemapLabel("none", en)).toBe("Map off");
+  expect(basemapLabel("none", ja)).toBe("地図なし");
 });
