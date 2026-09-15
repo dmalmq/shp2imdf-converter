@@ -339,6 +339,8 @@ type Props = {
   regionSource?: RegionCorners | null;
   regionTarget?: RegionCorners | null;
   onRegionDrawn?: (corners: RegionCorners) => void;
+  /** False while the pin or Station_pg snap is still in flight. */
+  artworkVisible?: boolean;
 };
 
 /**
@@ -365,7 +367,8 @@ export function PlacementMap({
   regionPickStage = null,
   regionSource = null,
   regionTarget = null,
-  onRegionDrawn
+  onRegionDrawn,
+  artworkVisible = true
 }: Props) {
   const { t } = useUiLanguage();
   const mapRef = useRef<MapRef | null>(null);
@@ -652,6 +655,9 @@ export function PlacementMap({
             floor.color,
             isImageryBasemap(basemap)
           );
+          const layout = {
+            visibility: artworkVisible ? paint.layout.visibility : ("none" as const)
+          };
           return (
             <Source
               key={floorSourceId(floor.label)}
@@ -664,14 +670,14 @@ export function PlacementMap({
                 type="fill"
                 beforeId={OVERLAY_SLOT_LAYER_ID}
                 filter={["==", ["geometry-type"], "Polygon"]}
-                layout={paint.layout}
+                layout={layout}
                 paint={paint.fill}
               />
               <Layer
                 id={floorLineLayerId(floor.label)}
                 type="line"
                 beforeId={OVERLAY_SLOT_LAYER_ID}
-                layout={paint.layout}
+                layout={layout}
                 paint={paint.line}
               />
             </Source>
@@ -822,7 +828,7 @@ export function PlacementMap({
         </Source>
 
         {/* Bounding box of the active floor: shows what the handles act on. */}
-        {gizmo ? (
+        {gizmo && artworkVisible ? (
           <Source
             id="placement-outline"
             type="geojson"
@@ -846,6 +852,7 @@ export function PlacementMap({
         ) : null}
 
         {ready &&
+        artworkVisible &&
         !pickStage &&
         !shapePickActive &&
         !regionPickStage &&

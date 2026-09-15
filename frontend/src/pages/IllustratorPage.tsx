@@ -39,6 +39,17 @@ import {
   parseMatchTarget,
   type ShapeMatchPanelModel
 } from "../components/illustrator/ShapeMatchPanel";
+import {
+  floorsNeedingArtworkMatch,
+  preferredArtworkMatchTarget
+} from "../lib/artworkMatch";
+import {
+  placementPoseReady,
+  sameSurveySnap,
+  surveySnapAwaitingRetrim,
+  type SurveyPose,
+  type SurveySnapTarget
+} from "../lib/placementPose";
 import { stationQueryFromFilename } from "../lib/siteName";
 import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
 import { useAppStore } from "../store/useAppStore";
@@ -154,6 +165,10 @@ function regionCorners(
   ];
 }
 
+function artworkMatchLabels(floors: PlacementState["floors"]): string[] {
+  return floors.filter((floor) => floor.artworkMatch).map((floor) => floor.label);
+}
+
 function keptMatchTarget(current: Pick<ShapeMatchState, "referenceName" | "referenceFloorLabel">): ShapeMatchState {
   return {
     ...EMPTY_SHAPE_MATCH,
@@ -212,9 +227,9 @@ function initialStateFromAssignment(
     ? assignment
     : [{ label: "artwork", box: preview.artwork_bounds, pages: null, layer_names: null }];
   const first = regions[0];
-  // The server already computed each floor's bounds from the geometry it
-  // matched, which is exact for page floors (no box) and tighter than the
-  // drawn box for box floors.
+  const artworkMatch = new Set(
+    floorsNeedingArtworkMatch(regions, preview.report.page_alignment ?? [])
+  );
   return {
     frame: {
       rotationDeg: 0,
@@ -225,13 +240,18 @@ function initialStateFromAssignment(
     scaleLocked: true,
     floors: regions.map((region) => {
       const bounds = boundsFor(preview, region, summary);
+      const needsMatch = artworkMatch.has(region.label);
       return {
         label: region.label,
-        linked: true,
+        linked: !needsMatch,
+        artworkMatch: needsMatch,
         artworkAnchor: [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2],
         mapAnchor: [139.7671, 35.6812],
         controlPoints: [],
-        artworkBounds: bounds
+        artworkBounds: bounds,
+        ...(needsMatch
+          ? { rotationDeg: 0, metresPerPoint: DEFAULT_METRES_PER_POINT }
+          : {})
       };
     })
   };
@@ -280,9 +300,9 @@ export function IllustratorPage() {
   const [referenceLayers, setReferenceLayers] = useState<ReferenceLayer[]>([]);
   const [placementTab, setPlacementTab] = useState<PlacementTab>("fit");
   const [surveyNotice, setSurveyNotice] = useState<string | null>(null);
-  // The Station_pg collection last sent for a snap. A re-trimmed layer is a new
-  // object and snaps again; a frame nudge or a lock toggle leaves it alone. The
-  // counter drops a response that lands after a newer snap or a new conversion.
+  const [surveyPose, setSurveyPose] = useState<SurveyPose>("idle");
+  const [locateSettled, setLocateSettled] = useState(false);
+
   // A shape match against a station-sized reference layer is a long request, and
   // an unbounded one is indistinguishable from a hang. Bound it, let the user
   // stop it, and make a superseded request abandon quietly.
@@ -331,7 +351,11 @@ export function IllustratorPage() {
     setShapeMatch((current) => ({ ...current, loading: false, searched: false, error: null }));
   };
 
-  const snappedRef = useRef<FeatureCollection | null>(null);
+  // The Station_pg collection last sent for a snap, keyed with the pin it used.
+  // A re-trimmed layer is a new object and snaps again; a frame nudge or a lock
+  // toggle leaves it alone. The counter drops a response that lands after a
+  // newer snap or a new conversion.
+  const snappedRef = useRef<SurveySnapTarget | null>(null);
   const surveySnapGen = useRef(0);
   // Floors start grouped: the whole building is aligned first, then the user
   // switches to individual mode for final per-floor nudges. UI-level only —
@@ -363,7 +387,9 @@ export function IllustratorPage() {
     setShapeMatch((current) => {
       // Switching levels is how the user gets a clear look at the floor being
       // boxed, so an area pick has to survive it. Only the outline selection,
-      // which belongs to one floor, is discarded.
+      // which belongs to one floor, is discarded. Mode changes go through the
+      // map toggle (which already drops the outline) or Match-to-floor, which
+      // starts a pick and must not wipe it.
       if (current.regionStage || current.sourceRegion || current.targetRegion) {
         return { ...current, selecting: false, selection: null };
       }
@@ -373,11 +399,12 @@ export function IllustratorPage() {
           referenceLayers,
           state.floors.map((floor) => floor.label),
           state.activeFloorLabel,
-          current
+          current,
+          artworkMatchLabels(state.floors)
         )
       };
     });
-  }, [state.activeFloorLabel, adjustmentMode]);
+  }, [state.activeFloorLabel]);
 
   // Computed unconditionally so the hook order is stable across the early
   // returns below (a conditional hook here crashes the placement view).
@@ -413,6 +440,10 @@ export function IllustratorPage() {
     [state.stationPin]
   );
 
+  useEffect(() => {
+    setOutputCrs(state.frame.workingCrs);
+  }, [state.frame.workingCrs]);
+
   const referenceFloorPlacement =
     state.floors.find((floor) => floor.label === shapeMatch.referenceFloorLabel) ?? null;
   const sourceFloorPlacement =
@@ -444,13 +475,29 @@ export function IllustratorPage() {
   const surveyName = surveyLayerName(referenceLayers);
   const surveyCollection =
     referenceLayers.find((layer) => layer.name === surveyName)?.data ?? null;
+  const surveyHasFeatures = Boolean(surveyCollection && surveyCollection.features.length > 0);
+  const snapMatchesCurrent = sameSurveySnap(
+    snappedRef.current,
+    surveyCollection,
+    state.stationPin
+  );
+  const poseReady = placementPoseReady(Boolean(state.stationPin), surveyHasFeatures, surveyPose, {
+    locateSettled,
+    snapMatchesCurrent
+  });
   const snapToSurvey = async (reference: FeatureCollection) => {
     // A group apply moves the linked floors through the active floor, so an
     // unlinked active floor hands the anchor to the first floor still linked.
     const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
     const anchor = active?.linked ? active : state.floors.find((floor) => floor.linked);
-    if (!preview || !anchor) return;
-    snappedRef.current = reference;
+    const pin = state.stationPin;
+    setSurveyPose("pending");
+    if (!preview || !anchor || !pin) {
+      if (pin) snappedRef.current = { collection: reference, pin };
+      setSurveyPose("ready");
+      return;
+    }
+    snappedRef.current = { collection: reference, pin };
     const gen = ++surveySnapGen.current;
     try {
       const { match } = await snapIllustratorSurvey(preview.conversion_id, {
@@ -488,13 +535,16 @@ export function IllustratorPage() {
           t("Could not snap to Station_pg.", "Station_pg にスナップできませんでした。")
         )
       );
+    } finally {
+      if (gen === surveySnapGen.current) setSurveyPose("ready");
     }
   };
 
   useEffect(() => {
     if (!preview || assignment === null || !state.stationPin || !state.scaleLocked) return;
     if (!surveyCollection || surveyCollection.features.length === 0) return;
-    if (snappedRef.current === surveyCollection) return;
+    if (sameSurveySnap(snappedRef.current, surveyCollection, state.stationPin)) return;
+    if (surveySnapAwaitingRetrim(snappedRef.current, surveyCollection, state.stationPin)) return;
     void snapToSurvey(surveyCollection);
   }, [preview, assignment, state.stationPin, state.scaleLocked, surveyCollection]);
 
@@ -517,7 +567,8 @@ export function IllustratorPage() {
         layers,
         state.floors.map((floor) => floor.label),
         state.activeFloorLabel,
-        current
+        current,
+        artworkMatchLabels(state.floors)
       );
       if (
         !geometryReplaced &&
@@ -761,6 +812,25 @@ export function IllustratorPage() {
     onFind: () => void findShapeMatches(),
     onCancel: cancelShapeMatch,
     onPreview: (previewRank) => setShapeMatch((current) => ({ ...current, previewRank })),
+    artworkMatchTarget:
+      state.floors.find((floor) => floor.label === state.activeFloorLabel)?.artworkMatch
+        ? preferredArtworkMatchTarget(state.activeFloorLabel ?? "", state.floors)
+        : "",
+    onStartArtworkMatch: () => {
+      const active = state.activeFloorLabel;
+      if (!active) return;
+      const target = preferredArtworkMatchTarget(active, state.floors);
+      if (!target) return;
+      setAdjustmentMode("individual");
+      setPlacementTab("fit");
+      setPickSession(null);
+      setShapeMatch({
+        ...EMPTY_SHAPE_MATCH,
+        sourceFloorLabel: active,
+        referenceFloorLabel: target,
+        selecting: true
+      });
+    },
     onApply: () => {
       if (!shapeMatchPreview) return;
       // An apply always moves the floor the source area came from, even if the
@@ -788,6 +858,9 @@ export function IllustratorPage() {
       setRecenterTo(null);
       setReferenceLayers([]);
       setSurveyNotice(null);
+      setSurveyPose("idle");
+      setLocateSettled(false);
+      snappedRef.current = null;
       surveySnapGen.current += 1;
       setLastFile(file);
       setOutputCrs(response.suggested_crs);
@@ -940,6 +1013,7 @@ export function IllustratorPage() {
         siteName={siteName}
         conversionId={preview.conversion_id}
         onLocate={setRecenterTo}
+        onLookupSettled={() => setLocateSettled(true)}
         canUndo={history.past.length > 0}
         canRedo={history.future.length > 0}
         tab={placementTab}
@@ -966,8 +1040,6 @@ export function IllustratorPage() {
         onReferenceLayersChange={updateReferenceLayers}
         focusBounds={focusBounds}
         bounds={bounds}
-        suggestedCrs={preview.suggested_crs}
-        suggestedCrsLabel={preview.suggested_crs_label}
         outputCrs={outputCrs}
         onOutputCrsChange={setOutputCrs}
         formats={formats}
@@ -978,12 +1050,25 @@ export function IllustratorPage() {
         error={error}
       />
 
-      <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-md border border-border">
+        {/* `bg-popover` rather than a literal white: this sits over the map and
+            has to stay readable when the page is dark. */}
+        {!poseReady ? (
+          <p
+            data-testid="placement-hold"
+            className="pointer-events-none absolute inset-x-0 top-3 z-30 mx-auto w-fit rounded-md border border-border bg-popover/95 px-3 py-1 text-xs leading-4 text-muted-foreground shadow-sm"
+          >
+            {state.stationPin
+              ? t("Snapping to Station_pg…", "Station_pg に合わせています…")
+              : t("Locating the station…", "駅を検索しています…")}
+          </p>
+        ) : null}
         <PlacementMap
           floors={floorLayers}
           state={state}
           dispatch={dispatch}
           mode={adjustmentMode}
+          artworkVisible={poseReady}
           onModeChange={(mode) => {
             setPickSession(null);
             setShapeMatch((current) => keptMatchTarget(current));

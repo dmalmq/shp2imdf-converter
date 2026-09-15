@@ -3,6 +3,7 @@ import type { Dispatch } from "react";
 import type { ExportFormatsPayload } from "../../api/client";
 import type { AdjustmentMode, PlacementAction, PlacementState } from "../../hooks/useIllustratorPlacement";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { workingCrsLabel } from "../../lib/workingCrs";
 import { Button } from "../ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { DisabledHint } from "../ui/tooltip";
@@ -34,6 +35,7 @@ type Props = {
   siteName: string;
   conversionId: string;
   onLocate: (lngLat: [number, number]) => void;
+  onLookupSettled?: () => void;
   canUndo: boolean;
   canRedo: boolean;
   tab: PlacementTab;
@@ -46,8 +48,6 @@ type Props = {
   onReferenceLayersChange: (layers: ReferenceLayer[]) => void;
   focusBounds?: [number, number, number, number] | null;
   bounds: [number, number, number, number];
-  suggestedCrs: string;
-  suggestedCrsLabel: string;
   outputCrs: string;
   onOutputCrsChange: (value: string) => void;
   formats: ExportFormatsPayload;
@@ -65,6 +65,7 @@ export function PlacementSidebar({
   siteName,
   conversionId,
   onLocate,
+  onLookupSettled,
   canUndo,
   canRedo,
   tab,
@@ -77,8 +78,6 @@ export function PlacementSidebar({
   onReferenceLayersChange,
   focusBounds,
   bounds,
-  suggestedCrs,
-  suggestedCrsLabel,
   outputCrs,
   onOutputCrsChange,
   formats,
@@ -104,7 +103,13 @@ export function PlacementSidebar({
   return (
     <aside className="flex h-full min-h-0 w-[340px] shrink-0 flex-col border-r border-border bg-background">
       <div className="flex flex-col gap-3 px-4 pt-4">
-        <LocateControl key={conversionId} siteName={siteName} dispatch={dispatch} onLocate={onLocate} />
+        <LocateControl
+          key={conversionId}
+          siteName={siteName}
+          dispatch={dispatch}
+          onLocate={onLocate}
+          onLookupSettled={onLookupSettled}
+        />
         <TransformPanel
           state={state}
           dispatch={dispatch}
@@ -186,7 +191,10 @@ export function PlacementSidebar({
               state={state}
               dispatch={dispatch}
               artworkBounds={bounds}
-              crsChoices={CRS_CHOICES(suggestedCrs, suggestedCrsLabel)}
+              crsChoices={CRS_CHOICES(
+                state.frame.workingCrs,
+                workingCrsLabel(state.frame.workingCrs)
+              )}
               outputCrs={outputCrs}
               onOutputCrsChange={onOutputCrsChange}
               formats={formats}

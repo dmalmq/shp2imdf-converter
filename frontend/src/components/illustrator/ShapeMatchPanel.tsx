@@ -30,6 +30,8 @@ export type ShapeMatchPanelModel = {
   onToggleRegions: () => void;
   onFind: () => void;
   onPreview: (rank: number) => void;
+  artworkMatchTarget?: string;
+  onStartArtworkMatch?: () => void;
   onApply: () => void;
   onClear: () => void;
   /** Stop an in-flight comparison. */
@@ -170,6 +172,28 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
           </Popover>
         </div>
       </div>
+
+      {/* The standing paragraph that used to sit here is the same text now in
+          the help popover above; this block is the one that is about your
+          data, so it is the one that stays on screen. */}
+      {model.artworkMatchTarget && activeFloor ? (
+        <div className="flex flex-col gap-2 rounded-md border border-border bg-muted p-2.5">
+          <p className="text-xs leading-4 text-muted-foreground">
+            {t(
+              `${activeFloor.label} did not stack. Match this floor to ${model.artworkMatchTarget}, not to Station_pg.`,
+              `「${activeFloor.label}」は他のフロアと一致しませんでした。「Station_pg」ではなく「${model.artworkMatchTarget}」に合わせてください。`
+            )}
+          </p>
+          {model.onStartArtworkMatch ? (
+            <Button size="sm" className="w-full" onClick={model.onStartArtworkMatch}>
+              {t(
+                `Match ${activeFloor.label} to ${model.artworkMatchTarget}`,
+                `「${activeFloor.label}」を「${model.artworkMatchTarget}」に合わせる`
+              )}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       {canMatch ? (
         <select

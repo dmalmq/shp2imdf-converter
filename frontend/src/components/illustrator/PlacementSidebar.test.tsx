@@ -81,9 +81,7 @@ function SidebarHarness({
       referenceLayers={[]}
       onReferenceLayersChange={() => {}}
       bounds={[0, 0, 100, 100]}
-      suggestedCrs="EPSG:6677"
-      suggestedCrsLabel="EPSG:6677 — JGD2011 / Japan Plane Rectangular CS IX"
-      outputCrs="EPSG:4326"
+      outputCrs={placement.frame.workingCrs}
       onOutputCrsChange={() => {}}
       formats={FORMATS}
       onFormatsChange={() => {}}
@@ -180,6 +178,24 @@ const oimachiTownWire: GeocodeResultItem = {
   source: "nominatim",
   address: EMPTY_ADDRESS
 };
+
+test("the export CRS list follows the pin's working CRS, not the Tokyo seed", () => {
+  const hakodate = {
+    ...STATE,
+    frame: { ...STATE.frame, workingCrs: "EPSG:6679" }
+  };
+  render(<SidebarHarness placement={hakodate} />);
+  clickTab("Export");
+
+  // The picker is a Radix Select now, so the current value reads off the
+  // trigger and the choices only exist once it is open.
+  const trigger = screen.getByRole("combobox", { name: "Output CRS" });
+  expect(trigger).toHaveTextContent("EPSG:6679");
+
+  fireEvent.click(trigger);
+  expect(screen.getByRole("option", { name: /EPSG:6679/ })).toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: /EPSG:6677/ })).toBeNull();
+});
 
 test("Nominatim hits stay out of the document until the locate row is opened", async () => {
   vi.mocked(geocodeSearch).mockResolvedValue([oimachiStaWire, oimachiTownWire]);

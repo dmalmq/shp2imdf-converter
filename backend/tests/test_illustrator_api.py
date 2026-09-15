@@ -142,6 +142,30 @@ def test_geocode_endpoint_needs_no_session(test_client) -> None:
 
 
 @pytest.mark.georef
+def test_geocode_uses_a_prefecture_name_when_nominatim_omits_the_iso_code(test_client) -> None:
+    class FakeGeocoder:
+        def search(self, query: str, language: str, limit: int = 5) -> list[GeocodeMatch]:
+            return [
+                GeocodeMatch(
+                    display_name="函館駅",
+                    latitude=41.7687,
+                    longitude=140.7288,
+                    source="fake",
+                    address=GeocodeAddressParts(locality="函館市", province="北海道"),
+                )
+            ]
+
+        def reverse(self, latitude: float, longitude: float, language: str):
+            return None
+
+    test_client.app.state.geocoder = FakeGeocoder()
+    response = test_client.get("/api/geocode", params={"query": "函館駅", "language": "ja"})
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert results[0]["working_crs"] == "EPSG:6679"
+
+
+@pytest.mark.georef
 def test_geocode_reports_when_disabled(test_client) -> None:
     test_client.app.state.geocoder = None
     response = test_client.get("/api/geocode", params={"query": "新宿駅"})

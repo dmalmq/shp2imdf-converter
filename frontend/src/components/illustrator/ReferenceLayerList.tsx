@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { uploadReferenceLayers } from "../../api/client";
 import { isBackendUnreachableError, toErrorMessage } from "../../api/errors";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { preferredArtworkMatchTarget } from "../../lib/artworkMatch";
 import { Button } from "../ui/button";
 import { DisabledHint } from "../ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -57,11 +58,22 @@ export function nextMatchTarget(
   layers: readonly { name: string }[],
   floorLabels: readonly string[],
   activeFloorLabel: string | null,
-  current: ShapeMatchTarget
+  current: ShapeMatchTarget,
+  artworkMatchLabels: readonly string[] = []
 ): ShapeMatchTarget {
   const otherFloors = floorLabels.filter((label) => label !== activeFloorLabel);
   if (current.referenceFloorLabel && otherFloors.includes(current.referenceFloorLabel)) {
     return { referenceName: "", referenceFloorLabel: current.referenceFloorLabel };
+  }
+  if (activeFloorLabel && artworkMatchLabels.includes(activeFloorLabel)) {
+    const target = preferredArtworkMatchTarget(
+      activeFloorLabel,
+      floorLabels.map((label) => ({
+        label,
+        artworkMatch: artworkMatchLabels.includes(label)
+      }))
+    );
+    if (target) return { referenceName: "", referenceFloorLabel: target };
   }
   const referenceName = preferSurveyLayer(layers, current.referenceName);
   if (referenceName) {
