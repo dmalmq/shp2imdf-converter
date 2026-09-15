@@ -1,4 +1,4 @@
-import { Globe } from "lucide-react";
+import { Globe, Moon, Sun } from "lucide-react";
 import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 
@@ -18,12 +18,19 @@ type Props = {
 export function AppShell({ children }: Props) {
   const { uiLanguage, setUiLanguage, t } = useUiLanguage();
   const sessionId = useAppStore((s) => s.sessionId);
+  const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
   const location = useLocation();
 
   // Keep document lang in sync
   useEffect(() => {
     document.documentElement.lang = uiLanguage;
   }, [uiLanguage]);
+
+  // The token layer keys dark off a class on <html>; nothing else reaches it.
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+  }, [theme]);
 
   const nextLanguage = uiLanguage === "en" ? "ja" : "en";
 
@@ -62,16 +69,31 @@ export function AppShell({ children }: Props) {
           {/* Centre: whichever flow this route actually belongs to */}
           {isIllustrator ? <IllustratorSteps /> : <StepIndicator />}
 
-          {/* Right: language toggle */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setUiLanguage(nextLanguage)}
-            title={t("Switch UI language", "表示言語を切り替え")}
-          >
-            <Globe className="h-3.5 w-3.5" />
-            {uiLanguage === "en" ? "日本語" : "EN"}
-          </Button>
+          {/* Right: display preferences */}
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              aria-label={t("Switch theme", "テーマを切り替え")}
+              title={
+                theme === "dark"
+                  ? t("Switch to light", "ライトに切り替え")
+                  : t("Switch to dark", "ダークに切り替え")
+              }
+            >
+              {theme === "dark" ? <Sun /> : <Moon />}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setUiLanguage(nextLanguage)}
+              title={t("Switch UI language", "表示言語を切り替え")}
+            >
+              <Globe className="h-3.5 w-3.5" />
+              {uiLanguage === "en" ? "日本語" : "EN"}
+            </Button>
+          </div>
         </header>
 
         {/* ─── Page content ─── */}

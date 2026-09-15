@@ -935,7 +935,7 @@ export function PlacementMap({
       {/* Above the area-capture layer: switching levels mid-pick is how the
           user gets a clear look at the floor being boxed. */}
       <div className="absolute left-3 top-3 z-20 flex flex-col gap-2">
-        <div className="flex flex-wrap gap-1 rounded-[var(--radius-md)] bg-white/90 p-1 shadow">
+        <div className="flex flex-wrap gap-1 rounded-md bg-popover/95 p-1 text-popover-foreground shadow-md">
           {floors.length > 1 ? (
             <>
               {floors.map((floor) => {
@@ -1027,7 +1027,7 @@ export function PlacementMap({
       {/* Tools, not geometry: things you reach for occasionally sit opposite the
           floor switcher as icons. The basemap had four always-visible chips in
           the prime corner — it is chosen once per session. */}
-      <div className="absolute right-3 top-3 z-20 flex gap-0.5 rounded-md bg-white/90 p-1 shadow">
+      <div className="absolute right-3 top-3 z-20 flex gap-0.5 rounded-md bg-popover/95 p-1 text-popover-foreground shadow-md">
         <Popover open={basemapOpen} onOpenChange={setBasemapOpen}>
           <PopoverTrigger asChild>
             <Button
@@ -1090,7 +1090,7 @@ export function PlacementMap({
       {/* Technical marginalia: where you are and in what, without spending a
           panel on it. */}
       {center ? (
-        <div className="pointer-events-none absolute bottom-3 left-3 z-20 rounded-md bg-white/90 px-2 py-1 font-mono text-[10px] leading-[14px] tracking-[0.02em] text-foreground shadow">
+        <div className="pointer-events-none absolute bottom-3 left-3 z-20 rounded-md bg-popover/95 px-2 py-1 font-mono text-[10px] leading-[14px] tracking-[0.02em] text-popover-foreground shadow-md">
           {center[1].toFixed(6)}, {center[0].toFixed(6)}
           <span className="mx-1 text-muted-foreground">·</span>
           <span className="text-muted-foreground">{state.frame.workingCrs}</span>

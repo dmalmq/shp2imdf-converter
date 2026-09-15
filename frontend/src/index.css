@@ -145,14 +145,43 @@
     --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
     --shadow-md: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
   }
+
+  /* Dark values for the legacy tokens.
+     Without these the un-migrated routes stay light while the shell goes dark,
+     because the block above only exists under `:root`. Deleting this goes with
+     deleting that one, once every route is on the tokens at the top. */
+  .dark {
+    --color-surface: #09090b;
+    --color-surface-muted: #18181b;
+    --color-surface-raised: #27272a;
+    --color-border: #27272a;
+    --color-border-muted: #1f1f23;
+
+    --color-primary: #3b82f6;
+    --color-primary-hover: #60a5fa;
+    --color-primary-muted: #1e3a8a;
+
+    --color-success: #22c55e;
+    --color-success-muted: #14532d;
+
+    --color-warning: #f59e0b;
+    --color-warning-muted: #451a03;
+
+    --color-error: #ef4444;
+    --color-error-muted: #450a0a;
+
+    --color-text: #fafafa;
+    --color-text-secondary: #d4d4d8;
+    --color-text-muted: #a1a1aa;
+  }
 }
 
 body {
   margin: 0;
   font-family: "Geist Variable", "IBM Plex Sans JP", "Hiragino Kaku Gothic ProN",
     "Yu Gothic UI", Meiryo, system-ui, sans-serif;
-  background: var(--color-surface-muted);
-  color: var(--color-text);
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
 }
 
 :root:lang(ja) body,

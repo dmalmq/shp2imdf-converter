@@ -5,7 +5,7 @@ import type { FeatureCollection } from "geojson";
 import type { IllustratorPageAlignment, IllustratorPagePreview } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { buildSvgPaths, splitByPage, type PartitionFloor } from "../../lib/svgPreview";
-import { Button } from "../legacy-ui";
+import { Button } from "../ui/button";
 import { AssignmentPanel } from "./AssignmentPanel";
 
 type Props = {
@@ -160,7 +160,7 @@ export function PageAssignmentPanel({
   return (
     <div className="space-y-3 text-sm">
       {movedPages.length > 0 ? (
-        <p data-testid="page-alignment-note" className="text-xs text-[var(--color-text-muted)]">
+        <p data-testid="page-alignment-note" className="text-xs text-muted-foreground">
           {movedPages.length === 1
             ? t(
                 `Page ${movedPages[0].page} was aligned to page ${anchor} automatically.`,
@@ -215,11 +215,11 @@ export function PageAssignmentPanel({
           return (
             <div
               key={page.index}
-              className={`rounded-[var(--radius-md)] border p-2 ${
+              className={`rounded-md border p-2 ${
                 card.excluded ? "opacity-50" : ""
               }`}
             >
-              <div className="mb-1 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+              <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
                 <span>
                   {t("Page", "ページ")} {page.index}
                 </span>
@@ -228,7 +228,7 @@ export function PageAssignmentPanel({
                 </span>
               </div>
 
-              <div className="overflow-hidden rounded-[var(--radius-md)] border bg-white">
+              <div className="overflow-hidden rounded-md border border-border bg-card">
                 <svg viewBox={viewBox} className="h-32 w-full">
                   {/* Artwork points are y-up; SVG user space is y-down. */}
                   <g transform={`translate(0 ${miny + maxy}) scale(1 -1)`}>
@@ -255,18 +255,18 @@ export function PageAssignmentPanel({
                     `Floor name for page ${page.index}`,
                     `ページ ${page.index} のフロア名`
                   )}
-                  className="w-24 rounded-[var(--radius-md)] border px-2 py-1"
+                  className="w-24 rounded-md border px-2 py-1"
                   value={card.label}
                   disabled={card.excluded || boxes.length > 0}
                   onChange={(event) => update(page.index, { label: event.target.value })}
                 />
-                <span className="text-xs text-[var(--color-text-muted)]">
+                <span className="text-xs text-muted-foreground">
                   {t("shapes", "図形")}: {page.preview_feature_count}
                 </span>
               </label>
 
               {boxes.length > 0 ? (
-                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                <p className="mt-1 text-xs text-muted-foreground">
                   {t(`${boxes.length} boxes on this page`, `このページに ${boxes.length} 個の範囲`)}
                 </p>
               ) : mergeCount > 1 ? (
@@ -294,7 +294,7 @@ export function PageAssignmentPanel({
                   {boxes.length > 0 ? (
                     <button
                       type="button"
-                      className="text-xs text-[var(--color-error)] underline"
+                      className="text-xs text-destructive underline"
                       onClick={() =>
                         setBoxesByPage((prev) => {
                           const next = new Map(prev);
@@ -324,7 +324,7 @@ export function PageAssignmentPanel({
       </div>
 
       {duplicates.length > 0 ? (
-        <p className="text-xs text-[var(--color-error)]">
+        <p className="text-xs text-destructive">
           {t(
             `Two floors share the name ${duplicates.join(", ")}. Rename one.`,
             `フロア名 ${duplicates.join("、")} が重複しています。いずれかを変更してください。`

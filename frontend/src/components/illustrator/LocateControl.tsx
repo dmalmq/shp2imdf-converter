@@ -3,7 +3,7 @@ import { useEffect, useReducer, useRef } from "react";
 import { geocodeSearch } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import type { PlacementAction } from "../../hooks/useIllustratorPlacement";
-import { Button } from "../legacy-ui";
+import { Button } from "../ui/button";
 import {
   INITIAL_LOCATE,
   acceptsGuess,
@@ -21,7 +21,7 @@ type Props = {
   onLocate: (lngLat: [number, number]) => void;
 };
 
-const FIELD = "w-full rounded-[var(--radius-md)] border px-2 py-1";
+const FIELD = "w-full rounded-md border px-2 py-1";
 
 function positionFromPlace(place: Place, baseline: boolean): PlacementAction {
   return {
@@ -112,7 +112,7 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
     >
       <button
         type="button"
-        className="flex h-6 w-full items-center gap-1 truncate rounded-[var(--radius-md)] px-1 text-left text-xs hover:bg-[var(--color-surface-muted)]"
+        className="flex h-6 w-full items-center gap-1 truncate rounded-md px-1 text-left text-xs hover:bg-accent"
         aria-expanded={search.kind === "open"}
         onClick={() =>
           send(search.kind === "open" ? { type: "close" } : { type: "open", siteName })
@@ -120,7 +120,7 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
       >
         <span className="truncate">{rowLabel}</span>
         {locate.located.kind === "guessed" ? (
-          <span className="shrink-0 text-[var(--color-text-muted)]">
+          <span className="shrink-0 text-muted-foreground">
             {t("first match", "最初の候補")}
           </span>
         ) : null}
@@ -155,7 +155,7 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
             </Button>
           </div>
           {search.outcome.kind === "unavailable" ? (
-            <p className="mt-1 text-xs text-[var(--color-error)]">
+            <p className="mt-1 text-xs text-destructive">
               {t(
                 "Address search is unavailable. Pan the map to the building instead.",
                 "住所検索を利用できません。地図を手動で移動してください。"
@@ -163,7 +163,7 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
             </p>
           ) : null}
           {search.outcome.kind === "empty" ? (
-            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+            <p className="mt-1 text-xs text-muted-foreground">
               {t("No places found.", "該当する場所がありません。")}
             </p>
           ) : null}
