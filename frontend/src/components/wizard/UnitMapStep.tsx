@@ -2,6 +2,14 @@ import { useMemo } from "react";
 
 import type { ImportedFile, UnitCodePreviewRow, UnitMappingState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../ui";
+import { ColumnField } from "./ColumnField";
 
 
 type Props = {
@@ -61,10 +69,9 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
   };
 
   return (
-    <section className="rounded border bg-card p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{t("Step 5: Unit Mapping", "Step 5: Unit 対応付け")}</h2>
-        <label className="rounded border px-3 py-1.5 text-sm">
+    <section className="rounded-lg border border-border bg-card p-5">
+      <div className="mb-3 flex items-center justify-end">
+        <label className="inline-flex h-8 cursor-pointer items-center rounded-md border border-input px-3 text-[13px] font-medium leading-[18px] transition-colors hover:bg-accent">
           {t("Upload company mappings", "会社マッピングをアップロード")}
           <input
             type="file"
@@ -82,87 +89,50 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
       </div>
 
       <div className="mb-3 grid gap-3 md:grid-cols-2">
-        <label className="text-sm">
-          <span className="mb-1 block text-muted-foreground">{t("Code Column", "コード列")}</span>
-          <select
-            className="w-full rounded border px-2 py-1.5"
-            value={mapping.code_column ?? ""}
-            onChange={(event) => updateField("code_column", event.target.value || null)}
-          >
-            <option value="">{t("(none)", "（なし）")}</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>
-                {column}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block text-muted-foreground">{t("Name Column", "名称列")}</span>
-          <select
-            className="w-full rounded border px-2 py-1.5"
-            value={mapping.name_column ?? ""}
-            onChange={(event) => updateField("name_column", event.target.value || null)}
-          >
-            <option value="">{t("(none)", "（なし）")}</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>
-                {column}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block text-muted-foreground">{t("Alt Name Column", "別名列")}</span>
-          <select
-            className="w-full rounded border px-2 py-1.5"
-            value={mapping.alt_name_column ?? ""}
-            onChange={(event) => updateField("alt_name_column", event.target.value || null)}
-          >
-            <option value="">{t("(none)", "（なし）")}</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>
-                {column}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block text-muted-foreground">{t("Restriction Column", "制限列")}</span>
-          <select
-            className="w-full rounded border px-2 py-1.5"
-            value={mapping.restriction_column ?? ""}
-            onChange={(event) => updateField("restriction_column", event.target.value || null)}
-          >
-            <option value="">{t("(none)", "（なし）")}</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>
-                {column}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm md:col-span-2">
-          <span className="mb-1 block text-muted-foreground">{t("Accessibility Column", "アクセシビリティ列")}</span>
-          <select
-            className="w-full rounded border px-2 py-1.5"
-            value={mapping.accessibility_column ?? ""}
-            onChange={(event) => updateField("accessibility_column", event.target.value || null)}
-          >
-            <option value="">{t("(none)", "（なし）")}</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>
-                {column}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ColumnField
+          label={t("Code Column", "コード列")}
+          columns={columns}
+          value={mapping.code_column}
+          emptyLabel={t("Not mapped", "未設定")}
+          onChange={(value) => updateField("code_column", value)}
+        />
+        <ColumnField
+          label={t("Name Column", "名称列")}
+          columns={columns}
+          value={mapping.name_column}
+          emptyLabel={t("Not mapped", "未設定")}
+          onChange={(value) => updateField("name_column", value)}
+        />
+        <ColumnField
+          label={t("Alt Name Column", "別名列")}
+          columns={columns}
+          value={mapping.alt_name_column}
+          emptyLabel={t("Not mapped", "未設定")}
+          onChange={(value) => updateField("alt_name_column", value)}
+        />
+        <ColumnField
+          label={t("Restriction Column", "制限列")}
+          columns={columns}
+          value={mapping.restriction_column}
+          emptyLabel={t("Not mapped", "未設定")}
+          onChange={(value) => updateField("restriction_column", value)}
+        />
+        <ColumnField
+          className="md:col-span-2"
+          label={t("Accessibility Column", "アクセシビリティ列")}
+          columns={columns}
+          value={mapping.accessibility_column}
+          emptyLabel={t("Not mapped", "未設定")}
+          onChange={(value) => updateField("accessibility_column", value)}
+        />
       </div>
 
-      <div className="rounded border">
-        <div className="flex items-center justify-between border-b bg-muted px-3 py-2 text-sm">
+      <div className="mt-1 overflow-hidden rounded-lg border border-border">
+        <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2 text-[13px] leading-[18px]">
           <span>{t("Code Resolution Preview", "コード解決プレビュー")}</span>
-          <span className={unresolved ? "text-warning" : "text-success"}>
+          <span
+            className={`font-mono text-[11px] leading-[14px] tracking-[0.02em] ${unresolved ? "text-warning" : "text-muted-foreground"}`}
+          >
             {t(
               `${mapping.preview.length} codes, ${unresolved} unresolved`,
               `${mapping.preview.length} 件、未解決 ${unresolved} 件`
@@ -171,7 +141,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
         </div>
         <div className="max-h-64 overflow-auto">
           <table className="w-full border-collapse text-sm">
-            <thead className="sticky top-0 bg-muted text-left text-xs uppercase tracking-wide text-muted-foreground">
+            <thead className="sticky top-0 bg-muted text-left font-mono text-[10px] uppercase leading-[13px] tracking-[0.06em] text-muted-foreground">
               <tr>
                 <th className="px-2 py-2">{t("Raw Code", "元コード")}</th>
                 <th className="px-2 py-2">{t("Count", "件数")}</th>
@@ -180,22 +150,32 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
             </thead>
             <tbody>
               {mapping.preview.map((row) => (
-                <tr key={row.code} className={`border-t ${row.unresolved ? "bg-warning/10" : "bg-card"}`}>
+                <tr
+                  key={row.code}
+                  className={`border-t border-border ${row.unresolved ? "bg-warning/10" : "bg-card"}`}
+                >
                   <td className="px-2 py-2 font-mono text-xs">{row.code}</td>
                   <td className="px-2 py-2">{row.count}</td>
                   <td className="px-2 py-2">
-                    <select
-                      className="w-full rounded border px-2 py-1"
+                    <Select
                       value={row.resolved_category}
                       disabled={saving || row.code === "(empty)"}
-                      onChange={(event) => updateCodeCategory(row.code, event.target.value)}
+                      onValueChange={(value) => updateCodeCategory(row.code, value)}
                     >
-                      {categoryOptions.map((category) => (
-                        <option key={category} value={category}>
-                          {category}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger
+                        className="h-8"
+                        aria-label={t(`Category for ${row.code}`, `${row.code} のカテゴリ`)}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {categoryOptions.map((category) => (
+                          <SelectItem key={category} value={category}>
+                            {category}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </td>
                 </tr>
               ))}
@@ -212,7 +192,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
             </tbody>
           </table>
         </div>
-        <p className="border-t bg-muted px-3 py-2 text-xs text-muted-foreground">
+        <p className="border-t border-border bg-muted px-3 py-2 text-xs leading-4 text-muted-foreground">
           {t(
             "A category selection applies to all units with the same raw code value.",
             "カテゴリを選択すると、同じ元コードを持つすべてのユニットに適用されます。"
@@ -220,7 +200,6 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
         </p>
       </div>
 
-      {saving && <p className="mt-2 text-xs text-muted-foreground">{t("Saving mappings...", "マッピングを保存中...")}</p>}
     </section>
   );
 }

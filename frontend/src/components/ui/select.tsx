@@ -17,6 +17,9 @@ export const SelectTrigger = React.forwardRef<
     className={cn(
       "flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-background",
       "px-3 py-2 text-sm ring-offset-background",
+      // A trigger in a table cell has whatever width the column gives it; the
+      // value has to give way rather than push the chevron out of view.
+      "[&>span]:min-w-0 [&>span]:truncate",
       "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-0",
       "disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60",
       className

@@ -1,14 +1,16 @@
+import { ChevronRight } from "lucide-react";
 import { useMemo } from "react";
 
 import type { CleanupSummary, ImportedFile, WizardState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { Card, SectionHeader } from "../ui";
+import { useRegisterSave } from "./wizardSave";
 
 
 type Props = {
   files: ImportedFile[];
   cleanupSummary: CleanupSummary | null;
   wizard: WizardState | null;
-  saving: boolean;
   disabled?: boolean;
   onConfirm: () => void;
 };
@@ -28,8 +30,18 @@ function formatVenueAddress(wizard: WizardState | null): string {
 }
 
 
-export function SummaryStep({ files, cleanupSummary, wizard, saving, disabled, onConfirm }: Props) {
+export function SummaryStep({ files, cleanupSummary, wizard, disabled, onConfirm }: Props) {
   const { t } = useUiLanguage();
+
+  // The last section's action is not a save, so it says what it does.
+  useRegisterSave(onConfirm, {
+    canSave: !disabled,
+    label: t("Generate & open Review", "生成してレビューへ"),
+    blockedReason: t(
+      "Finish the sections still marked incomplete first",
+      "未完了のセクションを先に完了してください"
+    )
+  });
   const typeCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     files.forEach((file) => {
@@ -53,79 +65,128 @@ export function SummaryStep({ files, cleanupSummary, wizard, saving, disabled, o
   const mappedCodes = wizard?.mappings.unit.preview.length ?? 0;
 
   return (
-    <section className="rounded border bg-card p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{t("Step 10: Summary", "Step 10: 概要")}</h2>
-        <button
-          type="button"
-          className="rounded bg-success px-3 py-1.5 text-sm text-white disabled:opacity-60"
-          disabled={saving || disabled}
-          onClick={onConfirm}
-        >
-          {saving ? t("Generating...", "生成中...") : t("Confirm & Open Review", "確定してレビューへ進む")}
-        </button>
-      </div>
-
+    <section className="flex flex-col gap-4">
       <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded border p-3 text-sm">
-          <h3 className="font-semibold">{t("Project", "プロジェクト")}</h3>
-          <p className="mt-1">{t("Name", "名称")}: {wizard?.project?.project_name ?? t("(none)", "（なし）")}</p>
-          <p>{t("Venue", "会場")}: {wizard?.project?.venue_name ?? t("(missing)", "（未設定）")}</p>
-          <p>{t("Venue category", "会場カテゴリ")}: {wizard?.project?.venue_category ?? t("(missing)", "（未設定）")}</p>
-          <p>{t("Address", "住所")}: {formatVenueAddress(wizard)}</p>
-        </div>
+        <Card className="p-4">
+          <SectionHeader title={t("Project", "プロジェクト")} />
+          <dl className="mt-2">
+            <SummaryRow
+              label={t("Name", "名称")}
+              value={wizard?.project?.project_name || t("Not set", "未設定")}
+            />
+            <SummaryRow
+              label={t("Venue", "会場")}
+              value={wizard?.project?.venue_name || t("Not set", "未設定")}
+            />
+            <SummaryRow
+              label={t("Category", "カテゴリ")}
+              value={wizard?.project?.venue_category || t("Not set", "未設定")}
+            />
+            <SummaryRow label={t("Address", "住所")} value={formatVenueAddress(wizard)} />
+            <SummaryRow label={t("Language", "言語")} value={wizard?.project?.language ?? "en"} />
+          </dl>
+        </Card>
 
-        <div className="rounded border p-3 text-sm">
-          <h3 className="font-semibold">{t("Coverage", "集計")}</h3>
-          <p>{t("Files total", "ファイル総数")}: {files.length}</p>
-          <p>
-            {t("Levels", "レベル")}: {levelOrdinals.length}{" "}
-            {levelMin !== null && levelMax !== null && t(`(range ${levelMin} to ${levelMax})`, `（${levelMin} 〜 ${levelMax}）`)}
-          </p>
-          <p>{t("Buildings", "建物数")}: {wizard?.buildings.length ?? 0}</p>
-          <p>
-            {t("Unit code mappings", "Unit コード対応")}: {mappedCodes}{" "}
-            {t(`(${unresolvedCodes} unresolved)`, `（未解決 ${unresolvedCodes}）`)}
-          </p>
-          <p>{t("Footprint method", "Footprint 生成方法")}: {wizard?.footprint.method ?? "union_buffer"}</p>
-          <p>{t("Language", "言語")}: {wizard?.project?.language ?? "en"}</p>
-        </div>
+        <Card className="p-4">
+          <SectionHeader title={t("Coverage", "集計")} />
+          <dl className="mt-2">
+            <SummaryRow label={t("Files", "ファイル")} value={String(files.length)} />
+            <SummaryRow
+              label={t("Levels", "レベル")}
+              value={
+                levelMin !== null && levelMax !== null
+                  ? `${levelOrdinals.length} (${levelMin} … ${levelMax})`
+                  : String(levelOrdinals.length)
+              }
+            />
+            <SummaryRow label={t("Buildings", "建物")} value={String(wizard?.buildings.length ?? 0)} />
+            <SummaryRow
+              label={t("Unit codes", "Unit コード")}
+              value={
+                unresolvedCodes
+                  ? t(`${mappedCodes}, ${unresolvedCodes} unresolved`, `${mappedCodes} 件、未解決 ${unresolvedCodes} 件`)
+                  : String(mappedCodes)
+              }
+              warn={unresolvedCodes > 0}
+            />
+            <SummaryRow
+              label={t("Footprint", "Footprint")}
+              value={wizard?.footprint.method ?? "union_buffer"}
+            />
+          </dl>
+        </Card>
       </div>
 
-      <div className="mt-4 rounded border">
-        <div className="border-b bg-muted px-3 py-2 text-sm font-semibold">{t("Files by Detected Type", "検出種別ごとのファイル数")}</div>
-        <ul className="px-3 py-2 text-sm">
+      <Card className="p-4">
+        <SectionHeader title={t("Files by detected type", "検出種別ごとのファイル数")} />
+        <dl className="mt-2">
           {typeCounts.map(([featureType, count]) => (
-            <li key={featureType}>
-              {featureType}: {count}
-            </li>
+            <SummaryRow key={featureType} label={featureType} value={String(count)} />
           ))}
-        </ul>
-      </div>
+        </dl>
+      </Card>
 
-      {cleanupSummary && (
-        <div className="mt-4 rounded border p-3 text-sm">
-          <h3 className="font-semibold">{t("Import Cleanup Summary", "インポート時クリーンアップ結果")}</h3>
-          <ul className="mt-1">
-            <li>{t("Multipolygons exploded", "マルチポリゴン分割数")}: {cleanupSummary.multipolygons_exploded}</li>
-            <li>{t("Rings closed", "リング補完数")}: {cleanupSummary.rings_closed}</li>
-            <li>{t("Features reoriented", "向き修正数")}: {cleanupSummary.features_reoriented}</li>
-            <li>{t("Empty features dropped", "空フィーチャ除外数")}: {cleanupSummary.empty_features_dropped}</li>
-            <li>{t("Coordinates rounded", "座標丸め数")}: {cleanupSummary.coordinates_rounded}</li>
-          </ul>
-        </div>
-      )}
-
-      {wizard && wizard.warnings.length > 0 && (
-        <div className="mt-4 rounded border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-          <h3 className="font-semibold">{t("Warnings", "警告")}</h3>
-          <ul className="mt-1">
+      {wizard && wizard.warnings.length > 0 ? (
+        <div className="rounded-lg border border-warning/30 bg-warning/10 p-4">
+          <h3 className="text-sm font-semibold leading-5 text-warning">{t("Warnings", "警告")}</h3>
+          <ul className="mt-1.5 flex flex-col gap-1 text-[13px] leading-[18px] text-warning">
             {wizard.warnings.map((warning) => (
               <li key={warning}>{warning}</li>
             ))}
           </ul>
         </div>
-      )}
+      ) : null}
+
+      {/* What the importer silently repaired. Worth being able to check, not
+          worth five lines of zeroes on the screen you generate from. */}
+      {cleanupSummary ? (
+        <details className="group rounded-lg border border-border bg-card p-4">
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-[13px] font-medium leading-[18px] text-muted-foreground transition-colors hover:text-foreground">
+            <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+            {t("What import cleaned up", "インポート時のクリーンアップ")}
+          </summary>
+          <dl className="mt-2">
+            <SummaryRow
+              label={t("Multipolygons exploded", "マルチポリゴン分割")}
+              value={String(cleanupSummary.multipolygons_exploded)}
+            />
+            <SummaryRow
+              label={t("Rings closed", "リング補完")}
+              value={String(cleanupSummary.rings_closed)}
+            />
+            <SummaryRow
+              label={t("Features reoriented", "向き修正")}
+              value={String(cleanupSummary.features_reoriented)}
+            />
+            <SummaryRow
+              label={t("Empty features dropped", "空フィーチャ除外")}
+              value={String(cleanupSummary.empty_features_dropped)}
+            />
+            <SummaryRow
+              label={t("Coordinates rounded", "座標丸め")}
+              value={String(cleanupSummary.coordinates_rounded)}
+            />
+          </dl>
+        </details>
+      ) : null}
     </section>
+  );
+}
+
+
+/** Label left, value right in mono — the numbers line up as a column. */
+function SummaryRow({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 border-b border-border py-1.5 last:border-b-0">
+      <dt className="text-[13px] leading-[18px] text-muted-foreground">{label}</dt>
+      <dd
+        className={`min-w-0 truncate text-right font-mono text-[11px] leading-[14px] tracking-[0.02em] ${
+          warn ? "text-warning" : "text-foreground"
+        }`}
+        title={value}
+      >
+        {value}
+      </dd>
+    </div>
   );
 }

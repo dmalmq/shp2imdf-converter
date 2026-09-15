@@ -42,7 +42,8 @@ import { UnitMapStep } from "../components/wizard/UnitMapStep";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
-import { Button, Badge } from "../components/ui";
+import { Button, DisabledHint } from "../components/ui";
+import { WizardSaveProvider, useWizardSaveState } from "../components/wizard/wizardSave";
 
 const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail", "kiosk", "section"]);
 
@@ -115,6 +116,14 @@ const SECTION_HELP: Record<string, { en: string; ja: string }> = {
   detail: {
     en: "Detail features are exported as lightweight line features linked to levels only.",
     ja: "detail は level のみを持つ軽量な線要素として出力されます。"
+  },
+  "project-info": {
+    en: "Set venue basics like name, category, and address. These become your IMDF venue and address records.",
+    ja: "会場名・カテゴリ・住所などの基本情報を設定します。"
+  },
+  attributes: {
+    en: "Map source attribute columns onto IMDF fields, one feature type at a time.",
+    ja: "元データの属性列を IMDF の項目へ、フィーチャー種別ごとに対応付けます。"
   },
   summary: {
     en: "Review configuration, then generate draft IMDF features and continue to review.",
@@ -193,6 +202,8 @@ export function WizardPage() {
   const { t, isJapanese } = useUiLanguage();
 
   const [activeSection, setActiveSection] = useState("project");
+  // What the footer's button does for whichever section is on screen.
+  const { action: saveAction, setAction: setSaveAction } = useWizardSaveState();
   const [loading, setLoading] = useState(false);
   const [features, setFeatures] = useState<
     {
@@ -591,6 +602,16 @@ export function WizardPage() {
 
   const helpText = SECTION_HELP[activeSection] ?? SECTION_HELP["project"];
 
+  // The heading names the section the rail is on, so the two never disagree.
+  const activeSectionLabel = useMemo(() => {
+    for (const section of sections) {
+      if (section.id === activeSection) return t(section.labelEn, section.labelJa);
+      const child = section.children?.find((item) => item.id === activeSection);
+      if (child) return t(child.labelEn, child.labelJa);
+    }
+    return t("Configure", "設定");
+  }, [sections, activeSection, t]);
+
   const showSection = () => {
     switch (activeSection) {
       case "project":
@@ -598,7 +619,6 @@ export function WizardPage() {
         return (
           <ProjectInfoStep
             project={wizardState?.project ?? null}
-            saving={wizardSaveStatus === "saving"}
             onSave={(payload) => void saveProject(payload)}
             onSearchAddress={(query, language) => searchProjectAddress(query, language)}
             onAutofillFromGeometry={(language) => autofillProjectAddressFromGeometry(language)}
@@ -612,7 +632,6 @@ export function WizardPage() {
             allFileStems={files.map((f) => f.stem)}
             venueName={wizardState?.project?.venue_name ?? ""}
             venueAddress={wizardState?.project?.address ?? null}
-            saving={wizardSaveStatus === "saving"}
             onSave={(buildings) => void saveBuildings(buildings)}
           />
         );
@@ -621,7 +640,6 @@ export function WizardPage() {
         return (
           <FootprintStep
             footprint={wizardState?.footprint ?? EMPTY_FOOTPRINT}
-            saving={wizardSaveStatus === "saving"}
             onSave={(payload) => void saveFootprint(payload)}
           />
         );
@@ -647,7 +665,6 @@ export function WizardPage() {
         return (
           <LevelMapStep
             files={files}
-            saving={wizardSaveStatus === "saving"}
             onPatchFile={(stem, payload) => void patchFile(stem, payload)}
           />
         );
@@ -672,7 +689,6 @@ export function WizardPage() {
           <OpeningMapStep
             files={files}
             mapping={wizardState?.mappings.opening ?? EMPTY_OPENING_MAPPING}
-            saving={wizardSaveStatus === "saving"}
             onSave={(mapping) => void saveMappings({ opening: mapping })}
           />
         );
@@ -682,7 +698,6 @@ export function WizardPage() {
           <FixtureMapStep
             files={files}
             mapping={wizardState?.mappings.fixture ?? EMPTY_FIXTURE_MAPPING}
-            saving={wizardSaveStatus === "saving"}
             onSave={(mapping) => void saveMappings({ fixture: mapping })}
           />
         );
@@ -698,7 +713,6 @@ export function WizardPage() {
             files={files}
             cleanupSummary={cleanupSummary}
             wizard={wizardState}
-            saving={wizardSaveStatus === "saving"}
             disabled={!canGenerate}
             onConfirm={() => void confirmSummary()}
           />
@@ -743,39 +757,26 @@ export function WizardPage() {
           onSelect={setActiveSection}
         />
 
-        <div className="space-y-4">
-          {/* Section help */}
-          <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="shrink-0 text-primary">
-              <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.3" />
-              <path d="M8 7v4M8 5h.01" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-            </svg>
-            <p className="text-xs text-muted-foreground">
+        <div className="flex flex-col gap-4">
+          {/* Section help was a bordered, icon-led box of its own; it is one
+              sentence about the heading right above it, so it reads as one. */}
+          <div className="flex flex-col gap-1">
+            <h1 className="text-lg font-semibold leading-7 tracking-tight text-foreground">
+              {activeSectionLabel}
+            </h1>
+            <p className="text-[13px] leading-[18px] text-muted-foreground">
               {isJapanese ? helpText.ja : helpText.en}
             </p>
           </div>
 
-          {/* Save status */}
-          {wizardSaveStatus !== "idle" ? (
-            <div className="flex items-center gap-2 text-xs">
-              {wizardSaveStatus === "saving" ? (
-                <Badge variant="default">{t("Saving...", "保存中...")}</Badge>
-              ) : wizardSaveStatus === "saved" ? (
-                <Badge variant="success">{t("Saved", "保存済み")}</Badge>
-              ) : wizardSaveStatus === "error" ? (
-                <Badge variant="destructive">
-                  {t("Error", "エラー")}: {wizardSaveError ?? t("Unknown", "不明")}
-                </Badge>
-              ) : null}
-            </div>
-          ) : null}
-
           {/* Section content */}
-          {loading ? <WizardStepSkeleton /> : showSection()}
+          <WizardSaveProvider onAction={setSaveAction}>
+            {loading ? <WizardStepSkeleton /> : showSection()}
+          </WizardSaveProvider>
 
           {/* Learning suggestion banner */}
           {learningSuggestion ? (
-            <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+            <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-[13px] leading-[18px] text-warning">
               <p>{learningSuggestion.message}</p>
               <div className="mt-2 flex gap-2">
                 <Button variant="default" size="sm" onClick={() => void applyLearningSuggestion()}>
@@ -787,6 +788,45 @@ export function WizardPage() {
               </div>
             </div>
           ) : null}
+
+          {/* One place to save, always in the same place. Each step used to
+              carry its own Save in its own header, so the control moved and
+              renamed itself as you walked the rail. */}
+          <div className="sticky bottom-0 z-10 -mb-5 flex items-center justify-between gap-3 border-t border-border bg-muted py-3">
+            <span
+              className="text-xs leading-4 text-muted-foreground"
+              role={wizardSaveStatus === "error" ? "alert" : undefined}
+            >
+              {wizardSaveStatus === "saving"
+                ? t("Saving…", "保存中…")
+                : wizardSaveStatus === "error"
+                  ? (
+                      <span className="text-destructive">
+                        {t("Could not save", "保存できませんでした")}
+                        {wizardSaveError ? ` — ${wizardSaveError}` : ""}
+                      </span>
+                    )
+                  : wizardSaveStatus === "saved"
+                    ? t("Saved", "保存済み")
+                    : saveAction
+                      ? null
+                      : t("Changes are saved as you edit.", "編集内容は自動的に保存されます。")}
+            </span>
+
+            {saveAction ? (
+              <DisabledHint
+                className="w-auto"
+                hint={saveAction.canSave ? null : (saveAction.blockedReason ?? null)}
+              >
+                <Button
+                  disabled={!saveAction.canSave || wizardSaveStatus === "saving"}
+                  onClick={() => saveAction.run()}
+                >
+                  {saveAction.label ?? t("Save", "保存")}
+                </Button>
+              </DisabledHint>
+            ) : null}
+          </div>
         </div>
       </div>
     </main>

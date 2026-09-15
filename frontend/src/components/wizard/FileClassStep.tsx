@@ -1,5 +1,13 @@
 import type { ImportedFile } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import {
+  Button,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../ui";
 import { ConfidenceDot } from "../shared/ConfidenceDot";
 import { PreviewMap } from "../shared/PreviewMap";
 
@@ -48,6 +56,10 @@ type Props = {
 };
 
 
+// Radix Select has no empty-string value, so "not classified" needs a sentinel.
+const UNKNOWN_TYPE = "__unknown__";
+
+
 export function FileClassStep({
   files,
   features,
@@ -62,21 +74,15 @@ export function FileClassStep({
   const { t } = useUiLanguage();
 
   return (
-    <section className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(400px,1fr)] 2xl:grid-cols-[minmax(0,1.7fr)_minmax(440px,1fr)]">
-      <div className="min-w-0 rounded border bg-card p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{t("Step 2: File Classification", "Step 2: ファイル分類")}</h2>
-          <button
-            type="button"
-            className="rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-60"
-            disabled={loading}
-            onClick={onDetectAll}
-          >
-            {loading ? t("Detecting...", "検出中...") : t("Detect All", "一括検出")}
-          </button>
+    <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_24rem] 2xl:grid-cols-[minmax(0,1fr)_28rem]">
+      <div className="min-w-0 rounded-lg border border-border bg-card p-5">
+        <div className="mb-4 flex items-center justify-end">
+          <Button variant="outline" size="sm" disabled={loading} onClick={onDetectAll}>
+            {loading ? t("Detecting…", "検出中…") : t("Re-detect all", "一括検出")}
+          </Button>
         </div>
-        <div className="max-h-[58vh] min-h-[430px] overflow-auto rounded border">
-          <table className="min-w-[820px] w-full table-fixed border-collapse text-sm">
+        <div className="max-h-[58vh] min-h-[430px] overflow-auto rounded-lg border border-border">
+          <table className="w-full min-w-[34rem] table-fixed border-collapse text-sm">
             <colgroup>
               <col style={{ width: "42%" }} />
               <col style={{ width: "14%" }} />
@@ -84,7 +90,7 @@ export function FileClassStep({
               <col style={{ width: "18%" }} />
               <col style={{ width: "16%" }} />
             </colgroup>
-            <thead className="sticky top-0 bg-muted text-left text-xs uppercase tracking-wide text-muted-foreground">
+            <thead className="sticky top-0 bg-muted text-left font-mono text-[10px] uppercase leading-[13px] tracking-[0.06em] text-muted-foreground">
               <tr>
                 <th className="px-3 py-2.5">{t("Source", "ソース")}</th>
                 <th className="px-3 py-2.5">{t("Geometry", "ジオメトリ")}</th>
@@ -100,7 +106,7 @@ export function FileClassStep({
                 return (
                   <tr
                     key={file.stem}
-                    className={`${rowClass} cursor-pointer border-t hover:bg-muted`}
+                    className={`${rowClass} cursor-pointer border-t border-border hover:bg-muted`}
                     onMouseEnter={() => onHoverStem(file.stem)}
                     onMouseLeave={() => onHoverStem(null)}
                     onClick={() => onSelectStem(isSelected ? null : file.stem)}
@@ -119,19 +125,28 @@ export function FileClassStep({
                     <td className="whitespace-nowrap px-3 py-2.5">{file.geometry_type}</td>
                     <td className="whitespace-nowrap px-3 py-2.5">{file.feature_count}</td>
                     <td className="px-3 py-2.5">
-                      <select
-                        value={file.detected_type ?? ""}
-                        className="w-full min-w-[7.5rem] rounded border px-2 py-1 text-sm"
-                        onChange={(event) => onChangeType(file.stem, event.target.value)}
-                        onClick={(event) => event.stopPropagation()}
+                      <Select
+                        value={file.detected_type || UNKNOWN_TYPE}
+                        onValueChange={(value) =>
+                          onChangeType(file.stem, value === UNKNOWN_TYPE ? "" : value)
+                        }
                       >
-                        <option value="">{t("Unknown", "未設定")}</option>
-                        {TYPE_OPTIONS.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger
+                          className="h-8"
+                          aria-label={t(`Type of ${file.stem}`, `${file.stem} の種別`)}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={UNKNOWN_TYPE}>{t("Unknown", "未設定")}</SelectItem>
+                          {TYPE_OPTIONS.map((option) => (
+                            <SelectItem key={option} value={option}>
+                              {option}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </td>
                     <td className="whitespace-nowrap px-3 py-2.5">
                       <ConfidenceDot confidence={file.confidence} />
@@ -144,7 +159,7 @@ export function FileClassStep({
         </div>
       </div>
 
-      <div className="rounded border bg-card p-5">
+      <div className="rounded-lg border border-border bg-card p-5">
         <h3 className="mb-2 text-sm font-semibold text-foreground">{t("Preview Map", "プレビューマップ")}</h3>
         <p className="mb-3 text-xs text-muted-foreground">
           {t("Hover a row to zoom/highlight. Click a row to isolate that file.", "行にカーソルを置くと強調表示・ズームします。クリックでそのファイルのみ表示します。")}

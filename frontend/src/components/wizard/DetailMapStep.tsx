@@ -18,12 +18,11 @@ export function DetailMapStep({ files }: Props) {
   );
 
   return (
-    <section className="rounded border bg-card p-5">
-      <h2 className="text-lg font-semibold">{t("Step 8: Detail Mapping", "Step 8: Detail 設定")}</h2>
-      <p className="mt-2 text-sm text-muted-foreground">
+    <section className="rounded-lg border border-border bg-card p-5">
+      <p className="text-[13px] leading-[18px] text-muted-foreground">
         {t(
-          "Detail features require no attribute mapping. They will export with geometry + level assignment from Step 3.",
-          "Detail は属性マッピング不要です。Step 3 の level 設定のみを使って出力されます。"
+          "Detail features require no attribute mapping. They export with their geometry and whatever Level Mapping assigned them.",
+          "Detail は属性マッピング不要です。レベル対応付けの結果と図形のみで出力されます。"
         )}
       </p>
       <div className="mt-3 rounded border bg-muted p-3 text-sm">
