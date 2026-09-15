@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { FeatureCollection } from "geojson";
 
-import { uploadReferenceLayers } from "../../api/client";
+import { uploadReferenceLayers, fetchPreloadedReferenceLayers, getPreloadedReferenceOverlay } from "../../api/client";
 import type * as ApiClient from "../../api/client";
 import { buildApiClientError } from "../../api/errors";
 import type { ReferenceLayer } from "./PlacementMap";
@@ -15,10 +15,14 @@ import {
 
 vi.mock("../../api/client", async (importOriginal) => ({
   ...(await importOriginal<typeof ApiClient>()),
-  uploadReferenceLayers: vi.fn()
+  uploadReferenceLayers: vi.fn(),
+  fetchPreloadedReferenceLayers: vi.fn(),
+  getPreloadedReferenceOverlay: vi.fn()
 }));
 
 const upload = vi.mocked(uploadReferenceLayers);
+const fetchPreloaded = vi.mocked(fetchPreloadedReferenceLayers);
+const getPreloaded = vi.mocked(getPreloadedReferenceOverlay);
 
 const FOCUS = [139.7, 35.69, 139.71, 35.7] as [number, number, number, number];
 
@@ -51,6 +55,10 @@ function addFile() {
 
 beforeEach(() => {
   upload.mockReset();
+  fetchPreloaded.mockReset();
+  getPreloaded.mockReset();
+  getPreloaded.mockResolvedValue({ available: false, label: "駅データ" });
+  fetchPreloaded.mockResolvedValue([]);
 });
 
 /** The component is controlled, so the count rows only appear via a stateful parent. */
@@ -425,4 +433,128 @@ test("removing the selected layer among several clears the match target", async 
   expect(screen.queryByRole("radio", { name: "Match with station" })).toBeNull();
   expect(screen.getByRole("radio", { name: "Match with parcels" })).not.toBeChecked();
   expect(screen.getByRole("radio", { name: "Match with roads" })).not.toBeChecked();
+});
+
+test("Load 駅データ is hidden until the server has a preloaded extract", async () => {
+  render(<ListHarness focusBounds={FOCUS} />);
+  await waitFor(() => expect(screen.getByRole("button", { name: /add shapefile/i })).toBeInTheDocument());
+  expect(screen.queryByTestId("load-eki-data")).toBeNull();
+});
+
+test("Load 駅データ is disabled until a station pin supplies focus bounds", async () => {
+  getPreloaded.mockResolvedValue({ available: true, label: "駅データ" });
+  render(<ListHarness />);
+  await waitFor(() => expect(screen.getByTestId("load-eki-data")).toBeDisabled());
+  fireEvent.click(screen.getByTestId("load-eki-data"));
+  expect(fetchPreloaded).not.toHaveBeenCalled();
+});
+
+test("Load 駅データ queries the server copy and does not POST files", async () => {
+  getPreloaded.mockResolvedValue({ available: true, label: "駅データ" });
+  fetchPreloaded.mockResolvedValue([layer("Station_pg", 12139, 493), layer("Station_pt", 5059, 199)]);
+  render(<ListHarness focusBounds={FOCUS} />);
+  await waitFor(() => expect(screen.getByTestId("load-eki-data")).toBeEnabled());
+  fireEvent.click(screen.getByTestId("load-eki-data"));
+  await waitFor(() => expect(screen.getByText("Station_pg")).toBeInTheDocument());
+  expect(fetchPreloaded).toHaveBeenCalledTimes(1);
+  expect(fetchPreloaded.mock.calls[0][0]).toEqual(FOCUS);
+  expect(fetchPreloaded.mock.calls[0][1]).toBe(false);
+  expect(upload).not.toHaveBeenCalled();
+  expect(screen.queryByText("Station_pl")).toBeNull();
+});
+
+test("changing the pin re-queries preload without uploading files", async () => {
+  getPreloaded.mockResolvedValue({ available: true, label: "駅データ" });
+  fetchPreloaded.mockResolvedValue([layer("Station_pg", 12139, 493)]);
+  function PinHarness() {
+    const [bounds, setBounds] = useState<[number, number, number, number] | null>(FOCUS);
+    const [layers, setLayers] = useState<ReferenceLayer[]>([]);
+    return (
+      <>
+        <button type="button" onClick={() => setBounds([140.11, 35.61, 140.11, 35.61])}>
+          move pin
+        </button>
+        <ReferenceLayerList
+          layers={layers}
+          onChange={setLayers}
+          matchTargetName=""
+          onMatchTargetChange={() => {}}
+          focusBounds={bounds}
+        />
+      </>
+    );
+  }
+  render(<PinHarness />);
+  await waitFor(() => expect(screen.getByTestId("load-eki-data")).toBeEnabled());
+  fireEvent.click(screen.getByTestId("load-eki-data"));
+  await waitFor(() => expect(fetchPreloaded).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("button", { name: /move pin/i }));
+  await waitFor(() => expect(fetchPreloaded).toHaveBeenCalledTimes(2));
+  expect(fetchPreloaded.mock.calls[1][0]).toEqual([140.11, 35.61, 140.11, 35.61]);
+  expect(upload).not.toHaveBeenCalled();
+});
+
+test("Show survey lines opts into Station_pl on the server copy", async () => {
+  getPreloaded.mockResolvedValue({ available: true, label: "駅データ" });
+  fetchPreloaded
+    .mockResolvedValueOnce([layer("Station_pg", 4, 4)])
+    .mockResolvedValueOnce([layer("Station_pg", 4, 4), layer("Station_pl", 8, 8)]);
+  render(<ListHarness focusBounds={FOCUS} />);
+  await waitFor(() => expect(screen.getByTestId("load-eki-data")).toBeEnabled());
+  fireEvent.click(screen.getByTestId("load-eki-data"));
+  await waitFor(() => expect(screen.getByText("Station_pg")).toBeInTheDocument());
+  expect(screen.queryByText("Station_pl")).toBeNull();
+  fireEvent.click(screen.getByTestId("include-survey-lines"));
+  await waitFor(() => expect(screen.getByText("Station_pl")).toBeInTheDocument());
+  expect(fetchPreloaded.mock.calls[1][1]).toBe(true);
+  expect(upload).not.toHaveBeenCalled();
+});
+
+test("Add shapefile still uploads a picked file after preload", async () => {
+  getPreloaded.mockResolvedValue({ available: true, label: "駅データ" });
+  fetchPreloaded.mockResolvedValue([layer("Station_pg", 4, 4)]);
+  upload.mockResolvedValue([layer("platforms", 2, 2)]);
+  render(<ListHarness focusBounds={FOCUS} />);
+  await waitFor(() => expect(screen.getByTestId("load-eki-data")).toBeEnabled());
+  fireEvent.click(screen.getByTestId("load-eki-data"));
+  await waitFor(() => expect(screen.getByText("Station_pg")).toBeInTheDocument());
+  addFile();
+  await waitFor(() => expect(screen.getByText("platforms")).toBeInTheDocument());
+  expect(upload).toHaveBeenCalledTimes(1);
+  expect(upload.mock.calls[0][0][0]).toEqual(expect.objectContaining({ name: "station.shp" }));
+});
+
+test("pin move re-queries preload and re-uploads only the picked files", async () => {
+  getPreloaded.mockResolvedValue({ available: true, label: "駅データ" });
+  fetchPreloaded.mockResolvedValue([layer("Station_pg", 4, 4)]);
+  upload.mockResolvedValue([layer("platforms", 2, 2)]);
+  function PinHarness() {
+    const [bounds, setBounds] = useState<[number, number, number, number] | null>(FOCUS);
+    const [layers, setLayers] = useState<ReferenceLayer[]>([]);
+    return (
+      <>
+        <button type="button" onClick={() => setBounds([140.11, 35.61, 140.11, 35.61])}>
+          move pin
+        </button>
+        <ReferenceLayerList
+          layers={layers}
+          onChange={setLayers}
+          matchTargetName=""
+          onMatchTargetChange={() => {}}
+          focusBounds={bounds}
+        />
+      </>
+    );
+  }
+  render(<PinHarness />);
+  await waitFor(() => expect(screen.getByTestId("load-eki-data")).toBeEnabled());
+  fireEvent.click(screen.getByTestId("load-eki-data"));
+  await waitFor(() => expect(screen.getByText("Station_pg")).toBeInTheDocument());
+  addFile();
+  await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("button", { name: /move pin/i }));
+  await waitFor(() => expect(fetchPreloaded).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+  expect(upload.mock.calls[1][0]).toHaveLength(1);
+  expect(upload.mock.calls[1][0][0]).toEqual(expect.objectContaining({ name: "station.shp" }));
 });
