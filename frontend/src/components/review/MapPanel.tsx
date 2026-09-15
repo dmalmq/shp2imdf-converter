@@ -1,7 +1,10 @@
+import { Maximize2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Layer, type LayerProps, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
 
 import { type ReviewFeature, type ReviewIssue, featureLayerKey, isLocatedFeature } from "./types";
+import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { Button } from "../ui";
 import { MapView } from "../shared/MapView";
 import { isFeatureOnFloor } from "./floorGroups";
 import { useAppStore } from "../../store/useAppStore";
@@ -258,6 +261,7 @@ export function MapPanel({
   // it, and fitBounds is a no-op until the map exists: without this gate the
   // review map opened on the hardcoded initial view and never framed the data.
   const [mapReady, setMapReady] = useState(false);
+  const { t } = useUiLanguage();
   const theme = useAppStore((state) => state.theme);
 
   useEffect(() => {
@@ -309,9 +313,12 @@ export function MapPanel({
   const selectedSet = useMemo(() => new Set(selectedFeatureIds), [selectedFeatureIds]);
   const hasSelection = selectedFeatureIds.length > 0;
 
+  // Taken from every feature, not just the visible ones. Selecting a level, a
+  // footprint or a unit on another floor used to produce an empty set, and the
+  // camera then framed the whole floor instead of the thing you clicked.
   const selectedFeatures = useMemo(() => {
-    return visibleFeatures.filter((feature) => selectedSet.has(feature.id));
-  }, [selectedSet, visibleFeatures]);
+    return features.filter((feature) => isLocatedFeature(feature) && selectedSet.has(feature.id));
+  }, [features, selectedSet]);
 
   const errorIds = useMemo(() => {
     return new Set(validationIssues.filter((item) => item.severity === "error" && item.feature_id).map((item) => item.feature_id!));
@@ -455,38 +462,69 @@ export function MapPanel({
     [overlapFeatures]
   );
 
-  // Frame the whole dataset once per dataset, whatever the floor filter shows.
-  // The floor fit below cannot do it: the opening floor may have no features at
-  // all, which used to leave the map on its hardcoded initial view.
-  const datasetBounds = useMemo(() => computeBounds(features.filter(isLocatedFeature)), [features]);
+  // Frame what you can see, once per dataset.
+  //
+  // Visible rather than everything, because the layers that are off by default
+  // — venue, footprint, level — are the big ones: framing those left the units
+  // you actually work with as a small shape off in a corner. Falls back to the
+  // whole dataset so a floor with nothing on it still lands somewhere real, and
+  // only latches once a fit has actually happened.
+  const datasetKey = useMemo(
+    () => computeBounds(features.filter(isLocatedFeature))?.flat().join(",") ?? null,
+    [features]
+  );
   const framedBoundsRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!mapReady || !datasetBounds || !mapRef.current) {
+    if (!mapReady || !datasetKey || !mapRef.current) {
       return;
     }
-    const key = datasetBounds.flat().join(",");
-    if (framedBoundsRef.current === key) {
+    if (framedBoundsRef.current === datasetKey) {
       return;
     }
-    framedBoundsRef.current = key;
-    mapRef.current.fitBounds(datasetBounds, { padding: 40, duration: 0 });
-  }, [mapReady, datasetBounds]);
+    const bounds =
+      computeBounds(visibleFeatures) ?? computeBounds(features.filter(isLocatedFeature));
+    if (!bounds) {
+      return;
+    }
+    framedBoundsRef.current = datasetKey;
+    mapRef.current.fitBounds(bounds, { padding: 40, duration: 0 });
+  }, [mapReady, datasetKey, visibleFeatures, features]);
+
+  // Framing follows the selection and nothing else.
+  //
+  // It used to fall back to framing every visible feature, which meant changing
+  // floor zoomed back out to that floor's extent — the one thing you do not
+  // want when you are comparing the same corner of two floors. Keyed on the
+  // selected ids so a refetch, an edit or a layer toggle leaves the camera
+  // alone; `Zoom to fit` below is how you get the overview back deliberately.
+  const fittedSelectionRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!mapReady) {
+    if (!mapReady || !mapRef.current) {
       return;
     }
-    const target = selectedFeatures.length ? selectedFeatures : visibleFeatures;
-    const bounds = computeBounds(target);
-    if (!bounds || !mapRef.current) {
+    const key = selectedFeatures.map((feature) => feature.id).sort().join(",");
+    if (!key || fittedSelectionRef.current === key) {
+      fittedSelectionRef.current = key || null;
       return;
     }
-    mapRef.current.fitBounds(bounds, {
-      padding: 40,
-      duration: 400
-    });
-  }, [mapReady, selectedFeatures, visibleFeatures]);
+    fittedSelectionRef.current = key;
+    const bounds = computeBounds(selectedFeatures);
+    if (!bounds) {
+      return;
+    }
+    // `maxZoom` because a single door is metres across: fitting it exactly
+    // lands past the deepest tile and shows a blank page with a dot on it.
+    mapRef.current.fitBounds(bounds, { padding: 80, duration: 400, maxZoom: 20 });
+  }, [mapReady, selectedFeatures]);
+
+  const zoomToFit = () => {
+    const bounds = computeBounds(visibleFeatures.length ? visibleFeatures : features);
+    if (bounds) {
+      mapRef.current?.fitBounds(bounds, { padding: 40, duration: 400 });
+    }
+  };
 
   // Zoom to the active issue's feature(s) when one is selected
   useEffect(() => {
@@ -519,7 +557,17 @@ export function MapPanel({
   };
 
   return (
-    <div className="h-full overflow-hidden rounded-md border border-border">
+    <div className="relative h-full overflow-hidden rounded-md border border-border">
+      <Button
+        variant="outline"
+        size="sm"
+        className="absolute right-3 top-3 z-10 bg-popover/95 backdrop-blur"
+        onClick={zoomToFit}
+        title={t("Frame everything on screen", "\u8868\u793a\u4e2d\u306e\u5168\u4f53\u3092\u8868\u793a")}
+      >
+        <Maximize2 className="h-3.5 w-3.5" />
+        {t("Zoom to fit", "\u5168\u4f53\u3092\u8868\u793a")}
+      </Button>
       <MapView
         ref={mapRef}
         initialViewState={{
