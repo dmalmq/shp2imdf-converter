@@ -14,7 +14,7 @@ export function LanguageToggle() {
   return (
     <button
       type="button"
-      className={`fixed right-4 top-4 z-[55] rounded border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 ${
+      className={`fixed right-4 top-4 z-[55] rounded border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted ${
         uiLanguage === "ja" ? "lang-ja" : ""
       }`}
       onClick={() => setUiLanguage(nextLanguage)}

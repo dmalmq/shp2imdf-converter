@@ -65,7 +65,7 @@ export function StepIndicator() {
                 height="16"
                 viewBox="0 0 16 16"
                 fill="none"
-                className="mx-0.5 text-[var(--color-text-muted)]"
+                className="mx-0.5 text-muted-foreground"
               >
                 <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
@@ -81,10 +81,10 @@ export function StepIndicator() {
               className={[
                 "rounded-full px-3 py-1 text-xs font-medium transition-colors",
                 status === "active"
-                  ? "bg-[var(--color-primary)] text-white"
+                  ? "bg-primary text-primary-foreground"
                   : status === "completed"
-                    ? "bg-[var(--color-success-muted)] text-[var(--color-success)] hover:bg-[var(--color-success)]/20"
-                    : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]",
+                    ? "bg-success/10 text-success hover:bg-success/20"
+                    : "bg-muted text-muted-foreground",
                 canNavigate && status !== "active" ? "cursor-pointer" : "",
                 !canNavigate && status !== "active" ? "cursor-default opacity-60" : ""
               ]

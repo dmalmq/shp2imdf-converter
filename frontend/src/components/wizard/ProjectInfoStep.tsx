@@ -185,12 +185,12 @@ export function ProjectInfoStep({
   };
 
   return (
-    <section className="rounded border bg-white p-5">
+    <section className="rounded border bg-card p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">{t("Step 1: Project Info", "Step 1: プロジェクト情報")}</h2>
         <button
           type="button"
-          className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-60"
+          className="rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-60"
           disabled={!canSave || saving}
           onClick={() => onSave(normalizeForSave(form))}
         >
@@ -200,7 +200,7 @@ export function ProjectInfoStep({
 
       <div className="grid gap-3 md:grid-cols-2">
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Project Name", "プロジェクト名")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Project Name", "プロジェクト名")}</span>
           <input
             className="w-full rounded border px-2 py-1.5"
             value={form.project_name ?? ""}
@@ -208,7 +208,7 @@ export function ProjectInfoStep({
           />
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Language Tag", "言語タグ")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Language Tag", "言語タグ")}</span>
           <input
             className="w-full rounded border px-2 py-1.5"
             value={form.language}
@@ -216,7 +216,7 @@ export function ProjectInfoStep({
           />
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Venue Name *", "会場名 *")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Venue Name *", "会場名 *")}</span>
           <input
             className="w-full rounded border px-2 py-1.5"
             value={form.venue_name}
@@ -224,7 +224,7 @@ export function ProjectInfoStep({
           />
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Venue Category *", "会場カテゴリ *")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Venue Category *", "会場カテゴリ *")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={form.venue_category}
@@ -238,7 +238,7 @@ export function ProjectInfoStep({
           </select>
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Venue Restriction", "会場の制限")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Venue Restriction", "会場の制限")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={form.venue_restriction ?? ""}
@@ -250,14 +250,14 @@ export function ProjectInfoStep({
           </select>
         </label>
         <div className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Venue Hours", "営業時間")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Venue Hours", "営業時間")}</span>
           <HoursEditor
             value={form.venue_hours ?? null}
             onChange={(val) => setForm((prev) => ({ ...prev, venue_hours: val }))}
           />
         </div>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Venue Phone", "電話番号")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Venue Phone", "電話番号")}</span>
           <input
             className="w-full rounded border px-2 py-1.5"
             value={form.venue_phone ?? ""}
@@ -266,7 +266,7 @@ export function ProjectInfoStep({
           />
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Venue Website", "Webサイト")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Venue Website", "Webサイト")}</span>
           <input
             className="w-full rounded border px-2 py-1.5"
             value={form.venue_website ?? ""}
@@ -275,12 +275,12 @@ export function ProjectInfoStep({
         </label>
       </div>
 
-      <div className="mt-4 rounded border border-slate-200 p-3">
+      <div className="mt-4 rounded border border-border p-3">
         <h3 className="mb-2 text-sm font-semibold">{t("Venue Address", "会場住所")}</h3>
 
-        <div className="mb-3 rounded border border-slate-200 bg-slate-50 p-3">
+        <div className="mb-3 rounded border border-border bg-muted p-3">
           <label className="mb-2 block text-sm">
-            <span className="mb-1 block text-slate-600">{t("Address Search", "住所検索")}</span>
+            <span className="mb-1 block text-muted-foreground">{t("Address Search", "住所検索")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={searchQuery}
@@ -315,19 +315,19 @@ export function ProjectInfoStep({
             </button>
           </div>
 
-          {searchStatus ? <p className="mt-2 text-xs text-slate-600">{searchStatus}</p> : null}
+          {searchStatus ? <p className="mt-2 text-xs text-muted-foreground">{searchStatus}</p> : null}
 
           {searchResults.length > 0 ? (
-            <div className="mt-2 max-h-40 overflow-auto rounded border bg-white">
+            <div className="mt-2 max-h-40 overflow-auto rounded border bg-card">
               {searchResults.map((result, index) => (
                 <button
                   key={`${result.display_name}-${index}`}
                   type="button"
-                  className="block w-full border-b px-3 py-2 text-left text-xs last:border-b-0 hover:bg-slate-50"
+                  className="block w-full border-b px-3 py-2 text-left text-xs last:border-b-0 hover:bg-muted"
                   onClick={() => selectAddressResult(result)}
                 >
-                  <div className="font-medium text-slate-800">{result.display_name}</div>
-                  <div className="mt-0.5 text-slate-500">
+                  <div className="font-medium text-foreground">{result.display_name}</div>
+                  <div className="mt-0.5 text-muted-foreground">
                     {[result.address.locality, result.address.country, result.address.postal_code].filter(Boolean).join(" / ")}
                   </div>
                 </button>
@@ -338,7 +338,7 @@ export function ProjectInfoStep({
 
         <div className="grid gap-3 md:grid-cols-2">
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">{t("Street Address", "住所")}</span>
+            <span className="mb-1 block text-muted-foreground">{t("Street Address", "住所")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.address ?? ""}
@@ -351,7 +351,7 @@ export function ProjectInfoStep({
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">{t("Unit/Suite", "部屋番号")}</span>
+            <span className="mb-1 block text-muted-foreground">{t("Unit/Suite", "部屋番号")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.unit ?? ""}
@@ -364,7 +364,7 @@ export function ProjectInfoStep({
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">{t("Locality *", "市区町村 *")}</span>
+            <span className="mb-1 block text-muted-foreground">{t("Locality *", "市区町村 *")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.locality}
@@ -377,7 +377,7 @@ export function ProjectInfoStep({
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">{t("Country *", "国 *")}</span>
+            <span className="mb-1 block text-muted-foreground">{t("Country *", "国 *")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.country}
@@ -390,7 +390,7 @@ export function ProjectInfoStep({
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">{t("Province / State", "都道府県 / 州")}</span>
+            <span className="mb-1 block text-muted-foreground">{t("Province / State", "都道府県 / 州")}</span>
             <ProvinceSelect
               country={form.address.country}
               value={form.address.province}
@@ -403,7 +403,7 @@ export function ProjectInfoStep({
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">{t("Postal Code", "郵便番号")}</span>
+            <span className="mb-1 block text-muted-foreground">{t("Postal Code", "郵便番号")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.postal_code ?? ""}
@@ -416,7 +416,7 @@ export function ProjectInfoStep({
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">{t("Postal Code Extension", "郵便番号（拡張）")}</span>
+            <span className="mb-1 block text-muted-foreground">{t("Postal Code Extension", "郵便番号（拡張）")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.postal_code_ext ?? ""}
@@ -429,7 +429,7 @@ export function ProjectInfoStep({
             />
           </label>
           <label className="text-sm">
-            <span className="mb-1 block text-slate-600">{t("Vanity Postal Code", "カスタム郵便番号")}</span>
+            <span className="mb-1 block text-muted-foreground">{t("Vanity Postal Code", "カスタム郵便番号")}</span>
             <input
               className="w-full rounded border px-2 py-1.5"
               value={form.address.postal_code_vanity ?? ""}

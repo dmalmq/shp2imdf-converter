@@ -34,15 +34,15 @@ export function OpeningMapStep({ files, mapping, saving, onSave }: Props) {
   };
 
   return (
-    <section className="rounded border bg-white p-5">
+    <section className="rounded border bg-card p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">{t("Step 6: Opening Mapping", "Step 6: Opening 対応付け")}</h2>
-        {saving && <span className="text-xs text-slate-500">{t("Saving...", "保存中...")}</span>}
+        {saving && <span className="text-xs text-muted-foreground">{t("Saving...", "保存中...")}</span>}
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Category Column", "カテゴリ列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Category Column", "カテゴリ列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.category_column ?? ""}
@@ -57,7 +57,7 @@ export function OpeningMapStep({ files, mapping, saving, onSave }: Props) {
           </select>
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Name Column", "名称列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Name Column", "名称列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.name_column ?? ""}
@@ -72,7 +72,7 @@ export function OpeningMapStep({ files, mapping, saving, onSave }: Props) {
           </select>
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Accessibility Column", "アクセシビリティ列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Accessibility Column", "アクセシビリティ列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.accessibility_column ?? ""}
@@ -87,7 +87,7 @@ export function OpeningMapStep({ files, mapping, saving, onSave }: Props) {
           </select>
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Access Control Column", "入退室制御列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Access Control Column", "入退室制御列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.access_control_column ?? ""}
@@ -102,7 +102,7 @@ export function OpeningMapStep({ files, mapping, saving, onSave }: Props) {
           </select>
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Door Automatic Column", "自動ドア列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Door Automatic Column", "自動ドア列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.door_automatic_column ?? ""}
@@ -117,7 +117,7 @@ export function OpeningMapStep({ files, mapping, saving, onSave }: Props) {
           </select>
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Door Material Column", "ドア材質列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Door Material Column", "ドア材質列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.door_material_column ?? ""}
@@ -132,7 +132,7 @@ export function OpeningMapStep({ files, mapping, saving, onSave }: Props) {
           </select>
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Door Type Column", "ドア種別列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Door Type Column", "ドア種別列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.door_type_column ?? ""}

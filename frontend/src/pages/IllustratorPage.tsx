@@ -978,7 +978,7 @@ export function IllustratorPage() {
         error={error}
       />
 
-      <div className="min-h-0 flex-1 overflow-hidden rounded-[var(--radius-md)] border">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
         <PlacementMap
           floors={floorLayers}
           state={state}

@@ -33,8 +33,8 @@ export function LayerTree({
   const { t } = useUiLanguage();
 
   return (
-    <div className="rounded border bg-white p-3">
-      <h3 className="mb-2 text-sm font-semibold text-slate-700">{t("Layers", "レイヤー")}</h3>
+    <div className="rounded border bg-card p-3">
+      <h3 className="mb-2 text-sm font-semibold text-foreground">{t("Layers", "レイヤー")}</h3>
       <div className="grid gap-1">
         <label className="flex items-center gap-2 text-sm">
           <input
@@ -44,7 +44,7 @@ export function LayerTree({
           />
           <span>{t("OpenStreetMap", "OpenStreetMap")}</span>
         </label>
-        <hr className="my-1 border-slate-200" />
+        <hr className="my-1 border-border" />
         {featureTypes.map((featureType) => {
           const checked = layerVisibility[featureType] ?? true;
           return (
@@ -66,7 +66,7 @@ export function LayerTree({
       </div>
 
       <label className="mt-3 block text-sm">
-        <span className="mb-1 block text-slate-600">{t("Floor Filter", "フロアフィルター")}</span>
+        <span className="mb-1 block text-muted-foreground">{t("Floor Filter", "フロアフィルター")}</span>
         <select
           className="w-full rounded border px-2 py-1.5"
           value={floorFilter}
@@ -83,7 +83,7 @@ export function LayerTree({
 
       {validationLoaded ? (
         <div className="mt-3 border-t pt-3">
-          <h4 className="mb-2 text-sm font-medium text-slate-700">{t("Validation Overlays", "検証オーバーレイ")}</h4>
+          <h4 className="mb-2 text-sm font-medium text-foreground">{t("Validation Overlays", "検証オーバーレイ")}</h4>
           <div className="grid gap-1">
             {[
               ["errors", t("Error highlights", "エラー表示")],

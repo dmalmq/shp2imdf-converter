@@ -86,7 +86,7 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
   );
 
   return (
-    <section className="rounded border bg-white p-5">
+    <section className="rounded border bg-card p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">{t("Step 4: Building Assignment", "Step 4: 建物割り当て")}</h2>
         <div className="flex gap-2">
@@ -108,7 +108,7 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
           </button>
           <button
             type="button"
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-60"
+            className="rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-60"
             disabled={saving}
             onClick={() => onSave(normalizeForSave(rows))}
           >
@@ -116,7 +116,7 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
           </button>
         </div>
       </div>
-      <p className="mb-3 text-xs text-slate-600">
+      <p className="mb-3 text-xs text-muted-foreground">
         {t(
           `Assigned file links: ${assignedCount}. Building address defaults to venue address unless set to different.`,
           `割り当て済みファイル: ${assignedCount}。建物住所は「別住所」にしない限り会場住所を使用します。`
@@ -131,7 +131,7 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
               {rows.length > 1 && (
                 <button
                   type="button"
-                  className="rounded border border-red-300 px-2 py-1 text-xs text-red-700"
+                  className="rounded border border-destructive/30 px-2 py-1 text-xs text-destructive"
                   onClick={() => setRows((prev) => prev.filter((_, i) => i !== index))}
                 >
                   {t("Remove", "削除")}
@@ -141,7 +141,7 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
 
             <div className="grid gap-3 md:grid-cols-2">
               <label className="text-sm">
-                <span className="mb-1 block text-slate-600">{t("Building Name", "建物名")}</span>
+                <span className="mb-1 block text-muted-foreground">{t("Building Name", "建物名")}</span>
                 <input
                   className="w-full rounded border px-2 py-1.5"
                   placeholder={venueName || ""}
@@ -161,7 +161,7 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
                 />
               </label>
               <label className="text-sm">
-                <span className="mb-1 block text-slate-600">{t("Category", "カテゴリ")}</span>
+                <span className="mb-1 block text-muted-foreground">{t("Category", "カテゴリ")}</span>
                 <select
                   className="w-full rounded border px-2 py-1.5"
                   value={building.category}
@@ -186,7 +186,7 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
                 </select>
               </label>
               <label className="text-sm">
-                <span className="mb-1 block text-slate-600">{t("Restriction", "制限")}</span>
+                <span className="mb-1 block text-muted-foreground">{t("Restriction", "制限")}</span>
                 <select
                   className="w-full rounded border px-2 py-1.5"
                   value={building.restriction ?? ""}
@@ -209,7 +209,7 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
                 </select>
               </label>
               <label className="text-sm">
-                <span className="mb-1 block text-slate-600">{t("Address Mode", "住所モード")}</span>
+                <span className="mb-1 block text-muted-foreground">{t("Address Mode", "住所モード")}</span>
                 <select
                   className="w-full rounded border px-2 py-1.5"
                   value={building.address_mode}
@@ -246,7 +246,7 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
                 </select>
               </label>
               <label className="text-sm md:col-span-2">
-                <span className="mb-1 block text-slate-600">{t("Assigned Files (comma-separated stems)", "割り当てファイル（カンマ区切り）")}</span>
+                <span className="mb-1 block text-muted-foreground">{t("Assigned Files (comma-separated stems)", "割り当てファイル（カンマ区切り）")}</span>
                 <input
                   className="w-full rounded border px-2 py-1.5 font-mono text-xs"
                   value={building.file_stems.join(",")}
@@ -271,9 +271,9 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
             </div>
 
             {building.address_mode === "different_address" && building.address && (
-              <div className="mt-3 grid gap-3 rounded border border-slate-200 p-3 md:grid-cols-2">
+              <div className="mt-3 grid gap-3 rounded border border-border p-3 md:grid-cols-2">
                 <label className="text-sm">
-                  <span className="mb-1 block text-slate-600">{t("Street Address", "住所")}</span>
+                  <span className="mb-1 block text-muted-foreground">{t("Street Address", "住所")}</span>
                   <input
                     className="w-full rounded border px-2 py-1.5"
                     value={building.address.address ?? ""}
@@ -292,7 +292,7 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
                   />
                 </label>
                 <label className="text-sm">
-                  <span className="mb-1 block text-slate-600">{t("Locality", "市区町村")}</span>
+                  <span className="mb-1 block text-muted-foreground">{t("Locality", "市区町村")}</span>
                   <input
                     className="w-full rounded border px-2 py-1.5"
                     value={building.address.locality}
@@ -311,7 +311,7 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
                   />
                 </label>
                 <label className="text-sm">
-                  <span className="mb-1 block text-slate-600">{t("Country", "国")}</span>
+                  <span className="mb-1 block text-muted-foreground">{t("Country", "国")}</span>
                   <input
                     className="w-full rounded border px-2 py-1.5"
                     value={building.address.country}
@@ -330,7 +330,7 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
                   />
                 </label>
                 <label className="text-sm">
-                  <span className="mb-1 block text-slate-600">{t("Province", "都道府県 / 州")}</span>
+                  <span className="mb-1 block text-muted-foreground">{t("Province", "都道府県 / 州")}</span>
                   <ProvinceSelect
                     country={building.address.country}
                     value={building.address.province}

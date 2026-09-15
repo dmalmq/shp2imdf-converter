@@ -25,7 +25,7 @@ export class ErrorBoundary extends Component<Props, State> {
   public render(): ReactNode {
     if (this.state.hasError) {
       return (
-        <div className="m-8 rounded border border-red-300 bg-red-50 p-4 text-red-700">
+        <div className="m-8 rounded border border-destructive/30 bg-destructive/10 p-4 text-destructive">
           Something went wrong while rendering this screen.
         </div>
       );

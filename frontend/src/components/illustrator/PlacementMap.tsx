@@ -975,7 +975,7 @@ export function PlacementMap({
                   </Button>
                 );
               })}
-              <span aria-hidden="true" className="mx-1 w-px self-stretch bg-[var(--color-border)]" />
+              <span aria-hidden="true" className="mx-1 w-px self-stretch bg-border" />
               {/* What gestures act on: the whole linked group while aligning the
                   building as one, or the selected floor for final per-floor
                   nudges. Sits with the pills because it pairs with floor switching. */}
@@ -1003,7 +1003,7 @@ export function PlacementMap({
               >
                 {t("Individual", "個別")}
               </Button>
-              <span aria-hidden="true" className="mx-1 w-px self-stretch bg-[var(--color-border)]" />
+              <span aria-hidden="true" className="mx-1 w-px self-stretch bg-border" />
               {/* Isolating the selected floor sits with the floor pills rather
                   than in the sidebar: it is a view option reached for while
                   watching the map, exactly like the basemap switcher below. */}

@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { EmptyState } from "../shared/EmptyState";
-import { FeatureTypeIcon } from "../legacy-ui";
+import { FeatureTypeIcon } from "../shared/FeatureTypeIcon";
 import { DEFAULT_LOCATED_FEATURE_ORDER, featureName, type ReviewFeature, type ReviewIssue } from "./types";
 
 
@@ -26,9 +26,9 @@ function statusForFeature(
 }
 
 const STATUS_DOT: Record<string, string> = {
-  error: "bg-[var(--color-error)]",
-  warning: "bg-[var(--color-warning)]",
-  ok: "bg-[var(--color-success)]"
+  error: "bg-destructive",
+  warning: "bg-warning",
+  ok: "bg-success"
 };
 
 type FeatureGroup = {
@@ -166,16 +166,16 @@ export function FeatureList({
 
   return (
     <div className="flex flex-col overflow-hidden">
-      <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-2">
+      <div className="flex items-center gap-1.5 border-b border-border px-3 py-2">
         <input
           type="text"
-          className="h-7 flex-1 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs focus:border-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]/20"
+          className="h-7 flex-1 rounded-sm border border-border bg-card px-2 text-xs focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring/20"
           placeholder={t("Search...", "検索...")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
         <select
-          className="h-7 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 text-xs focus:border-[var(--color-primary)] focus:outline-none"
+          className="h-7 rounded-sm border border-border bg-card px-1.5 text-xs focus:border-primary focus:outline-none"
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
         >
@@ -186,7 +186,7 @@ export function FeatureList({
         </select>
       </div>
 
-      <div className="px-3 py-1.5 text-[11px] text-[var(--color-text-muted)] border-b border-[var(--color-border)]">
+      <div className="px-3 py-1.5 text-[11px] text-muted-foreground border-b border-border">
         {filtered.length} {t("features", "件")}
         {selectedFeatureIds.length > 0 ? ` · ${selectedFeatureIds.length} ${t("selected", "選択中")}` : ""}
       </div>
@@ -201,7 +201,7 @@ export function FeatureList({
             <div key={group.type}>
               {/* Group header */}
               <div
-                className="sticky top-0 z-[1] flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1.5 cursor-pointer select-none text-xs font-medium text-[var(--color-text)]"
+                className="sticky top-0 z-[1] flex items-center gap-2 border-b border-border bg-muted px-3 py-1.5 cursor-pointer select-none text-xs font-medium text-foreground"
                 onClick={() => toggleCollapse(group.type)}
               >
                 <svg
@@ -215,11 +215,11 @@ export function FeatureList({
                 </svg>
                 <FeatureTypeIcon featureType={group.type} size="sm" />
                 <span className="capitalize">{group.type}</span>
-                <span className="ml-auto text-[10px] text-[var(--color-text-muted)]">{group.features.length}</span>
+                <span className="ml-auto text-[10px] text-muted-foreground">{group.features.length}</span>
                 {groupErrors > 0 ? (
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--color-error)]" title={`${groupErrors} errors`} />
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-destructive" title={`${groupErrors} errors`} />
                 ) : groupWarnings > 0 ? (
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--color-warning)]" title={`${groupWarnings} warnings`} />
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-warning" title={`${groupWarnings} warnings`} />
                 ) : null}
               </div>
 
@@ -234,19 +234,19 @@ export function FeatureList({
                   <div
                     key={feature.id}
                     className={[
-                      "flex items-center gap-2 px-3 py-1.5 cursor-pointer border-b border-[var(--color-border)]/50 text-xs transition-colors pl-7",
+                      "flex items-center gap-2 px-3 py-1.5 cursor-pointer border-b border-border/50 text-xs transition-colors pl-7",
                       selected
-                        ? "bg-[var(--color-primary-muted)] border-l-2 border-l-[var(--color-primary)]"
-                        : "hover:bg-[var(--color-surface-muted)]"
+                        ? "bg-accent border-l-2 border-l-primary"
+                        : "hover:bg-muted"
                     ].join(" ")}
                     onClick={(e) => handleClick(feature.id, e)}
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium text-[var(--color-text)]">
-                        {name || <span className="font-mono text-[var(--color-text-muted)]">{feature.id.slice(0, 8)}</span>}
+                      <div className="truncate font-medium text-foreground">
+                        {name || <span className="font-mono text-muted-foreground">{feature.id.slice(0, 8)}</span>}
                       </div>
                       {category ? (
-                        <div className="truncate text-[10px] text-[var(--color-text-muted)]">{category}</div>
+                        <div className="truncate text-[10px] text-muted-foreground">{category}</div>
                       ) : null}
                     </div>
                     <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[status]}`} />

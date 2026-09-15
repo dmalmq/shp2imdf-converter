@@ -174,7 +174,7 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
                   <button
                     type="button"
                     title={place.name}
-                    className="w-full truncate px-2 py-1 text-left text-xs hover:bg-black/5"
+                    className="w-full truncate px-2 py-1 text-left text-xs hover:bg-accent"
                     onClick={() => pick(place)}
                   >
                     {place.name}

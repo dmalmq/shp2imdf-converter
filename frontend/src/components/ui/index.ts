@@ -35,3 +35,4 @@ export {
   TooltipProvider,
   TooltipTrigger
 } from "./tooltip";
+export { StatusDot } from "./status-dot";

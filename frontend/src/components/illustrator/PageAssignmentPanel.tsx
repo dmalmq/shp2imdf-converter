@@ -270,7 +270,7 @@ export function PageAssignmentPanel({
                   {t(`${boxes.length} boxes on this page`, `このページに ${boxes.length} 個の範囲`)}
                 </p>
               ) : mergeCount > 1 ? (
-                <p className="mt-1 text-xs text-blue-700">
+                <p className="mt-1 text-xs text-primary">
                   {mergeCount} {t("pages", "ページ")} → {card.label.trim()}
                 </p>
               ) : null}

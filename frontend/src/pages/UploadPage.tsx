@@ -12,7 +12,7 @@ import { useToast } from "../components/shared/ToastProvider";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
-import { Button, Card, Badge } from "../components/legacy-ui";
+import { Button, Card, Badge } from "../components/ui";
 
 type QueuedUploadFile = {
   id: string;
@@ -351,13 +351,13 @@ export function UploadPage() {
 
   return (
     <div className="flex flex-1 items-start justify-center px-4 py-10">
-      <Card padding="lg" className="w-full max-w-2xl animate-fade-in-up">
+      <Card className="w-full max-w-2xl animate-fade-in-up p-6">
         {/* Cleanup summary banner (if exists from a previous import in same session) */}
         {lastCleanup && !loading ? (
-          <div className="mb-5 rounded-[var(--radius-md)] border border-[var(--color-primary)]/20 bg-[var(--color-primary-muted)] px-3 py-2">
+          <div className="mb-5 rounded-md border border-primary/20 bg-accent px-3 py-2">
             <button
               type="button"
-              className="flex w-full items-center justify-between text-xs font-medium text-[var(--color-primary)]"
+              className="flex w-full items-center justify-between text-xs font-medium text-primary"
               onClick={() => setCleanupExpanded((prev) => !prev)}
             >
               <span>{t("Cleanup Summary", "クリーンアップサマリー")}</span>
@@ -375,7 +375,7 @@ export function UploadPage() {
               </svg>
             </button>
             {cleanupExpanded ? (
-              <ul className="mt-2 space-y-0.5 text-xs text-[var(--color-text-secondary)]">
+              <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
                 <li>{t("Multipolygons exploded", "マルチポリゴン分解")}: {lastCleanup.multipolygons_exploded}</li>
                 <li>{t("Rings closed", "リング閉鎖")}: {lastCleanup.rings_closed}</li>
                 <li>{t("Features reoriented", "フィーチャー方向修正")}: {lastCleanup.features_reoriented}</li>
@@ -390,10 +390,10 @@ export function UploadPage() {
           <button
             type="button"
             className={[
-              "rounded-[var(--radius-md)] border px-3 py-2 text-left text-sm transition-colors",
+              "rounded-md border px-3 py-2 text-left text-sm transition-colors",
               importMode === "standard"
-                ? "border-[var(--color-primary)]/40 bg-[var(--color-primary-muted)] text-[var(--color-primary)]"
-                : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-muted)]"
+                ? "border-primary/40 bg-accent text-primary"
+                : "border-border bg-card text-muted-foreground hover:bg-muted"
             ].join(" ")}
             onClick={() => setImportMode("standard")}
           >
@@ -405,10 +405,10 @@ export function UploadPage() {
           <button
             type="button"
             className={[
-              "rounded-[var(--radius-md)] border px-3 py-2 text-left text-sm transition-colors",
+              "rounded-md border px-3 py-2 text-left text-sm transition-colors",
               importMode === "imdf_shapefile"
-                ? "border-[var(--color-primary)]/40 bg-[var(--color-primary-muted)] text-[var(--color-primary)]"
-                : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-muted)]"
+                ? "border-primary/40 bg-accent text-primary"
+                : "border-border bg-card text-muted-foreground hover:bg-muted"
             ].join(" ")}
             onClick={() => setImportMode("imdf_shapefile")}
           >
@@ -420,7 +420,7 @@ export function UploadPage() {
         </div>
 
         {importMode === "imdf_shapefile" ? (
-          <label className="mb-5 flex items-start gap-2 text-sm text-[var(--color-text-secondary)]">
+          <label className="mb-5 flex items-start gap-2 text-sm text-muted-foreground">
             <input
               type="checkbox"
               className="mt-0.5"
@@ -440,10 +440,10 @@ export function UploadPage() {
         <div
           {...getRootProps()}
           className={[
-            "flex flex-col items-center justify-center rounded-[var(--radius-lg)] border-2 border-dashed px-6 py-10 text-center transition-colors cursor-pointer",
+            "flex flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-10 text-center transition-colors cursor-pointer",
             isDragActive
-              ? "border-[var(--color-primary)] bg-[var(--color-primary-muted)]"
-              : "border-[var(--color-border)] bg-[var(--color-surface-muted)] hover:border-[var(--color-primary)]/50"
+              ? "border-primary bg-accent"
+              : "border-border bg-muted hover:border-primary/50"
           ].join(" ")}
         >
           <input {...getInputProps()} />
@@ -452,21 +452,21 @@ export function UploadPage() {
             height="40"
             viewBox="0 0 40 40"
             fill="none"
-            className="mb-3 text-[var(--color-text-muted)]"
+            className="mb-3 text-muted-foreground"
           >
             <rect x="4" y="8" width="32" height="24" rx="3" stroke="currentColor" strokeWidth="1.5" />
             <path d="M20 16v10M15 21l5-5 5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           {isDragActive ? (
-            <p className="text-sm font-medium text-[var(--color-primary)]">
+            <p className="text-sm font-medium text-primary">
               {t("Drop files here...", "ここにファイルをドロップ...")}
             </p>
           ) : (
             <>
-              <p className="text-sm font-medium text-[var(--color-text)]">
+              <p className="text-sm font-medium text-foreground">
                 {t("Drop files here or click to browse", "ファイルをドロップまたはクリックして選択")}
               </p>
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+              <p className="mt-1 text-xs text-muted-foreground">
                 .shp, .dbf, .shx, .prj, .gpkg, .zip
               </p>
             </>
@@ -477,7 +477,7 @@ export function UploadPage() {
         {hasFiles ? (
           <div className="mt-5">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-xs font-medium text-[var(--color-text-secondary)]">
+              <span className="text-xs font-medium text-muted-foreground">
                 {selectedStemCount + geoPackageRows.filter((r) => r.selected).length + archiveRows.filter((r) => r.selected).length} {t("of", "/")} {stemRows.length + geoPackageRows.length + archiveRows.length} {t("datasets selected", "データセット選択")}
               </span>
             </div>
@@ -490,8 +490,8 @@ export function UploadPage() {
                     className={[
                       "group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors cursor-pointer",
                       row.selected
-                        ? "border-[var(--color-primary)]/30 bg-[var(--color-primary-muted)] text-[var(--color-primary)]"
-                        : "border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]"
+                        ? "border-primary/30 bg-accent text-primary"
+                        : "border-border bg-muted text-muted-foreground"
                     ].join(" ")}
                   >
                     <input
@@ -501,10 +501,10 @@ export function UploadPage() {
                       onChange={() => toggleStemGroup(row.key)}
                     />
                     <span className="truncate max-w-[180px]">{row.stem}</span>
-                    <Badge variant={row.selected ? "primary" : "default"}>{row.extensions.map((e) => `.${e}`).join(", ")}</Badge>
+                    <Badge variant={row.selected ? "default" : "secondary"}>{row.extensions.map((e) => `.${e}`).join(", ")}</Badge>
                     <button
                       type="button"
-                      className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-current hover:text-[var(--color-error)]"
+                      className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-current hover:text-destructive"
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -526,8 +526,8 @@ export function UploadPage() {
                   className={[
                     "group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors cursor-pointer",
                     item.selected
-                      ? "border-[var(--color-success)]/30 bg-[var(--color-success-muted)] text-[var(--color-success)]"
-                      : "border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]"
+                      ? "border-success/30 bg-success/10 text-success"
+                      : "border-border bg-muted text-muted-foreground"
                   ].join(" ")}
                 >
                   <input
@@ -540,7 +540,7 @@ export function UploadPage() {
                   <Badge variant={item.selected ? "success" : "default"}>.gpkg</Badge>
                   <button
                     type="button"
-                    className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-current hover:text-[var(--color-error)]"
+                    className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-current hover:text-destructive"
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -561,8 +561,8 @@ export function UploadPage() {
                   className={[
                     "group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors cursor-pointer",
                     item.selected
-                      ? "border-[var(--color-warning)]/30 bg-[var(--color-warning-muted)] text-[var(--color-warning)]"
-                      : "border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]"
+                      ? "border-warning/30 bg-warning/10 text-warning"
+                      : "border-border bg-muted text-muted-foreground"
                   ].join(" ")}
                 >
                   <input
@@ -575,7 +575,7 @@ export function UploadPage() {
                   <Badge variant={item.selected ? "warning" : "default"}>.zip</Badge>
                   <button
                     type="button"
-                    className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-current hover:text-[var(--color-error)]"
+                    className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity text-current hover:text-destructive"
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -595,7 +595,7 @@ export function UploadPage() {
 
         {/* Error */}
         {error ? (
-          <div className="mt-4 rounded-[var(--radius-md)] border border-[var(--color-error)]/20 bg-[var(--color-error-muted)] px-3 py-2 text-xs text-[var(--color-error)]">
+          <div className="mt-4 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             {error}
           </div>
         ) : null}
@@ -603,7 +603,7 @@ export function UploadPage() {
         {/* Import button */}
         <div className="mt-6">
           <Button
-            variant="primary"
+            variant="default"
             className="relative w-full overflow-hidden"
             onClick={() => void runImportAndContinue()}
             disabled={loading || selectedFileCount === 0}
@@ -611,7 +611,7 @@ export function UploadPage() {
             {/* Progress bar overlay */}
             {loading ? (
               <span
-                className="absolute inset-y-0 left-0 bg-white/20 transition-all duration-300"
+                className="absolute inset-y-0 left-0 bg-card/20 transition-all duration-300"
                 style={{ width: `${progress}%` }}
               />
             ) : null}
@@ -631,9 +631,9 @@ export function UploadPage() {
 
         {/* IMDF re-open divider */}
         <div className="mt-6 flex items-center gap-3">
-          <div className="h-px flex-1 bg-[var(--color-border)]" />
-          <span className="text-xs text-[var(--color-text-muted)]">{t("or", "または")}</span>
-          <div className="h-px flex-1 bg-[var(--color-border)]" />
+          <div className="h-px flex-1 bg-border" />
+          <span className="text-xs text-muted-foreground">{t("or", "または")}</span>
+          <div className="h-px flex-1 bg-border" />
         </div>
 
         <div className="mt-4">
@@ -652,7 +652,7 @@ export function UploadPage() {
               id="imdf-file-input"
             />
             <Button
-              variant="secondary"
+              variant="outline"
               className="w-full"
               disabled={imdfLoading}
               onClick={() => document.getElementById("imdf-file-input")?.click()}
@@ -662,11 +662,11 @@ export function UploadPage() {
                 : t("Open IMDF archive", "IMDFアーカイブを開く")}
             </Button>
           </label>
-          <p className="mt-1 text-center text-xs text-[var(--color-text-muted)]">
+          <p className="mt-1 text-center text-xs text-muted-foreground">
             {t("Re-open a previously exported .imdf.zip for further editing", "以前エクスポートした .imdf.zip を再編集のために開く")}
           </p>
           {imdfError ? (
-            <div className="mt-2 rounded-[var(--radius-md)] border border-[var(--color-error)]/20 bg-[var(--color-error-muted)] px-3 py-2 text-xs text-[var(--color-error)]">
+            <div className="mt-2 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {imdfError}
             </div>
           ) : null}
@@ -674,10 +674,10 @@ export function UploadPage() {
 
         {/* Illustrator (.ai) -> georeferenced export */}
         <div className="mt-4">
-          <Button variant="secondary" className="w-full" onClick={() => navigate("/illustrator")}>
+          <Button variant="outline" className="w-full" onClick={() => navigate("/illustrator")}>
             {t("Illustrator (.ai) → place on map", "Illustrator (.ai) → 地図に配置")}
           </Button>
-          <p className="mt-1 text-center text-xs text-[var(--color-text-muted)]">
+          <p className="mt-1 text-center text-xs text-muted-foreground">
             {t(
               "Convert .ai layers, position them on the map, then export GeoPackage, shapefiles and a QGIS project",
               ".ai のレイヤーを変換し地図に配置して、GeoPackage・シェープファイル・QGISプロジェクトを書き出し"

@@ -43,7 +43,7 @@ import { type ReviewFeature, featureName, layerKeyBaseType, orderedLayerKeys } f
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
-import { Button } from "../components/legacy-ui";
+import { Button } from "../components/ui";
 import { StepIndicator } from "../components/shell/StepIndicator";
 
 
@@ -1009,13 +1009,13 @@ export function ReviewPage() {
   const sidebarWidth = sidebarCollapsed ? 0 : 340;
 
   return (
-    <div className="flex h-screen flex-col bg-[var(--color-surface-muted)]">
+    <div className="flex h-screen flex-col bg-muted">
       {/* Top bar — mirrors AppShell but inline since review opts out of shell */}
-      <header className="flex h-12 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 shadow-[var(--shadow-sm)]">
+      <header className="flex h-12 items-center justify-between border-b border-border bg-card px-4 shadow-sm">
         <div className="flex items-center gap-3">
           <button
             type="button"
-            className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]"
+            className="flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={() => setSidebarCollapsed((prev) => !prev)}
             title={sidebarCollapsed ? t("Show sidebar", "サイドバーを表示") : t("Hide sidebar", "サイドバーを非表示")}
           >
@@ -1024,7 +1024,7 @@ export function ReviewPage() {
               <line x1="5.5" y1="2.5" x2="5.5" y2="13.5" />
             </svg>
           </button>
-          <span className="text-sm font-bold tracking-tight text-[var(--color-text)]">IMDF Converter</span>
+          <span className="text-sm font-bold tracking-tight text-foreground">IMDF Converter</span>
         </div>
 
         <StepIndicator />
@@ -1032,7 +1032,7 @@ export function ReviewPage() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="flex h-8 items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-muted)]"
+            className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
             onClick={() => {
               const next = uiLanguage === "en" ? "ja" : "en";
               setUiLanguage(next);
@@ -1051,7 +1051,7 @@ export function ReviewPage() {
       </header>
 
       {error ? (
-        <div className="border-b border-[var(--color-error)]/20 bg-[var(--color-error-muted)] px-4 py-2 text-xs text-[var(--color-error)]">
+        <div className="border-b border-destructive/20 bg-destructive/10 px-4 py-2 text-xs text-destructive">
           {error}
         </div>
       ) : null}
@@ -1061,12 +1061,12 @@ export function ReviewPage() {
         {/* ── Left sidebar: Layers + Features ── */}
         {!sidebarCollapsed ? (
           <aside
-            className="flex flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]"
+            className="flex flex-col border-r border-border bg-card"
             style={{ width: sidebarWidth, minWidth: sidebarWidth }}
           >
             <div className="flex-1 overflow-y-auto">
               {/* Layers section (compact) */}
-              <div className="border-b border-[var(--color-border)] p-3">
+              <div className="border-b border-border p-3">
                 <LayerTree
                   featureTypes={layerKeys}
                   layerVisibility={layerVisibility}
@@ -1105,13 +1105,13 @@ export function ReviewPage() {
               ) : (
                 <>
                   {filters.status ? (
-                    <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5 text-[11px] text-[var(--color-text-muted)]">
+                    <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
                       <span>
-                        {t("Showing", "表示中")}: <span className="font-medium capitalize text-[var(--color-text)]">{filters.status}</span>
+                        {t("Showing", "表示中")}: <span className="font-medium capitalize text-foreground">{filters.status}</span>
                       </span>
                       <button
                         type="button"
-                        className="ml-auto rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10px] hover:bg-[var(--color-surface-muted)]"
+                        className="ml-auto rounded-sm px-1.5 py-0.5 text-[10px] hover:bg-muted"
                         onClick={() => setFilters({ ...filters, status: undefined })}
                       >
                         {t("Clear", "解除")}
@@ -1131,13 +1131,13 @@ export function ReviewPage() {
 
             {/* Bulk actions bar (when multiple selected) */}
             {selectedFeatureIds.length > 1 ? (
-              <div className="border-t border-[var(--color-border)] bg-[var(--color-surface-muted)] p-2">
-                <div className="mb-1.5 text-[11px] font-medium text-[var(--color-text-secondary)]">
+              <div className="border-t border-border bg-muted p-2">
+                <div className="mb-1.5 text-[11px] font-medium text-muted-foreground">
                   {selectedFeatureIds.length} {t("selected", "選択中")}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   <select
-                    className="h-6 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1.5 text-[11px]"
+                    className="h-6 rounded-sm border border-border px-1.5 text-[11px]"
                     value={bulkLevel}
                     onChange={(e) => setBulkLevel(e.target.value)}
                   >
@@ -1146,28 +1146,28 @@ export function ReviewPage() {
                       <option key={o.id} value={o.id}>{o.label}</option>
                     ))}
                   </select>
-                  <Button variant="secondary" size="sm" onClick={() => void applyBulkLevel()} disabled={!bulkLevel}>
+                  <Button variant="outline" size="sm" onClick={() => void applyBulkLevel()} disabled={!bulkLevel}>
                     {t("Apply", "適用")}
                   </Button>
                   <input
-                    className="h-6 w-20 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1.5 text-[11px]"
+                    className="h-6 w-20 rounded-sm border border-border px-1.5 text-[11px]"
                     placeholder={t("Category", "カテゴリ")}
                     value={bulkCategory}
                     onChange={(e) => setBulkCategory(e.target.value)}
                   />
-                  <Button variant="secondary" size="sm" onClick={() => void applyBulkCategory()} disabled={!bulkCategory}>
+                  <Button variant="outline" size="sm" onClick={() => void applyBulkCategory()} disabled={!bulkCategory}>
                     {t("Apply", "適用")}
                   </Button>
                   <input
-                    className="h-6 w-20 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1.5 text-[11px]"
+                    className="h-6 w-20 rounded-sm border border-border px-1.5 text-[11px]"
                     placeholder={t("Merge name", "結合名")}
                     value={mergeName}
                     onChange={(e) => setMergeName(e.target.value)}
                   />
-                  <Button variant="secondary" size="sm" onClick={() => void mergeSelectedUnits()}>
+                  <Button variant="outline" size="sm" onClick={() => void mergeSelectedUnits()}>
                     {t("Merge", "結合")}
                   </Button>
-                  <Button variant="danger" size="sm" onClick={() => void deleteSelected()}>
+                  <Button variant="destructive" size="sm" onClick={() => void deleteSelected()}>
                     {t("Delete", "削除")}
                   </Button>
                 </div>
@@ -1179,7 +1179,7 @@ export function ReviewPage() {
         {/* ── Map area ── */}
         <div className="flex-1">
           {loading ? (
-            <div className="flex h-full items-center justify-center bg-[var(--color-surface-muted)]">
+            <div className="flex h-full items-center justify-center bg-muted">
               <SkeletonBlock className="h-full w-full" />
             </div>
           ) : (
@@ -1202,14 +1202,14 @@ export function ReviewPage() {
         {/* ── Right sidebar: Properties ── */}
         {rightSidebarOpen && selectedFeature ? (
           <aside
-            className="flex flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)] overflow-y-auto"
+            className="flex flex-col border-l border-border bg-card overflow-y-auto"
             style={{ width: 340, minWidth: 340 }}
           >
-            <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2">
-              <span className="text-xs font-medium text-[var(--color-text)]">{t("Properties", "プロパティ")}</span>
+            <div className="flex items-center justify-between border-b border-border px-3 py-2">
+              <span className="text-xs font-medium text-foreground">{t("Properties", "プロパティ")}</span>
               <button
                 type="button"
-                className="flex h-5 w-5 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]"
+                className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
                 onClick={() => setRightSidebarOpen(false)}
               >
                 <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -1264,14 +1264,14 @@ export function ReviewPage() {
 
       {/* Export dialog */}
       {exportDialogOpen && validation ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/35 p-4">
-          <div className="w-full max-w-xl rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-md)]">
-            <h3 className="text-lg font-semibold text-[var(--color-text)]">{t("Export", "Export")}</h3>
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-foreground/35 p-4">
+          <div className="w-full max-w-xl rounded-lg border border-border bg-card p-5 shadow-md">
+            <h3 className="text-lg font-semibold text-foreground">{t("Export", "Export")}</h3>
 
             <label className="mt-3 block text-sm">
-              <span className="mb-1 block text-[var(--color-text-secondary)]">{t("Format", "Format")}</span>
+              <span className="mb-1 block text-muted-foreground">{t("Format", "Format")}</span>
               <select
-                className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5 text-sm"
+                className="w-full rounded-md border border-border px-2.5 py-1.5 text-sm"
                 value={exportFormat}
                 onChange={(event) => setExportFormat(event.target.value as ExportFormat)}
               >
@@ -1287,7 +1287,7 @@ export function ReviewPage() {
               </select>
             </label>
             {exportFormat === "imdf_zip" ? (
-              <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+              <p className="mt-2 text-xs text-muted-foreground">
                 {t(
                   "Same contents as the .imdf archive, packaged as .zip for the IMDF Sandbox validator.",
                   "内容は .imdf アーカイブと同じで、IMDF Sandbox 検証用に .zip 形式でパッケージ化しています。"
@@ -1295,7 +1295,7 @@ export function ReviewPage() {
               </p>
             ) : null}
             {hasGeoPackageSources ? (
-              <p className="mt-2 rounded-[var(--radius-sm)] border border-[var(--color-warning)]/20 bg-[var(--color-warning-muted)] px-2 py-1 text-xs text-[var(--color-warning)]">
+              <p className="mt-2 rounded-sm border border-warning/20 bg-warning/10 px-2 py-1 text-xs text-warning">
                 {t(
                   "Shapefile (.zip) export is only available for shapefile-backed sessions. This session includes GeoPackage sources, so only IMDF export is available.",
                   "Shapefile (.zip) export is only available for shapefile-backed sessions. This session includes GeoPackage sources, so only IMDF export is available."
@@ -1303,16 +1303,16 @@ export function ReviewPage() {
               </p>
             ) : null}
 
-            <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
+            <p className="mt-3 text-sm text-muted-foreground">
               {t(`${validation.summary.total_features} features will be exported.`, `${validation.summary.total_features} features will be exported.`)}
             </p>
-            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+            <p className="mt-1 text-sm text-muted-foreground">
               {t("Validation", "Validation")}: {t(`${validation.summary.error_count} errors`, `${validation.summary.error_count} errors`)} -{" "}
               {t(`${validation.summary.warning_count} warnings`, `${validation.summary.warning_count} warnings`)}
             </p>
 
             {exportFormat !== "shapefiles" && exportFormat !== "odc2026_shapefiles" && exportFormat !== "qgis_project" && validation && validation.summary.error_count > 0 ? (
-              <p className="mt-2 rounded-[var(--radius-sm)] border border-[var(--color-warning)]/20 bg-[var(--color-warning-muted)] px-2 py-1 text-xs text-[var(--color-warning)]">
+              <p className="mt-2 rounded-sm border border-warning/20 bg-warning/10 px-2 py-1 text-xs text-warning">
                 {t(
                   `There are ${validation.summary.error_count} validation error(s). The exported IMDF may not pass Apple's validation.`,
                   `${validation.summary.error_count} 件の検証エラーがあります。エクスポートされた IMDF は Apple の検証を通過しない可能性があります。`
@@ -1321,11 +1321,11 @@ export function ReviewPage() {
             ) : null}
 
             {(exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles" || exportFormat === "qgis_project") && !hasGeoPackageSources ? (
-              <div className="mt-3 space-y-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-sm">
+              <div className="mt-3 space-y-2 rounded-md border border-border bg-muted p-3 text-sm">
                 <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-[var(--color-text-muted)]">{t("Encoding", "Encoding")}</span>
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">{t("Encoding", "Encoding")}</span>
                   <select
-                    className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5"
+                    className="w-full rounded-md border border-border px-2.5 py-1.5"
                     value={shapefileEncoding}
                     onChange={(event) => setShapefileEncoding(event.target.value as ShapefileExportEncoding)}
                   >
@@ -1339,7 +1339,7 @@ export function ReviewPage() {
                   <div>
                     <label
                       htmlFor="shapefile-export-name"
-                      className="mb-1 block text-xs uppercase tracking-wide text-[var(--color-text-muted)]"
+                      className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground"
                     >
                       {t("Export file prefix (required)", "エクスポートファイルの接頭辞（必須）")}
                     </label>
@@ -1347,7 +1347,7 @@ export function ReviewPage() {
                       id="shapefile-export-name"
                       required
                       aria-describedby="shapefile-export-name-help"
-                      className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5"
+                      className="w-full rounded-md border border-border px-2.5 py-1.5"
                       value={shapefileExportName}
                       onChange={(event) => {
                         const value = event.target.value;
@@ -1358,7 +1358,7 @@ export function ReviewPage() {
                       }}
                       placeholder="TokyoSta"
                     />
-                    <p id="shapefile-export-name-help" className="mt-1 text-xs text-[var(--color-text-muted)]">
+                    <p id="shapefile-export-name-help" className="mt-1 text-xs text-muted-foreground">
                       {t(
                         `Required. Prefixes every exported file, e.g. "${(shapefileExportName.trim() || "TokyoSta")}_1_Floor".`,
                         `必須。すべての書き出しファイルの接頭辞になります（例: "${(shapefileExportName.trim() || "TokyoSta")}_1_Floor"）。`
@@ -1368,7 +1368,7 @@ export function ReviewPage() {
                 ) : null}
 
                 {exportFormat === "odc2026_shapefiles" ? (
-                  <p className="text-xs text-[var(--color-text-muted)]">
+                  <p className="text-xs text-muted-foreground">
                     {t(
                       "Uses reviewed IMDF-schema features to generate Site, Building, Floor, Space, Fixture, Opening, Drawing, Facility, Occupant, and Segment shapefiles.",
                       "レビュー済みの IMDF スキーマ地物から Site・Building・Floor・Space・Fixture・Opening・Drawing・Facility・Occupant・Segment のシェープファイルを生成します。"
@@ -1377,7 +1377,7 @@ export function ReviewPage() {
                 ) : null}
 
                 {exportFormat === "qgis_project" ? (
-                  <p className="text-xs text-[var(--color-text-muted)]">
+                  <p className="text-xs text-muted-foreground">
                     {t(
                       "Generates a styled QGIS .qgz project (floors grouped as layers, spaces colored by category) bundled with the ODC2026 shapefiles. Extract the zip and open the .qgz in QGIS.",
                       "階層ごとにレイヤをグループ化し、空間をカテゴリ別に色分けした QGIS プロジェクト (.qgz) を ODC2026 シェープファイルと一緒に zip で出力します。zip を展開して .qgz を QGIS で開いてください。"
@@ -1387,7 +1387,7 @@ export function ReviewPage() {
 
                 {exportFormat === "shapefiles" ? (
                   <>
-                <label className="flex items-start gap-2 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-2 text-xs text-[var(--color-text-secondary)]">
+                <label className="flex items-start gap-2 rounded-sm border border-border bg-card px-2 py-2 text-xs text-muted-foreground">
                   <input
                     className="mt-0.5 h-4 w-4"
                     checked={shapefileWriteCategoryToNewField}
@@ -1417,20 +1417,20 @@ export function ReviewPage() {
                 </label>
 
                 <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">
                     {shapefileWriteCategoryToNewField
                       ? t("New IMDF category field", "New IMDF category field")
                       : t("Existing category/code field to overwrite", "Existing category/code field to overwrite")}
                   </span>
                   <input
-                    className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5"
+                    className="w-full rounded-md border border-border px-2.5 py-1.5"
                     value={shapefileCategoryField}
                     onChange={(event) => setShapefileCategoryField(event.target.value)}
                     placeholder={shapefileWriteCategoryToNewField ? "IMDF_CAT" : (shapefileSourceCategoryField || "CATEGORY")}
                   />
                 </label>
                 {!shapefileWriteCategoryToNewField ? (
-                  <p className="text-xs text-[var(--color-text-muted)]">
+                  <p className="text-xs text-muted-foreground">
                     {t(
                       "Default is your mapped source code/category column, so exports replace old codes with IMDF categories.",
                       "Default is your mapped source code/category column, so exports replace old codes with IMDF categories."
@@ -1439,11 +1439,11 @@ export function ReviewPage() {
                 ) : null}
 
                 <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">
                     {t("Legacy code field (optional)", "Legacy code field (optional)")}
                   </span>
                   <input
-                    className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5"
+                    className="w-full rounded-md border border-border px-2.5 py-1.5"
                     value={shapefileLegacyCodeField}
                     onChange={(event) => setShapefileLegacyCodeField(event.target.value)}
                     placeholder="COMPANY_CODE"
@@ -1451,18 +1451,18 @@ export function ReviewPage() {
                 </label>
 
                 <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">
                     {t("Legacy mappings (optional)", "Legacy mappings (optional)")}
                   </span>
                   <textarea
-                    className="min-h-20 w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5 font-mono text-xs"
+                    className="min-h-20 w-full rounded-md border border-border px-2.5 py-1.5 font-mono text-xs"
                     value={shapefileLegacyMapText}
                     onChange={(event) => setShapefileLegacyMapText(event.target.value)}
                     placeholder={"room=B0001\noffice=B0002"}
                     rows={4}
                   />
                 </label>
-                <p className="text-xs text-[var(--color-text-muted)]">
+                <p className="text-xs text-muted-foreground">
                   {t(
                     "Use one mapping per line as category=CODE (also accepts category,CODE or category:CODE). Applied only when Legacy code field is set.",
                     "Use one mapping per line as category=CODE (also accepts category,CODE or category:CODE). Applied only when Legacy code field is set."
@@ -1473,10 +1473,10 @@ export function ReviewPage() {
               </div>
             ) : null}
 
-            {exportOptionsError ? <p className="mt-2 text-xs text-[var(--color-error)]">{exportOptionsError}</p> : null}
+            {exportOptionsError ? <p className="mt-2 text-xs text-destructive">{exportOptionsError}</p> : null}
 
             {validation.warnings.length > 0 ? (
-              <div className="mt-3 max-h-36 overflow-auto rounded-[var(--radius-sm)] border border-[var(--color-warning)]/20 bg-[var(--color-warning-muted)] p-2 text-xs text-[var(--color-warning)]">
+              <div className="mt-3 max-h-36 overflow-auto rounded-sm border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
                 {validation.warnings.slice(0, 10).map((warning, index) => (
                   <p key={`${warning.check}-${index}`}>{warning.message}</p>
                 ))}
@@ -1484,11 +1484,11 @@ export function ReviewPage() {
             ) : null}
 
             <div className="mt-4 flex justify-end gap-2">
-              <Button variant="secondary" size="sm" onClick={() => setExportDialogOpen(false)}>
+              <Button variant="outline" size="sm" onClick={() => setExportDialogOpen(false)}>
                 {t("Cancel", "Cancel")}
               </Button>
               <Button
-                variant="primary"
+                variant="default"
                 size="sm"
                 onClick={() => void downloadExport()}
                 disabled={exporting || exportBlocked}

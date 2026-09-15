@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { Button } from "../legacy-ui";
+import { Button } from "../ui";
 import type { ReviewFeature } from "./types";
 
 /**
@@ -128,10 +128,10 @@ export function VenueDetailsPanel({ venue, building, address, language, onSave, 
   }
 
   const field = (key: keyof Draft, label: string, placeholder?: string) => (
-    <label className="text-[11px] text-[var(--color-text-secondary)]">
+    <label className="text-[11px] text-muted-foreground">
       <span className="mb-0.5 block">{label}</span>
       <input
-        className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] px-2 py-1 text-xs"
+        className="w-full rounded-sm border border-border px-2 py-1 text-xs"
         value={draft[key]}
         placeholder={placeholder}
         onChange={(event) => setDraft((prev) => ({ ...prev, [key]: event.target.value }))}
@@ -193,16 +193,16 @@ export function VenueDetailsPanel({ venue, building, address, language, onSave, 
   };
 
   return (
-    <div className="border-b border-[var(--color-border)]">
+    <div className="border-b border-border">
       <button
         type="button"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-muted)]"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-muted"
         onClick={() => setExpanded((prev) => !prev)}
       >
         <span>{expanded ? "▾" : "▸"}</span>
         <span>{t("Facility details", "施設情報")}</span>
         {draft.venueName === "" || draft.venueName === "Venue" || draft.category === "" ? (
-          <span className="ml-auto rounded-[var(--radius-sm)] bg-[var(--color-error-muted)] px-1.5 py-0.5 text-[10px] text-[var(--color-error)]">
+          <span className="ml-auto rounded-sm bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive">
             {t("required", "未入力")}
           </span>
         ) : null}
@@ -210,10 +210,10 @@ export function VenueDetailsPanel({ venue, building, address, language, onSave, 
       {expanded ? (
         <div className="grid gap-2 px-3 pb-3">
           {field("venueName", t("Facility name", "施設の名称"), t("e.g. JR Shinjuku Station", "例: JR新宿駅"))}
-          <label className="text-[11px] text-[var(--color-text-secondary)]">
+          <label className="text-[11px] text-muted-foreground">
             <span className="mb-0.5 block">{t("Facility category", "施設のカテゴリー")}</span>
             <select
-              className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] px-2 py-1 text-xs"
+              className="w-full rounded-sm border border-border px-2 py-1 text-xs"
               value={draft.category}
               onChange={(event) => setDraft((prev) => ({ ...prev, category: event.target.value }))}
             >
@@ -233,7 +233,7 @@ export function VenueDetailsPanel({ venue, building, address, language, onSave, 
               {field("locality", t("City", "市区町村"))}
               {field("address", t("Address", "住所"))}
               {field("country", t("Country (ISO)", "国 (ISO)"))}
-              <Button variant="secondary" size="sm" onClick={() => void autofill()} disabled={autofilling}>
+              <Button variant="outline" size="sm" onClick={() => void autofill()} disabled={autofilling}>
                 {autofilling ? t("Looking up...", "取得中...") : t("Fill address from geometry", "位置から住所を取得")}
               </Button>
             </>

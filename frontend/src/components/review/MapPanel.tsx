@@ -546,7 +546,7 @@ export function MapPanel({
   };
 
   return (
-    <div className="h-full overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)]">
+    <div className="h-full overflow-hidden rounded-md border border-border">
       <MapView
         ref={mapRef}
         initialViewState={{

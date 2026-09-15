@@ -42,7 +42,7 @@ import { UnitMapStep } from "../components/wizard/UnitMapStep";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
-import { Button, Badge } from "../components/legacy-ui";
+import { Button, Badge } from "../components/ui";
 
 const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail", "kiosk", "section"]);
 
@@ -156,7 +156,7 @@ function isFormTarget(target: EventTarget | null): boolean {
 
 function WizardStepSkeleton() {
   return (
-    <section className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+    <section className="rounded-lg border border-border bg-card p-5">
       <SkeletonBlock className="h-6 w-56" />
       <div className="mt-4 space-y-3">
         <SkeletonBlock className="h-10 w-full" />
@@ -745,12 +745,12 @@ export function WizardPage() {
 
         <div className="space-y-4">
           {/* Section help */}
-          <div className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="shrink-0 text-[var(--color-primary)]">
+          <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="shrink-0 text-primary">
               <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.3" />
               <path d="M8 7v4M8 5h.01" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
             </svg>
-            <p className="text-xs text-[var(--color-text-secondary)]">
+            <p className="text-xs text-muted-foreground">
               {isJapanese ? helpText.ja : helpText.en}
             </p>
           </div>
@@ -759,11 +759,11 @@ export function WizardPage() {
           {wizardSaveStatus !== "idle" ? (
             <div className="flex items-center gap-2 text-xs">
               {wizardSaveStatus === "saving" ? (
-                <Badge variant="primary">{t("Saving...", "保存中...")}</Badge>
+                <Badge variant="default">{t("Saving...", "保存中...")}</Badge>
               ) : wizardSaveStatus === "saved" ? (
                 <Badge variant="success">{t("Saved", "保存済み")}</Badge>
               ) : wizardSaveStatus === "error" ? (
-                <Badge variant="error">
+                <Badge variant="destructive">
                   {t("Error", "エラー")}: {wizardSaveError ?? t("Unknown", "不明")}
                 </Badge>
               ) : null}
@@ -775,13 +775,13 @@ export function WizardPage() {
 
           {/* Learning suggestion banner */}
           {learningSuggestion ? (
-            <div className="rounded-[var(--radius-md)] border border-[var(--color-warning)]/30 bg-[var(--color-warning-muted)] p-3 text-sm text-[var(--color-warning)]">
+            <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
               <p>{learningSuggestion.message}</p>
               <div className="mt-2 flex gap-2">
-                <Button variant="primary" size="sm" onClick={() => void applyLearningSuggestion()}>
+                <Button variant="default" size="sm" onClick={() => void applyLearningSuggestion()}>
                   {t("Apply Learning", "学習ルールを適用")}
                 </Button>
-                <Button variant="secondary" size="sm" onClick={() => setLearningSuggestion(null)}>
+                <Button variant="outline" size="sm" onClick={() => setLearningSuggestion(null)}>
                   {t("Dismiss", "閉じる")}
                 </Button>
               </div>

@@ -63,12 +63,12 @@ export function FileClassStep({
 
   return (
     <section className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(400px,1fr)] 2xl:grid-cols-[minmax(0,1.7fr)_minmax(440px,1fr)]">
-      <div className="min-w-0 rounded border bg-white p-5">
+      <div className="min-w-0 rounded border bg-card p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{t("Step 2: File Classification", "Step 2: ファイル分類")}</h2>
           <button
             type="button"
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-60"
+            className="rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-60"
             disabled={loading}
             onClick={onDetectAll}
           >
@@ -84,7 +84,7 @@ export function FileClassStep({
               <col style={{ width: "18%" }} />
               <col style={{ width: "16%" }} />
             </colgroup>
-            <thead className="sticky top-0 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
+            <thead className="sticky top-0 bg-muted text-left text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="px-3 py-2.5">{t("Source", "ソース")}</th>
                 <th className="px-3 py-2.5">{t("Geometry", "ジオメトリ")}</th>
@@ -96,11 +96,11 @@ export function FileClassStep({
             <tbody>
               {files.map((file) => {
                 const isSelected = selectedStem === file.stem;
-                const rowClass = isSelected ? "bg-blue-50" : "bg-white";
+                const rowClass = isSelected ? "bg-accent" : "bg-card";
                 return (
                   <tr
                     key={file.stem}
-                    className={`${rowClass} cursor-pointer border-t hover:bg-slate-50`}
+                    className={`${rowClass} cursor-pointer border-t hover:bg-muted`}
                     onMouseEnter={() => onHoverStem(file.stem)}
                     onMouseLeave={() => onHoverStem(null)}
                     onClick={() => onSelectStem(isSelected ? null : file.stem)}
@@ -111,7 +111,7 @@ export function FileClassStep({
                     >
                       <div className="truncate">{file.stem}</div>
                       {file.source_format === "gpkg" && file.source_layer ? (
-                        <div className="truncate font-sans text-[10px] text-slate-500">
+                        <div className="truncate font-sans text-[10px] text-muted-foreground">
                           {t(`Layer: ${file.source_layer}`, `レイヤー: ${file.source_layer}`)}
                         </div>
                       ) : null}
@@ -144,9 +144,9 @@ export function FileClassStep({
         </div>
       </div>
 
-      <div className="rounded border bg-white p-5">
-        <h3 className="mb-2 text-sm font-semibold text-slate-700">{t("Preview Map", "プレビューマップ")}</h3>
-        <p className="mb-3 text-xs text-slate-500">
+      <div className="rounded border bg-card p-5">
+        <h3 className="mb-2 text-sm font-semibold text-foreground">{t("Preview Map", "プレビューマップ")}</h3>
+        <p className="mb-3 text-xs text-muted-foreground">
           {t("Hover a row to zoom/highlight. Click a row to isolate that file.", "行にカーソルを置くと強調表示・ズームします。クリックでそのファイルのみ表示します。")}
         </p>
         <PreviewMap features={features} selectedStem={selectedStem} hoveredStem={hoveredStem} />

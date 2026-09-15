@@ -21,9 +21,9 @@ export function FilterBar({ filters, featureTypes, levels, categories, onChange 
   const { t } = useUiLanguage();
 
   return (
-    <div className="grid gap-2 rounded border bg-white p-3 xl:grid-cols-5">
+    <div className="grid gap-2 rounded border bg-card p-3 xl:grid-cols-5">
       <label className="text-xs">
-        <span className="mb-1 block text-slate-600">{t("Type", "種別")}</span>
+        <span className="mb-1 block text-muted-foreground">{t("Type", "種別")}</span>
         <select
           className="w-full rounded border px-2 py-1.5 text-sm"
           value={filters.type ?? ""}
@@ -39,7 +39,7 @@ export function FilterBar({ filters, featureTypes, levels, categories, onChange 
       </label>
 
       <label className="text-xs">
-        <span className="mb-1 block text-slate-600">{t("Level", "レベル")}</span>
+        <span className="mb-1 block text-muted-foreground">{t("Level", "レベル")}</span>
         <select
           className="w-full rounded border px-2 py-1.5 text-sm"
           value={filters.level ?? ""}
@@ -55,7 +55,7 @@ export function FilterBar({ filters, featureTypes, levels, categories, onChange 
       </label>
 
       <label className="text-xs">
-        <span className="mb-1 block text-slate-600">{t("Category", "カテゴリ")}</span>
+        <span className="mb-1 block text-muted-foreground">{t("Category", "カテゴリ")}</span>
         <select
           className="w-full rounded border px-2 py-1.5 text-sm"
           value={filters.category ?? ""}
@@ -71,7 +71,7 @@ export function FilterBar({ filters, featureTypes, levels, categories, onChange 
       </label>
 
       <label className="text-xs">
-        <span className="mb-1 block text-slate-600">{t("Status", "ステータス")}</span>
+        <span className="mb-1 block text-muted-foreground">{t("Status", "ステータス")}</span>
         <select
           className="w-full rounded border px-2 py-1.5 text-sm"
           value={filters.status ?? ""}
@@ -86,7 +86,7 @@ export function FilterBar({ filters, featureTypes, levels, categories, onChange 
       </label>
 
       <label className="text-xs">
-        <span className="mb-1 block text-slate-600">{t("Search", "検索")}</span>
+        <span className="mb-1 block text-muted-foreground">{t("Search", "検索")}</span>
         <input
           className="w-full rounded border px-2 py-1.5 text-sm"
           value={filters.search ?? ""}

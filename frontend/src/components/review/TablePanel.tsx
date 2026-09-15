@@ -220,10 +220,10 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
         const status = statusValue(row.original);
         const className =
           status === "error"
-            ? "bg-red-100 text-red-700"
+            ? "bg-destructive/20 text-destructive"
             : status === "warning"
-              ? "bg-amber-100 text-amber-700"
-              : "bg-emerald-100 text-emerald-700";
+              ? "bg-warning/20 text-warning"
+              : "bg-success/20 text-success";
         return <span className={`rounded px-2 py-0.5 text-xs ${className}`}>{status}</span>;
       }
     }
@@ -236,10 +236,10 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
   });
 
   return (
-    <div className="rounded border bg-white">
+    <div className="rounded border bg-card">
       <div className="max-h-[360px] overflow-auto">
         <table className="min-w-full border-collapse text-sm">
-          <thead className="sticky top-0 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
+          <thead className="sticky top-0 bg-muted text-left text-xs uppercase tracking-wide text-muted-foreground">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
@@ -256,7 +256,7 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
               return (
                 <tr
                   key={row.id}
-                  className={`cursor-pointer border-t ${isSelected ? "bg-blue-50" : "bg-white hover:bg-slate-50"}`}
+                  className={`cursor-pointer border-t ${isSelected ? "bg-accent" : "bg-card hover:bg-muted"}`}
                   onClick={(event) => handleRowSelection(row.original.id, event.shiftKey)}
                 >
                   {row.getVisibleCells().map((cell) => (

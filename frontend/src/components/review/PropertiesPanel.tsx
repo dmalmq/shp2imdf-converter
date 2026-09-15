@@ -77,17 +77,17 @@ export function PropertiesPanel({
 
   if (!feature) {
     return (
-      <div className="rounded border bg-white p-3 text-sm text-slate-600">
+      <div className="rounded border bg-card p-3 text-sm text-muted-foreground">
         {t("Select a feature to inspect/edit its properties.", "フィーチャーを選択してプロパティを確認・編集してください。")}
       </div>
     );
   }
 
   return (
-    <div className="space-y-3 rounded border bg-white p-3">
+    <div className="space-y-3 rounded border bg-card p-3">
       <div>
         <h3 className="text-sm font-semibold">{t("Properties", "プロパティ")}</h3>
-        <p className="text-xs text-slate-600">
+        <p className="text-xs text-muted-foreground">
           {feature.feature_type} <span className="font-mono">{feature.id.slice(0, 8)}</span>
         </p>
       </div>
@@ -99,7 +99,7 @@ export function PropertiesPanel({
           if (key === "name" || key === "alt_name") {
             return (
               <label key={key} className="text-xs">
-                <span className="mb-1 block text-slate-600">{key}</span>
+                <span className="mb-1 block text-muted-foreground">{key}</span>
                 <input
                   className="w-full rounded border px-2 py-1.5 text-sm"
                   value={asLabelText(value)}
@@ -117,7 +117,7 @@ export function PropertiesPanel({
           if (key === "level_id") {
             return (
               <label key={key} className="text-xs">
-                <span className="mb-1 block text-slate-600">level_id</span>
+                <span className="mb-1 block text-muted-foreground">level_id</span>
                 <select
                   className="w-full rounded border px-2 py-1.5 text-sm"
                   value={typeof value === "string" ? value : ""}
@@ -142,7 +142,7 @@ export function PropertiesPanel({
           if (key === "address_id") {
             return (
               <label key={key} className="text-xs">
-                <span className="mb-1 block text-slate-600">address_id</span>
+                <span className="mb-1 block text-muted-foreground">address_id</span>
                 <select
                   className="w-full rounded border px-2 py-1.5 text-sm"
                   value={typeof value === "string" ? value : ""}
@@ -167,7 +167,7 @@ export function PropertiesPanel({
           if (key === "building_ids") {
             return (
               <label key={key} className="text-xs">
-                <span className="mb-1 block text-slate-600">building_ids</span>
+                <span className="mb-1 block text-muted-foreground">building_ids</span>
                 <input
                   className="w-full rounded border px-2 py-1.5 text-sm"
                   value={toStringValue(value)}
@@ -206,7 +206,7 @@ export function PropertiesPanel({
           if (typeof value === "number") {
             return (
               <label key={key} className="text-xs">
-                <span className="mb-1 block text-slate-600">{key}</span>
+                <span className="mb-1 block text-muted-foreground">{key}</span>
                 <input
                   type="number"
                   className="w-full rounded border px-2 py-1.5 text-sm"
@@ -224,7 +224,7 @@ export function PropertiesPanel({
 
           return (
             <label key={key} className="text-xs">
-              <span className="mb-1 block text-slate-600">{key}</span>
+              <span className="mb-1 block text-muted-foreground">{key}</span>
               <input
                 className="w-full rounded border px-2 py-1.5 text-sm"
                 value={toStringValue(value)}
@@ -240,21 +240,21 @@ export function PropertiesPanel({
         })}
       </div>
 
-      <div className="text-xs text-slate-600">
+      <div className="text-xs text-muted-foreground">
         {t("Name preview", "名称プレビュー")}: <span className="font-medium">{featureName({ ...feature, properties: form }) || "-"}</span>
       </div>
 
       <div className="flex gap-2">
         <button
           type="button"
-          className="rounded bg-blue-600 px-3 py-1.5 text-xs text-white"
+          className="rounded bg-primary px-3 py-1.5 text-xs text-primary-foreground"
           onClick={() => onSave(feature.id, form)}
         >
           {t("Save Changes", "変更を保存")}
         </button>
         <button
           type="button"
-          className="rounded border border-red-300 px-3 py-1.5 text-xs text-red-700"
+          className="rounded border border-destructive/30 px-3 py-1.5 text-xs text-destructive"
           onClick={() => onDelete(feature.id)}
         >
           {t("Delete Feature", "フィーチャーを削除")}

@@ -61,7 +61,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
   };
 
   return (
-    <section className="rounded border bg-white p-5">
+    <section className="rounded border bg-card p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">{t("Step 5: Unit Mapping", "Step 5: Unit 対応付け")}</h2>
         <label className="rounded border px-3 py-1.5 text-sm">
@@ -83,7 +83,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
 
       <div className="mb-3 grid gap-3 md:grid-cols-2">
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Code Column", "コード列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Code Column", "コード列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.code_column ?? ""}
@@ -98,7 +98,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
           </select>
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Name Column", "名称列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Name Column", "名称列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.name_column ?? ""}
@@ -113,7 +113,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
           </select>
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Alt Name Column", "別名列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Alt Name Column", "別名列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.alt_name_column ?? ""}
@@ -128,7 +128,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
           </select>
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Restriction Column", "制限列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Restriction Column", "制限列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.restriction_column ?? ""}
@@ -143,7 +143,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
           </select>
         </label>
         <label className="text-sm md:col-span-2">
-          <span className="mb-1 block text-slate-600">{t("Accessibility Column", "アクセシビリティ列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Accessibility Column", "アクセシビリティ列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.accessibility_column ?? ""}
@@ -160,9 +160,9 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
       </div>
 
       <div className="rounded border">
-        <div className="flex items-center justify-between border-b bg-slate-50 px-3 py-2 text-sm">
+        <div className="flex items-center justify-between border-b bg-muted px-3 py-2 text-sm">
           <span>{t("Code Resolution Preview", "コード解決プレビュー")}</span>
-          <span className={unresolved ? "text-amber-700" : "text-emerald-700"}>
+          <span className={unresolved ? "text-warning" : "text-success"}>
             {t(
               `${mapping.preview.length} codes, ${unresolved} unresolved`,
               `${mapping.preview.length} 件、未解決 ${unresolved} 件`
@@ -171,7 +171,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
         </div>
         <div className="max-h-64 overflow-auto">
           <table className="w-full border-collapse text-sm">
-            <thead className="sticky top-0 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
+            <thead className="sticky top-0 bg-muted text-left text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="px-2 py-2">{t("Raw Code", "元コード")}</th>
                 <th className="px-2 py-2">{t("Count", "件数")}</th>
@@ -180,7 +180,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
             </thead>
             <tbody>
               {mapping.preview.map((row) => (
-                <tr key={row.code} className={`border-t ${row.unresolved ? "bg-amber-50" : "bg-white"}`}>
+                <tr key={row.code} className={`border-t ${row.unresolved ? "bg-warning/10" : "bg-card"}`}>
                   <td className="px-2 py-2 font-mono text-xs">{row.code}</td>
                   <td className="px-2 py-2">{row.count}</td>
                   <td className="px-2 py-2">
@@ -201,7 +201,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
               ))}
               {mapping.preview.length === 0 && (
                 <tr>
-                  <td className="px-2 py-3 text-sm text-slate-500" colSpan={3}>
+                  <td className="px-2 py-3 text-sm text-muted-foreground" colSpan={3}>
                     {t(
                       "Select a code column to generate coverage preview.",
                       "コード列を選択するとカバレッジプレビューが表示されます。"
@@ -212,7 +212,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
             </tbody>
           </table>
         </div>
-        <p className="border-t bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        <p className="border-t bg-muted px-3 py-2 text-xs text-muted-foreground">
           {t(
             "A category selection applies to all units with the same raw code value.",
             "カテゴリを選択すると、同じ元コードを持つすべてのユニットに適用されます。"
@@ -220,7 +220,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
         </p>
       </div>
 
-      {saving && <p className="mt-2 text-xs text-slate-500">{t("Saving mappings...", "マッピングを保存中...")}</p>}
+      {saving && <p className="mt-2 text-xs text-muted-foreground">{t("Saving mappings...", "マッピングを保存中...")}</p>}
     </section>
   );
 }

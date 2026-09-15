@@ -34,15 +34,15 @@ export function FixtureMapStep({ files, mapping, saving, onSave }: Props) {
   };
 
   return (
-    <section className="rounded border bg-white p-5">
+    <section className="rounded border bg-card p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">{t("Step 7: Fixture Mapping", "Step 7: Fixture 対応付け")}</h2>
-        {saving && <span className="text-xs text-slate-500">{t("Saving...", "保存中...")}</span>}
+        {saving && <span className="text-xs text-muted-foreground">{t("Saving...", "保存中...")}</span>}
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Name Column", "名称列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Name Column", "名称列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.name_column ?? ""}
@@ -57,7 +57,7 @@ export function FixtureMapStep({ files, mapping, saving, onSave }: Props) {
           </select>
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Alt Name Column", "別名列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Alt Name Column", "別名列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.alt_name_column ?? ""}
@@ -72,7 +72,7 @@ export function FixtureMapStep({ files, mapping, saving, onSave }: Props) {
           </select>
         </label>
         <label className="text-sm md:col-span-2">
-          <span className="mb-1 block text-slate-600">{t("Category Column", "カテゴリ列")}</span>
+          <span className="mb-1 block text-muted-foreground">{t("Category Column", "カテゴリ列")}</span>
           <select
             className="w-full rounded border px-2 py-1.5"
             value={mapping.category_column ?? ""}

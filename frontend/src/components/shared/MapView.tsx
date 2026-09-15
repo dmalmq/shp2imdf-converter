@@ -8,7 +8,7 @@ import MapGL, {
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { attachMapHealth } from "../../lib/mapHealth";
-import { Button } from "../legacy-ui";
+import { Button } from "../ui";
 
 const MAP_LIB = import("maplibre-gl");
 const MAX_RECOVERY_ATTEMPTS = 3;
@@ -163,7 +163,7 @@ export const MapView = forwardRef<MapRef, Props>(function MapView(
     <div className="relative h-full w-full bg-[#e8eef4]">
       {failed ? (
         <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-          <p className="text-sm text-[var(--color-text-secondary)]">
+          <p className="text-sm text-muted-foreground">
             {t("The map stopped drawing. Reload it to continue.", "地図の描画が停止しました。再読み込みしてください。")}
           </p>
           <Button type="button" size="sm" onClick={reload}>

@@ -89,10 +89,10 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
 
   return (
     <section className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,1fr)] 2xl:grid-cols-[minmax(0,1.7fr)_minmax(400px,1fr)]">
-      <div className="min-w-0 rounded border bg-white p-5">
+      <div className="min-w-0 rounded border bg-card p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{t("Step 3: Level Mapping", "Step 3: レベル対応付け")}</h2>
-          {saving && <span className="text-xs text-slate-500">{t("Saving...", "保存中...")}</span>}
+          {saving && <span className="text-xs text-muted-foreground">{t("Saving...", "保存中...")}</span>}
         </div>
 
         <div className="max-h-[58vh] min-h-[430px] overflow-auto rounded border">
@@ -106,7 +106,7 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
               <col style={{ width: "8%" }} />
               <col style={{ width: "14%" }} />
             </colgroup>
-            <thead className="sticky top-0 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
+            <thead className="sticky top-0 bg-muted text-left text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="px-3 py-2.5">{t("Filename", "ファイル名")}</th>
                 <th className="px-3 py-2.5">{t("Type", "種別")}</th>
@@ -175,15 +175,15 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
         </div>
       </div>
 
-      <div className="rounded border bg-white p-5">
-        <h3 className="mb-2 text-sm font-semibold text-slate-700">{t("Stacking Diagram", "レベル構成図")}</h3>
-        <p className="mb-4 text-xs text-slate-500">
+      <div className="rounded border bg-card p-5">
+        <h3 className="mb-2 text-sm font-semibold text-foreground">{t("Stacking Diagram", "レベル構成図")}</h3>
+        <p className="mb-4 text-xs text-muted-foreground">
           {t("Levels are ordered by ordinal from bottom to top.", "レベルは下階から上階へ順に並びます。")}
         </p>
         <div className="space-y-2">
           {buckets.map((bucket) => {
             const hasDuplicate = duplicateOrdinals.has(bucket.ordinal);
-            const labelClass = hasDuplicate ? "border-red-400 bg-red-50 text-red-700" : "border-slate-300 bg-slate-50 text-slate-700";
+            const labelClass = hasDuplicate ? "border-destructive bg-destructive/10 text-destructive" : "border-border bg-muted text-foreground";
             return (
               <div key={bucket.ordinal} className={`rounded border px-3 py-2 text-sm ${labelClass}`}>
                 <div className="font-semibold">{t(`Ordinal ${bucket.ordinal}`, `階層 ${bucket.ordinal}`)}</div>
@@ -194,7 +194,7 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
           {gapOrdinals.map((ordinal) => (
             <div
               key={`gap-${ordinal}`}
-              className="rounded border border-dashed border-amber-400 bg-amber-50 px-3 py-2 text-xs text-amber-700"
+              className="rounded border border-dashed border-warning bg-warning/10 px-3 py-2 text-xs text-warning"
             >
               {t(`Gap at ordinal ${ordinal}`, `階層 ${ordinal} に欠番があります`)}
             </div>

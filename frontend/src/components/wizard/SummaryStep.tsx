@@ -53,12 +53,12 @@ export function SummaryStep({ files, cleanupSummary, wizard, saving, disabled, o
   const mappedCodes = wizard?.mappings.unit.preview.length ?? 0;
 
   return (
-    <section className="rounded border bg-white p-5">
+    <section className="rounded border bg-card p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold">{t("Step 10: Summary", "Step 10: 概要")}</h2>
         <button
           type="button"
-          className="rounded bg-emerald-600 px-3 py-1.5 text-sm text-white disabled:opacity-60"
+          className="rounded bg-success px-3 py-1.5 text-sm text-white disabled:opacity-60"
           disabled={saving || disabled}
           onClick={onConfirm}
         >
@@ -93,7 +93,7 @@ export function SummaryStep({ files, cleanupSummary, wizard, saving, disabled, o
       </div>
 
       <div className="mt-4 rounded border">
-        <div className="border-b bg-slate-50 px-3 py-2 text-sm font-semibold">{t("Files by Detected Type", "検出種別ごとのファイル数")}</div>
+        <div className="border-b bg-muted px-3 py-2 text-sm font-semibold">{t("Files by Detected Type", "検出種別ごとのファイル数")}</div>
         <ul className="px-3 py-2 text-sm">
           {typeCounts.map(([featureType, count]) => (
             <li key={featureType}>
@@ -117,7 +117,7 @@ export function SummaryStep({ files, cleanupSummary, wizard, saving, disabled, o
       )}
 
       {wizard && wizard.warnings.length > 0 && (
-        <div className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+        <div className="mt-4 rounded border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
           <h3 className="font-semibold">{t("Warnings", "警告")}</h3>
           <ul className="mt-1">
             {wizard.warnings.map((warning) => (
