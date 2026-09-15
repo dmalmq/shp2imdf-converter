@@ -1,4 +1,4 @@
-import { Globe, Moon, PanelLeft, Sun, X } from "lucide-react";
+import { ChevronRight, Globe, Moon, PanelLeft, Sun, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -46,7 +46,14 @@ import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
 import {
   Button,
+  Checkbox,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogTitle,
+  Field,
   Input,
+  Metric,
   Select,
   SelectContent,
   SelectItem,
@@ -55,7 +62,8 @@ import {
   Tabs,
   TabsContent,
   TabsList,
-  TabsTrigger
+  TabsTrigger,
+  Textarea
 } from "../components/ui";
 import { StepIndicator } from "../components/shell/StepIndicator";
 
@@ -1324,56 +1332,87 @@ export function ReviewPage() {
       />
 
       {/* Export dialog */}
-      {exportDialogOpen && validation ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-foreground/35 p-4">
-          <div className="w-full max-w-xl rounded-lg border border-border bg-card p-5 shadow-md">
-            <h3 className="text-lg font-semibold text-foreground">{t("Export", "Export")}</h3>
+      {/* Was a hand-rolled fixed overlay: no focus trap, no escape-to-close and
+          no labelled dialog role. The advanced shapefile field options move
+          behind a disclosure — three text inputs and a mapping textarea that
+          only matter if you are replacing codes in an existing schema. */}
+      <Dialog open={exportDialogOpen && validation !== null} onOpenChange={setExportDialogOpen}>
+        <DialogContent className="max-h-[85vh] max-w-xl grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+          <DialogTitle>{t("Export", "エクスポート")}</DialogTitle>
 
-            <label className="mt-3 block text-sm">
-              <span className="mb-1 block text-muted-foreground">{t("Format", "Format")}</span>
-              <select
-                className="w-full rounded-md border border-border px-2.5 py-1.5 text-sm"
-                value={exportFormat}
-                onChange={(event) => setExportFormat(event.target.value as ExportFormat)}
-              >
-                <option value="imdf">{t("IMDF (.imdf)", "IMDF (.imdf)")}</option>
-                <option value="imdf_zip">{t("IMDF (.zip)", "IMDF (.zip)")}</option>
-                {!hasGeoPackageSources ? (
-                  <>
-                    <option value="shapefiles">{t("Shapefiles (.zip)", "Shapefiles (.zip)")}</option>
-                    <option value="odc2026_shapefiles">{t("Open Data Contest 2026 shapefiles (.zip)", "オープンデータコンテスト2026 シェープファイル (.zip)")}</option>
-                    <option value="qgis_project">{t("QGIS project (.qgz + shapefiles .zip)", "QGIS プロジェクト (.qgz + シェープファイル .zip)")}</option>
-                  </>
-                ) : null}
-              </select>
-            </label>
+          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
+            <Field label={t("Format", "形式")}>
+              {(id) => (
+                <Select
+                  value={exportFormat}
+                  onValueChange={(value) => setExportFormat(value as ExportFormat)}
+                >
+                  <SelectTrigger id={id}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="imdf">{t("IMDF (.imdf)", "IMDF (.imdf)")}</SelectItem>
+                    <SelectItem value="imdf_zip">{t("IMDF (.zip)", "IMDF (.zip)")}</SelectItem>
+                    {!hasGeoPackageSources ? (
+                      <>
+                        <SelectItem value="shapefiles">{t("Shapefiles (.zip)", "Shapefiles (.zip)")}</SelectItem>
+                        <SelectItem value="odc2026_shapefiles">
+                          {t("Open Data Contest 2026 shapefiles (.zip)", "オープンデータコンテスト2026 シェープファイル (.zip)")}
+                        </SelectItem>
+                        <SelectItem value="qgis_project">
+                          {t("QGIS project (.qgz + shapefiles .zip)", "QGIS プロジェクト (.qgz + シェープファイル .zip)")}
+                        </SelectItem>
+                      </>
+                    ) : null}
+                  </SelectContent>
+                </Select>
+              )}
+            </Field>
+
             {exportFormat === "imdf_zip" ? (
-              <p className="mt-2 text-xs text-muted-foreground">
+              <p className="-mt-2 text-xs leading-4 text-muted-foreground">
                 {t(
                   "Same contents as the .imdf archive, packaged as .zip for the IMDF Sandbox validator.",
                   "内容は .imdf アーカイブと同じで、IMDF Sandbox 検証用に .zip 形式でパッケージ化しています。"
                 )}
               </p>
             ) : null}
+
             {hasGeoPackageSources ? (
-              <p className="mt-2 rounded-sm border border-warning/20 bg-warning/10 px-2 py-1 text-xs text-warning">
+              <p className="rounded-md border border-warning/20 bg-warning/10 px-3 py-2 text-xs leading-4 text-warning">
                 {t(
-                  "Shapefile (.zip) export is only available for shapefile-backed sessions. This session includes GeoPackage sources, so only IMDF export is available.",
-                  "Shapefile (.zip) export is only available for shapefile-backed sessions. This session includes GeoPackage sources, so only IMDF export is available."
+                  "This session includes GeoPackage sources, so only IMDF export is available.",
+                  "このセッションには GeoPackage ソースが含まれるため、IMDF 書き出しのみ利用できます。"
                 )}
               </p>
             ) : null}
 
-            <p className="mt-3 text-sm text-muted-foreground">
-              {t(`${validation.summary.total_features} features will be exported.`, `${validation.summary.total_features} features will be exported.`)}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t("Validation", "Validation")}: {t(`${validation.summary.error_count} errors`, `${validation.summary.error_count} errors`)} -{" "}
-              {t(`${validation.summary.warning_count} warnings`, `${validation.summary.warning_count} warnings`)}
-            </p>
+            {validation ? (
+              <div className="flex gap-2">
+                <Metric
+                  label={t("FEATURES", "フィーチャー")}
+                  value={validation.summary.total_features}
+                  className="flex-1"
+                />
+                <Metric
+                  label={t("ERRORS", "エラー")}
+                  value={validation.summary.error_count}
+                  className="flex-1"
+                />
+                <Metric
+                  label={t("WARNINGS", "警告")}
+                  value={validation.summary.warning_count}
+                  className="flex-1"
+                />
+              </div>
+            ) : null}
 
-            {exportFormat !== "shapefiles" && exportFormat !== "odc2026_shapefiles" && exportFormat !== "qgis_project" && validation && validation.summary.error_count > 0 ? (
-              <p className="mt-2 rounded-sm border border-warning/20 bg-warning/10 px-2 py-1 text-xs text-warning">
+            {exportFormat !== "shapefiles" &&
+            exportFormat !== "odc2026_shapefiles" &&
+            exportFormat !== "qgis_project" &&
+            validation &&
+            validation.summary.error_count > 0 ? (
+              <p className="rounded-md border border-warning/20 bg-warning/10 px-3 py-2 text-xs leading-4 text-warning">
                 {t(
                   `There are ${validation.summary.error_count} validation error(s). The exported IMDF may not pass Apple's validation.`,
                   `${validation.summary.error_count} 件の検証エラーがあります。エクスポートされた IMDF は Apple の検証を通過しない可能性があります。`
@@ -1381,55 +1420,63 @@ export function ReviewPage() {
               </p>
             ) : null}
 
-            {(exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles" || exportFormat === "qgis_project") && !hasGeoPackageSources ? (
-              <div className="mt-3 space-y-2 rounded-md border border-border bg-muted p-3 text-sm">
-                <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">{t("Encoding", "Encoding")}</span>
-                  <select
-                    className="w-full rounded-md border border-border px-2.5 py-1.5"
-                    value={shapefileEncoding}
-                    onChange={(event) => setShapefileEncoding(event.target.value as ShapefileExportEncoding)}
-                  >
-                    <option value="preserve_source">{t("Preserve source encoding", "Preserve source encoding")}</option>
-                    <option value="utf-8">UTF-8</option>
-                    <option value="cp932">CP932 (Shift-JIS)</option>
-                  </select>
-                </label>
+            {(exportFormat === "shapefiles" ||
+              exportFormat === "odc2026_shapefiles" ||
+              exportFormat === "qgis_project") &&
+            !hasGeoPackageSources ? (
+              <div className="flex flex-col gap-4 rounded-lg border border-border bg-muted/40 p-4">
+                <Field label={t("Encoding", "文字コード")}>
+                  {(id) => (
+                    <Select
+                      value={shapefileEncoding}
+                      onValueChange={(value) =>
+                        setShapefileEncoding(value as ShapefileExportEncoding)
+                      }
+                    >
+                      <SelectTrigger id={id}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="preserve_source">
+                          {t("Preserve source encoding", "元データの文字コードを維持")}
+                        </SelectItem>
+                        <SelectItem value="utf-8">UTF-8</SelectItem>
+                        <SelectItem value="cp932">CP932 (Shift-JIS)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                </Field>
 
                 {exportFormat === "odc2026_shapefiles" || exportFormat === "qgis_project" ? (
-                  <div>
-                    <label
-                      htmlFor="shapefile-export-name"
-                      className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground"
-                    >
-                      {t("Export file prefix (required)", "エクスポートファイルの接頭辞（必須）")}
-                    </label>
-                    <input
-                      id="shapefile-export-name"
-                      required
-                      aria-describedby="shapefile-export-name-help"
-                      className="w-full rounded-md border border-border px-2.5 py-1.5"
-                      value={shapefileExportName}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setShapefileExportName(value);
-                        if (value.trim()) {
-                          setExportOptionsError(null);
-                        }
-                      }}
-                      placeholder="TokyoSta"
-                    />
-                    <p id="shapefile-export-name-help" className="mt-1 text-xs text-muted-foreground">
-                      {t(
-                        `Required. Prefixes every exported file, e.g. "${(shapefileExportName.trim() || "TokyoSta")}_1_Floor".`,
-                        `必須。すべての書き出しファイルの接頭辞になります（例: "${(shapefileExportName.trim() || "TokyoSta")}_1_Floor"）。`
-                      )}
-                    </p>
-                  </div>
+                  <Field
+                    label={t("Export file prefix", "エクスポートファイルの接頭辞")}
+                    required
+                    hint={t(
+                      `Prefixes every exported file, e.g. "${shapefileExportName.trim() || "TokyoSta"}_1_Floor".`,
+                      `すべての書き出しファイルの接頭辞になります（例: "${shapefileExportName.trim() || "TokyoSta"}_1_Floor"）。`
+                    )}
+                  >
+                    {(id) => (
+                      <Input
+                        id={id}
+                        required
+                        invalid={Boolean(exportOptionsError) && !shapefileExportName.trim()}
+                        value={shapefileExportName}
+                        placeholder="TokyoSta"
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setShapefileExportName(value);
+                          if (value.trim()) {
+                            setExportOptionsError(null);
+                          }
+                        }}
+                      />
+                    )}
+                  </Field>
                 ) : null}
 
                 {exportFormat === "odc2026_shapefiles" ? (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs leading-4 text-muted-foreground">
                     {t(
                       "Uses reviewed IMDF-schema features to generate Site, Building, Floor, Space, Fixture, Opening, Drawing, Facility, Occupant, and Segment shapefiles.",
                       "レビュー済みの IMDF スキーマ地物から Site・Building・Floor・Space・Fixture・Opening・Drawing・Facility・Occupant・Segment のシェープファイルを生成します。"
@@ -1438,7 +1485,7 @@ export function ReviewPage() {
                 ) : null}
 
                 {exportFormat === "qgis_project" ? (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs leading-4 text-muted-foreground">
                     {t(
                       "Generates a styled QGIS .qgz project (floors grouped as layers, spaces colored by category) bundled with the ODC2026 shapefiles. Extract the zip and open the .qgz in QGIS.",
                       "階層ごとにレイヤをグループ化し、空間をカテゴリ別に色分けした QGIS プロジェクト (.qgz) を ODC2026 シェープファイルと一緒に zip で出力します。zip を展開して .qgz を QGIS で開いてください。"
@@ -1447,129 +1494,142 @@ export function ReviewPage() {
                 ) : null}
 
                 {exportFormat === "shapefiles" ? (
-                  <>
-                <label className="flex items-start gap-2 rounded-sm border border-border bg-card px-2 py-2 text-xs text-muted-foreground">
-                  <input
-                    className="mt-0.5 h-4 w-4"
-                    checked={shapefileWriteCategoryToNewField}
-                    onChange={(event) => {
-                      const checked = event.target.checked;
-                      setShapefileWriteCategoryToNewField(checked);
-                      if (checked) {
-                        const sourceField = shapefileSourceCategoryField.trim().toLowerCase();
-                        const currentField = shapefileCategoryField.trim().toLowerCase();
-                        if (!currentField || (sourceField && currentField === sourceField)) {
-                          setShapefileCategoryField("IMDF_CAT");
+                  <details className="group">
+                    <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-[13px] font-medium leading-[18px] text-muted-foreground transition-colors hover:text-foreground">
+                      <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+                      {t("Field names and legacy codes", "フィールド名と旧コード")}
+                    </summary>
+
+                    <div className="mt-4 flex flex-col gap-4">
+                      <label className="flex cursor-pointer items-start gap-2 text-[13px] leading-[18px] text-foreground">
+                        <Checkbox
+                          className="mt-0.5"
+                          checked={shapefileWriteCategoryToNewField}
+                          onCheckedChange={(next) => {
+                            const checked = next === true;
+                            setShapefileWriteCategoryToNewField(checked);
+                            if (checked) {
+                              const sourceField = shapefileSourceCategoryField.trim().toLowerCase();
+                              const currentField = shapefileCategoryField.trim().toLowerCase();
+                              if (!currentField || (sourceField && currentField === sourceField)) {
+                                setShapefileCategoryField("IMDF_CAT");
+                              }
+                              return;
+                            }
+                            const sourceField = shapefileSourceCategoryField.trim();
+                            if (sourceField) {
+                              setShapefileCategoryField(sourceField);
+                            }
+                          }}
+                        />
+                        <span>
+                          {t(
+                            "Write IMDF categories to a new field instead of overwriting the existing code/category field.",
+                            "既存のコード/カテゴリ列を上書きせず、新しい列に IMDF カテゴリを書き込みます。"
+                          )}
+                        </span>
+                      </label>
+
+                      <Field
+                        label={
+                          shapefileWriteCategoryToNewField
+                            ? t("New IMDF category field", "新しい IMDF カテゴリ列")
+                            : t("Existing category/code field to overwrite", "上書きする既存のカテゴリ/コード列")
                         }
-                        return;
-                      }
-                      const sourceField = shapefileSourceCategoryField.trim();
-                      if (sourceField) {
-                        setShapefileCategoryField(sourceField);
-                      }
-                    }}
-                  />
-                  <span>
-                    {t(
-                      "Write IMDF categories to a new field instead of overwriting the existing code/category field.",
-                      "Write IMDF categories to a new field instead of overwriting the existing code/category field."
-                    )}
-                  </span>
-                </label>
+                        hint={
+                          shapefileWriteCategoryToNewField
+                            ? undefined
+                            : t(
+                                "Defaults to your mapped source column, so exports replace old codes with IMDF categories.",
+                                "既定値は対応付け済みの元列で、旧コードを IMDF カテゴリに置き換えます。"
+                              )
+                        }
+                      >
+                        {(id) => (
+                          <Input
+                            id={id}
+                            value={shapefileCategoryField}
+                            onChange={(event) => setShapefileCategoryField(event.target.value)}
+                            placeholder={
+                              shapefileWriteCategoryToNewField
+                                ? "IMDF_CAT"
+                                : shapefileSourceCategoryField || "CATEGORY"
+                            }
+                          />
+                        )}
+                      </Field>
 
-                <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">
-                    {shapefileWriteCategoryToNewField
-                      ? t("New IMDF category field", "New IMDF category field")
-                      : t("Existing category/code field to overwrite", "Existing category/code field to overwrite")}
-                  </span>
-                  <input
-                    className="w-full rounded-md border border-border px-2.5 py-1.5"
-                    value={shapefileCategoryField}
-                    onChange={(event) => setShapefileCategoryField(event.target.value)}
-                    placeholder={shapefileWriteCategoryToNewField ? "IMDF_CAT" : (shapefileSourceCategoryField || "CATEGORY")}
-                  />
-                </label>
-                {!shapefileWriteCategoryToNewField ? (
-                  <p className="text-xs text-muted-foreground">
-                    {t(
-                      "Default is your mapped source code/category column, so exports replace old codes with IMDF categories.",
-                      "Default is your mapped source code/category column, so exports replace old codes with IMDF categories."
-                    )}
-                  </p>
-                ) : null}
+                      <Field label={t("Legacy code field (optional)", "旧コード列（任意）")}>
+                        {(id) => (
+                          <Input
+                            id={id}
+                            value={shapefileLegacyCodeField}
+                            onChange={(event) => setShapefileLegacyCodeField(event.target.value)}
+                            placeholder="COMPANY_CODE"
+                          />
+                        )}
+                      </Field>
 
-                <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">
-                    {t("Legacy code field (optional)", "Legacy code field (optional)")}
-                  </span>
-                  <input
-                    className="w-full rounded-md border border-border px-2.5 py-1.5"
-                    value={shapefileLegacyCodeField}
-                    onChange={(event) => setShapefileLegacyCodeField(event.target.value)}
-                    placeholder="COMPANY_CODE"
-                  />
-                </label>
-
-                <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">
-                    {t("Legacy mappings (optional)", "Legacy mappings (optional)")}
-                  </span>
-                  <textarea
-                    className="min-h-20 w-full rounded-md border border-border px-2.5 py-1.5 font-mono text-xs"
-                    value={shapefileLegacyMapText}
-                    onChange={(event) => setShapefileLegacyMapText(event.target.value)}
-                    placeholder={"room=B0001\noffice=B0002"}
-                    rows={4}
-                  />
-                </label>
-                <p className="text-xs text-muted-foreground">
-                  {t(
-                    "Use one mapping per line as category=CODE (also accepts category,CODE or category:CODE). Applied only when Legacy code field is set.",
-                    "Use one mapping per line as category=CODE (also accepts category,CODE or category:CODE). Applied only when Legacy code field is set."
-                  )}
-                </p>
-                  </>
+                      <Field
+                        label={t("Legacy mappings (optional)", "旧コードの対応（任意）")}
+                        hint={t(
+                          "One per line as category=CODE. Applied only when a legacy code field is set.",
+                          "1行に1つ、category=CODE の形式で。旧コード列を設定したときのみ適用されます。"
+                        )}
+                      >
+                        {(id) => (
+                          <Textarea
+                            id={id}
+                            className="font-mono text-xs"
+                            rows={4}
+                            value={shapefileLegacyMapText}
+                            onChange={(event) => setShapefileLegacyMapText(event.target.value)}
+                            placeholder={"room=B0001\noffice=B0002"}
+                          />
+                        )}
+                      </Field>
+                    </div>
+                  </details>
                 ) : null}
               </div>
             ) : null}
 
-            {exportOptionsError ? <p className="mt-2 text-xs text-destructive">{exportOptionsError}</p> : null}
+            {exportOptionsError ? (
+              <p role="alert" className="text-xs leading-4 text-destructive">
+                {exportOptionsError}
+              </p>
+            ) : null}
 
-            {validation.warnings.length > 0 ? (
-              <div className="mt-3 max-h-36 overflow-auto rounded-sm border border-warning/20 bg-warning/10 p-2 text-xs text-warning">
+            {validation && validation.warnings.length > 0 ? (
+              <div className="flex max-h-36 flex-col gap-1 overflow-auto rounded-md border border-warning/20 bg-warning/10 p-3 text-xs leading-4 text-warning">
                 {validation.warnings.slice(0, 10).map((warning, index) => (
                   <p key={`${warning.check}-${index}`}>{warning.message}</p>
                 ))}
               </div>
             ) : null}
-
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setExportDialogOpen(false)}>
-                {t("Cancel", "Cancel")}
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={() => void downloadExport()}
-                disabled={exporting || exportBlocked}
-              >
-                {exporting
-                  ? t("Downloading...", "Downloading...")
-                  : exportFormat === "shapefiles"
-                    ? t("Download shapefiles .zip", "Download shapefiles .zip")
-                    : exportFormat === "odc2026_shapefiles"
-                      ? t("Download Open Data Contest 2026 shapefiles .zip", "オープンデータコンテスト2026 シェープファイル .zip をダウンロード")
-                      : exportFormat === "qgis_project"
-                        ? t("Download QGIS project .zip", "QGIS プロジェクト .zip をダウンロード")
-                        : exportFormat === "imdf_zip"
-                          ? t("Download .zip", "Download .zip")
-                          : t("Download .imdf", "Download .imdf")}
-              </Button>
-            </div>
           </div>
-        </div>
-      ) : null}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExportDialogOpen(false)}>
+              {t("Cancel", "キャンセル")}
+            </Button>
+            <Button onClick={() => void downloadExport()} disabled={exporting || exportBlocked}>
+              {exporting
+                ? t("Downloading…", "ダウンロード中…")
+                : exportFormat === "shapefiles"
+                  ? t("Download shapefiles .zip", "シェープファイル .zip をダウンロード")
+                  : exportFormat === "odc2026_shapefiles"
+                    ? t("Download ODC 2026 .zip", "オープンデータコンテスト2026 .zip をダウンロード")
+                    : exportFormat === "qgis_project"
+                      ? t("Download QGIS project .zip", "QGIS プロジェクト .zip をダウンロード")
+                      : exportFormat === "imdf_zip"
+                        ? t("Download .zip", ".zip をダウンロード")
+                        : t("Download .imdf", ".imdf をダウンロード")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

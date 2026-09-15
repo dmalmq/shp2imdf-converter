@@ -20,10 +20,16 @@ type ToastContextValue = {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
+/**
+ * A toast floats over whatever is underneath, so its background has to be
+ * opaque. The success and error variants were a 10% tint with nothing behind
+ * it, which let the validation bar's buttons show straight through the toast
+ * that was supposed to be covering them.
+ */
 const VARIANT_STYLE: Record<ToastVariant, string> = {
   info: "border-border bg-card text-foreground",
-  success: "border-success/30 bg-success/10 text-success",
-  error: "border-destructive/30 bg-destructive/10 text-destructive"
+  success: "border-success/40 bg-card text-success",
+  error: "border-destructive/40 bg-card text-destructive"
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
