@@ -9,10 +9,8 @@ export function geometryKindOf(geometry: { type: string } | null | undefined): F
     case "MultiPolygon":
       return "polygon";
     case "LineString":
-    case "MultiLineString":
       return "line";
     case "Point":
-    case "MultiPoint":
       return "point";
     default:
       return "any";

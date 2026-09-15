@@ -1016,12 +1016,14 @@ export type IllustratorShapeMatchResponse = {
 
 export async function matchIllustratorShape(
   conversionId: string,
-  payload: IllustratorShapeMatchRequest
+  payload: IllustratorShapeMatchRequest,
+  signal?: AbortSignal
 ): Promise<IllustratorShapeMatchResponse> {
   const response = await fetch(`/api/convert/illustrator/${conversionId}/shape-matches`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal
   });
   return handleJson<IllustratorShapeMatchResponse>(response);
 }
@@ -1067,12 +1069,14 @@ export type IllustratorRegionMatchRequest = {
 
 export async function matchIllustratorRegions(
   conversionId: string,
-  payload: IllustratorRegionMatchRequest
+  payload: IllustratorRegionMatchRequest,
+  signal?: AbortSignal
 ): Promise<IllustratorShapeMatchResponse> {
   const response = await fetch(`/api/convert/illustrator/${conversionId}/region-matches`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal
   });
   return handleJson<IllustratorShapeMatchResponse>(response);
 }
@@ -1131,7 +1135,8 @@ export type ReferenceLayerItem = {
  */
 export async function uploadReferenceLayers(
   files: File[],
-  focusBounds?: [number, number, number, number] | null
+  focusBounds?: [number, number, number, number] | null,
+  signal?: AbortSignal
 ): Promise<ReferenceLayerItem[]> {
   const body = new FormData();
   for (const file of files) {
@@ -1140,7 +1145,35 @@ export async function uploadReferenceLayers(
   if (focusBounds) {
     body.append("focus_bounds", focusBounds.join(","));
   }
-  const response = await fetch("/api/reference-layers", { method: "POST", body });
+  const response = await fetch("/api/reference-layers", { method: "POST", body, signal });
+  const payload = await handleJson<{ layers: ReferenceLayerItem[] }>(response);
+  return payload.layers;
+}
+
+export type PreloadedReferenceOverlayInfo = {
+  available: boolean;
+  label: string;
+};
+
+export async function getPreloadedReferenceOverlay(): Promise<PreloadedReferenceOverlayInfo> {
+  const response = await fetch("/api/reference-layers/preloaded");
+  return handleJson<PreloadedReferenceOverlayInfo>(response);
+}
+
+export async function fetchPreloadedReferenceLayers(
+  focusBounds: [number, number, number, number],
+  includeLines = false,
+  signal?: AbortSignal
+): Promise<ReferenceLayerItem[]> {
+  const response = await fetch("/api/reference-layers/preloaded", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      focus_bounds: focusBounds.join(","),
+      include_lines: includeLines
+    }),
+    signal
+  });
   const payload = await handleJson<{ layers: ReferenceLayerItem[] }>(response);
   return payload.layers;
 }

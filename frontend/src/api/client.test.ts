@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { uploadReferenceLayers, matchIllustratorShape, type IllustratorShapeMatchRequest, type IllustratorShapeMatchResponse } from "./client";
+import { uploadReferenceLayers, fetchPreloadedReferenceLayers, getPreloadedReferenceOverlay, matchIllustratorShape, type IllustratorShapeMatchRequest, type IllustratorShapeMatchResponse } from "./client";
 
 function okResponse(payload: unknown): Response {
   return {
@@ -38,6 +38,35 @@ describe("uploadReferenceLayers", () => {
     const body = init.body as FormData;
     expect(body.has("focus_bounds")).toBe(false);
     expect(body.get("files")).toBeInstanceOf(File);
+  });
+});
+
+describe("preloaded reference overlay", () => {
+  it("GETs availability", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ available: true, label: "駅データ" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getPreloadedReferenceOverlay()).resolves.toEqual({
+      available: true,
+      label: "駅データ"
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/reference-layers/preloaded");
+  });
+
+  it("POSTs the pin box and include_lines without files", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ layers: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchPreloadedReferenceLayers([140.1134, 35.6132, 140.1134, 35.6132], true);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/reference-layers/preloaded");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({
+      focus_bounds: "140.1134,35.6132,140.1134,35.6132",
+      include_lines: true
+    });
+    expect(init.body).not.toBeInstanceOf(FormData);
   });
 });
 

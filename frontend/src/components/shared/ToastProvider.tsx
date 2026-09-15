@@ -20,10 +20,16 @@ type ToastContextValue = {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
+/**
+ * A toast floats over whatever is underneath, so its background has to be
+ * opaque. The success and error variants were a 10% tint with nothing behind
+ * it, which let the validation bar's buttons show straight through the toast
+ * that was supposed to be covering them.
+ */
 const VARIANT_STYLE: Record<ToastVariant, string> = {
-  info: "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)]",
-  success: "border-[var(--color-success)]/30 bg-[var(--color-success-muted)] text-[var(--color-success)]",
-  error: "border-[var(--color-error)]/30 bg-[var(--color-error-muted)] text-[var(--color-error)]"
+  info: "border-border bg-card text-foreground",
+  success: "border-success/40 bg-card text-success",
+  error: "border-destructive/40 bg-card text-destructive"
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -63,7 +69,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div
               key={toast.id}
               className={[
-                "pointer-events-auto rounded-[var(--radius-md)] border px-3 py-2.5 shadow-[var(--shadow-md)]",
+                "pointer-events-auto rounded-md border px-3 py-2.5 shadow-md",
                 VARIANT_STYLE[variant],
                 toast.exiting ? "animate-slide-out-right" : "animate-slide-in-right"
               ].join(" ")}
@@ -77,7 +83,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 </div>
                 <button
                   type="button"
-                  className="shrink-0 rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[11px] opacity-60 transition-opacity hover:opacity-100"
+                  className="shrink-0 rounded-sm px-1.5 py-0.5 text-[11px] opacity-60 transition-opacity hover:opacity-100"
                   onClick={() => startExit(toast.id)}
                 >
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">

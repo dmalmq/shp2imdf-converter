@@ -1,8 +1,23 @@
+import { ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { Button } from "../ui";
+import {
+  Badge,
+  Button,
+  Field,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../ui";
+import { cn } from "@/lib/utils";
 import type { ReviewFeature } from "./types";
+
+/** Radix Select has no empty-string value, so "not set" needs a sentinel. */
+const UNSET_CATEGORY = "__none__";
 
 /**
  * Facility metadata for datasets that ship no Site or Building layer.
@@ -128,15 +143,17 @@ export function VenueDetailsPanel({ venue, building, address, language, onSave, 
   }
 
   const field = (key: keyof Draft, label: string, placeholder?: string) => (
-    <label className="text-[11px] text-[var(--color-text-secondary)]">
-      <span className="mb-0.5 block">{label}</span>
-      <input
-        className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] px-2 py-1 text-xs"
-        value={draft[key]}
-        placeholder={placeholder}
-        onChange={(event) => setDraft((prev) => ({ ...prev, [key]: event.target.value }))}
-      />
-    </label>
+    <Field key={key} label={label}>
+      {(id) => (
+        <Input
+          id={id}
+          className="h-8"
+          value={draft[key]}
+          placeholder={placeholder}
+          onChange={(event) => setDraft((prev) => ({ ...prev, [key]: event.target.value }))}
+        />
+      )}
+    </Field>
   );
 
   const save = () => {
@@ -193,38 +210,48 @@ export function VenueDetailsPanel({ venue, building, address, language, onSave, 
   };
 
   return (
-    <div className="border-b border-[var(--color-border)]">
+    <div className="border-b border-border">
       <button
         type="button"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-muted)]"
+        aria-expanded={expanded}
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-[13px] font-medium leading-[18px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => setExpanded((prev) => !prev)}
       >
-        <span>{expanded ? "▾" : "▸"}</span>
+        <ChevronRight
+          className={cn("h-3.5 w-3.5 shrink-0 transition-transform", expanded && "rotate-90")}
+        />
         <span>{t("Facility details", "施設情報")}</span>
         {draft.venueName === "" || draft.venueName === "Venue" || draft.category === "" ? (
-          <span className="ml-auto rounded-[var(--radius-sm)] bg-[var(--color-error-muted)] px-1.5 py-0.5 text-[10px] text-[var(--color-error)]">
-            {t("required", "未入力")}
-          </span>
+          <Badge variant="destructive" className="ml-auto">
+            {t("Needs input", "未入力")}
+          </Badge>
         ) : null}
       </button>
       {expanded ? (
-        <div className="grid gap-2 px-3 pb-3">
+        <div className="flex flex-col gap-3 px-3 pb-3">
           {field("venueName", t("Facility name", "施設の名称"), t("e.g. JR Shinjuku Station", "例: JR新宿駅"))}
-          <label className="text-[11px] text-[var(--color-text-secondary)]">
-            <span className="mb-0.5 block">{t("Facility category", "施設のカテゴリー")}</span>
-            <select
-              className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] px-2 py-1 text-xs"
-              value={draft.category}
-              onChange={(event) => setDraft((prev) => ({ ...prev, category: event.target.value }))}
-            >
-              <option value="">{t("(not set)", "（未設定）")}</option>
-              {VENUE_CATEGORY_CODES.map((option) => (
-                <option key={option.code} value={option.code}>
-                  {option.code} {t(option.en, option.ja)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Field label={t("Facility category", "施設のカテゴリー")}>
+            {(id) => (
+              <Select
+                value={draft.category || UNSET_CATEGORY}
+                onValueChange={(value) =>
+                  setDraft((prev) => ({ ...prev, category: value === UNSET_CATEGORY ? "" : value }))
+                }
+              >
+                <SelectTrigger id={id} className="h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={UNSET_CATEGORY}>{t("Not set", "未設定")}</SelectItem>
+                  {VENUE_CATEGORY_CODES.map((option) => (
+                    <SelectItem key={option.code} value={option.code}>
+                      {option.code} {t(option.en, option.ja)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </Field>
           {building ? field("buildingName", t("Building name", "建物躯体の名称")) : null}
           {address ? (
             <>
@@ -233,8 +260,8 @@ export function VenueDetailsPanel({ venue, building, address, language, onSave, 
               {field("locality", t("City", "市区町村"))}
               {field("address", t("Address", "住所"))}
               {field("country", t("Country (ISO)", "国 (ISO)"))}
-              <Button variant="secondary" size="sm" onClick={() => void autofill()} disabled={autofilling}>
-                {autofilling ? t("Looking up...", "取得中...") : t("Fill address from geometry", "位置から住所を取得")}
+              <Button variant="outline" size="sm" onClick={() => void autofill()} disabled={autofilling}>
+                {autofilling ? t("Looking up…", "取得中…") : t("Fill address from geometry", "位置から住所を取得")}
               </Button>
             </>
           ) : null}

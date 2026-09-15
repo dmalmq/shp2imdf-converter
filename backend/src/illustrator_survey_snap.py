@@ -80,13 +80,14 @@ def match_survey_consensus(
     pivot = _pivot(sources)
     votes = _votes(sources, targets, pivot, current.metres_per_point, spec)
     winner = _largest_cluster(votes, spec)
-    chosen = {id(vote) for vote in winner}
-    runner_up = _largest_cluster([vote for vote in votes if id(vote) not in chosen], spec)
-    if len(winner) < spec.min_support:
+    if len(winner.votes) < spec.min_support:
         return None
-    if len(runner_up) >= spec.runner_support_ratio * len(winner):
+    # Page copies of an outline agree with the winner; only another pose rivals it.
+    supporting = {id(vote) for vote in winner.supporters}
+    rivals = _largest_cluster([vote for vote in votes if id(vote) not in supporting], spec)
+    if len(rivals.votes) >= spec.runner_support_ratio * len(winner.votes):
         return None
-    return _suggestion(winner, sources, targets, origins, current, spec)
+    return _suggestion(winner.votes, sources, targets, origins, current, spec)
 
 
 def _artwork_candidates(
@@ -199,20 +200,28 @@ def _pose_distance(left: _Vote, right: _Vote, spec: SurveyConsensusSpec) -> floa
     )
 
 
-def _largest_cluster(votes: list[_Vote], spec: SurveyConsensusSpec) -> list[_Vote]:
-    best: list[_Vote] = []
+@dataclass(slots=True, frozen=True)
+class _Cluster:
+    supporters: list[_Vote]
+    votes: list[_Vote]
+
+
+def _largest_cluster(votes: list[_Vote], spec: SurveyConsensusSpec) -> _Cluster:
+    best = _Cluster(supporters=[], votes=[])
     best_key: tuple[int, float, float] | None = None
     for seed in votes:
-        agreeing = [vote for vote in votes if _agrees(seed, vote, spec)]
-        by_match = {id(vote.match): vote for vote in agreeing}
-        cluster = [by_match[id(match)] for match in independent_matches([vote.match for vote in agreeing])]
+        supporters = [vote for vote in votes if _agrees(seed, vote, spec)]
+        by_match = {id(vote.match): vote for vote in supporters}
+        independent = [
+            by_match[id(match)] for match in independent_matches([vote.match for vote in supporters])
+        ]
         key = (
-            len(cluster),
-            sum(vote.match.weight for vote in cluster),
-            sum(vote.match.overlap_iou for vote in cluster) / len(cluster),
+            len(independent),
+            sum(vote.match.weight for vote in independent),
+            sum(vote.match.overlap_iou for vote in independent) / len(independent),
         )
         if best_key is None or key > best_key:
-            best, best_key = cluster, key
+            best, best_key = _Cluster(supporters=supporters, votes=independent), key
     return best
 
 

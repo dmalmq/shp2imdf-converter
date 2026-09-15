@@ -136,7 +136,7 @@ FEATURE_TYPE_SPECS: dict[str, FeatureTypeSpec] = {
             "venue",
             "polygon",
             _catalog("venue"),
-            "unspecified",
+            "transitstation",
             (
                 "category",
                 "restriction",
@@ -215,7 +215,7 @@ FEATURE_TYPE_SPECS: dict[str, FeatureTypeSpec] = {
             "fixture",
             "polygon",
             _catalog("fixture"),
-            "unspecified",
+            "furniture",
             ("category", "name", "alt_name", "anchor_id", "display_point", "level_id"),
         ),
         FeatureTypeSpec(
@@ -377,10 +377,20 @@ def geometry_kind(geometry: Any) -> GeometryKind:
 
 
 def geometry_is_compatible(geometry: Any, feature_type: str) -> bool:
-    """Whether ``geometry`` can be carried unchanged onto ``feature_type``."""
+    """Whether ``geometry`` can be carried unchanged onto ``feature_type``.
+
+    Line and point IMDF types require the singular GeoJSON type (``LineString``,
+    ``Point``). ``MultiLineString`` / ``MultiPoint`` share a geometry family but
+    fail the validator, so they are not offered as retype targets.
+    """
     spec = FEATURE_TYPE_SPECS[feature_type]
     if spec.geometry == "any":
         return True
+    geom_type = geometry.get("type") if isinstance(geometry, dict) else None
+    if spec.geometry == "line":
+        return geom_type == "LineString"
+    if spec.geometry == "point":
+        return geom_type == "Point"
     return geometry_kind(geometry) == spec.geometry
 
 

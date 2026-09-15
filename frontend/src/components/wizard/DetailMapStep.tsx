@@ -18,15 +18,14 @@ export function DetailMapStep({ files }: Props) {
   );
 
   return (
-    <section className="rounded border bg-white p-5">
-      <h2 className="text-lg font-semibold">{t("Step 8: Detail Mapping", "Step 8: Detail 設定")}</h2>
-      <p className="mt-2 text-sm text-slate-600">
+    <section className="rounded-lg border border-border bg-card p-5">
+      <p className="text-[13px] leading-[18px] text-muted-foreground">
         {t(
-          "Detail features require no attribute mapping. They will export with geometry + level assignment from Step 3.",
-          "Detail は属性マッピング不要です。Step 3 の level 設定のみを使って出力されます。"
+          "Detail features require no attribute mapping. They export with their geometry and whatever Level Mapping assigned them.",
+          "Detail は属性マッピング不要です。レベル対応付けの結果と図形のみで出力されます。"
         )}
       </p>
-      <div className="mt-3 rounded border bg-slate-50 p-3 text-sm">
+      <div className="mt-3 rounded border bg-muted p-3 text-sm">
         <p>
           {t("Detail files detected", "Detail ファイル数")}: <span className="font-semibold">{detailFiles.length}</span>
         </p>
@@ -35,7 +34,7 @@ export function DetailMapStep({ files }: Props) {
         </p>
       </div>
       {detailFiles.length > 0 && (
-        <ul className="mt-3 space-y-1 text-xs text-slate-600">
+        <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
           {detailFiles.map((file) => (
             <li key={file.stem} className="font-mono">
               {file.stem}

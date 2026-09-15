@@ -2,7 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { AddressInput, BuildingWizardState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import {
+  Button,
+  Field,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../ui";
 import { ProvinceSelect } from "./ProvinceSelect";
+import { useRegisterSave } from "./wizardSave";
 
 
 type Props = {
@@ -10,11 +21,24 @@ type Props = {
   allFileStems: string[];
   venueName: string;
   venueAddress: AddressInput | null;
-  saving: boolean;
   onSave: (buildings: BuildingWizardState[]) => void;
 };
 
 const BUILDING_CATEGORIES = ["unspecified", "parking", "transit", "transit.bus", "transit.train"];
+
+/** Radix Select has no empty-string value, so "no restriction" needs a sentinel. */
+const NO_RESTRICTION = "__none__";
+
+const EMPTY_ADDRESS: AddressInput = {
+  address: "",
+  unit: null,
+  locality: "",
+  province: null,
+  country: "",
+  postal_code: null,
+  postal_code_ext: null,
+  postal_code_vanity: null
+};
 
 
 function createDefaultBuilding(allFileStems: string[]): BuildingWizardState {
@@ -66,7 +90,7 @@ function normalizeForSave(buildings: BuildingWizardState[]): BuildingWizardState
 }
 
 
-export function BuildingStep({ buildings, allFileStems, venueName, venueAddress, saving, onSave }: Props) {
+export function BuildingStep({ buildings, allFileStems, venueName, venueAddress, onSave }: Props) {
   const { t } = useUiLanguage();
   const [rows, setRows] = useState<BuildingWizardState[]>(
     () => (buildings.length ? buildings : [createDefaultBuilding(allFileStems)])
@@ -85,271 +109,209 @@ export function BuildingStep({ buildings, allFileStems, venueName, venueAddress,
     [rows]
   );
 
-  return (
-    <section className="rounded border bg-white p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{t("Step 4: Building Assignment", "Step 4: 建物割り当て")}</h2>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className="rounded border px-3 py-1.5 text-sm"
-            onClick={() =>
-              setRows((prev) => [
-                ...prev,
-                {
-                  ...createDefaultBuilding([]),
-                  id: `building-${prev.length + 1}`,
-                  file_stems: []
-                }
-              ])
-            }
-          >
-            {t("Add Building", "建物を追加")}
-          </button>
-          <button
-            type="button"
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-60"
-            disabled={saving}
-            onClick={() => onSave(normalizeForSave(rows))}
-          >
-            {saving ? t("Saving...", "保存中...") : t("Save Buildings", "建物設定を保存")}
-          </button>
-        </div>
-      </div>
-      <p className="mb-3 text-xs text-slate-600">
-        {t(
-          `Assigned file links: ${assignedCount}. Building address defaults to venue address unless set to different.`,
-          `割り当て済みファイル: ${assignedCount}。建物住所は「別住所」にしない限り会場住所を使用します。`
-        )}
-      </p>
+  useRegisterSave(() => onSave(normalizeForSave(rows)), { canSave: true });
 
-      <div className="space-y-3">
+  const patch = (index: number, changes: Partial<BuildingWizardState>) => {
+    setRows((prev) => prev.map((item, i) => (i === index ? { ...item, ...changes } : item)));
+  };
+
+  const patchAddress = (index: number, changes: Partial<AddressInput>) => {
+    setRows((prev) =>
+      prev.map((item, i) =>
+        i === index && item.address ? { ...item, address: { ...item.address, ...changes } } : item
+      )
+    );
+  };
+
+  return (
+    <section className="rounded-lg border border-border bg-card p-5">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <p className="text-xs leading-4 text-muted-foreground">
+          {t(
+            `${assignedCount} files assigned. A building uses the venue address unless you give it its own.`,
+            `割り当て済み ${assignedCount} 件。別住所を設定しない限り会場住所を使用します。`
+          )}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={() =>
+            setRows((prev) => [
+              ...prev,
+              {
+                ...createDefaultBuilding([]),
+                id: `building-${prev.length + 1}`,
+                file_stems: []
+              }
+            ])
+          }
+        >
+          {t("Add building", "建物を追加")}
+        </Button>
+      </div>
+
+      <div className="flex flex-col gap-3">
         {rows.map((building, index) => (
-          <div key={building.id} className="rounded border p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-sm font-semibold">{building.id}</h3>
-              {rows.length > 1 && (
-                <button
-                  type="button"
-                  className="rounded border border-red-300 px-2 py-1 text-xs text-red-700"
+          <div key={building.id} className="rounded-lg border border-border p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
+                {building.id}
+              </h3>
+              {rows.length > 1 ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-destructive"
                   onClick={() => setRows((prev) => prev.filter((_, i) => i !== index))}
                 >
                   {t("Remove", "削除")}
-                </button>
-              )}
+                </Button>
+              ) : null}
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2">
-              <label className="text-sm">
-                <span className="mb-1 block text-slate-600">{t("Building Name", "建物名")}</span>
-                <input
-                  className="w-full rounded border px-2 py-1.5"
-                  placeholder={venueName || ""}
-                  value={building.name ?? ""}
-                  onChange={(event) =>
-                    setRows((prev) =>
-                      prev.map((item, i) =>
-                        i === index
-                          ? {
-                              ...item,
-                              name: event.target.value
-                            }
-                          : item
-                      )
-                    )
-                  }
-                />
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block text-slate-600">{t("Category", "カテゴリ")}</span>
-                <select
-                  className="w-full rounded border px-2 py-1.5"
-                  value={building.category}
-                  onChange={(event) =>
-                    setRows((prev) =>
-                      prev.map((item, i) =>
-                        i === index
-                          ? {
-                              ...item,
-                              category: event.target.value
-                            }
-                          : item
-                      )
-                    )
-                  }
-                >
-                  {BUILDING_CATEGORIES.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block text-slate-600">{t("Restriction", "制限")}</span>
-                <select
-                  className="w-full rounded border px-2 py-1.5"
-                  value={building.restriction ?? ""}
-                  onChange={(event) =>
-                    setRows((prev) =>
-                      prev.map((item, i) =>
-                        i === index
-                          ? {
-                              ...item,
-                              restriction: event.target.value || null
-                            }
-                          : item
-                      )
-                    )
-                  }
-                >
-                  <option value="">{t("None", "なし")}</option>
-                  <option value="employeesonly">employeesonly</option>
-                  <option value="restricted">restricted</option>
-                </select>
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block text-slate-600">{t("Address Mode", "住所モード")}</span>
-                <select
-                  className="w-full rounded border px-2 py-1.5"
-                  value={building.address_mode}
-                  onChange={(event) =>
-                    setRows((prev) =>
-                      prev.map((item, i) =>
-                        i === index
-                          ? {
-                              ...item,
-                              address_mode: event.target.value as BuildingWizardState["address_mode"],
-                              address:
-                                event.target.value === "different_address"
-                                  ? item.address ?? {
-                                      ...(venueAddress ?? {
-                                        address: "",
-                                        unit: null,
-                                        locality: "",
-                                        province: null,
-                                        country: "",
-                                        postal_code: null,
-                                        postal_code_ext: null,
-                                        postal_code_vanity: null
-                                      })
-                                    }
-                                  : null
-                            }
-                          : item
-                      )
-                    )
-                  }
-                >
-                  <option value="same_as_venue">{t("Same as venue", "会場住所と同じ")}</option>
-                  <option value="different_address">{t("Different address", "建物ごとに別住所")}</option>
-                </select>
-              </label>
-              <label className="text-sm md:col-span-2">
-                <span className="mb-1 block text-slate-600">{t("Assigned Files (comma-separated stems)", "割り当てファイル（カンマ区切り）")}</span>
-                <input
-                  className="w-full rounded border px-2 py-1.5 font-mono text-xs"
-                  value={building.file_stems.join(",")}
-                  onChange={(event) =>
-                    setRows((prev) =>
-                      prev.map((item, i) =>
-                        i === index
-                          ? {
-                              ...item,
-                              file_stems: event.target.value
-                                .split(",")
-                                .map((token) => token.trim())
-                                .filter(Boolean)
-                            }
-                          : item
-                      )
-                    )
-                  }
-                  placeholder={allFileStems.join(",")}
-                />
-              </label>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label={t("Building Name", "建物名")}>
+                {(id) => (
+                  <Input
+                    id={id}
+                    placeholder={venueName || ""}
+                    value={building.name ?? ""}
+                    onChange={(event) => patch(index, { name: event.target.value })}
+                  />
+                )}
+              </Field>
+              <Field label={t("Category", "カテゴリ")}>
+                {(id) => (
+                  <Select
+                    value={building.category}
+                    onValueChange={(value) => patch(index, { category: value })}
+                  >
+                    <SelectTrigger id={id}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BUILDING_CATEGORIES.map((item) => (
+                        <SelectItem key={item} value={item}>
+                          {item}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </Field>
+              <Field label={t("Restriction", "制限")}>
+                {(id) => (
+                  <Select
+                    value={building.restriction ?? NO_RESTRICTION}
+                    onValueChange={(value) =>
+                      patch(index, { restriction: value === NO_RESTRICTION ? null : value })
+                    }
+                  >
+                    <SelectTrigger id={id}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_RESTRICTION}>{t("None", "なし")}</SelectItem>
+                      <SelectItem value="employeesonly">employeesonly</SelectItem>
+                      <SelectItem value="restricted">restricted</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              </Field>
+              <Field label={t("Address", "住所")}>
+                {(id) => (
+                  <Select
+                    value={building.address_mode}
+                    onValueChange={(value) =>
+                      patch(index, {
+                        address_mode: value as BuildingWizardState["address_mode"],
+                        address:
+                          value === "different_address"
+                            ? rows[index].address ?? { ...(venueAddress ?? EMPTY_ADDRESS) }
+                            : null
+                      })
+                    }
+                  >
+                    <SelectTrigger id={id}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="same_as_venue">
+                        {t("Same as venue", "会場住所と同じ")}
+                      </SelectItem>
+                      <SelectItem value="different_address">
+                        {t("Its own address", "建物ごとに別住所")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              </Field>
+              <Field
+                className="md:col-span-2"
+                label={t("Assigned files", "割り当てファイル")}
+                hint={t("Comma-separated file stems", "ファイル名をカンマ区切りで")}
+              >
+                {(id) => (
+                  <Input
+                    id={id}
+                    className="font-mono text-xs"
+                    value={building.file_stems.join(",")}
+                    placeholder={allFileStems.join(",")}
+                    onChange={(event) =>
+                      patch(index, {
+                        file_stems: event.target.value
+                          .split(",")
+                          .map((token) => token.trim())
+                          .filter(Boolean)
+                      })
+                    }
+                  />
+                )}
+              </Field>
             </div>
 
-            {building.address_mode === "different_address" && building.address && (
-              <div className="mt-3 grid gap-3 rounded border border-slate-200 p-3 md:grid-cols-2">
-                <label className="text-sm">
-                  <span className="mb-1 block text-slate-600">{t("Street Address", "住所")}</span>
-                  <input
-                    className="w-full rounded border px-2 py-1.5"
-                    value={building.address.address ?? ""}
-                    onChange={(event) =>
-                      setRows((prev) =>
-                        prev.map((item, i) =>
-                          i === index && item.address
-                            ? {
-                                ...item,
-                                address: { ...item.address, address: event.target.value }
-                              }
-                            : item
-                        )
-                      )
-                    }
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="mb-1 block text-slate-600">{t("Locality", "市区町村")}</span>
-                  <input
-                    className="w-full rounded border px-2 py-1.5"
-                    value={building.address.locality}
-                    onChange={(event) =>
-                      setRows((prev) =>
-                        prev.map((item, i) =>
-                          i === index && item.address
-                            ? {
-                                ...item,
-                                address: { ...item.address, locality: event.target.value }
-                              }
-                            : item
-                        )
-                      )
-                    }
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="mb-1 block text-slate-600">{t("Country", "国")}</span>
-                  <input
-                    className="w-full rounded border px-2 py-1.5"
-                    value={building.address.country}
-                    onChange={(event) =>
-                      setRows((prev) =>
-                        prev.map((item, i) =>
-                          i === index && item.address
-                            ? {
-                                ...item,
-                                address: { ...item.address, country: event.target.value }
-                              }
-                            : item
-                        )
-                      )
-                    }
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="mb-1 block text-slate-600">{t("Province", "都道府県 / 州")}</span>
-                  <ProvinceSelect
-                    country={building.address.country}
-                    value={building.address.province}
-                    onChange={(province) =>
-                      setRows((prev) =>
-                        prev.map((item, i) =>
-                          i === index && item.address
-                            ? {
-                                ...item,
-                                address: { ...item.address, province }
-                              }
-                            : item
-                        )
-                      )
-                    }
-                  />
-                </label>
+            {building.address_mode === "different_address" && building.address ? (
+              <div className="mt-4 grid gap-4 rounded-lg border border-border bg-muted/40 p-4 md:grid-cols-2">
+                <Field label={t("Street Address", "住所")}>
+                  {(id) => (
+                    <Input
+                      id={id}
+                      value={building.address?.address ?? ""}
+                      onChange={(event) => patchAddress(index, { address: event.target.value })}
+                    />
+                  )}
+                </Field>
+                <Field label={t("Locality", "市区町村")}>
+                  {(id) => (
+                    <Input
+                      id={id}
+                      value={building.address?.locality ?? ""}
+                      onChange={(event) => patchAddress(index, { locality: event.target.value })}
+                    />
+                  )}
+                </Field>
+                <Field label={t("Country", "国")}>
+                  {(id) => (
+                    <Input
+                      id={id}
+                      value={building.address?.country ?? ""}
+                      onChange={(event) => patchAddress(index, { country: event.target.value })}
+                    />
+                  )}
+                </Field>
+                <Field label={t("Province / State", "都道府県 / 州")}>
+                  {(id) => (
+                    <ProvinceSelect
+                      id={id}
+                      country={building.address?.country ?? ""}
+                      value={building.address?.province ?? null}
+                      onChange={(province) => patchAddress(index, { province })}
+                    />
+                  )}
+                </Field>
               </div>
-            )}
+            ) : null}
           </div>
         ))}
       </div>

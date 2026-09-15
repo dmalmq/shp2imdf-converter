@@ -8,7 +8,10 @@ import {
   partitionByFloors,
   type PartitionFloor
 } from "../../lib/svgPreview";
-import { Button } from "../ui";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { DisabledHint } from "../ui/tooltip";
+import { cn } from "@/lib/utils";
 
 type Props = {
   preview: FeatureCollection;
@@ -28,7 +31,10 @@ type Props = {
   initialDrafts?: PartitionFloor[];
 };
 
-const BOX_COLORS = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#d97706", "#0891b2"];
+// Mirrors the `layer-1..4` tokens: draft boxes are data the operator is
+// defining, so they stay cool and distinguishable, and leave the warm accent to
+// the placed artwork.
+const BOX_COLORS = ["#2563eb", "#0891b2", "#65a30d", "#57534e"];
 
 type DraftFloor = {
   label: string;
@@ -157,19 +163,37 @@ export function AssignmentPanel({
     );
   };
 
+  const doneButton = (
+    <Button
+      disabled={drafts.length === 0}
+      onClick={() =>
+        onAssigned(
+          drafts.map((d) => ({
+            label: d.label,
+            box: d.box,
+            pages: pageTag,
+            layerNames: d.layerNames
+          }))
+        )
+      }
+    >
+      {t("Done assigning", "割り当て完了")}
+    </Button>
+  );
+
   return (
-    <div className="space-y-3 text-sm">
-      <p className="text-xs text-[var(--color-text-muted)]">
+    <div className="flex flex-col gap-3">
+      <p className="text-xs leading-4 text-muted-foreground">
         {t(
           "Draw a box around each floor plan. Boxes touching artwork edges may count differently at export, which uses the full geometry.",
           "各階の平面図を囲むように四角を描いてください。端に触れる四角は、書き出し時（完全な形状で判定）と数が異なる場合があります。"
         )}
       </p>
-      <div className="relative overflow-hidden rounded-[var(--radius-md)] border bg-white">
+      <div className="relative overflow-hidden rounded-lg border border-border bg-card">
         <svg
           ref={svgRef}
           viewBox={viewBox}
-          className="h-[60vh] min-h-[420px] w-full touch-none"
+          className="h-[60vh] min-h-[420px] w-full cursor-crosshair touch-none"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -204,31 +228,47 @@ export function AssignmentPanel({
                   cx={drawing.start[0]}
                   cy={drawing.start[1]}
                   r={markerRadius}
-                  fill="#2563eb"
+                  fill="#0a0a0a"
                 />
                 <rect
                   x={Math.min(drawing.start[0], drawing.current[0])}
                   y={Math.min(drawing.start[1], drawing.current[1])}
                   width={Math.abs(drawing.current[0] - drawing.start[0])}
                   height={Math.abs(drawing.current[1] - drawing.start[1])}
-                  fill="#2563eb"
-                  fillOpacity={0.15}
-                  stroke="#2563eb"
+                  fill="#0a0a0a"
+                  fillOpacity={0.08}
+                  stroke="#0a0a0a"
+                  strokeWidth={1}
                   strokeDasharray="4 2"
                 />
               </>
             ) : null}
           </g>
         </svg>
+
+        {/* The canvas used to be a blank field with one line of grey text far
+            above it. Say what the gesture is, where the gesture happens. */}
+        {drafts.length === 0 && !drawing ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="rounded-md bg-foreground/80 px-3 py-1.5 text-xs font-medium leading-4 text-background">
+              {t("Drag a box around a floor plan", "平面図を囲むようにドラッグ")}
+            </span>
+          </div>
+        ) : null}
       </div>
 
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         {drafts.map((draft, index) => (
-          <div key={draft.label} className="rounded-[var(--radius-md)] border p-2">
+          <div key={draft.label} className="rounded-lg border border-border bg-card p-2">
             <div className="flex items-center gap-2">
-              <span className="h-3 w-3 rounded-full" style={{ background: draft.color }} />
-              <input
-                className="w-24 rounded-[var(--radius-md)] border px-2 py-1"
+              <span
+                aria-hidden="true"
+                className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                style={{ background: draft.color }}
+              />
+              <Input
+                className="h-8 w-24"
+                aria-label={t("Floor name", "フロア名")}
                 value={draft.label}
                 onChange={(event) =>
                   setDrafts((prev) =>
@@ -236,19 +276,19 @@ export function AssignmentPanel({
                   )
                 }
               />
-              <span className="text-xs text-[var(--color-text-muted)]">
+              <span className="text-xs leading-4 text-muted-foreground">
                 {t("features", "図形")}: {perFloor.get(draft.label)?.length ?? 0}
               </span>
               <button
                 type="button"
-                className="ml-auto text-[var(--color-error)]"
+                className="ml-auto rounded-sm text-xs text-muted-foreground transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => setDrafts((prev) => prev.filter((_, i) => i !== index))}
               >
                 {t("Remove", "削除")}
               </button>
             </div>
-            <details className="mt-1">
-              <summary className="cursor-pointer text-xs">
+            <details className="mt-1.5">
+              <summary className="cursor-pointer text-xs leading-4 text-muted-foreground transition-colors hover:text-foreground">
                 {t("Restrict to layers", "レイヤーを指定")}
               </summary>
               <div className="mt-1 flex flex-wrap gap-1">
@@ -259,9 +299,13 @@ export function AssignmentPanel({
                       key={layer.ai_layer}
                       type="button"
                       onClick={() => toggleLayer(index, layer.ai_layer)}
-                      className={`rounded-full border px-2 py-0.5 text-xs ${
-                        active ? "bg-blue-100 border-blue-400" : "border-slate-300"
-                      }`}
+                      className={cn(
+                        "rounded-full border px-2 py-0.5 text-xs transition-colors",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        active
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border text-muted-foreground hover:bg-accent"
+                      )}
                     >
                       {layer.ai_layer} ({layer.feature_count})
                     </button>
@@ -273,39 +317,38 @@ export function AssignmentPanel({
         ))}
       </div>
 
-      <p className="text-xs">
+      <p className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
         {t(
           `Unassigned: ${unassigned.length} of ${preview.features.length} preview shapes.`,
           `未割当: プレビュー ${preview.features.length} 図形中 ${unassigned.length} 件。`
         )}
       </p>
 
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2">
         {onCancel ? (
-          <Button variant="secondary" onClick={onCancel}>
+          <Button variant="outline" onClick={onCancel}>
             {t("Back to pages", "ページ一覧へ戻る")}
           </Button>
         ) : (
-          <Button variant="secondary" onClick={onSkip}>
+          <Button variant="ghost" onClick={onSkip}>
             {t("Skip — one floor for everything", "スキップ — 全図形を1フロアに")}
           </Button>
         )}
-        <Button
-          className="ml-auto"
-          disabled={drafts.length === 0}
-          onClick={() =>
-            onAssigned(
-              drafts.map((d) => ({
-                label: d.label,
-                box: d.box,
-                pages: pageTag,
-                layerNames: d.layerNames
-              }))
-            )
-          }
-        >
-          {t("Done assigning", "割り当て完了")}
-        </Button>
+        <div className="ml-auto">
+          <DisabledHint
+            className="w-auto"
+            hint={
+              drafts.length === 0
+                ? t(
+                    "Draw at least one box, or skip",
+                    "四角を1つ以上描くか、スキップしてください"
+                  )
+                : null
+            }
+          >
+            {doneButton}
+          </DisabledHint>
+        </div>
       </div>
     </div>
   );

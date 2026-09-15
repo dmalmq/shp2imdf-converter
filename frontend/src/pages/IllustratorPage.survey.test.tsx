@@ -62,10 +62,17 @@ type SidebarProps = {
   mode: AdjustmentMode;
   surveySnap: SurveySnapModel;
   onReferenceLayersChange: (layers: (typeof STATION_PG)[]) => void;
+  onLookupSettled?: () => void;
 };
 
 vi.mock("../components/illustrator/PlacementSidebar", () => ({
-  PlacementSidebar: ({ state, dispatch, surveySnap, onReferenceLayersChange }: SidebarProps) => (
+  PlacementSidebar: ({
+    state,
+    dispatch,
+    surveySnap,
+    onReferenceLayersChange,
+    onLookupSettled
+  }: SidebarProps) => (
     <section>
       <button
         type="button"
@@ -79,6 +86,21 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
         }
       >
         Pin station
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          dispatch({
+            type: "positionBuilding",
+            mapAnchor: [139.7671, 35.6812],
+            workingCrs: "EPSG:6677"
+          })
+        }
+      >
+        Pin elsewhere
+      </button>
+      <button type="button" onClick={() => onLookupSettled?.()}>
+        Lookup failed
       </button>
       <button type="button" onClick={() => onReferenceLayersChange([STATION_PG, STATION_PL])}>
         Add Station_pg
@@ -115,7 +137,7 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
 }));
 
 vi.mock("../components/illustrator/PlacementMap", () => ({
-  FLOOR_TINTS: ["#111111", "#222222", "#333333"],
+  ARTWORK_TINT: "#ea580c",
   PlacementMap: () => <section data-testid="map" />
 }));
 
@@ -265,4 +287,59 @@ test("a layer that is not Station_pg never snaps, and a failed consensus only no
   fireEvent.click(screen.getByRole("button", { name: "Snap to Station_pg" }));
   await waitFor(() => expect(screen.getByTestId("frame-rotation")).toHaveTextContent("-36.4"));
   expect(snap).toHaveBeenCalledTimes(2);
+});
+
+test("artwork stays off the map until the pin and Station_pg snap have landed", async () => {
+  let finish: ((value: { match: typeof MATCH; reason: null }) => void) | undefined;
+  snap.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  await enterPlacementView();
+  expect(screen.getByTestId("placement-hold")).toHaveTextContent(/locating/i);
+  fireEvent.click(screen.getByRole("button", { name: "Pin station" }));
+  expect(screen.queryByTestId("placement-hold")).toBeNull();
+  expect(screen.getByTestId("frame-rotation")).toHaveTextContent("0");
+
+  fireEvent.click(screen.getByRole("button", { name: "Add Station_pg" }));
+  await waitFor(() => expect(screen.getByTestId("placement-hold")).toHaveTextContent(/snapping/i));
+  expect(screen.getByTestId("frame-rotation")).toHaveTextContent("0");
+  expect(finish).toBeDefined();
+  finish!({ match: MATCH, reason: null });
+  await waitFor(() => expect(screen.getByTestId("frame-rotation")).toHaveTextContent("-36.4"));
+  expect(screen.queryByTestId("placement-hold")).toBeNull();
+});
+
+test("a failed lookup reveals the drawing so it can be placed by hand", async () => {
+  await enterPlacementView();
+  expect(screen.getByTestId("placement-hold")).toHaveTextContent(/locating/i);
+  fireEvent.click(screen.getByRole("button", { name: "Lookup failed" }));
+  expect(screen.queryByTestId("placement-hold")).toBeNull();
+});
+
+test("changing station hides the drawing until Station_pg snaps at the new pin", async () => {
+  await enterPlacementView();
+  fireEvent.click(screen.getByRole("button", { name: "Pin station" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add Station_pg" }));
+  await waitFor(() => expect(screen.getByTestId("frame-rotation")).toHaveTextContent("-36.4"));
+  expect(screen.queryByTestId("placement-hold")).toBeNull();
+
+  let finish: ((value: { match: typeof MATCH; reason: null }) => void) | undefined;
+  snap.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Pin elsewhere" }));
+  await waitFor(() => expect(screen.getByTestId("placement-hold")).toHaveTextContent(/snapping/i));
+  expect(snap).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Re-trim Station_pg" }));
+  await waitFor(() => expect(snap).toHaveBeenCalledTimes(2));
+  expect(finish).toBeDefined();
+  finish!({ match: MATCH, reason: null });
+  await waitFor(() => expect(screen.queryByTestId("placement-hold")).toBeNull());
 });

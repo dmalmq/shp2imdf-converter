@@ -36,8 +36,9 @@ from backend.src.illustrator_store import ConversionStore
 from backend.src.illustrator_survey_snap import match_survey_consensus
 from backend.src.imdf_reader import read_imdf_zip
 from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
-from backend.src.importer import import_file_blobs, read_reference_layers
+from backend.src.importer import ReferenceLayer, import_file_blobs, read_reference_layers
 from backend.src.placements import PlacementStore
+from backend.src.reference_overlay import PRELOADED_LABEL, ReferenceOverlayStore
 from backend.src.schemas import (
     AssignFloorSummary,
     AssignFloorsRequest,
@@ -52,6 +53,8 @@ from backend.src.schemas import (
     PlacementItem,
     PlacementListResponse,
     PlacementRequest,
+    PreloadedReferenceLayersRequest,
+    PreloadedReferenceOverlayInfo,
     ReferenceLayerItem,
     ReferenceLayersResponse,
     IllustratorRegionMatchRequest,
@@ -240,33 +243,19 @@ def _parse_focus_bounds(raw: str | None) -> tuple[float, float, float, float] | 
     return (min_lon, min_lat, max_lon, max_lat)
 
 
-@router.post("/reference-layers", response_model=ReferenceLayersResponse)
-async def upload_reference_layers(
-    request: Request,
-    files: Annotated[
-        list[UploadFile],
-        File(description="Shapefile components, a .zip containing them, or a .gpkg"),
-    ],
-    focus_bounds: Annotated[str | None, Form()] = None,
-) -> ReferenceLayersResponse:
-    """Read overlay geometry for the placement map.
+def _require_focus_bounds(raw: str | None) -> tuple[float, float, float, float]:
+    """Preload queries the server copy around the pin; a missing box is an error."""
+    parsed = _parse_focus_bounds(raw)
+    if parsed is None:
+        raise ValueError("A station pin is required before loading the overlay (focus_bounds).")
+    return parsed
 
-    Stateless on purpose: the layers are only drawn under the artwork to align
-    it, so the response is the whole contract and nothing is cached or exported.
 
-    ``focus_bounds`` optionally pins the trim to a WGS84 box.
-    """
-    blobs: list[tuple[str, bytes]] = []
-    total = 0
-    limit = _max_upload_bytes(request)
-    for upload in files:
-        payload = await upload.read()
-        total += len(payload)
-        if total > limit:
-            raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
-        blobs.append((upload.filename or "reference.bin", payload))
+def _overlay_store(request: Request) -> ReferenceOverlayStore:
+    return request.app.state.reference_overlay
 
-    layers = read_reference_layers(blobs, focus=_parse_focus_bounds(focus_bounds))
+
+def _reference_layers_response(layers: list[ReferenceLayer]) -> ReferenceLayersResponse:
     return ReferenceLayersResponse(
         layers=[
             ReferenceLayerItem(
@@ -282,6 +271,60 @@ async def upload_reference_layers(
     )
 
 
+@router.post("/reference-layers", response_model=ReferenceLayersResponse)
+async def upload_reference_layers(
+    request: Request,
+    files: Annotated[
+        list[UploadFile],
+        File(description="Shapefile components, a .zip containing them, or a .gpkg"),
+    ],
+    focus_bounds: Annotated[str | None, Form()] = None,
+) -> ReferenceLayersResponse:
+    """Read overlay geometry for the placement map.
+
+    Stateless on purpose for picked files: the layers are only drawn under the
+    artwork to align it, so the response is the whole contract and nothing is
+    cached or exported.
+
+    ``focus_bounds`` optionally pins the trim to a WGS84 box.
+    """
+    blobs: list[tuple[str, bytes]] = []
+    total = 0
+    limit = _max_upload_bytes(request)
+    for upload in files:
+        payload = await upload.read()
+        total += len(payload)
+        if total > limit:
+            raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
+        blobs.append((upload.filename or "reference.bin", payload))
+
+    layers = read_reference_layers(blobs, focus=_parse_focus_bounds(focus_bounds))
+    return _reference_layers_response(layers)
+
+
+@router.get("/reference-layers/preloaded", response_model=PreloadedReferenceOverlayInfo)
+def preloaded_reference_overlay(request: Request) -> PreloadedReferenceOverlayInfo:
+    """Whether the shared-PC 駅データ extract can be loaded without an upload."""
+    store = _overlay_store(request)
+    return PreloadedReferenceOverlayInfo(available=store.available(), label=PRELOADED_LABEL)
+
+
+@router.post("/reference-layers/preloaded", response_model=ReferenceLayersResponse)
+def read_preloaded_reference_layers(
+    request: Request,
+    body: PreloadedReferenceLayersRequest,
+) -> ReferenceLayersResponse:
+    """Bbox-query the configured 駅データ copy. Pin required. No zip in the body."""
+    store = _overlay_store(request)
+    if not store.available():
+        raise ValueError("No preloaded 駅データ. Set REFERENCE_OVERLAY_PATH to the zip or folder.")
+    layers = store.read(
+        focus=_require_focus_bounds(body.focus_bounds),
+        include_lines=body.include_lines,
+    )
+    return _reference_layers_response(layers)
+
+
 @router.post("/convert/illustrator/preview", response_model=IllustratorPreviewResponse)
 async def preview_illustrator(
     request: Request,
@@ -293,8 +336,8 @@ async def preview_illustrator(
 
     cached = _illustrator_store(request).put(parse_ai(payload, name))
     preview = build_preview(cached)
-    # Placement has no location yet; the client re-resolves the zone once the
-    # user picks a search result, passing the prefecture code from Nominatim.
+    # No pin yet. Export and the frame take the zone from the locate hit
+    # (``working_crs`` on /geocode). This seed is only the no-pin fallback.
     suggested = resolve_working_crs(139.7671, 35.6812, None)
     return IllustratorPreviewResponse(
         conversion_id=cached.conversion_id,
@@ -329,11 +372,22 @@ def _transform_from_payload(payload: TransformPayload) -> SimilarityTransform:
     )
 
 
+# These handlers are deliberately `def`, not `async def`.
+#
+# Their bodies are synchronous and CPU-bound — shape ranking, region ranking,
+# survey consensus, floor assignment and the export writers. An `async def`
+# handler runs ON the event loop, so that work blocks every other request for
+# its whole duration: a Station_pg match against a large reference layer took
+# the entire API down with it, `/api/health` included. Declared `def`, FastAPI
+# runs them in a threadpool and the server stays responsive.
+#
+# Do not "tidy" these into `async def`. If one ever needs to await something,
+# wrap the CPU-bound call in `run_in_threadpool` instead.
 @router.post(
     "/convert/illustrator/{conversion_id}/shape-matches",
     response_model=IllustratorShapeMatchResponse,
 )
-async def match_illustrator_shape(
+def match_illustrator_shape(
     conversion_id: str,
     request: Request,
     payload: IllustratorShapeMatchRequest,
@@ -362,7 +416,7 @@ async def match_illustrator_shape(
     "/convert/illustrator/{conversion_id}/region-matches",
     response_model=IllustratorShapeMatchResponse,
 )
-async def match_illustrator_region(
+def match_illustrator_region(
     conversion_id: str,
     request: Request,
     payload: IllustratorRegionMatchRequest,
@@ -386,7 +440,7 @@ async def match_illustrator_region(
     "/convert/illustrator/{conversion_id}/survey-snap",
     response_model=IllustratorSurveySnapResponse,
 )
-async def snap_illustrator_survey(
+def snap_illustrator_survey(
     conversion_id: str,
     request: Request,
     payload: IllustratorSurveySnapRequest,
@@ -404,7 +458,7 @@ async def snap_illustrator_survey(
 
 
 @router.post("/convert/illustrator/{conversion_id}/assign", response_model=AssignFloorsResponse)
-async def assign_illustrator_floors(
+def assign_illustrator_floors(
     conversion_id: str,
     request: Request,
     payload: AssignFloorsRequest,
@@ -452,7 +506,7 @@ async def assign_illustrator_floors(
 
 
 @router.post("/convert/illustrator/{conversion_id}/export")
-async def export_illustrator(
+def export_illustrator(
     conversion_id: str,
     request: Request,
     payload: IllustratorExportRequest,

@@ -108,7 +108,7 @@ export function HoursEditor({ value, onChange }: Props) {
   }
 
   return (
-    <div className="space-y-1 rounded border border-slate-200 bg-slate-50 p-2">
+    <div className="space-y-1 rounded border border-border bg-muted p-2">
       {DAYS.map(({ key, label, labelJa }) => {
         const day = days[key];
         return (
@@ -118,14 +118,14 @@ export function HoursEditor({ value, onChange }: Props) {
               onClick={() => update(key, { open: !day.open })}
               className={`w-5 h-5 flex-shrink-0 rounded border text-xs font-bold transition-colors ${
                 day.open
-                  ? "border-blue-500 bg-blue-500 text-white"
-                  : "border-slate-300 bg-white text-slate-400"
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card text-muted-foreground"
               }`}
               aria-label={day.open ? `Close ${label}` : `Open ${label}`}
             >
               {day.open ? "✓" : ""}
             </button>
-            <span className={`w-32 flex-shrink-0 ${day.open ? "text-slate-800" : "text-slate-400"}`}>
+            <span className={`w-32 flex-shrink-0 ${day.open ? "text-foreground" : "text-muted-foreground"}`}>
               {t(label, labelJa)}
             </span>
             {day.open ? (
@@ -134,18 +134,18 @@ export function HoursEditor({ value, onChange }: Props) {
                   type="time"
                   value={day.from}
                   onChange={(e) => update(key, { from: e.target.value })}
-                  className="rounded border border-slate-300 px-1 py-0.5 text-xs"
+                  className="rounded border border-border px-1 py-0.5 text-xs"
                 />
-                <span className="text-slate-400">–</span>
+                <span className="text-muted-foreground">–</span>
                 <input
                   type="time"
                   value={day.to}
                   onChange={(e) => update(key, { to: e.target.value })}
-                  className="rounded border border-slate-300 px-1 py-0.5 text-xs"
+                  className="rounded border border-border px-1 py-0.5 text-xs"
                 />
               </div>
             ) : (
-              <span className="text-xs text-slate-400">{t("Closed", "休業")}</span>
+              <span className="text-xs text-muted-foreground">{t("Closed", "休業")}</span>
             )}
           </div>
         );

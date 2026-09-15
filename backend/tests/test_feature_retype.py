@@ -18,6 +18,7 @@ import pytest
 from backend.src.converter import IMDF_TYPE_ORDER
 from backend.src.feature_types import (
     FEATURE_TYPE_SPECS,
+    categories_for,
     conform_properties,
     feature_type_catalog,
     geometry_is_compatible,
@@ -104,6 +105,10 @@ def test_conform_properties_keeps_a_category_the_target_type_accepts() -> None:
     # Open vocabulary constrained by a pattern rather than an enum.
     assert resolve_category("retail.grocery", "occupant") == "retail.grocery"
     assert resolve_category("Not A Category", "occupant") == "occupant"
+    assert resolve_category("road", "venue") == "transitstation"
+    assert resolve_category("road", "fixture") == "furniture"
+    assert "unspecified" not in (categories_for("venue") or ())
+    assert "unspecified" not in (categories_for("fixture") or ())
 
 
 @pytest.mark.phase4
@@ -118,6 +123,13 @@ def test_geometry_families_gate_the_reachable_types() -> None:
     # relationship accepts any geometry.
     assert geometry_is_compatible(polygon, "relationship")
     assert geometry_is_compatible(None, "relationship")
+    assert geometry_is_compatible({"type": "MultiPolygon", "coordinates": []}, "unit")
+    assert not geometry_is_compatible({"type": "MultiLineString", "coordinates": []}, "opening")
+    assert not geometry_is_compatible({"type": "MultiLineString", "coordinates": []}, "detail")
+    assert not geometry_is_compatible({"type": "MultiPoint", "coordinates": []}, "amenity")
+    assert not geometry_is_compatible({"type": "MultiPoint", "coordinates": []}, "anchor")
+    assert geometry_is_compatible({"type": "LineString", "coordinates": []}, "opening")
+    assert geometry_is_compatible({"type": "Point", "coordinates": []}, "amenity")
 
 
 @pytest.mark.phase4

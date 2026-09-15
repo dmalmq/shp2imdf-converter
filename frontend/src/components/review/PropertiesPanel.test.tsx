@@ -87,14 +87,14 @@ test("saving after selecting geofence passes the new type", () => {
   const onSave = vi.fn();
   renderPanel(onSave);
   fireEvent.change(screen.getByLabelText("Feature type"), { target: { value: "geofence" } });
-  fireEvent.click(screen.getByText("Save Changes"));
+  fireEvent.click(screen.getByText("Save changes"));
   expect(onSave).toHaveBeenCalledWith("unit-road-1", expect.any(Object), "geofence");
 });
 
 test("saving without changing type omits the third argument", () => {
   const onSave = vi.fn();
   renderPanel(onSave);
-  fireEvent.click(screen.getByText("Save Changes"));
+  fireEvent.click(screen.getByText("Save changes"));
   expect(onSave).toHaveBeenCalledWith("unit-road-1", expect.any(Object), undefined);
 });
 

@@ -1,7 +1,13 @@
+import { HelpCircle, Loader2 } from "lucide-react";
+
 import type { IllustratorShapeMatchSuggestion } from "../../api/client";
 import type { AdjustmentMode, PlacementState } from "../../hooks/useIllustratorPlacement";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { Button, Select } from "../ui";
+import { Button } from "../ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { DisabledHint } from "../ui/tooltip";
+import { cn } from "@/lib/utils";
+import { OVERLAY_COLORS } from "./overlayColors";
 import type { ArtworkShapeSelection, ReferenceLayer } from "./PlacementMap";
 
 export type ShapeMatchPanelModel = {
@@ -25,8 +31,12 @@ export type ShapeMatchPanelModel = {
   onFind: () => void;
   onPreview: (rank: number) => void;
   onInspect: (rank: number | null) => void;
+  artworkMatchTarget?: string;
+  onStartArtworkMatch?: () => void;
   onApply: () => void;
   onClear: () => void;
+  /** Stop an in-flight comparison. */
+  onCancel: () => void;
 };
 
 type Props = {
@@ -55,6 +65,9 @@ export function parseMatchTarget(value: string): {
   return { referenceName: "", referenceFloorLabel: "" };
 }
 
+const MONO_LABEL =
+  "font-mono text-[11px] uppercase leading-[14px] tracking-[0.04em] text-muted-foreground";
+
 export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) {
   const { t } = useUiLanguage();
   const activeFloor =
@@ -73,37 +86,127 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
   const regionsReady = model.hasSourceRegion && model.hasTargetRegion;
   const canFind = Boolean(model.selection) || regionsReady;
 
+  const chooseButton = (
+    <Button
+      size="sm"
+      className="w-full"
+      variant={model.selecting ? "default" : "outline"}
+      disabled={!canMatch}
+      onClick={model.onToggleSelection}
+    >
+      {model.selecting
+        ? t("Click an outline…", "外周をクリック…")
+        : model.selection
+          ? t("Choose another", "選び直す")
+          : t("Choose outline", "外周を選択")}
+    </Button>
+  );
+
+  const findButton = (
+    <Button
+      size="sm"
+      className="w-full"
+      disabled={!canFind || !hasTarget || model.loading}
+      onClick={model.onFind}
+    >
+      {model.loading ? t("Comparing…", "比較中…") : t("Find matches", "候補を検索")}
+    </Button>
+  );
+
+  const findBlockedReason = !hasTarget
+    ? t("Choose what to match against first", "先に照合対象を選択してください")
+    : t("Choose an outline or two areas first", "先に外周または範囲を選択してください");
+
+  const applyButton = (
+    <Button
+      className="w-full"
+      disabled={!selectedMatch || groupBlocked || pinnedBlocked}
+      onClick={model.onApply}
+    >
+      {floorTarget || mode === "individual"
+        ? t("Apply to this floor", "このフロアに適用")
+        : t("Apply to all linked floors", "リンクした全フロアに適用")}
+    </Button>
+  );
+
+  const applyBlockedReason = pinnedBlocked
+    ? t(
+        `Unpin ${activeFloor?.label ?? state.activeFloorLabel} before applying an alignment.`,
+        `位置合わせを適用する前に「${activeFloor?.label ?? state.activeFloorLabel}」の固定を解除してください。`
+      )
+    : groupBlocked
+    ? t(
+        `Relink ${activeFloor?.label ?? state.activeFloorLabel} to apply to all floors`,
+        `全フロアに適用するには「${activeFloor?.label ?? state.activeFloorLabel}」を再リンクしてください`
+      )
+    : t("Pick a candidate below first", "先に下の候補を選択してください");
+
   return (
-    <section className="border-t border-[var(--color-border)] pt-4">
+    <div className="flex flex-col gap-3">
+      {/* No standing explanation: the tab is already labelled "Shape match", and
+          the 33-word description of how ranking works is reference material, not
+          something to read every time the panel opens. */}
       <div className="flex items-center justify-between gap-2">
-        <div>
-          <h3 className="text-xs font-semibold">{t("Shape match", "形状で合わせる")}</h3>
-          <p className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-            {t("Alternative to control points", "基準点を使わない方法")}
-          </p>
+        <label htmlFor="shape-match-target" className={MONO_LABEL}>
+          {t("Match against", "照合対象")}
+        </label>
+        <div className="flex items-center gap-1">
+          {model.selection ? (
+            <button
+              type="button"
+              className="rounded-sm text-[11px] leading-4 text-muted-foreground underline transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={model.onClear}
+            >
+              {t("Clear", "クリア")}
+            </button>
+          ) : null}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                aria-label={t("How shape match works", "形状マッチの仕組み")}
+              >
+                <HelpCircle />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-72 text-xs leading-4 text-muted-foreground">
+              {t(
+                "Choose one distinctive exterior outline — a filled shape or a stroked path. The converter will rank similar polygons in a reference shapefile or another floor; nothing moves until you apply a result.",
+                "塗りつぶしまたは線で描かれた外周を1つ選択してください。参照シェープファイルまたは別フロアの似たポリゴンを順位付けします。結果を適用するまで図面は移動しません。"
+              )}
+            </PopoverContent>
+          </Popover>
         </div>
-        {model.selection ? (
-          <button
-            type="button"
-            className="text-[11px] text-[var(--color-text-muted)] underline"
-            onClick={model.onClear}
-          >
-            {t("Clear", "クリア")}
-          </button>
-        ) : null}
       </div>
 
-      <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-        {t(
-          "Choose one distinctive exterior outline — a filled shape or a stroked path. The converter will rank similar polygons in a reference shapefile or another floor; nothing moves until you apply a result.",
-          "塗りつぶしまたは線で描かれた外周を1つ選択してください。参照シェープファイルまたは別フロアの似たポリゴンを順位付けします。結果を適用するまで図面は移動しません。"
-        )}
-      </p>
+      {/* The standing paragraph that used to sit here is the same text now in
+          the help popover above; this block is the one that is about your
+          data, so it is the one that stays on screen. */}
+      {model.artworkMatchTarget && activeFloor ? (
+        <div className="flex flex-col gap-2 rounded-md border border-border bg-muted p-2.5">
+          <p className="text-xs leading-4 text-muted-foreground">
+            {t(
+              `${activeFloor.label} did not stack. Match this floor to ${model.artworkMatchTarget}, not to Station_pg.`,
+              `「${activeFloor.label}」は他のフロアと一致しませんでした。「Station_pg」ではなく「${model.artworkMatchTarget}」に合わせてください。`
+            )}
+          </p>
+          {model.onStartArtworkMatch ? (
+            <Button size="sm" className="w-full" onClick={model.onStartArtworkMatch}>
+              {t(
+                `Match ${activeFloor.label} to ${model.artworkMatchTarget}`,
+                `「${activeFloor.label}」を「${model.artworkMatchTarget}」に合わせる`
+              )}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       {canMatch ? (
-        <Select
-          label={t("Match against", "照合対象")}
-          className="mt-2 h-8 text-xs"
+        <select
+          id="shape-match-target"
+          className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           value={selectedTarget}
           onChange={(event) => model.onMatchTargetChange(event.target.value)}
         >
@@ -128,9 +231,9 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
               ))}
             </optgroup>
           ) : null}
-        </Select>
+        </select>
       ) : (
-        <p className="mt-2 rounded-[var(--radius-sm)] bg-[var(--color-surface-muted)] p-2 text-xs">
+        <p className="rounded-md bg-muted p-2 text-xs leading-4 text-muted-foreground">
           {t(
             "Add a shapefile in the Reference tab, or assign more than one floor.",
             "「参照」タブでシェープファイルを追加するか、フロアを複数割り当ててください。"
@@ -139,7 +242,7 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
       )}
 
       {selectedReference?.truncated ? (
-        <p className="mt-1 text-[11px] text-[var(--color-warning)]">
+        <p className="text-[11px] leading-4 text-warning">
           {t(
             "This layer was trimmed for display, so some candidates may be absent.",
             "このレイヤーは表示用に一部省略されているため、候補が含まれない場合があります。"
@@ -147,33 +250,41 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
         </p>
       ) : null}
 
-      <div className="mt-2 grid grid-cols-2 gap-2">
-        <Button
-          size="sm"
-          variant={model.selecting ? "primary" : "secondary"}
-          disabled={!canMatch}
-          onClick={model.onToggleSelection}
+      <div className="grid grid-cols-2 gap-2">
+        <DisabledHint
+          hint={
+            canMatch
+              ? null
+              : t(
+                  "Add a reference layer or a second floor first",
+                  "先に参照レイヤーか2つ目のフロアを追加してください"
+                )
+          }
         >
-          {model.selecting
-            ? t("Click an outline…", "外周をクリック…")
-            : model.selection
-              ? t("Choose another", "選び直す")
-              : t("Choose outline", "外周を選択")}
-        </Button>
-        <Button
-          size="sm"
-          disabled={!canFind || !hasTarget || model.loading}
-          onClick={model.onFind}
-        >
-          {model.loading ? t("Comparing…", "比較中…") : t("Find matches", "候補を検索")}
-        </Button>
+          {chooseButton}
+        </DisabledHint>
+        <DisabledHint hint={!canFind || !hasTarget ? findBlockedReason : null}>
+          {findButton}
+        </DisabledHint>
       </div>
+
+      {model.loading ? (
+        <div className="flex items-center justify-between gap-2 rounded-md bg-muted px-2 py-1.5">
+          <span className="flex items-center gap-2 text-xs leading-4 text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            {t("Comparing outlines…", "外周を比較中…")}
+          </span>
+          <Button size="sm" variant="ghost" className="h-6 px-2" onClick={model.onCancel}>
+            {t("Cancel", "中止")}
+          </Button>
+        </div>
+      ) : null}
 
       {floorTarget ? (
         <Button
           size="sm"
-          className="mt-2 w-full"
-          variant={model.regionStage ? "primary" : "secondary"}
+          className="w-full"
+          variant={model.regionStage ? "default" : "outline"}
           onClick={model.onToggleRegions}
         >
           {model.regionStage === "source"
@@ -193,7 +304,7 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
       ) : null}
 
       {floorTarget && !model.regionStage && !regionsReady && !model.selection ? (
-        <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+        <p className="text-[11px] leading-4 text-muted-foreground">
           {t(
             "Use areas when only part of the two floors is the same.",
             "2つのフロアの一部だけが同じ場合は範囲で合わせます。"
@@ -202,8 +313,11 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
       ) : null}
 
       {regionsReady && !model.regionStage ? (
-        <p className="mt-2 flex items-center gap-1.5 text-xs">
-          <span className="h-2.5 w-2.5 rounded-full border border-white bg-[#f59e0b] shadow" />
+        <p className="flex items-center gap-1.5 text-xs leading-4">
+          <span
+            className="h-2.5 w-2.5 shrink-0 rounded-full border border-background"
+            style={{ backgroundColor: OVERLAY_COLORS.reference }}
+          />
           {t(
             `Areas selected on ${model.sourceFloorLabel} and ${model.referenceFloorLabel}.`,
             `「${model.sourceFloorLabel}」と「${model.referenceFloorLabel}」の範囲を選択しました。`
@@ -212,8 +326,11 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
       ) : null}
 
       {model.selection ? (
-        <p className="mt-2 flex items-center gap-1.5 text-xs">
-          <span className="h-2.5 w-2.5 rounded-full border border-white bg-[#2563eb] shadow" />
+        <p className="flex items-center gap-1.5 text-xs leading-4">
+          <span
+            className="h-2.5 w-2.5 shrink-0 rounded-full border border-background"
+            style={{ backgroundColor: OVERLAY_COLORS.artwork }}
+          />
           {t(
             `Outline selected on ${model.selection.floorLabel}.`,
             `「${model.selection.floorLabel}」の外周を選択しました。`
@@ -221,14 +338,18 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
         </p>
       ) : null}
 
-      {model.error ? <p className="mt-2 text-xs text-[var(--color-error)]">{model.error}</p> : null}
+      {model.error ? (
+        <p role="alert" className="text-xs leading-4 text-destructive">
+          {model.error}
+        </p>
+      ) : null}
 
       {!model.loading &&
       (model.selection || regionsReady) &&
       model.matches.length === 0 &&
       !model.error &&
       !model.searched ? (
-        <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+        <p className="text-[11px] leading-4 text-muted-foreground">
           {t(
             "Find matches to rank similar reference polygons.",
             "候補を検索して、似た参照ポリゴンを順位付けします。"
@@ -237,7 +358,7 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
       ) : null}
 
       {model.searched && model.matches.length === 0 && !model.loading && !model.error ? (
-        <p className="mt-2 rounded-[var(--radius-sm)] bg-[var(--color-surface-muted)] p-2 text-xs">
+        <p className="rounded-md bg-muted p-2 text-xs leading-4 text-muted-foreground">
           {regionsReady
             ? t(
                 "Nothing in those two areas matched. Try areas that share a distinctive shape.",
@@ -251,20 +372,15 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
       ) : null}
 
       {model.matches.length > 0 ? (
-        <div className="mt-3 space-y-2">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
-            {t("Ranked candidates", "候補の順位")}
-          </p>
-          <p
-            id="shape-match-candidate-help"
-            className="mt-1 text-[11px] leading-4 text-[var(--color-text-muted)]"
-          >
+        <div className="flex flex-col gap-2">
+          <p className={MONO_LABEL}>{t("Ranked candidates", "候補の順位")}</p>
+          <p id="shape-match-candidate-help" className="text-[11px] leading-4 text-muted-foreground">
             {t(
               "Hover or focus a candidate to locate its area on the map. Select the correct area before applying.",
               "候補にカーソルを合わせるかフォーカスすると、地図上の範囲を確認できます。正しい範囲を選んでから適用してください。"
             )}
           </p>
-          <ol className="space-y-1.5">
+          <ol className="flex flex-col gap-1.5">
             {model.matches.map((match) => {
               const active = match.rank === model.previewRank;
               return (
@@ -277,11 +393,12 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
                       `候補 ${match.rank} を選択`
                     )}
                     aria-describedby="shape-match-candidate-help"
-                    className={`w-full rounded-[var(--radius-md)] border p-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb] focus-visible:ring-offset-1 ${
-                      active
-                        ? "border-[#2563eb] bg-blue-50"
-                        : "border-[var(--color-border)] bg-[var(--color-surface)] hover:border-[#f59e0b] hover:bg-amber-50"
-                    }`}
+                    className={cn(
+                      "w-full rounded-md border p-2 text-left transition-colors",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      active ? "bg-accent" : "border-border bg-card hover:bg-accent"
+                    )}
+                    style={active ? { borderColor: OVERLAY_COLORS.artwork } : undefined}
                     onMouseEnter={() => model.onInspect(match.rank)}
                     onMouseLeave={() => model.onInspect(null)}
                     onFocus={() => model.onInspect(match.rank)}
@@ -290,30 +407,33 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
                   >
                     <span className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-2 text-xs font-semibold">
-                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#f59e0b] px-1 text-[10px] text-white">
+                        <span
+                          className="flex h-5 min-w-5 items-center justify-center rounded-full px-1 font-mono text-[10px] text-white"
+                          style={{ backgroundColor: OVERLAY_COLORS.reference }}
+                        >
                           {match.rank}
                         </span>
                         {t(`Candidate ${match.rank}`, `候補 ${match.rank}`)}
                       </span>
                       <span className="flex flex-col items-end gap-0.5">
-                        <span className="text-[11px] font-medium">
+                        <span className="font-mono text-[11px] font-medium">
                           {(match.overlap_iou * 100).toFixed(0)}% {t("overlap", "重なり")}
                         </span>
                         {active ? (
-                          <span className="text-[10px] font-semibold text-[#2563eb]">
+                          <span className="text-[10px] font-semibold text-foreground">
                             {t("Selected", "選択中")}
                           </span>
                         ) : null}
                       </span>
                     </span>
-                    <span className="mt-1 grid grid-cols-2 gap-x-2 text-[11px] text-[var(--color-text-muted)]">
+                    <span className="mt-1 grid grid-cols-2 gap-x-2 font-mono text-[11px] text-muted-foreground">
                       <span>RMSE {match.boundary_rmse_m.toFixed(2)} m</span>
                       <span>P95 {match.boundary_p95_m.toFixed(2)} m</span>
                       <span>{match.transform.rotation_deg.toFixed(1)}°</span>
                       <span>{match.transform.metres_per_point.toFixed(4)} m/pt</span>
                     </span>
                     {match.relative_gap !== null ? (
-                      <span className="mt-1 block text-[10px] text-[var(--color-text-muted)]">
+                      <span className="mt-1 block font-mono text-[10px] text-muted-foreground">
                         {(match.relative_gap * 100).toFixed(0)}%{" "}
                         {t("better than next", "次候補より良好")}
                       </span>
@@ -325,7 +445,7 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
           </ol>
 
           {groupBlocked ? (
-            <p className="text-xs text-[var(--color-error)]">
+            <p className="text-xs leading-4 text-destructive">
               {t(
                 `Relink ${activeFloor?.label ?? state.activeFloorLabel} before applying to all floors.`,
                 `すべてのフロアに適用する前に「${activeFloor?.label ?? state.activeFloorLabel}」を再リンクしてください。`
@@ -334,7 +454,7 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
           ) : null}
 
           {floorTarget ? (
-            <p className="text-[11px] text-[var(--color-text-muted)]">
+            <p className="text-[11px] leading-4 text-muted-foreground">
               {t(
                 "This floor will unlink so the other level keeps its position.",
                 "このフロアのリンクを解除し、照合先のフロアは動かさないまま適用します。"
@@ -342,27 +462,11 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
             </p>
           ) : null}
 
-          {pinnedBlocked ? (
-            <p className="text-xs text-[var(--color-error)]">
-              {t(
-                `Unpin ${activeFloor?.label ?? state.activeFloorLabel} before applying an alignment.`,
-                `位置合わせを適用する前に「${activeFloor?.label ?? state.activeFloorLabel}」の固定を解除してください。`
-              )}
-            </p>
-          ) : null}
-
-          <Button
-            size="sm"
-            className="w-full"
-            disabled={!selectedMatch || groupBlocked || pinnedBlocked}
-            onClick={model.onApply}
-          >
-            {floorTarget || mode === "individual"
-              ? t("Apply to this floor", "このフロアに適用")
-              : t("Apply to all linked floors", "リンクした全フロアに適用")}
-          </Button>
+          <DisabledHint hint={!selectedMatch || groupBlocked || pinnedBlocked ? applyBlockedReason : null}>
+            {applyButton}
+          </DisabledHint>
         </div>
       ) : null}
-    </section>
+    </div>
   );
 }

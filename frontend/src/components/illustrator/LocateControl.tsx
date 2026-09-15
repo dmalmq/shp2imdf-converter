@@ -3,7 +3,7 @@ import { useEffect, useReducer, useRef } from "react";
 import { geocodeSearch } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import type { PlacementAction } from "../../hooks/useIllustratorPlacement";
-import { Button } from "../ui";
+import { Button } from "../ui/button";
 import {
   INITIAL_LOCATE,
   acceptsGuess,
@@ -19,9 +19,11 @@ type Props = {
   siteName: string;
   dispatch: (action: PlacementAction) => void;
   onLocate: (lngLat: [number, number]) => void;
+  /** Filename lookup finished without a pin, or there was nothing to look up. */
+  onLookupSettled?: () => void;
 };
 
-const FIELD = "w-full rounded-[var(--radius-md)] border px-2 py-1";
+const FIELD = "w-full rounded-md border px-2 py-1";
 
 function positionFromPlace(place: Place, baseline: boolean): PlacementAction {
   return {
@@ -32,17 +34,23 @@ function positionFromPlace(place: Place, baseline: boolean): PlacementAction {
   };
 }
 
-export function LocateControl({ siteName, dispatch, onLocate }: Props) {
+export function LocateControl({ siteName, dispatch, onLocate, onLookupSettled }: Props) {
   const { t, uiLanguage } = useUiLanguage();
   const [locate, send] = useReducer(locateReducer, INITIAL_LOCATE);
   const locateRef = useRef(locate);
   locateRef.current = locate;
   const searchedFor = useRef<string | null>(null);
   const queryInput = useRef<HTMLInputElement>(null);
+  const onLookupSettledRef = useRef(onLookupSettled);
+  onLookupSettledRef.current = onLookupSettled;
 
   useEffect(() => {
     const name = siteName.trim();
-    if (!name || searchedFor.current === name) return;
+    if (!name) {
+      onLookupSettledRef.current?.();
+      return;
+    }
+    if (searchedFor.current === name) return;
     searchedFor.current = name;
     const armed = locateReducer(locateRef.current, { type: "armFilename", query: name });
     locateRef.current = armed;
@@ -50,15 +58,18 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
     void geocodeSearch(name, uiLanguage)
       .then((found) => {
         const candidates = preferStationHits(found.map(toPlace));
-        if (!acceptsGuess(locateRef.current)) return;
-        if (candidates[0]) {
-          dispatch(positionFromPlace(candidates[0], true));
-          onLocate(candidates[0].lngLat);
+        if (acceptsGuess(locateRef.current)) {
+          if (candidates[0]) {
+            dispatch(positionFromPlace(candidates[0], true));
+            onLocate(candidates[0].lngLat);
+          }
+          send({ type: "guessed", candidates });
         }
-        send({ type: "guessed", candidates });
+        onLookupSettledRef.current?.();
       })
       .catch(() => {
         if (acceptsGuess(locateRef.current)) send({ type: "guessed", candidates: [] });
+        onLookupSettledRef.current?.();
       });
   }, [siteName, uiLanguage, dispatch, onLocate]);
 
@@ -74,9 +85,11 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
     void geocodeSearch(trimmed, uiLanguage)
       .then((found) => {
         send({ type: "settled", query: trimmed, places: preferStationHits(found.map(toPlace)) });
+        onLookupSettledRef.current?.();
       })
       .catch(() => {
         send({ type: "faulted", query: trimmed });
+        onLookupSettledRef.current?.();
       });
   };
 
@@ -112,7 +125,7 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
     >
       <button
         type="button"
-        className="flex h-6 w-full items-center gap-1 truncate rounded-[var(--radius-md)] px-1 text-left text-xs hover:bg-[var(--color-surface-muted)]"
+        className="flex h-6 w-full items-center gap-1 truncate rounded-md px-1 text-left text-xs hover:bg-accent"
         aria-expanded={search.kind === "open"}
         onClick={() =>
           send(search.kind === "open" ? { type: "close" } : { type: "open", siteName })
@@ -120,7 +133,7 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
       >
         <span className="truncate">{rowLabel}</span>
         {locate.located.kind === "guessed" ? (
-          <span className="shrink-0 text-[var(--color-text-muted)]">
+          <span className="shrink-0 text-muted-foreground">
             {t("first match", "最初の候補")}
           </span>
         ) : null}
@@ -155,7 +168,7 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
             </Button>
           </div>
           {search.outcome.kind === "unavailable" ? (
-            <p className="mt-1 text-xs text-[var(--color-error)]">
+            <p className="mt-1 text-xs text-destructive">
               {t(
                 "Address search is unavailable. Pan the map to the building instead.",
                 "住所検索を利用できません。地図を手動で移動してください。"
@@ -163,7 +176,7 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
             </p>
           ) : null}
           {search.outcome.kind === "empty" ? (
-            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+            <p className="mt-1 text-xs text-muted-foreground">
               {t("No places found.", "該当する場所がありません。")}
             </p>
           ) : null}
@@ -174,7 +187,7 @@ export function LocateControl({ siteName, dispatch, onLocate }: Props) {
                   <button
                     type="button"
                     title={place.name}
-                    className="w-full truncate px-2 py-1 text-left text-xs hover:bg-black/5"
+                    className="w-full truncate px-2 py-1 text-left text-xs hover:bg-accent"
                     onClick={() => pick(place)}
                   >
                     {place.name}

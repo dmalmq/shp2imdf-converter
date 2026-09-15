@@ -1,3 +1,4 @@
+import { ChevronRight, Globe, Moon, PanelLeft, Sun, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -25,6 +26,7 @@ import {
   type ValidationIssue,
   type ValidationResponse} from "../api/client";
 import { FeatureList } from "../components/review/FeatureList";
+import { FilterBar, activeFilterCount } from "../components/review/FilterBar";
 import { IssuesPanel } from "../components/review/IssuesPanel";
 import {
   buildFloorGroups,
@@ -38,6 +40,7 @@ import { VenueDetailsPanel, type AddressParts } from "../components/review/Venue
 import { MapPanel } from "../components/review/MapPanel";
 import { compatibleFeatureTypes, geometryKindOf, typeIsCompatible } from "../components/review/featureTypeOptions";
 import { PropertiesPanel } from "../components/review/PropertiesPanel";
+import { TablePanel } from "../components/review/TablePanel";
 import { ValidationBar } from "../components/review/ValidationBar";
 import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
@@ -46,8 +49,29 @@ import { type ReviewFeature, featureLayerKey, featureName, layerKeyBaseType, ord
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
-import { Button } from "../components/ui";
+import {
+  Button,
+  Checkbox,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogTitle,
+  Field,
+  Input,
+  Metric,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  Textarea
+} from "../components/ui";
 import { StepIndicator } from "../components/shell/StepIndicator";
+import { cn } from "@/lib/utils";
 
 
 /** Only these feature types are visible by default on the map. */
@@ -183,6 +207,10 @@ function buildShapefileDefaultsFromWizard(wizardState: WizardState | null): {
 }
 
 
+/** Radix Select has no empty-string value, so "no level chosen" needs one. */
+const BULK_NO_LEVEL = "__none__";
+
+
 export function ReviewPage() {
   const navigate = useNavigate();
   const sessionId = useAppStore((state) => state.sessionId);
@@ -191,6 +219,8 @@ export function ReviewPage() {
   const files = useAppStore((state) => state.files);
   const setFiles = useAppStore((state) => state.setFiles);
   const wizardState = useAppStore((state) => state.wizardState);
+  const theme = useAppStore((state) => state.theme);
+  const setTheme = useAppStore((state) => state.setTheme);
   const selectedFeatureIds = useAppStore((state) => state.selectedFeatureIds);
   const setSelectedFeatureIds = useAppStore((state) => state.setSelectedFeatureIds);
   const toggleSelectedFeatureId = useAppStore((state) => state.toggleSelectedFeatureId);
@@ -239,6 +269,8 @@ export function ReviewPage() {
   const [shapefileExportName, setShapefileExportName] = useState("");
   const [exportOptionsError, setExportOptionsError] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState("features");
+  const [mainView, setMainView] = useState<"map" | "table">("map");
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [activeIssueIndex, setActiveIssueIndex] = useState<number | null>(null);
   const [issuesPanelCollapsed, setIssuesPanelCollapsed] = useState(false);
@@ -256,9 +288,9 @@ export function ReviewPage() {
     }
   }, [navigate, sessionId]);
 
-  const loadFeatures = async () => {
+  const loadFeatures = async (): Promise<ReviewFeature[]> => {
     if (!sessionId) {
-      return;
+      return [];
     }
     setLoading(true);
     setError(null);
@@ -282,8 +314,10 @@ export function ReviewPage() {
           .filter((item): item is ReviewFeature => item !== null);
       }
       setFeatures(rows);
+      return rows;
     } catch (caught) {
       captureError(caught, t("Failed to load review data", "レビュー データの読み込みに失敗しました"), t("Review load failed", "レビュー読み込み失敗"));
+      return [];
     } finally {
       setLoading(false);
     }
@@ -352,6 +386,23 @@ export function ReviewPage() {
 
   const layerKeys = useMemo(() => orderedLayerKeys(features), [features]);
 
+  // Filter options come from the data rather than a fixed list: a session only
+  // ever holds the feature types and categories its own shapefiles produced.
+  const filterFeatureTypes = useMemo(
+    () => [...new Set(features.map((item) => item.feature_type))].sort(),
+    [features]
+  );
+  const filterCategories = useMemo(() => {
+    const found = new Set<string>();
+    features.forEach((item) => {
+      const category = item.properties.category;
+      if (typeof category === "string" && category.trim()) {
+        found.add(category);
+      }
+    });
+    return [...found].sort();
+  }, [features]);
+
   // Initialize layer visibility: only unit/detail/opening ON by default
   useEffect(() => {
     if (layerKeys.length === 0) {
@@ -370,6 +421,7 @@ export function ReviewPage() {
   }, [layerVisibility, layerKeys, setLayerVisibility]);
 
   const filteredFeatures = useMemo(() => applyFilters(features, filters), [features, filters]);
+  const filterCount = activeFilterCount(filters);
 
   const selectedFeature = useMemo(() => {
     if (selectedFeatureIds.length === 0) {
@@ -408,7 +460,8 @@ export function ReviewPage() {
     }
     pushEditHistory({
       featureId,
-      previousProperties: previous.properties
+      previousProperties: previous.properties,
+      previousFeatureType: previous.feature_type
     });
 
     try {
@@ -526,17 +579,18 @@ export function ReviewPage() {
       return;
     }
     const targetType = bulkFeatureType;
-    const sample = features.find((item) => selectedFeatureIds.includes(item.id));
+    const sampleId = features.find((item) => selectedFeatureIds.includes(item.id))?.id;
     try {
       await patchSessionFeaturesBulk(sessionId, {
         feature_ids: selectedFeatureIds,
         action: "patch",
         feature_type: targetType
       });
-      await loadFeatures();
-      const key = sample
-        ? featureLayerKey({ ...sample, feature_type: targetType })
-        : targetType;
+      const rows = await loadFeatures();
+      const reloaded =
+        (sampleId ? rows.find((item) => item.id === sampleId) : undefined) ??
+        rows.find((item) => selectedFeatureIds.includes(item.id) && item.feature_type === targetType);
+      const key = reloaded ? featureLayerKey(reloaded) : targetType;
       if (layerVisibility[key] !== true) {
         setLayerVisibility({ ...layerVisibility, [key]: true });
       }
@@ -985,11 +1039,15 @@ export function ReviewPage() {
         }
         const featureId = popped.featureId;
         const previousProperties = popped.previousProperties;
+        const previousFeatureType = popped.previousFeatureType;
         if (typeof featureId !== "string" || !previousProperties || typeof previousProperties !== "object") {
           return;
         }
         void patchSessionFeature(sessionId, featureId, {
-          properties: previousProperties as Record<string, unknown>
+          properties: previousProperties as Record<string, unknown>,
+          ...(typeof previousFeatureType === "string" && previousFeatureType
+            ? { feature_type: previousFeatureType }
+            : {})
         })
           .then((updated) => {
             setFeatures((prev) =>
@@ -1078,64 +1136,140 @@ export function ReviewPage() {
   const sidebarWidth = sidebarCollapsed ? 0 : 340;
 
   return (
-    <div className="flex h-screen flex-col bg-[var(--color-surface-muted)]">
+    <div className="flex h-screen flex-col bg-muted">
       {/* Top bar — mirrors AppShell but inline since review opts out of shell */}
-      <header className="flex h-12 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 shadow-[var(--shadow-sm)]">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]"
+      {/* Review opts out of AppShell for its full-bleed layout, so it has to
+          carry the shell's own controls — the theme toggle was simply missing
+          here, which left dark mode unreachable once you reached Review. */}
+      <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-background px-4">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => setSidebarCollapsed((prev) => !prev)}
+            aria-label={sidebarCollapsed ? t("Show sidebar", "サイドバーを表示") : t("Hide sidebar", "サイドバーを非表示")}
             title={sidebarCollapsed ? t("Show sidebar", "サイドバーを表示") : t("Hide sidebar", "サイドバーを非表示")}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
-              <line x1="5.5" y1="2.5" x2="5.5" y2="13.5" />
-            </svg>
-          </button>
-          <span className="text-sm font-bold tracking-tight text-[var(--color-text)]">IMDF Converter</span>
+            <PanelLeft />
+          </Button>
+          <span className="text-[13px] font-semibold leading-[18px] tracking-tight text-foreground">
+            IMDF Converter
+          </span>
         </div>
 
         <StepIndicator />
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="flex h-8 items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-muted)]"
-            onClick={() => {
-              const next = uiLanguage === "en" ? "ja" : "en";
-              setUiLanguage(next);
-            }}
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            aria-label={t("Switch theme", "テーマを切り替え")}
+            title={
+              theme === "dark"
+                ? t("Switch to light", "ライトに切り替え")
+                : t("Switch to dark", "ダークに切り替え")
+            }
+          >
+            {theme === "dark" ? <Sun /> : <Moon />}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setUiLanguage(uiLanguage === "en" ? "ja" : "en")}
             title={t("Switch UI language", "表示言語を切り替え")}
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="8" cy="8" r="6.5" />
-              <path d="M1.5 8h13" />
-              <path d="M8 1.5c-1.8 2-2.7 4-2.7 6.5s.9 4.5 2.7 6.5" />
-              <path d="M8 1.5c1.8 2 2.7 4 2.7 6.5s-.9 4.5-2.7 6.5" />
-            </svg>
+            <Globe className="h-3.5 w-3.5" />
             {uiLanguage === "en" ? "日本語" : "EN"}
-          </button>
+          </Button>
         </div>
       </header>
 
       {error ? (
-        <div className="border-b border-[var(--color-error)]/20 bg-[var(--color-error-muted)] px-4 py-2 text-xs text-[var(--color-error)]">
+        <div className="border-b border-destructive/20 bg-destructive/10 px-4 py-2 text-xs text-destructive">
           {error}
         </div>
       ) : null}
 
       {/* Main area: left sidebar + map + right sidebar */}
       <div className="flex flex-1 overflow-hidden">
-        {/* ── Left sidebar: Layers + Features ── */}
+        {/* ── Left sidebar: Features / Layers ── */}
+        {/* Both used to be stacked in one scroller, so the layer panel ate the
+            top 300px and the feature list — the thing you came here to work
+            through — started below the fold. */}
         {!sidebarCollapsed ? (
           <aside
-            className="flex flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]"
+            className="flex flex-col border-r border-border bg-card"
             style={{ width: sidebarWidth, minWidth: sidebarWidth }}
           >
-            <div className="flex-1 overflow-y-auto">
-              {/* Layers section (compact) */}
-              <div className="border-b border-[var(--color-border)] p-3">
+            <Tabs
+              value={sidebarTab}
+              onValueChange={setSidebarTab}
+              className="flex min-h-0 flex-1 flex-col"
+            >
+              <TabsList className="mx-3 mt-3 grid grid-cols-2">
+                <TabsTrigger value="features">
+                  {t("Features", "フィーチャー")}
+                </TabsTrigger>
+                <TabsTrigger value="layers">{t("Layers", "レイヤー")}</TabsTrigger>
+              </TabsList>
+
+              <TabsContent
+                value="features"
+                className="flex min-h-0 flex-1 flex-col data-[state=active]:mt-3"
+              >
+                {importProfile === "imdf_shapefile" ? (
+                  <VenueDetailsPanel
+                    venue={venueFeature}
+                    building={buildingFeature}
+                    address={addressFeature}
+                    language={wizardState?.project?.language ?? "en"}
+                    onSave={(featureId, properties) => void saveFeatureProperties(featureId, properties)}
+                    onRequestAutofill={requestAddressAutofill}
+                  />
+                ) : null}
+
+                {loading ? (
+                  <div className="flex flex-col gap-2 p-3">
+                    <SkeletonBlock className="h-6 w-full" />
+                    <SkeletonBlock className="h-6 w-full" />
+                    <SkeletonBlock className="h-6 w-full" />
+                    <SkeletonBlock className="h-6 w-full" />
+                    <SkeletonBlock className="h-6 w-full" />
+                  </div>
+                ) : (
+                  <>
+                    {filters.status ? (
+                      <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs leading-4 text-muted-foreground">
+                        <span>
+                          {t("Showing", "表示中")}:{" "}
+                          <span className="font-medium capitalize text-foreground">{filters.status}</span>
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="ml-auto h-auto px-1.5 py-0.5 text-xs font-normal"
+                          onClick={() => setFilters({ ...filters, status: undefined })}
+                        >
+                          {t("Clear", "解除")}
+                        </Button>
+                      </div>
+                    ) : null}
+                    <FeatureList
+                      features={filteredFeatures}
+                      selectedFeatureIds={selectedFeatureIds}
+                      validationIssues={allValidationIssues}
+                      onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
+                      onSelectionChange={(ids) => setSelectedFeatureIds(ids)}
+                    />
+                  </>
+                )}
+              </TabsContent>
+
+              <TabsContent
+                value="layers"
+                className="min-h-0 flex-1 overflow-y-auto p-3 data-[state=active]:mt-1"
+              >
                 <LayerTree
                   featureTypes={layerKeys}
                   layerVisibility={layerVisibility}
@@ -1149,110 +1283,81 @@ export function ReviewPage() {
                   onOverlayVisibilityChange={setOverlayVisibility}
                   onShowBasemapChange={setShowBasemap}
                 />
-              </div>
-
-              {importProfile === "imdf_shapefile" ? (
-                <VenueDetailsPanel
-                  venue={venueFeature}
-                  building={buildingFeature}
-                  address={addressFeature}
-                  language={wizardState?.project?.language ?? "en"}
-                  onSave={(featureId, properties) => void saveFeatureProperties(featureId, properties)}
-                  onRequestAutofill={requestAddressAutofill}
-                />
-              ) : null}
-
-              {/* Features list */}
-              {loading ? (
-                <div className="space-y-2 p-3">
-                  <SkeletonBlock className="h-6 w-full" />
-                  <SkeletonBlock className="h-6 w-full" />
-                  <SkeletonBlock className="h-6 w-full" />
-                  <SkeletonBlock className="h-6 w-full" />
-                  <SkeletonBlock className="h-6 w-full" />
-                </div>
-              ) : (
-                <>
-                  {filters.status ? (
-                    <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5 text-[11px] text-[var(--color-text-muted)]">
-                      <span>
-                        {t("Showing", "表示中")}: <span className="font-medium capitalize text-[var(--color-text)]">{filters.status}</span>
-                      </span>
-                      <button
-                        type="button"
-                        className="ml-auto rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10px] hover:bg-[var(--color-surface-muted)]"
-                        onClick={() => setFilters({ ...filters, status: undefined })}
-                      >
-                        {t("Clear", "解除")}
-                      </button>
-                    </div>
-                  ) : null}
-                  <FeatureList
-                    features={filteredFeatures}
-                    selectedFeatureIds={selectedFeatureIds}
-                    validationIssues={allValidationIssues}
-                    onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
-                    onSelectionChange={(ids) => setSelectedFeatureIds(ids)}
-                  />
-                </>
-              )}
-            </div>
+              </TabsContent>
+            </Tabs>
 
             {/* Bulk actions bar (when multiple selected) */}
             {selectedFeatureIds.length > 1 ? (
-              <div className="border-t border-[var(--color-border)] bg-[var(--color-surface-muted)] p-2">
-                <div className="mb-1.5 text-[11px] font-medium text-[var(--color-text-secondary)]">
+              <div className="shrink-0 border-t border-border bg-muted p-2.5">
+                <div className="mb-2 font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
                   {selectedFeatureIds.length} {t("selected", "選択中")}
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  <select
-                    className="h-6 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1.5 text-[11px]"
-                    value={bulkLevel}
-                    onChange={(e) => setBulkLevel(e.target.value)}
-                  >
-                    <option value="">{t("Level...", "レベル...")}</option>
-                    {levelOptions.map((o) => (
-                      <option key={o.id} value={o.id}>{o.label}</option>
-                    ))}
-                  </select>
-                  <Button variant="secondary" size="sm" onClick={() => void applyBulkLevel()} disabled={!bulkLevel}>
-                    {t("Apply", "適用")}
-                  </Button>
-                  <input
-                    className="h-6 w-20 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1.5 text-[11px]"
-                    placeholder={t("Category", "カテゴリ")}
-                    value={bulkCategory}
-                    onChange={(e) => setBulkCategory(e.target.value)}
-                  />
-                  <Button variant="secondary" size="sm" onClick={() => void applyBulkCategory()} disabled={!bulkCategory}>
-                    {t("Apply", "適用")}
-                  </Button>
-                  <select
-                    className="h-6 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1.5 text-[11px]"
-                    value={bulkFeatureType}
-                    onChange={(e) => setBulkFeatureType(e.target.value)}
-                  >
-                    <option value="">{t("Type...", "種別...")}</option>
-                    {bulkTypeOptions.map((option) => (
-                      <option key={option.feature_type} value={option.feature_type}>
-                        {option.feature_type}
-                      </option>
-                    ))}
-                  </select>
-                  <Button variant="secondary" size="sm" onClick={() => void applyBulkFeatureType()} disabled={!bulkFeatureType}>
-                    {t("Apply", "適用")}
-                  </Button>
-                  <input
-                    className="h-6 w-20 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-1.5 text-[11px]"
-                    placeholder={t("Merge name", "結合名")}
-                    value={mergeName}
-                    onChange={(e) => setMergeName(e.target.value)}
-                  />
-                  <Button variant="secondary" size="sm" onClick={() => void mergeSelectedUnits()}>
-                    {t("Merge", "結合")}
-                  </Button>
-                  <Button variant="danger" size="sm" onClick={() => void deleteSelected()}>
-                    {t("Delete", "削除")}
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex gap-1.5">
+                    <Select value={bulkLevel || BULK_NO_LEVEL} onValueChange={(value) => setBulkLevel(value === BULK_NO_LEVEL ? "" : value)}>
+                      <SelectTrigger className="h-8 flex-1" aria-label={t("Level", "レベル")}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={BULK_NO_LEVEL}>{t("Level…", "レベル…")}</SelectItem>
+                        {levelOptions.map((o) => (
+                          <SelectItem key={o.id} value={o.id}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button variant="outline" size="sm" onClick={() => void applyBulkLevel()} disabled={!bulkLevel}>
+                      {t("Apply", "適用")}
+                    </Button>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <Input
+                      className="h-8 flex-1"
+                      placeholder={t("Category", "カテゴリ")}
+                      value={bulkCategory}
+                      onChange={(e) => setBulkCategory(e.target.value)}
+                    />
+                    <Button variant="outline" size="sm" onClick={() => void applyBulkCategory()} disabled={!bulkCategory}>
+                      {t("Apply", "適用")}
+                    </Button>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <select
+                      className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-sm"
+                      aria-label={t("Type", "種別")}
+                      value={bulkFeatureType}
+                      onChange={(e) => setBulkFeatureType(e.target.value)}
+                    >
+                      <option value="">{t("Type...", "種別...")}</option>
+                      {bulkTypeOptions.map((option) => (
+                        <option key={option.feature_type} value={option.feature_type}>
+                          {option.feature_type}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void applyBulkFeatureType()}
+                      disabled={!bulkFeatureType}
+                    >
+                      {t("Apply", "適用")}
+                    </Button>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <Input
+                      className="h-8 flex-1"
+                      placeholder={t("Merge name", "結合名")}
+                      value={mergeName}
+                      onChange={(e) => setMergeName(e.target.value)}
+                    />
+                    <Button variant="outline" size="sm" onClick={() => void mergeSelectedUnits()}>
+                      {t("Merge", "結合")}
+                    </Button>
+                  </div>
+                  <Button variant="destructive" size="sm" onClick={() => void deleteSelected()}>
+                    {t("Delete selected", "選択を削除")}
                   </Button>
                 </div>
               </div>
@@ -1260,48 +1365,124 @@ export function ReviewPage() {
           </aside>
         ) : null}
 
-        {/* ── Map area ── */}
-        <div className="flex-1">
-          {loading ? (
-            <div className="flex h-full items-center justify-center bg-[var(--color-surface-muted)]">
-              <SkeletonBlock className="h-full w-full" />
+        {/* ── Main area: map or table ── */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-3 py-1.5">
+            <div
+              role="group"
+              aria-label={t("View", "表示")}
+              className="inline-flex gap-0.5 rounded-md bg-muted p-1"
+            >
+              {([
+                ["map", t("Map", "地図")],
+                ["table", t("Table", "表")]
+              ] as const).map(([view, label]) => (
+                <button
+                  key={view}
+                  type="button"
+                  aria-pressed={mainView === view}
+                  onClick={() => setMainView(view)}
+                  className={cn(
+                    "rounded-sm px-3 py-1 text-[13px] font-medium leading-[18px] transition-colors",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    mainView === view
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-          ) : (
-            <ErrorBoundary>
-              <MapPanel
-                features={features}
-                selectedFeatureIds={selectedFeatureIds}
-                layerVisibility={layerVisibility}
-                validationIssues={allValidationIssues}
-                overlayVisibility={overlayVisibility}
-                visibleLevelIds={visibleLevelIds}
-                showBasemap={showBasemap}
-                activeIssue={activeIssue}
-                onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
-              />
-            </ErrorBoundary>
-          )}
+
+            <span className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
+              {filterCount > 0
+                ? t(
+                    `${filteredFeatures.length} of ${features.length} features`,
+                    `${features.length} 件中 ${filteredFeatures.length} 件`
+                  )
+                : t(`${features.length} features`, `${features.length} 件`)}
+            </span>
+          </div>
+
+          {/* The map stays mounted behind the table rather than unmounting on
+              every view switch: rebuilding a MapLibre instance throws away the
+              tiles, the camera and the fitted bounds. */}
+          <div className="relative min-h-0 flex-1">
+            {/* Hidden with opacity rather than `visibility` or `display`: a
+                descendant can override `visibility` — MapLibre's attribution
+                control does, and the © OpenStreetMap pill floated over the
+                table — and `display: none` makes the map lose its size, which
+                means a resize on every switch back. Opacity does neither. */}
+            <div
+              className={cn(
+                "absolute inset-0 transition-opacity",
+                mainView === "table" && "pointer-events-none opacity-0"
+              )}
+              aria-hidden={mainView === "table"}
+            >
+              {loading ? (
+                <div className="flex h-full items-center justify-center bg-muted">
+                  <SkeletonBlock className="h-full w-full" />
+                </div>
+              ) : (
+                <ErrorBoundary>
+                  <MapPanel
+                    features={features}
+                    selectedFeatureIds={selectedFeatureIds}
+                    layerVisibility={layerVisibility}
+                    validationIssues={allValidationIssues}
+                    overlayVisibility={overlayVisibility}
+                    visibleLevelIds={visibleLevelIds}
+                    showBasemap={showBasemap}
+                    activeIssue={activeIssue}
+                    onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
+                  />
+                </ErrorBoundary>
+              )}
+            </div>
+
+            {mainView === "table" ? (
+              <div className="absolute inset-0 flex flex-col gap-3 overflow-auto bg-muted p-3">
+                <FilterBar
+                  filters={filters}
+                  featureTypes={filterFeatureTypes}
+                  levels={levelOptions}
+                  categories={filterCategories}
+                  onChange={(next) => setFilters(next)}
+                />
+                <TablePanel
+                  features={filteredFeatures}
+                  selectedFeatureIds={selectedFeatureIds}
+                  onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
+                  onSelectionChange={(ids) => setSelectedFeatureIds(ids)}
+                />
+              </div>
+            ) : null}
+          </div>
         </div>
 
         {/* ── Right sidebar: Properties ── */}
         {rightSidebarOpen && selectedFeature ? (
           <aside
-            className="flex flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)] overflow-y-auto"
+            className="flex flex-col border-l border-border bg-card overflow-y-auto"
             style={{ width: 340, minWidth: 340 }}
           >
-            <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2">
-              <span className="text-xs font-medium text-[var(--color-text)]">{t("Properties", "プロパティ")}</span>
-              <button
-                type="button"
-                className="flex h-5 w-5 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]"
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
+              <span className="text-[13px] font-semibold leading-[18px] text-foreground">
+                {t("Properties", "プロパティ")}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                aria-label={t("Close properties", "プロパティを閉じる")}
                 onClick={() => setRightSidebarOpen(false)}
               >
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                  <path d="M2 2l6 6M8 2l-6 6" />
-                </svg>
-              </button>
+                <X className="h-3.5 w-3.5" />
+              </Button>
             </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3">
               {selectedFeatureIssues.length > 0 ? (
                 <IssuesPanel
                   issues={selectedFeatureIssues}
@@ -1348,56 +1529,87 @@ export function ReviewPage() {
       />
 
       {/* Export dialog */}
-      {exportDialogOpen && validation ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/35 p-4">
-          <div className="w-full max-w-xl rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-md)]">
-            <h3 className="text-lg font-semibold text-[var(--color-text)]">{t("Export", "Export")}</h3>
+      {/* Was a hand-rolled fixed overlay: no focus trap, no escape-to-close and
+          no labelled dialog role. The advanced shapefile field options move
+          behind a disclosure — three text inputs and a mapping textarea that
+          only matter if you are replacing codes in an existing schema. */}
+      <Dialog open={exportDialogOpen && validation !== null} onOpenChange={setExportDialogOpen}>
+        <DialogContent className="max-h-[85vh] max-w-xl grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+          <DialogTitle>{t("Export", "エクスポート")}</DialogTitle>
 
-            <label className="mt-3 block text-sm">
-              <span className="mb-1 block text-[var(--color-text-secondary)]">{t("Format", "Format")}</span>
-              <select
-                className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5 text-sm"
-                value={exportFormat}
-                onChange={(event) => setExportFormat(event.target.value as ExportFormat)}
-              >
-                <option value="imdf">{t("IMDF (.imdf)", "IMDF (.imdf)")}</option>
-                <option value="imdf_zip">{t("IMDF (.zip)", "IMDF (.zip)")}</option>
-                {!hasGeoPackageSources ? (
-                  <>
-                    <option value="shapefiles">{t("Shapefiles (.zip)", "Shapefiles (.zip)")}</option>
-                    <option value="odc2026_shapefiles">{t("Open Data Contest 2026 shapefiles (.zip)", "オープンデータコンテスト2026 シェープファイル (.zip)")}</option>
-                    <option value="qgis_project">{t("QGIS project (.qgz + shapefiles .zip)", "QGIS プロジェクト (.qgz + シェープファイル .zip)")}</option>
-                  </>
-                ) : null}
-              </select>
-            </label>
+          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
+            <Field label={t("Format", "形式")}>
+              {(id) => (
+                <Select
+                  value={exportFormat}
+                  onValueChange={(value) => setExportFormat(value as ExportFormat)}
+                >
+                  <SelectTrigger id={id}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="imdf">{t("IMDF (.imdf)", "IMDF (.imdf)")}</SelectItem>
+                    <SelectItem value="imdf_zip">{t("IMDF (.zip)", "IMDF (.zip)")}</SelectItem>
+                    {!hasGeoPackageSources ? (
+                      <>
+                        <SelectItem value="shapefiles">{t("Shapefiles (.zip)", "Shapefiles (.zip)")}</SelectItem>
+                        <SelectItem value="odc2026_shapefiles">
+                          {t("Open Data Contest 2026 shapefiles (.zip)", "オープンデータコンテスト2026 シェープファイル (.zip)")}
+                        </SelectItem>
+                        <SelectItem value="qgis_project">
+                          {t("QGIS project (.qgz + shapefiles .zip)", "QGIS プロジェクト (.qgz + シェープファイル .zip)")}
+                        </SelectItem>
+                      </>
+                    ) : null}
+                  </SelectContent>
+                </Select>
+              )}
+            </Field>
+
             {exportFormat === "imdf_zip" ? (
-              <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+              <p className="-mt-2 text-xs leading-4 text-muted-foreground">
                 {t(
                   "Same contents as the .imdf archive, packaged as .zip for the IMDF Sandbox validator.",
                   "内容は .imdf アーカイブと同じで、IMDF Sandbox 検証用に .zip 形式でパッケージ化しています。"
                 )}
               </p>
             ) : null}
+
             {hasGeoPackageSources ? (
-              <p className="mt-2 rounded-[var(--radius-sm)] border border-[var(--color-warning)]/20 bg-[var(--color-warning-muted)] px-2 py-1 text-xs text-[var(--color-warning)]">
+              <p className="rounded-md border border-warning/20 bg-warning/10 px-3 py-2 text-xs leading-4 text-warning">
                 {t(
-                  "Shapefile (.zip) export is only available for shapefile-backed sessions. This session includes GeoPackage sources, so only IMDF export is available.",
-                  "Shapefile (.zip) export is only available for shapefile-backed sessions. This session includes GeoPackage sources, so only IMDF export is available."
+                  "This session includes GeoPackage sources, so only IMDF export is available.",
+                  "このセッションには GeoPackage ソースが含まれるため、IMDF 書き出しのみ利用できます。"
                 )}
               </p>
             ) : null}
 
-            <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
-              {t(`${validation.summary.total_features} features will be exported.`, `${validation.summary.total_features} features will be exported.`)}
-            </p>
-            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-              {t("Validation", "Validation")}: {t(`${validation.summary.error_count} errors`, `${validation.summary.error_count} errors`)} -{" "}
-              {t(`${validation.summary.warning_count} warnings`, `${validation.summary.warning_count} warnings`)}
-            </p>
+            {validation ? (
+              <div className="flex gap-2">
+                <Metric
+                  label={t("FEATURES", "フィーチャー")}
+                  value={validation.summary.total_features}
+                  className="flex-1"
+                />
+                <Metric
+                  label={t("ERRORS", "エラー")}
+                  value={validation.summary.error_count}
+                  className="flex-1"
+                />
+                <Metric
+                  label={t("WARNINGS", "警告")}
+                  value={validation.summary.warning_count}
+                  className="flex-1"
+                />
+              </div>
+            ) : null}
 
-            {exportFormat !== "shapefiles" && exportFormat !== "odc2026_shapefiles" && exportFormat !== "qgis_project" && validation && validation.summary.error_count > 0 ? (
-              <p className="mt-2 rounded-[var(--radius-sm)] border border-[var(--color-warning)]/20 bg-[var(--color-warning-muted)] px-2 py-1 text-xs text-[var(--color-warning)]">
+            {exportFormat !== "shapefiles" &&
+            exportFormat !== "odc2026_shapefiles" &&
+            exportFormat !== "qgis_project" &&
+            validation &&
+            validation.summary.error_count > 0 ? (
+              <p className="rounded-md border border-warning/20 bg-warning/10 px-3 py-2 text-xs leading-4 text-warning">
                 {t(
                   `There are ${validation.summary.error_count} validation error(s). The exported IMDF may not pass Apple's validation.`,
                   `${validation.summary.error_count} 件の検証エラーがあります。エクスポートされた IMDF は Apple の検証を通過しない可能性があります。`
@@ -1405,55 +1617,63 @@ export function ReviewPage() {
               </p>
             ) : null}
 
-            {(exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles" || exportFormat === "qgis_project") && !hasGeoPackageSources ? (
-              <div className="mt-3 space-y-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-sm">
-                <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-[var(--color-text-muted)]">{t("Encoding", "Encoding")}</span>
-                  <select
-                    className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5"
-                    value={shapefileEncoding}
-                    onChange={(event) => setShapefileEncoding(event.target.value as ShapefileExportEncoding)}
-                  >
-                    <option value="preserve_source">{t("Preserve source encoding", "Preserve source encoding")}</option>
-                    <option value="utf-8">UTF-8</option>
-                    <option value="cp932">CP932 (Shift-JIS)</option>
-                  </select>
-                </label>
+            {(exportFormat === "shapefiles" ||
+              exportFormat === "odc2026_shapefiles" ||
+              exportFormat === "qgis_project") &&
+            !hasGeoPackageSources ? (
+              <div className="flex flex-col gap-4 rounded-lg border border-border bg-muted/40 p-4">
+                <Field label={t("Encoding", "文字コード")}>
+                  {(id) => (
+                    <Select
+                      value={shapefileEncoding}
+                      onValueChange={(value) =>
+                        setShapefileEncoding(value as ShapefileExportEncoding)
+                      }
+                    >
+                      <SelectTrigger id={id}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="preserve_source">
+                          {t("Preserve source encoding", "元データの文字コードを維持")}
+                        </SelectItem>
+                        <SelectItem value="utf-8">UTF-8</SelectItem>
+                        <SelectItem value="cp932">CP932 (Shift-JIS)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                </Field>
 
                 {exportFormat === "odc2026_shapefiles" || exportFormat === "qgis_project" ? (
-                  <div>
-                    <label
-                      htmlFor="shapefile-export-name"
-                      className="mb-1 block text-xs uppercase tracking-wide text-[var(--color-text-muted)]"
-                    >
-                      {t("Export file prefix (required)", "エクスポートファイルの接頭辞（必須）")}
-                    </label>
-                    <input
-                      id="shapefile-export-name"
-                      required
-                      aria-describedby="shapefile-export-name-help"
-                      className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5"
-                      value={shapefileExportName}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setShapefileExportName(value);
-                        if (value.trim()) {
-                          setExportOptionsError(null);
-                        }
-                      }}
-                      placeholder="TokyoSta"
-                    />
-                    <p id="shapefile-export-name-help" className="mt-1 text-xs text-[var(--color-text-muted)]">
-                      {t(
-                        `Required. Prefixes every exported file, e.g. "${(shapefileExportName.trim() || "TokyoSta")}_1_Floor".`,
-                        `必須。すべての書き出しファイルの接頭辞になります（例: "${(shapefileExportName.trim() || "TokyoSta")}_1_Floor"）。`
-                      )}
-                    </p>
-                  </div>
+                  <Field
+                    label={t("Export file prefix", "エクスポートファイルの接頭辞")}
+                    required
+                    hint={t(
+                      `Prefixes every exported file, e.g. "${shapefileExportName.trim() || "TokyoSta"}_1_Floor".`,
+                      `すべての書き出しファイルの接頭辞になります（例: "${shapefileExportName.trim() || "TokyoSta"}_1_Floor"）。`
+                    )}
+                  >
+                    {(id) => (
+                      <Input
+                        id={id}
+                        required
+                        invalid={Boolean(exportOptionsError) && !shapefileExportName.trim()}
+                        value={shapefileExportName}
+                        placeholder="TokyoSta"
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setShapefileExportName(value);
+                          if (value.trim()) {
+                            setExportOptionsError(null);
+                          }
+                        }}
+                      />
+                    )}
+                  </Field>
                 ) : null}
 
                 {exportFormat === "odc2026_shapefiles" ? (
-                  <p className="text-xs text-[var(--color-text-muted)]">
+                  <p className="text-xs leading-4 text-muted-foreground">
                     {t(
                       "Uses reviewed IMDF-schema features to generate Site, Building, Floor, Space, Fixture, Opening, Drawing, Facility, Occupant, and Segment shapefiles.",
                       "レビュー済みの IMDF スキーマ地物から Site・Building・Floor・Space・Fixture・Opening・Drawing・Facility・Occupant・Segment のシェープファイルを生成します。"
@@ -1462,7 +1682,7 @@ export function ReviewPage() {
                 ) : null}
 
                 {exportFormat === "qgis_project" ? (
-                  <p className="text-xs text-[var(--color-text-muted)]">
+                  <p className="text-xs leading-4 text-muted-foreground">
                     {t(
                       "Generates a styled QGIS .qgz project (floors grouped as layers, spaces colored by category) bundled with the ODC2026 shapefiles. Extract the zip and open the .qgz in QGIS.",
                       "階層ごとにレイヤをグループ化し、空間をカテゴリ別に色分けした QGIS プロジェクト (.qgz) を ODC2026 シェープファイルと一緒に zip で出力します。zip を展開して .qgz を QGIS で開いてください。"
@@ -1471,129 +1691,142 @@ export function ReviewPage() {
                 ) : null}
 
                 {exportFormat === "shapefiles" ? (
-                  <>
-                <label className="flex items-start gap-2 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-2 text-xs text-[var(--color-text-secondary)]">
-                  <input
-                    className="mt-0.5 h-4 w-4"
-                    checked={shapefileWriteCategoryToNewField}
-                    onChange={(event) => {
-                      const checked = event.target.checked;
-                      setShapefileWriteCategoryToNewField(checked);
-                      if (checked) {
-                        const sourceField = shapefileSourceCategoryField.trim().toLowerCase();
-                        const currentField = shapefileCategoryField.trim().toLowerCase();
-                        if (!currentField || (sourceField && currentField === sourceField)) {
-                          setShapefileCategoryField("IMDF_CAT");
+                  <details className="group">
+                    <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-[13px] font-medium leading-[18px] text-muted-foreground transition-colors hover:text-foreground">
+                      <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+                      {t("Field names and legacy codes", "フィールド名と旧コード")}
+                    </summary>
+
+                    <div className="mt-4 flex flex-col gap-4">
+                      <label className="flex cursor-pointer items-start gap-2 text-[13px] leading-[18px] text-foreground">
+                        <Checkbox
+                          className="mt-0.5"
+                          checked={shapefileWriteCategoryToNewField}
+                          onCheckedChange={(next) => {
+                            const checked = next === true;
+                            setShapefileWriteCategoryToNewField(checked);
+                            if (checked) {
+                              const sourceField = shapefileSourceCategoryField.trim().toLowerCase();
+                              const currentField = shapefileCategoryField.trim().toLowerCase();
+                              if (!currentField || (sourceField && currentField === sourceField)) {
+                                setShapefileCategoryField("IMDF_CAT");
+                              }
+                              return;
+                            }
+                            const sourceField = shapefileSourceCategoryField.trim();
+                            if (sourceField) {
+                              setShapefileCategoryField(sourceField);
+                            }
+                          }}
+                        />
+                        <span>
+                          {t(
+                            "Write IMDF categories to a new field instead of overwriting the existing code/category field.",
+                            "既存のコード/カテゴリ列を上書きせず、新しい列に IMDF カテゴリを書き込みます。"
+                          )}
+                        </span>
+                      </label>
+
+                      <Field
+                        label={
+                          shapefileWriteCategoryToNewField
+                            ? t("New IMDF category field", "新しい IMDF カテゴリ列")
+                            : t("Existing category/code field to overwrite", "上書きする既存のカテゴリ/コード列")
                         }
-                        return;
-                      }
-                      const sourceField = shapefileSourceCategoryField.trim();
-                      if (sourceField) {
-                        setShapefileCategoryField(sourceField);
-                      }
-                    }}
-                  />
-                  <span>
-                    {t(
-                      "Write IMDF categories to a new field instead of overwriting the existing code/category field.",
-                      "Write IMDF categories to a new field instead of overwriting the existing code/category field."
-                    )}
-                  </span>
-                </label>
+                        hint={
+                          shapefileWriteCategoryToNewField
+                            ? undefined
+                            : t(
+                                "Defaults to your mapped source column, so exports replace old codes with IMDF categories.",
+                                "既定値は対応付け済みの元列で、旧コードを IMDF カテゴリに置き換えます。"
+                              )
+                        }
+                      >
+                        {(id) => (
+                          <Input
+                            id={id}
+                            value={shapefileCategoryField}
+                            onChange={(event) => setShapefileCategoryField(event.target.value)}
+                            placeholder={
+                              shapefileWriteCategoryToNewField
+                                ? "IMDF_CAT"
+                                : shapefileSourceCategoryField || "CATEGORY"
+                            }
+                          />
+                        )}
+                      </Field>
 
-                <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
-                    {shapefileWriteCategoryToNewField
-                      ? t("New IMDF category field", "New IMDF category field")
-                      : t("Existing category/code field to overwrite", "Existing category/code field to overwrite")}
-                  </span>
-                  <input
-                    className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5"
-                    value={shapefileCategoryField}
-                    onChange={(event) => setShapefileCategoryField(event.target.value)}
-                    placeholder={shapefileWriteCategoryToNewField ? "IMDF_CAT" : (shapefileSourceCategoryField || "CATEGORY")}
-                  />
-                </label>
-                {!shapefileWriteCategoryToNewField ? (
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    {t(
-                      "Default is your mapped source code/category column, so exports replace old codes with IMDF categories.",
-                      "Default is your mapped source code/category column, so exports replace old codes with IMDF categories."
-                    )}
-                  </p>
-                ) : null}
+                      <Field label={t("Legacy code field (optional)", "旧コード列（任意）")}>
+                        {(id) => (
+                          <Input
+                            id={id}
+                            value={shapefileLegacyCodeField}
+                            onChange={(event) => setShapefileLegacyCodeField(event.target.value)}
+                            placeholder="COMPANY_CODE"
+                          />
+                        )}
+                      </Field>
 
-                <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
-                    {t("Legacy code field (optional)", "Legacy code field (optional)")}
-                  </span>
-                  <input
-                    className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5"
-                    value={shapefileLegacyCodeField}
-                    onChange={(event) => setShapefileLegacyCodeField(event.target.value)}
-                    placeholder="COMPANY_CODE"
-                  />
-                </label>
-
-                <label className="block">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
-                    {t("Legacy mappings (optional)", "Legacy mappings (optional)")}
-                  </span>
-                  <textarea
-                    className="min-h-20 w-full rounded-[var(--radius-md)] border border-[var(--color-border)] px-2.5 py-1.5 font-mono text-xs"
-                    value={shapefileLegacyMapText}
-                    onChange={(event) => setShapefileLegacyMapText(event.target.value)}
-                    placeholder={"room=B0001\noffice=B0002"}
-                    rows={4}
-                  />
-                </label>
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  {t(
-                    "Use one mapping per line as category=CODE (also accepts category,CODE or category:CODE). Applied only when Legacy code field is set.",
-                    "Use one mapping per line as category=CODE (also accepts category,CODE or category:CODE). Applied only when Legacy code field is set."
-                  )}
-                </p>
-                  </>
+                      <Field
+                        label={t("Legacy mappings (optional)", "旧コードの対応（任意）")}
+                        hint={t(
+                          "One per line as category=CODE. Applied only when a legacy code field is set.",
+                          "1行に1つ、category=CODE の形式で。旧コード列を設定したときのみ適用されます。"
+                        )}
+                      >
+                        {(id) => (
+                          <Textarea
+                            id={id}
+                            className="font-mono text-xs"
+                            rows={4}
+                            value={shapefileLegacyMapText}
+                            onChange={(event) => setShapefileLegacyMapText(event.target.value)}
+                            placeholder={"room=B0001\noffice=B0002"}
+                          />
+                        )}
+                      </Field>
+                    </div>
+                  </details>
                 ) : null}
               </div>
             ) : null}
 
-            {exportOptionsError ? <p className="mt-2 text-xs text-[var(--color-error)]">{exportOptionsError}</p> : null}
+            {exportOptionsError ? (
+              <p role="alert" className="text-xs leading-4 text-destructive">
+                {exportOptionsError}
+              </p>
+            ) : null}
 
-            {validation.warnings.length > 0 ? (
-              <div className="mt-3 max-h-36 overflow-auto rounded-[var(--radius-sm)] border border-[var(--color-warning)]/20 bg-[var(--color-warning-muted)] p-2 text-xs text-[var(--color-warning)]">
+            {validation && validation.warnings.length > 0 ? (
+              <div className="flex max-h-36 flex-col gap-1 overflow-auto rounded-md border border-warning/20 bg-warning/10 p-3 text-xs leading-4 text-warning">
                 {validation.warnings.slice(0, 10).map((warning, index) => (
                   <p key={`${warning.check}-${index}`}>{warning.message}</p>
                 ))}
               </div>
             ) : null}
-
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="secondary" size="sm" onClick={() => setExportDialogOpen(false)}>
-                {t("Cancel", "Cancel")}
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => void downloadExport()}
-                disabled={exporting || exportBlocked}
-              >
-                {exporting
-                  ? t("Downloading...", "Downloading...")
-                  : exportFormat === "shapefiles"
-                    ? t("Download shapefiles .zip", "Download shapefiles .zip")
-                    : exportFormat === "odc2026_shapefiles"
-                      ? t("Download Open Data Contest 2026 shapefiles .zip", "オープンデータコンテスト2026 シェープファイル .zip をダウンロード")
-                      : exportFormat === "qgis_project"
-                        ? t("Download QGIS project .zip", "QGIS プロジェクト .zip をダウンロード")
-                        : exportFormat === "imdf_zip"
-                          ? t("Download .zip", "Download .zip")
-                          : t("Download .imdf", "Download .imdf")}
-              </Button>
-            </div>
           </div>
-        </div>
-      ) : null}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExportDialogOpen(false)}>
+              {t("Cancel", "キャンセル")}
+            </Button>
+            <Button onClick={() => void downloadExport()} disabled={exporting || exportBlocked}>
+              {exporting
+                ? t("Downloading…", "ダウンロード中…")
+                : exportFormat === "shapefiles"
+                  ? t("Download shapefiles .zip", "シェープファイル .zip をダウンロード")
+                  : exportFormat === "odc2026_shapefiles"
+                    ? t("Download ODC 2026 .zip", "オープンデータコンテスト2026 .zip をダウンロード")
+                    : exportFormat === "qgis_project"
+                      ? t("Download QGIS project .zip", "QGIS プロジェクト .zip をダウンロード")
+                      : exportFormat === "imdf_zip"
+                        ? t("Download .zip", ".zip をダウンロード")
+                        : t("Download .imdf", ".imdf をダウンロード")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

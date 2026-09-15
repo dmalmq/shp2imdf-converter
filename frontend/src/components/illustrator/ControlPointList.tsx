@@ -6,7 +6,9 @@ import {
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
-import { Button } from "../ui";
+import { Button } from "../ui/button";
+import { DisabledHint } from "../ui/tooltip";
+import { OVERLAY_COLORS } from "./overlayColors";
 
 type Props = {
   state: PlacementState;
@@ -27,6 +29,7 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
   const fit = currentResiduals(state);
   const pinnedBlocked = Boolean(activeFloor?.pinned);
   const groupBlocked = !pinnedBlocked && mode === "group" && !activeFloor?.linked;
+  const enoughPoints = controlPoints.length >= MIN_CONTROL_POINTS;
   const largestResidualIndex = fit
     ? fit.perPoint.reduce(
         (largest, residual, index, values) => (residual > values[largest] ? index : largest),
@@ -63,35 +66,110 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
               "位置合わせの準備ができました。参照データに誤差がある場合は対応点を追加してください。"
             );
 
+  const addLabel =
+    pickStage === "artwork"
+      ? t("Click a point on the plan...", "図面上の点をクリック...")
+      : pickStage === "map"
+        ? t("Click the same point on the map...", "地図上の同じ点をクリック...")
+        : t("Add matching pair", "対応点を追加");
+
+  const addButton = (
+    <Button
+      size="sm"
+      variant={pickStage ? "default" : "outline"}
+      disabled={groupBlocked || pinnedBlocked}
+      onClick={onTogglePicking}
+    >
+      {addLabel}
+    </Button>
+  );
+
+  const fitLabel =
+    mode === "group"
+      ? t("Fit all linked floors", "リンクした全フロアを合わせる")
+      : t("Fit this floor", "このフロアを合わせる");
+
+  const fitButton = (
+    <Button
+      className="w-full"
+      disabled={groupBlocked || pinnedBlocked || !enoughPoints}
+      onClick={() => dispatch({ type: "fitControlPoints", mode })}
+    >
+      {fitLabel}
+    </Button>
+  );
+
+  // Why the action is unavailable belongs on the action, not in a paragraph
+  // further up the panel.
+  const fitBlockedReason = pinnedBlocked
+    ? t(
+        `Unpin ${floorLabel} before fitting it with control points.`,
+        `基準点で合わせる前に「${floorLabel}」の固定を解除してください。`
+      )
+    : groupBlocked
+    ? t(
+        `Relink ${floorLabel} to fit all floors`,
+        `すべてのフロアを合わせるには「${floorLabel}」を再リンクしてください`
+      )
+    : t(
+        `Add ${MIN_CONTROL_POINTS - controlPoints.length} more matching ${
+          MIN_CONTROL_POINTS - controlPoints.length === 1 ? "point" : "points"
+        } to enable`,
+        `あと${MIN_CONTROL_POINTS - controlPoints.length}点追加すると有効になります`
+      );
+
   return (
-    <div className="space-y-2 text-sm">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium">{t("Control points", "基準点")}</span>
-        <Button
-          size="sm"
-          variant={pickStage ? "primary" : "secondary"}
-          disabled={groupBlocked || pinnedBlocked}
-          onClick={onTogglePicking}
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[13px] font-medium leading-[18px] text-foreground">
+          {t("Control points", "基準点")}
+        </span>
+        <DisabledHint
+          className="w-auto"
+          hint={
+            pinnedBlocked
+              ? t(
+                  `Unpin ${floorLabel} before adding control points`,
+                  `基準点を追加する前に「${floorLabel}」の固定を解除してください`
+                )
+              : groupBlocked
+              ? t(
+                  `Relink ${floorLabel} to add points for every floor`,
+                  `全フロアに対応点を追加するには「${floorLabel}」を再リンクしてください`
+                )
+              : null
+          }
         >
-          {pickStage === "artwork"
-            ? t("Click a point on the plan...", "図面上の点をクリック...")
-            : pickStage === "map"
-              ? t("Click the same point on the map...", "地図上の同じ点をクリック...")
-              : t("Add matching pair", "対応点を追加")}
-        </Button>
+          {addButton}
+        </DisabledHint>
       </div>
 
-      <p className="text-xs text-[var(--color-text-muted)]">{scopeGuide}</p>
-      <p className="text-xs font-medium">
-        {t(
-          `${controlPoints.length} / ${MIN_CONTROL_POINTS} minimum`,
-          `最低${MIN_CONTROL_POINTS}点中${controlPoints.length}点`
-        )}
-      </p>
-      <p className="text-xs text-[var(--color-text-muted)]">{nextStep}</p>
+      <p className="text-xs leading-4 text-muted-foreground">{scopeGuide}</p>
+
+      <div className="flex flex-col gap-1">
+        <p className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-foreground">
+          {t(
+            `${controlPoints.length} / ${MIN_CONTROL_POINTS} minimum`,
+            `最低${MIN_CONTROL_POINTS}点中${controlPoints.length}点`
+          )}
+        </p>
+        {/* Three segments, one per required pair — the count and the progress
+            say the same thing, so the bar carries no text of its own. */}
+        <div className="flex gap-1" aria-hidden="true">
+          {Array.from({ length: MIN_CONTROL_POINTS }, (_, index) => (
+            <span
+              key={index}
+              className={`h-1 flex-1 rounded-full ${
+                index < controlPoints.length ? "bg-signal" : "bg-border"
+              }`}
+            />
+          ))}
+        </div>
+        <p className="text-xs leading-4 text-muted-foreground">{nextStep}</p>
+      </div>
 
       {groupBlocked ? (
-        <p className="text-xs text-[var(--color-error)]">
+        <p className="text-xs leading-4 text-destructive">
           {t(
             `Relink ${floorLabel} before fitting all floors.`,
             `すべてのフロアを合わせる前に「${floorLabel}」を再リンクしてください。`
@@ -99,41 +177,45 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
         </p>
       ) : null}
 
-      {pinnedBlocked ? (
-        <p className="text-xs text-[var(--color-error)]">
-          {t(
-            `Unpin ${floorLabel} before fitting it with control points.`,
-            `基準点で合わせる前に「${floorLabel}」の固定を解除してください。`
-          )}
-        </p>
+      {/* The legend describes markers on the map. With no pairs placed there is
+          nothing out there to describe. */}
+      {controlPoints.length > 0 ? (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] leading-4 text-muted-foreground">
+          <span className="inline-flex items-center gap-1">
+            <span
+              aria-hidden="true"
+              className="size-2 rounded-full border border-background"
+              style={{ backgroundColor: OVERLAY_COLORS.artwork }}
+            />
+            {t("Artwork position", "図面上の位置")}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span
+              aria-hidden="true"
+              className="size-2 rounded-full border border-background"
+              style={{ backgroundColor: OVERLAY_COLORS.reference }}
+            />
+            {t("Reference target", "参照先")}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span
+              aria-hidden="true"
+              className="h-0.5 w-3"
+              style={{ backgroundColor: OVERLAY_COLORS.residual }}
+            />
+            {t("Residual", "ずれ")}
+          </span>
+        </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-muted)]">
-        <span className="inline-flex items-center gap-1">
-          <span
-            aria-hidden="true"
-            className="size-2 rounded-full border border-white bg-[#2563eb]"
-          />
-          {t("Artwork position", "図面上の位置")}
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span
-            aria-hidden="true"
-            className="size-2 rounded-full border border-white bg-[#f59e0b]"
-          />
-          {t("Reference target", "参照先")}
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span aria-hidden="true" className="h-0.5 w-3 bg-[#dc2626]" />
-          {t("Residual", "ずれ")}
-        </span>
-      </div>
-
       {controlPoints.length > 0 ? (
-        <ul className="space-y-1">
+        <ul className="flex flex-col gap-0.5">
           {controlPoints.map((point, index) => (
-            <li key={point.id} className="flex items-center justify-between text-xs">
-              <span>
+            <li
+              key={point.id}
+              className="flex items-center justify-between gap-2 text-xs leading-4"
+            >
+              <span className="font-mono text-[11px] text-muted-foreground">
                 #{index + 1} ({point.artwork[0].toFixed(1)}, {point.artwork[1].toFixed(1)}) pt
                 {fit ? ` — ${fit.perPoint[index].toFixed(2)} m` : ""}
                 {fit && index === largestResidualIndex
@@ -142,7 +224,7 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
               </span>
               <button
                 type="button"
-                className="text-[var(--color-error)]"
+                className="shrink-0 rounded-sm text-xs text-muted-foreground transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => dispatch({ type: "removeControlPoint", id: point.id })}
               >
                 {t("Remove", "削除")}
@@ -153,21 +235,15 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
       ) : null}
 
       {fit ? (
-        <p className="text-xs">
-          {t("Current RMSE", "現在のRMSE")}: <strong>{fit.rmse.toFixed(2)} m</strong>
+        <p className="text-xs leading-4">
+          {t("Current RMSE", "現在のRMSE")}:{" "}
+          <strong className="font-mono">{fit.rmse.toFixed(2)} m</strong>
         </p>
       ) : null}
 
-      <Button
-        size="sm"
-        className="w-full"
-        disabled={pinnedBlocked || groupBlocked || controlPoints.length < MIN_CONTROL_POINTS}
-        onClick={() => dispatch({ type: "fitControlPoints", mode })}
-      >
-        {mode === "group"
-          ? t("Fit all linked floors", "リンクした全フロアを合わせる")
-          : t("Fit this floor", "このフロアを合わせる")}
-      </Button>
+      <DisabledHint hint={pinnedBlocked || groupBlocked || !enoughPoints ? fitBlockedReason : null}>
+        {fitButton}
+      </DisabledHint>
     </div>
   );
 }

@@ -16,8 +16,8 @@ test("renders upload page heading", () => {
     </QueryClientProvider>
   );
 
-  expect(screen.getByText("Standard import")).toBeInTheDocument();
-  expect(screen.getByText("IMDF-schema shapefiles")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Standard" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "IMDF schema" })).toBeInTheDocument();
 });
 
 test("allows deselecting queued files before import", async () => {
@@ -107,5 +107,5 @@ test("queues geopackage uploads as selectable sources", async () => {
   await waitFor(() => expect(importButton).toBeEnabled());
   expect(screen.getByText("1 of 1 datasets selected")).toBeInTheDocument();
   expect(screen.getByText("station.gpkg")).toBeInTheDocument();
-  expect(screen.getByText(".gpkg")).toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: "station.gpkg" })).toBeChecked();
 });

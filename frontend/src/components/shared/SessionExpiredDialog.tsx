@@ -19,14 +19,14 @@ export function SessionExpiredDialog() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-      <div className="w-full max-w-md rounded border bg-white p-5 shadow-lg">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 p-4">
+      <div className="w-full max-w-md rounded border bg-card p-5 shadow-lg">
         <h2 className="text-lg font-semibold">{t("Session Expired", "セッションの有効期限が切れました")}</h2>
-        <p className="mt-2 text-sm text-slate-700">{message}</p>
+        <p className="mt-2 text-sm text-foreground">{message}</p>
         <div className="mt-4 flex justify-end gap-2">
           <button
             type="button"
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white"
+            className="rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground"
             onClick={restart}
           >
             {t("Back to Upload", "アップロード画面へ戻る")}

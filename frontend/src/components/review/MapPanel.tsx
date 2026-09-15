@@ -1,10 +1,15 @@
+import { Maximize2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Layer, type LayerProps, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
 
 import { type ReviewFeature, type ReviewIssue, featureLayerKey, isLocatedFeature } from "./types";
+import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { Button } from "../ui";
 import { MapView } from "../shared/MapView";
 import { isFeatureOnFloor } from "./floorGroups";
-import { STREET_MAP_STYLE } from "../shared/streetMapStyle";
+import { useAppStore } from "../../store/useAppStore";
+import { MAP_BACKGROUND, STREET_MAP_STYLE } from "../shared/streetMapStyle";
+import { featureColorMatchExpr, featureColorMatchTail } from "../shared/featureColors";
 import { buildUnitFillColorExpr, buildUnitLineColorExpr, buildUnitOpacityExpr } from "../shared/unitCategoryColors";
 
 
@@ -26,17 +31,7 @@ const POLYGON_FILL_LAYER: LayerProps = {
   type: "fill",
   filter: ["==", ["geometry-type"], "Polygon"],
   paint: {
-    "fill-color": buildUnitFillColorExpr("_feature_type", [
-      "venue", "#334155",
-      "footprint", "#7c3aed",
-      "level", "#2563eb",
-      "fixture", "#14b8a6",
-      "section", "#0f766e",
-      "geofence", "#16a34a",
-      "kiosk", "#f97316",
-      "facility", "#a855f7",
-      "#64748b"
-    ]),
+    "fill-color": buildUnitFillColorExpr("_feature_type", featureColorMatchTail("fill")),
     "fill-opacity": buildUnitOpacityExpr("_feature_type", 1.0, 0.7)
   }
 } as unknown as LayerProps;
@@ -46,17 +41,7 @@ const POLYGON_LINE_LAYER: LayerProps = {
   type: "line",
   filter: ["==", ["geometry-type"], "Polygon"],
   paint: {
-    "line-color": buildUnitLineColorExpr("_feature_type", [
-      "venue", "#1e293b",
-      "footprint", "#6d28d9",
-      "level", "#1d4ed8",
-      "fixture", "#0f766e",
-      "section", "#0f766e",
-      "geofence", "#15803d",
-      "kiosk", "#ea580c",
-      "facility", "#7e22ce",
-      "#475569"
-    ]),
+    "line-color": buildUnitLineColorExpr("_feature_type", featureColorMatchTail("line")),
     "line-width": 1.5
   }
 } as unknown as LayerProps;
@@ -66,17 +51,7 @@ const LINE_LAYER: LayerProps = {
   type: "line",
   filter: ["==", ["geometry-type"], "LineString"],
   paint: {
-    "line-color": [
-      "match",
-      ["get", "_feature_type"],
-      "opening",
-      "#ea580c",
-      "detail",
-      "#0f766e",
-      "relationship",
-      "#7c3aed",
-      "#2563eb"
-    ],
+    "line-color": featureColorMatchExpr("_feature_type", "line"),
     "line-width": 2.5
   }
 };
@@ -86,19 +61,7 @@ const POINT_LAYER: LayerProps = {
   type: "circle",
   filter: ["==", ["geometry-type"], "Point"],
   paint: {
-    "circle-color": [
-      "match",
-      ["get", "_feature_type"],
-      "amenity",
-      "#16a34a",
-      "anchor",
-      "#2563eb",
-      "kiosk",
-      "#f97316",
-      "facility",
-      "#a855f7",
-      "#0ea5e9"
-    ],
+    "circle-color": featureColorMatchExpr("_feature_type", "fill"),
     "circle-radius": 5,
     "circle-stroke-color": "#ffffff",
     "circle-stroke-width": 1.2
@@ -298,12 +261,26 @@ export function MapPanel({
   // it, and fitBounds is a no-op until the map exists: without this gate the
   // review map opened on the hardcoded initial view and never framed the data.
   const [mapReady, setMapReady] = useState(false);
+  const { t } = useUiLanguage();
+  const theme = useAppStore((state) => state.theme);
 
   useEffect(() => {
     const map = mapRef.current?.getMap();
     if (!map || !map.getLayer("osm-raster")) return;
     map.setLayoutProperty("osm-raster", "visibility", showBasemap ? "visible" : "none");
-  }, [showBasemap]);
+  }, [showBasemap, mapReady]);
+
+  // Set imperatively rather than through `mapStyle`: swapping the style object
+  // tears down and rebuilds every source and layer on the map.
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !map.getLayer("background")) return;
+    map.setPaintProperty(
+      "background",
+      "background-color",
+      theme === "dark" ? MAP_BACKGROUND.dark : MAP_BACKGROUND.light
+    );
+  }, [theme, mapReady]);
 
   const toGeoJsonFeature = (feature: ReviewFeature) => ({
     type: "Feature" as const,
@@ -336,9 +313,12 @@ export function MapPanel({
   const selectedSet = useMemo(() => new Set(selectedFeatureIds), [selectedFeatureIds]);
   const hasSelection = selectedFeatureIds.length > 0;
 
+  // Taken from every feature, not just the visible ones. Selecting a level, a
+  // footprint or a unit on another floor used to produce an empty set, and the
+  // camera then framed the whole floor instead of the thing you clicked.
   const selectedFeatures = useMemo(() => {
-    return visibleFeatures.filter((feature) => selectedSet.has(feature.id));
-  }, [selectedSet, visibleFeatures]);
+    return features.filter((feature) => isLocatedFeature(feature) && selectedSet.has(feature.id));
+  }, [features, selectedSet]);
 
   const errorIds = useMemo(() => {
     return new Set(validationIssues.filter((item) => item.severity === "error" && item.feature_id).map((item) => item.feature_id!));
@@ -482,38 +462,69 @@ export function MapPanel({
     [overlapFeatures]
   );
 
-  // Frame the whole dataset once per dataset, whatever the floor filter shows.
-  // The floor fit below cannot do it: the opening floor may have no features at
-  // all, which used to leave the map on its hardcoded initial view.
-  const datasetBounds = useMemo(() => computeBounds(features.filter(isLocatedFeature)), [features]);
+  // Frame what you can see, once per dataset.
+  //
+  // Visible rather than everything, because the layers that are off by default
+  // — venue, footprint, level — are the big ones: framing those left the units
+  // you actually work with as a small shape off in a corner. Falls back to the
+  // whole dataset so a floor with nothing on it still lands somewhere real, and
+  // only latches once a fit has actually happened.
+  const datasetKey = useMemo(
+    () => computeBounds(features.filter(isLocatedFeature))?.flat().join(",") ?? null,
+    [features]
+  );
   const framedBoundsRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!mapReady || !datasetBounds || !mapRef.current) {
+    if (!mapReady || !datasetKey || !mapRef.current) {
       return;
     }
-    const key = datasetBounds.flat().join(",");
-    if (framedBoundsRef.current === key) {
+    if (framedBoundsRef.current === datasetKey) {
       return;
     }
-    framedBoundsRef.current = key;
-    mapRef.current.fitBounds(datasetBounds, { padding: 40, duration: 0 });
-  }, [mapReady, datasetBounds]);
+    const bounds =
+      computeBounds(visibleFeatures) ?? computeBounds(features.filter(isLocatedFeature));
+    if (!bounds) {
+      return;
+    }
+    framedBoundsRef.current = datasetKey;
+    mapRef.current.fitBounds(bounds, { padding: 40, duration: 0 });
+  }, [mapReady, datasetKey, visibleFeatures, features]);
+
+  // Framing follows the selection and nothing else.
+  //
+  // It used to fall back to framing every visible feature, which meant changing
+  // floor zoomed back out to that floor's extent — the one thing you do not
+  // want when you are comparing the same corner of two floors. Keyed on the
+  // selected ids so a refetch, an edit or a layer toggle leaves the camera
+  // alone; `Zoom to fit` below is how you get the overview back deliberately.
+  const fittedSelectionRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!mapReady) {
+    if (!mapReady || !mapRef.current) {
       return;
     }
-    const target = selectedFeatures.length ? selectedFeatures : visibleFeatures;
-    const bounds = computeBounds(target);
-    if (!bounds || !mapRef.current) {
+    const key = selectedFeatures.map((feature) => feature.id).sort().join(",");
+    if (!key || fittedSelectionRef.current === key) {
+      fittedSelectionRef.current = key || null;
       return;
     }
-    mapRef.current.fitBounds(bounds, {
-      padding: 40,
-      duration: 400
-    });
-  }, [mapReady, selectedFeatures, visibleFeatures]);
+    fittedSelectionRef.current = key;
+    const bounds = computeBounds(selectedFeatures);
+    if (!bounds) {
+      return;
+    }
+    // `maxZoom` because a single door is metres across: fitting it exactly
+    // lands past the deepest tile and shows a blank page with a dot on it.
+    mapRef.current.fitBounds(bounds, { padding: 80, duration: 400, maxZoom: 20 });
+  }, [mapReady, selectedFeatures]);
+
+  const zoomToFit = () => {
+    const bounds = computeBounds(visibleFeatures.length ? visibleFeatures : features);
+    if (bounds) {
+      mapRef.current?.fitBounds(bounds, { padding: 40, duration: 400 });
+    }
+  };
 
   // Zoom to the active issue's feature(s) when one is selected
   useEffect(() => {
@@ -546,7 +557,17 @@ export function MapPanel({
   };
 
   return (
-    <div className="h-full overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)]">
+    <div className="relative h-full overflow-hidden rounded-md border border-border">
+      <Button
+        variant="outline"
+        size="sm"
+        className="absolute right-3 top-3 z-10 bg-popover/95 backdrop-blur"
+        onClick={zoomToFit}
+        title={t("Frame everything on screen", "\u8868\u793a\u4e2d\u306e\u5168\u4f53\u3092\u8868\u793a")}
+      >
+        <Maximize2 className="h-3.5 w-3.5" />
+        {t("Zoom to fit", "\u5168\u4f53\u3092\u8868\u793a")}
+      </Button>
       <MapView
         ref={mapRef}
         initialViewState={{

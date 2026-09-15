@@ -2,12 +2,20 @@ import { useEffect, useState } from "react";
 
 import { getIsoSubdivisions, type IsoSubdivision } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import {
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../ui";
 
 type Props = {
+  id?: string;
   country: string;
   value: string | null;
   onChange: (value: string | null) => void;
-  className?: string;
 };
 
 /**
@@ -18,13 +26,12 @@ type Props = {
  * Falls back to a free-text input when the country has no reference list
  * available (unknown country code or the lookup is unavailable offline).
  */
-export function ProvinceSelect({ country, value, onChange, className }: Props) {
+export function ProvinceSelect({ id, country, value, onChange }: Props) {
   const { t } = useUiLanguage();
   const [subdivisions, setSubdivisions] = useState<IsoSubdivision[]>([]);
   const [loading, setLoading] = useState(false);
 
   const normalizedCountry = country.trim().toUpperCase();
-  const inputClass = className ?? "w-full rounded border px-2 py-1.5";
 
   useEffect(() => {
     let cancelled = false;
@@ -58,8 +65,8 @@ export function ProvinceSelect({ country, value, onChange, className }: Props) {
   // No reference list (unknown country / offline): keep manual entry possible.
   if (!loading && subdivisions.length === 0) {
     return (
-      <input
-        className={inputClass}
+      <Input
+        id={id}
         value={value ?? ""}
         placeholder={t("ISO 3166-2 code (e.g. JP-13)", "ISO 3166-2 コード（例：JP-13）")}
         onChange={(event) => onChange(event.target.value.trim() ? event.target.value.trim() : null)}
@@ -71,19 +78,31 @@ export function ProvinceSelect({ country, value, onChange, className }: Props) {
   const knownValue = subdivisions.some((item) => item.code === currentValue);
 
   return (
-    <select
-      className={inputClass}
-      value={currentValue}
+    <Select
+      value={currentValue || NONE}
       disabled={loading}
-      onChange={(event) => onChange(event.target.value ? event.target.value : null)}
+      onValueChange={(next) => onChange(next === NONE ? null : next)}
     >
-      <option value="">{loading ? t("Loading…", "読み込み中…") : t("— Select province —", "— 都道府県を選択 —")}</option>
-      {currentValue && !knownValue ? <option value={currentValue}>{currentValue}</option> : null}
-      {subdivisions.map((item) => (
-        <option key={item.code} value={item.code}>
-          {`${item.code} ${item.name}`}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger id={id}>
+        <SelectValue
+          placeholder={loading ? t("Loading…", "読み込み中…") : t("Select province", "都道府県を選択")}
+        />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={NONE}>{t("Not set", "未設定")}</SelectItem>
+        {/* A code the reference list does not know still has to stay selectable,
+            or opening the wizard on an old project would silently clear it. */}
+        {currentValue && !knownValue ? (
+          <SelectItem value={currentValue}>{currentValue}</SelectItem>
+        ) : null}
+        {subdivisions.map((item) => (
+          <SelectItem key={item.code} value={item.code}>
+            {`${item.code} ${item.name}`}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
+
+const NONE = "__none__";
