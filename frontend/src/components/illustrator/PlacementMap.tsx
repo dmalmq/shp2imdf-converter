@@ -33,9 +33,12 @@ import {
   BASEMAP_ORDER,
   BASEMAP_STYLES,
   basemapLabel,
+  isImageryBasemap,
   type BasemapId
 } from "../shared/basemapStyles";
-import { Button } from "../ui";
+import { Button } from "../ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { cn } from "@/lib/utils";
 import {
   DEFAULT_ARTWORK_VIEW,
   floorPaint,
@@ -44,6 +47,8 @@ import {
   type ArtworkView
 } from "./artworkView";
 import { TransformHandles } from "./TransformHandles";
+import { Contrast, Layers, Maximize2 } from "lucide-react";
+import { OVERLAY_COLORS } from "./overlayColors";
 import {
   ARTWORK_SLOT_LAYER_ID,
   ARTWORK_SLOT_SOURCE_ID,
@@ -60,7 +65,14 @@ import {
   referenceSourceId
 } from "./placementMapLayers";
 
-export const FLOOR_TINTS = ["#3b82f6", "#16a34a", "#dc2626", "#9333ea", "#d97706", "#0891b2"];
+/**
+ * Fallback colour for the active floor, used when the artwork carries no colour
+ * of its own. `signal` — reserved for the placed artwork and nothing else.
+ *
+ * Replaces a six-entry `FLOOR_TINTS` list: floors no longer each own a hue, so
+ * there is one tint rather than one per floor.
+ */
+export const ARTWORK_TINT = "#ea580c";
 const PLACEMENT_GLYPHS = "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf";
 
 /** Snap radius for control-point picking, in screen pixels. */
@@ -362,6 +374,7 @@ export function PlacementMap({
   const mapRef = useRef<MapRef | null>(null);
   const [ready, setReady] = useState(false);
   const [basemap, setBasemap] = useState<BasemapId>("osm");
+  const [basemapOpen, setBasemapOpen] = useState(false);
   const [view, setView] = useState<ArtworkView>(DEFAULT_ARTWORK_VIEW);
   const [rubber, setRubber] = useState<
     { x0: number; y0: number; x1: number; y1: number } | null
@@ -509,6 +522,49 @@ export function PlacementMap({
     onPickMap(snapped ?? [event.lngLat.lng, event.lngLat.lat]);
   };
 
+  // Bottom-left read-out. Updated on moveEnd rather than move: a pan fires move
+  // every frame, and re-rendering this map on every frame to retitle a label is
+  // not a trade worth making.
+  const [center, setCenter] = useState<[number, number] | null>(null);
+
+  /**
+   * Frame the active floor.
+   *
+   * The artwork routinely sits as a small shape on a very large basemap with no
+   * way back to it; panning to find your own drawing was the most common way to
+   * get lost on this screen.
+   */
+  const zoomToArtwork = () => {
+    const instance = mapRef.current?.getMap();
+    const active = placedByFloor.find((floor) => floor.label === activeLabel);
+    if (!instance || !active) return;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    const walk = (coords: unknown): void => {
+      if (!Array.isArray(coords)) return;
+      if (typeof coords[0] === "number" && typeof coords[1] === "number") {
+        const [x, y] = coords as [number, number];
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+        return;
+      }
+      for (const part of coords) walk(part);
+    };
+    for (const feature of active.data.features) walk((feature.geometry as { coordinates?: unknown })?.coordinates);
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
+    instance.fitBounds(
+      [
+        [minX, minY],
+        [maxX, maxY]
+      ],
+      { padding: 72, duration: 600, maxZoom: 20 }
+    );
+  };
+
   // The pinned artwork half of the pair follows the active floor's transform.
   const pendingMarkerLngLat =
     pickStage === "map" && pendingArtwork && activeTransform
@@ -533,6 +589,9 @@ export function PlacementMap({
           setReady(true);
         }}
         onRemove={() => setReady(false)}
+        onMoveEnd={(event) =>
+          setCenter([event.viewState.longitude, event.viewState.latitude])
+        }
         onClick={onClick}
         cursor={shapePickActive || pickStage ? "crosshair" : undefined}
       >
@@ -593,7 +652,8 @@ export function PlacementMap({
           const paint = floorPaint(
             floor.label === activeLabel ? "active" : "other",
             view,
-            floor.color
+            floor.color,
+            isImageryBasemap(basemap)
           );
           const layout = {
             visibility: artworkVisible ? paint.layout.visibility : ("none" as const)
@@ -635,7 +695,8 @@ export function PlacementMap({
                 `Artwork point ${activeFloor.controlPoints.length + 1}`,
                 `図面上の点 ${activeFloor.controlPoints.length + 1}`
               )}
-              className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-[#2563eb] text-[10px] font-semibold text-white shadow"
+              className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-white text-[10px] font-semibold text-white shadow"
+              style={{ backgroundColor: OVERLAY_COLORS.artwork }}
             >
               {activeFloor.controlPoints.length + 1}
             </div>
@@ -647,7 +708,7 @@ export function PlacementMap({
             id="placement-control-point-residuals"
             type="line"
             filter={["==", ["get", "kind"], "residual"]}
-            paint={{ "line-color": "#dc2626", "line-width": 2 }}
+            paint={{ "line-color": OVERLAY_COLORS.residual, "line-width": 2 }}
           />
           <Layer
             id="placement-control-point-artwork"
@@ -655,8 +716,8 @@ export function PlacementMap({
             filter={["==", ["get", "kind"], "artwork"]}
             paint={{
               "circle-radius": 5,
-              "circle-color": "#2563eb",
-              "circle-stroke-color": "#ffffff",
+              "circle-color": OVERLAY_COLORS.artwork,
+              "circle-stroke-color": OVERLAY_COLORS.halo,
               "circle-stroke-width": 2
             }}
           />
@@ -666,8 +727,8 @@ export function PlacementMap({
             filter={["==", ["get", "kind"], "reference"]}
             paint={{
               "circle-radius": 6,
-              "circle-color": "#f59e0b",
-              "circle-stroke-color": "#ffffff",
+              "circle-color": OVERLAY_COLORS.reference,
+              "circle-stroke-color": OVERLAY_COLORS.halo,
               "circle-stroke-width": 2
             }}
           />
@@ -682,7 +743,7 @@ export function PlacementMap({
               "text-anchor": "center",
               "text-allow-overlap": true
             }}
-            paint={{ "text-color": "#ffffff" }}
+            paint={{ "text-color": OVERLAY_COLORS.halo }}
           />
         </Source>
 
@@ -691,7 +752,7 @@ export function PlacementMap({
             id="placement-shape-match-residuals"
             type="line"
             filter={["==", ["get", "kind"], "residual"]}
-            paint={{ "line-color": "#dc2626", "line-width": 1.5, "line-opacity": 0.9 }}
+            paint={{ "line-color": OVERLAY_COLORS.residual, "line-width": 1.5, "line-opacity": 0.9 }}
           />
           <Layer
             id="placement-shape-match-selected-fill"
@@ -881,7 +942,7 @@ export function PlacementMap({
       {/* Above the area-capture layer: switching levels mid-pick is how the
           user gets a clear look at the floor being boxed. */}
       <div className="absolute left-3 top-3 z-20 flex flex-col gap-2">
-        <div className="flex flex-wrap gap-1 rounded-[var(--radius-md)] bg-white/90 p-1 shadow">
+        <div className="flex flex-wrap gap-1 rounded-md bg-popover/95 p-1 text-popover-foreground shadow-md">
           {floors.length > 1 ? (
             <>
               {floors.map((floor) => {
@@ -890,7 +951,11 @@ export function PlacementMap({
                   <Button
                     key={floor.label}
                     size="sm"
-                    variant={floor.label === state.activeFloorLabel ? "primary" : "secondary"}
+                    variant={floor.label === state.activeFloorLabel ? "default" : "ghost"}
+                    className={cn(
+                      floor.label === state.activeFloorLabel &&
+                        "bg-signal text-signal-foreground hover:bg-signal/90"
+                    )}
                     // The deleted dropdown announced its current value; the
                     // pills are the only floor control now, so the active one
                     // must expose the state, not just the colour.
@@ -917,13 +982,13 @@ export function PlacementMap({
                   </Button>
                 );
               })}
-              <span aria-hidden="true" className="mx-1 w-px self-stretch bg-[var(--color-border)]" />
+              <span aria-hidden="true" className="mx-1 w-px self-stretch bg-border" />
               {/* What gestures act on: the whole linked group while aligning the
                   building as one, or the selected floor for final per-floor
                   nudges. Sits with the pills because it pairs with floor switching. */}
               <Button
                 size="sm"
-                variant={mode === "group" ? "primary" : "secondary"}
+                variant={mode === "group" ? "default" : "ghost"}
                 aria-pressed={mode === "group"}
                 onClick={() => onModeChange("group")}
                 title={t(
@@ -935,7 +1000,7 @@ export function PlacementMap({
               </Button>
               <Button
                 size="sm"
-                variant={mode === "individual" ? "primary" : "secondary"}
+                variant={mode === "individual" ? "default" : "ghost"}
                 aria-pressed={mode === "individual"}
                 onClick={() => onModeChange("individual")}
                 title={t(
@@ -945,13 +1010,13 @@ export function PlacementMap({
               >
                 {t("Individual", "個別")}
               </Button>
-              <span aria-hidden="true" className="mx-1 w-px self-stretch bg-[var(--color-border)]" />
+              <span aria-hidden="true" className="mx-1 w-px self-stretch bg-border" />
               {/* Isolating the selected floor sits with the floor pills rather
                   than in the sidebar: it is a view option reached for while
                   watching the map, exactly like the basemap switcher below. */}
               <Button
                 size="sm"
-                variant={view.others === "hidden" ? "primary" : "secondary"}
+                variant={view.others === "hidden" ? "default" : "ghost"}
                 aria-pressed={view.others === "hidden"}
                 onClick={() => setView(toggleOthersHidden)}
                 title={t(
@@ -963,32 +1028,81 @@ export function PlacementMap({
               </Button>
             </>
           ) : null}
-          <Button
-            size="sm"
-            variant={view.active === "transparent" ? "primary" : "secondary"}
-            aria-pressed={view.active === "transparent"}
-            onClick={() => setView(toggleTransparent)}
-            title={t(
-              "Draw the selected floor as outlines so the map shows through",
-              "選択中の階を輪郭だけで描き、下の地図を透かして見る"
-            )}
-          >
-            {t("Transparent", "透過表示")}
-          </Button>
-        </div>
-        <div className="flex gap-1 rounded-[var(--radius-md)] bg-white/90 p-1 shadow">
-          {BASEMAP_ORDER.map((id) => (
-            <Button
-              key={id}
-              size="sm"
-              variant={id === basemap ? "primary" : "secondary"}
-              onClick={() => setBasemap(id)}
-            >
-              {basemapLabel(id, t)}
-            </Button>
-          ))}
         </div>
       </div>
+
+      {/* Tools, not geometry: things you reach for occasionally sit opposite the
+          floor switcher as icons. The basemap had four always-visible chips in
+          the prime corner — it is chosen once per session. */}
+      <div className="absolute right-3 top-3 z-20 flex gap-0.5 rounded-md bg-popover/95 p-1 text-popover-foreground shadow-md">
+        <Popover open={basemapOpen} onOpenChange={setBasemapOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label={t("Basemap", "背景地図")}
+              title={basemapLabel(basemap, t)}
+            >
+              <Layers />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-52 p-1">
+            {BASEMAP_ORDER.map((id) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={id === basemap}
+                onClick={() => {
+                  setBasemap(id);
+                  setBasemapOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-center rounded-sm px-2 py-1.5 text-left text-sm transition-colors",
+                  id === basemap
+                    ? "bg-accent font-medium text-accent-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                )}
+              >
+                {basemapLabel(id, t)}
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
+
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={zoomToArtwork}
+          aria-label={t("Zoom to artwork", "図面にズーム")}
+          title={t("Frame the selected floor", "選択中の階に合わせる")}
+        >
+          <Maximize2 />
+        </Button>
+
+        <Button
+          size="icon"
+          variant={view.active === "transparent" ? "default" : "ghost"}
+          aria-pressed={view.active === "transparent"}
+          onClick={() => setView(toggleTransparent)}
+          aria-label={t("Transparent", "透過表示")}
+          title={t(
+            "Draw the selected floor as outlines so the map shows through",
+            "選択中の階を輪郭だけで描き、下の地図を透かして見る"
+          )}
+        >
+          <Contrast />
+        </Button>
+      </div>
+
+      {/* Technical marginalia: where you are and in what, without spending a
+          panel on it. */}
+      {center ? (
+        <div className="pointer-events-none absolute bottom-3 left-3 z-20 rounded-md bg-popover/95 px-2 py-1 font-mono text-[10px] leading-[14px] tracking-[0.02em] text-popover-foreground shadow-md">
+          {center[1].toFixed(6)}, {center[0].toFixed(6)}
+          <span className="mx-1 text-muted-foreground">·</span>
+          <span className="text-muted-foreground">{state.frame.workingCrs}</span>
+        </div>
+      ) : null}
     </div>
   );
 }

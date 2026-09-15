@@ -2,11 +2,19 @@ import { useMemo } from "react";
 
 import type { ImportedFile, UpdateFileRequest } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import {
+  Checkbox,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../ui";
 
 
 type Props = {
   files: ImportedFile[];
-  saving: boolean;
   onPatchFile: (stem: string, payload: UpdateFileRequest) => void;
 };
 
@@ -32,7 +40,7 @@ function makeFloorLabel(ordinal: number | null): string {
 }
 
 
-export function LevelMapStep({ files, saving, onPatchFile }: Props) {
+export function LevelMapStep({ files, onPatchFile }: Props) {
   const { t } = useUiLanguage();
   const levelFiles = useMemo(
     () => files.filter((item) => LEVEL_REQUIRED_TYPES.has(item.detected_type ?? "")),
@@ -87,26 +95,24 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
     return gaps;
   }, [buckets]);
 
+  // The stacking diagram is a short list, not half the screen: giving it a
+  // fixed narrow rail is what lets the table show all seven columns instead of
+  // clipping Category off the right edge at 1440px.
   return (
-    <section className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,1fr)] 2xl:grid-cols-[minmax(0,1.7fr)_minmax(400px,1fr)]">
-      <div className="min-w-0 rounded border bg-white p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{t("Step 3: Level Mapping", "Step 3: レベル対応付け")}</h2>
-          {saving && <span className="text-xs text-slate-500">{t("Saving...", "保存中...")}</span>}
-        </div>
-
-        <div className="max-h-[58vh] min-h-[430px] overflow-auto rounded border">
-          <table className="min-w-[860px] w-full table-fixed border-collapse text-sm">
+    <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_16rem]">
+      <div className="min-w-0 rounded-lg border border-border bg-card p-5">
+        <div className="max-h-[58vh] min-h-[430px] overflow-auto rounded-lg border border-border">
+          <table className="w-full min-w-[44rem] table-fixed border-collapse text-sm">
             <colgroup>
-              <col style={{ width: "30%" }} />
-              <col style={{ width: "10%" }} />
-              <col style={{ width: "13%" }} />
+              <col style={{ width: "25%" }} />
+              <col style={{ width: "9%" }} />
+              <col style={{ width: "12%" }} />
               <col style={{ width: "15%" }} />
-              <col style={{ width: "10%" }} />
-              <col style={{ width: "8%" }} />
-              <col style={{ width: "14%" }} />
+              <col style={{ width: "11%" }} />
+              <col style={{ width: "9%" }} />
+              <col style={{ width: "19%" }} />
             </colgroup>
-            <thead className="sticky top-0 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
+            <thead className="sticky top-0 bg-muted text-left font-mono text-[10px] uppercase leading-[13px] tracking-[0.06em] text-muted-foreground">
               <tr>
                 <th className="px-3 py-2.5">{t("Filename", "ファイル名")}</th>
                 <th className="px-3 py-2.5">{t("Type", "種別")}</th>
@@ -119,15 +125,16 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
             </thead>
             <tbody>
               {levelFiles.map((file) => (
-                <tr key={file.stem} className="border-t">
+                <tr key={file.stem} className="border-t border-border">
                   <td className="truncate px-3 py-2.5 font-mono text-xs" title={file.stem}>
                     {file.stem}
                   </td>
                   <td className="px-3 py-2.5">{file.detected_type}</td>
                   <td className="px-3 py-2.5">
-                    <input
-                      className="w-full max-w-[5rem] rounded border px-2 py-1"
+                    <Input
+                      className="h-8 w-full max-w-[5rem]"
                       type="number"
+                      aria-label={t(`Level of ${file.stem}`, `${file.stem} のレベル`)}
                       value={file.detected_level ?? ""}
                       onChange={(event) =>
                         onPatchFile(file.stem, {
@@ -137,36 +144,47 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
                     />
                   </td>
                   <td className="px-3 py-2.5">
-                    <input
-                      className="w-full rounded border px-2 py-1"
+                    <Input
+                      className="h-8 w-full"
+                      aria-label={t(`Level name of ${file.stem}`, `${file.stem} のレベル名`)}
                       value={file.level_name ?? makeFloorLabel(file.detected_level)}
                       onChange={(event) => onPatchFile(file.stem, { level_name: event.target.value })}
                     />
                   </td>
                   <td className="px-3 py-2.5">
-                    <input
-                      className="w-full max-w-[6rem] rounded border px-2 py-1"
+                    <Input
+                      className="h-8 w-full max-w-[6rem]"
+                      aria-label={t(`Short name of ${file.stem}`, `${file.stem} の短縮名`)}
                       value={file.short_name ?? makeFloorLabel(file.detected_level)}
                       onChange={(event) => onPatchFile(file.stem, { short_name: event.target.value })}
                     />
                   </td>
                   <td className="px-3 py-2.5">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={file.outdoor}
-                      onChange={(event) => onPatchFile(file.stem, { outdoor: event.target.checked })}
+                      aria-label={t(`${file.stem} is outdoors`, `${file.stem} は屋外`)}
+                      onCheckedChange={(checked) =>
+                        onPatchFile(file.stem, { outdoor: checked === true })
+                      }
                     />
                   </td>
                   <td className="px-3 py-2.5">
-                    <select
-                      className="rounded border px-2 py-1"
+                    <Select
                       value={file.level_category}
-                      onChange={(event) => onPatchFile(file.stem, { level_category: event.target.value })}
+                      onValueChange={(value) => onPatchFile(file.stem, { level_category: value })}
                     >
-                      <option value="unspecified">unspecified</option>
-                      <option value="parking">parking</option>
-                      <option value="transit">transit</option>
-                    </select>
+                      <SelectTrigger
+                        className="h-8"
+                        aria-label={t(`Category of ${file.stem}`, `${file.stem} のカテゴリ`)}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unspecified">unspecified</SelectItem>
+                        <SelectItem value="parking">parking</SelectItem>
+                        <SelectItem value="transit">transit</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </td>
                 </tr>
               ))}
@@ -175,15 +193,15 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
         </div>
       </div>
 
-      <div className="rounded border bg-white p-5">
-        <h3 className="mb-2 text-sm font-semibold text-slate-700">{t("Stacking Diagram", "レベル構成図")}</h3>
-        <p className="mb-4 text-xs text-slate-500">
+      <div className="rounded-lg border border-border bg-card p-5">
+        <h3 className="mb-2 text-sm font-semibold text-foreground">{t("Stacking Diagram", "レベル構成図")}</h3>
+        <p className="mb-4 text-xs text-muted-foreground">
           {t("Levels are ordered by ordinal from bottom to top.", "レベルは下階から上階へ順に並びます。")}
         </p>
         <div className="space-y-2">
           {buckets.map((bucket) => {
             const hasDuplicate = duplicateOrdinals.has(bucket.ordinal);
-            const labelClass = hasDuplicate ? "border-red-400 bg-red-50 text-red-700" : "border-slate-300 bg-slate-50 text-slate-700";
+            const labelClass = hasDuplicate ? "border-destructive bg-destructive/10 text-destructive" : "border-border bg-muted text-foreground";
             return (
               <div key={bucket.ordinal} className={`rounded border px-3 py-2 text-sm ${labelClass}`}>
                 <div className="font-semibold">{t(`Ordinal ${bucket.ordinal}`, `階層 ${bucket.ordinal}`)}</div>
@@ -194,7 +212,7 @@ export function LevelMapStep({ files, saving, onPatchFile }: Props) {
           {gapOrdinals.map((ordinal) => (
             <div
               key={`gap-${ordinal}`}
-              className="rounded border border-dashed border-amber-400 bg-amber-50 px-3 py-2 text-xs text-amber-700"
+              className="rounded border border-dashed border-warning bg-warning/10 px-3 py-2 text-xs text-warning"
             >
               {t(`Gap at ordinal ${ordinal}`, `階層 ${ordinal} に欠番があります`)}
             </div>

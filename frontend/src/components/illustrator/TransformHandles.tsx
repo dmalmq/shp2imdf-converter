@@ -28,9 +28,9 @@ type Props = {
 };
 
 const HANDLE_BOX =
-  "flex h-[18px] w-[18px] items-center justify-center rounded-[3px] border border-slate-700 bg-white shadow";
+  "flex h-[18px] w-[18px] items-center justify-center rounded-[3px] border border-signal bg-background shadow";
 const HANDLE_ROUND =
-  "flex h-[22px] w-[22px] items-center justify-center rounded-full border border-slate-700 bg-white shadow";
+  "flex h-[22px] w-[22px] items-center justify-center rounded-full border border-signal bg-background shadow";
 
 /**
  * Direct-manipulation gizmo for the active floor.
@@ -260,7 +260,7 @@ export function TransformHandles({
                 style={{ cursor: corner.cursor }}
                 title="Drag to scale"
               >
-                <Maximize2 size={11} strokeWidth={2.5} className="text-slate-700" />
+                <Maximize2 size={11} strokeWidth={2.5} className="text-foreground" />
               </div>
             </Marker>
           ))
@@ -279,7 +279,7 @@ export function TransformHandles({
           style={{ cursor: "grab" }}
           title="Drag to rotate (hold Shift to snap to 15°)"
         >
-          <RotateCw size={13} strokeWidth={2.5} className="text-slate-700" />
+          <RotateCw size={13} strokeWidth={2.5} className="text-foreground" />
         </div>
       </Marker>
     </>

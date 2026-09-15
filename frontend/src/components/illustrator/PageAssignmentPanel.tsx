@@ -1,10 +1,11 @@
+import { AlertTriangle } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { FeatureCollection } from "geojson";
 
 import type { IllustratorPageAlignment, IllustratorPagePreview } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { buildSvgPaths, splitByPage, type PartitionFloor } from "../../lib/svgPreview";
-import { Button } from "../ui";
+import { Button } from "../ui/button";
 import { AssignmentPanel } from "./AssignmentPanel";
 
 type Props = {
@@ -158,15 +159,8 @@ export function PageAssignmentPanel({
 
   return (
     <div className="space-y-3 text-sm">
-      <p className="text-xs text-[var(--color-text-muted)]">
-        {t(
-          "Name the floor on each page. Pages given the same name become one floor; untick a cover sheet or legend to leave it out.",
-          "各ページのフロア名を入力してください。同じ名前のページは1つのフロアにまとまります。表紙や凡例はチェックを外して除外できます。"
-        )}
-      </p>
-
       {movedPages.length > 0 ? (
-        <p data-testid="page-alignment-note" className="text-xs text-[var(--color-text-muted)]">
+        <p data-testid="page-alignment-note" className="text-xs text-muted-foreground">
           {movedPages.length === 1
             ? t(
                 `Page ${movedPages[0].page} was aligned to page ${anchor} automatically.`,
@@ -179,30 +173,35 @@ export function PageAssignmentPanel({
         </p>
       ) : null}
 
-      {failedPages.length > 0 ? (
-        <p data-testid="page-alignment-warning" className="text-xs text-[var(--color-warning)]">
-          {failedPages.length === 1
-            ? t(
-                `Page ${failedPages[0].page} did not match page ${anchor}; align that floor yourself.`,
-                `ページ ${failedPages[0].page} はページ ${anchor} と一致しませんでした。該当フロアは手動で合わせてください。`
-              )
-            : t(
-                `Pages ${failedPages.map((entry) => entry.page).join(", ")} did not match page ${anchor}; align those floors yourself.`,
-                `ページ ${failedPages.map((entry) => entry.page).join("、")} はページ ${anchor} と一致しませんでした。該当フロアは手動で合わせてください。`
-              )}
-        </p>
-      ) : null}
-
-      {sizesDiffer ? (
-        <p
-          data-testid="page-size-warning"
-          className="rounded-[var(--radius-md)] border border-amber-400 bg-amber-50 p-2 text-xs"
-        >
-          {t(
-            "The pages are not all the same size, so their floor plans may land offset from each other. Align the building as a group first, then switch to Individual on the map to adjust any floor that needs its own position.",
-            "ページのサイズが揃っていないため、各階の位置がずれる場合があります。まずグループで建物全体を合わせてから、地図の「個別」に切り替えて位置が合わないフロアを調整してください。"
-          )}
-        </p>
+      {/* One warning region, not two. The alignment failure and the size mismatch
+          are the same problem to the reader — stacked separately they competed. */}
+      {failedPages.length > 0 || sizesDiffer ? (
+        <div className="flex items-start gap-2 rounded-lg border border-warning bg-signal-muted p-3">
+          <AlertTriangle className="mt-px h-4 w-4 shrink-0 text-warning" />
+          <div className="flex flex-col gap-1">
+            {failedPages.length > 0 ? (
+              <p data-testid="page-alignment-warning" className="text-[13px] leading-[18px] text-foreground">
+                {failedPages.length === 1
+                  ? t(
+                      `Page ${failedPages[0].page} did not match page ${anchor}; align that floor yourself.`,
+                      `ページ ${failedPages[0].page} はページ ${anchor} と一致しませんでした。該当フロアは手動で合わせてください。`
+                    )
+                  : t(
+                      `Pages ${failedPages.map((entry) => entry.page).join(", ")} did not match page ${anchor}; align those floors yourself.`,
+                      `ページ ${failedPages.map((entry) => entry.page).join("、")} はページ ${anchor} と一致しませんでした。該当フロアは手動で合わせてください。`
+                    )}
+              </p>
+            ) : null}
+            {sizesDiffer ? (
+              <p data-testid="page-size-warning" className="text-[13px] leading-[18px] text-foreground">
+                {t(
+                  "The pages are not all the same size, so their floor plans may land offset from each other. Align the building as a group first, then switch to Individual on the map to adjust any floor that needs its own position.",
+                  "ページのサイズが揃っていないため、各階の位置がずれる場合があります。まずグループで建物全体を合わせてから、地図の「個別」に切り替えて位置が合わないフロアを調整してください。"
+                )}
+              </p>
+            ) : null}
+          </div>
+        </div>
       ) : null}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
@@ -216,11 +215,11 @@ export function PageAssignmentPanel({
           return (
             <div
               key={page.index}
-              className={`rounded-[var(--radius-md)] border p-2 ${
+              className={`rounded-md border p-2 ${
                 card.excluded ? "opacity-50" : ""
               }`}
             >
-              <div className="mb-1 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+              <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
                 <span>
                   {t("Page", "ページ")} {page.index}
                 </span>
@@ -229,7 +228,7 @@ export function PageAssignmentPanel({
                 </span>
               </div>
 
-              <div className="overflow-hidden rounded-[var(--radius-md)] border bg-white">
+              <div className="overflow-hidden rounded-md border border-border bg-card">
                 <svg viewBox={viewBox} className="h-32 w-full">
                   {/* Artwork points are y-up; SVG user space is y-down. */}
                   <g transform={`translate(0 ${miny + maxy}) scale(1 -1)`}>
@@ -256,22 +255,22 @@ export function PageAssignmentPanel({
                     `Floor name for page ${page.index}`,
                     `ページ ${page.index} のフロア名`
                   )}
-                  className="w-24 rounded-[var(--radius-md)] border px-2 py-1"
+                  className="w-24 rounded-md border px-2 py-1"
                   value={card.label}
                   disabled={card.excluded || boxes.length > 0}
                   onChange={(event) => update(page.index, { label: event.target.value })}
                 />
-                <span className="text-xs text-[var(--color-text-muted)]">
+                <span className="text-xs text-muted-foreground">
                   {t("shapes", "図形")}: {page.preview_feature_count}
                 </span>
               </label>
 
               {boxes.length > 0 ? (
-                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                <p className="mt-1 text-xs text-muted-foreground">
                   {t(`${boxes.length} boxes on this page`, `このページに ${boxes.length} 個の範囲`)}
                 </p>
               ) : mergeCount > 1 ? (
-                <p className="mt-1 text-xs text-blue-700">
+                <p className="mt-1 text-xs text-primary">
                   {mergeCount} {t("pages", "ページ")} → {card.label.trim()}
                 </p>
               ) : null}
@@ -295,7 +294,7 @@ export function PageAssignmentPanel({
                   {boxes.length > 0 ? (
                     <button
                       type="button"
-                      className="text-xs text-[var(--color-error)] underline"
+                      className="text-xs text-destructive underline"
                       onClick={() =>
                         setBoxesByPage((prev) => {
                           const next = new Map(prev);
@@ -325,7 +324,7 @@ export function PageAssignmentPanel({
       </div>
 
       {duplicates.length > 0 ? (
-        <p className="text-xs text-[var(--color-error)]">
+        <p className="text-xs text-destructive">
           {t(
             `Two floors share the name ${duplicates.join(", ")}. Rename one.`,
             `フロア名 ${duplicates.join("、")} が重複しています。いずれかを変更してください。`

@@ -1,5 +1,14 @@
 import type { StyleSpecification } from "maplibre-gl";
 
+/**
+ * What shows under the tiles.
+ *
+ * Turning the basemap off is a normal way to read geometry, and it used to
+ * leave a hard light slab on a dark page. The OSM raster itself cannot follow
+ * the theme — those are somebody else's tiles — but this can.
+ */
+export const MAP_BACKGROUND = { light: "#e8eef4", dark: "#171717" };
+
 
 export const STREET_MAP_STYLE: StyleSpecification = {
   version: 8,
@@ -15,7 +24,7 @@ export const STREET_MAP_STYLE: StyleSpecification = {
     {
       id: "background",
       type: "background",
-      paint: { "background-color": "#e8eef4" }
+      paint: { "background-color": MAP_BACKGROUND.light }
     },
     {
       id: "osm-raster",

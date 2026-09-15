@@ -12,7 +12,7 @@ import {
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
-import { Button } from "../ui";
+import { Button } from "../ui/button";
 
 type Props = {
   state: PlacementState;
@@ -90,7 +90,7 @@ export function PlacementLibrary({ state, dispatch, artworkBounds }: Props) {
       <span className="text-xs font-medium">{t("Saved placements", "保存済み配置")}</span>
       <div className="flex gap-2">
         <input
-          className="w-full rounded-[var(--radius-md)] border px-2 py-1"
+          className="w-full rounded-md border px-2 py-1"
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder={t("Building name", "建物名")}
@@ -99,8 +99,8 @@ export function PlacementLibrary({ state, dispatch, artworkBounds }: Props) {
           {t("Save", "保存")}
         </Button>
       </div>
-      {error ? <p className="text-xs text-[var(--color-error)]">{error}</p> : null}
-      {warning ? <p className="text-xs text-[var(--color-warning)]">{warning}</p> : null}
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {warning ? <p className="text-xs text-warning">{warning}</p> : null}
       <ul className="space-y-1">
         {placements.map((placement) => (
           <li key={placement.id} className="flex items-center justify-between text-xs">
@@ -109,7 +109,7 @@ export function PlacementLibrary({ state, dispatch, artworkBounds }: Props) {
             </button>
             <button
               type="button"
-              className="text-[var(--color-error)]"
+              className="text-destructive"
               onClick={async () => {
                 await deletePlacement(placement.id);
                 await refresh();

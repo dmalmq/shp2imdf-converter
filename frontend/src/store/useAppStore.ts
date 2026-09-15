@@ -3,8 +3,11 @@ import { create } from "zustand";
 import type { CleanupSummary, ImportedFile, LearningSuggestion, WizardState } from "../api/client";
 
 type Screen = "upload" | "wizard" | "review";
+/** The Illustrator route has its own three stages, unrelated to the wizard's. */
+export type IllustratorStage = 1 | 2 | 3;
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 export type UiLanguage = "en" | "ja";
+export type Theme = "light" | "dark";
 type ImportProfile = "standard" | "imdf_shapefile";
 
 type Filters = {
@@ -22,10 +25,12 @@ type ValidationResults = {
 
 type AppState = {
   uiLanguage: UiLanguage;
+  theme: Theme;
   sessionId: string | null;
   importProfile: ImportProfile;
   sessionExpiredMessage: string | null;
   currentScreen: Screen;
+  illustratorStage: IllustratorStage;
   wizardStep: number;
   wizardData: Record<string, unknown>;
   geojsonData: Record<string, unknown> | null;
@@ -43,11 +48,13 @@ type AppState = {
   wizardSaveError: string | null;
   learningSuggestion: LearningSuggestion | null;
   setUiLanguage: (language: UiLanguage) => void;
+  setTheme: (theme: Theme) => void;
   setSessionId: (sessionId: string | null) => void;
   setImportProfile: (profile: ImportProfile) => void;
   setSessionExpiredMessage: (message: string | null) => void;
   clearSession: () => void;
   setCurrentScreen: (screen: Screen) => void;
+  setIllustratorStage: (stage: IllustratorStage) => void;
   setWizardStep: (step: number) => void;
   mergeWizardData: (payload: Record<string, unknown>) => void;
   setGeojsonData: (payload: Record<string, unknown> | null) => void;
@@ -69,6 +76,16 @@ type AppState = {
   setLearningSuggestion: (suggestion: LearningSuggestion | null) => void;
 };
 
+/** Saved choice wins; otherwise follow the OS so nobody has to opt in. */
+function readInitialTheme(): Theme {
+  if (typeof window !== "undefined") {
+    const saved = window.localStorage.getItem("ui_theme");
+    if (saved === "light" || saved === "dark") return saved;
+    if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) return "dark";
+  }
+  return "light";
+}
+
 function readInitialLanguage(): UiLanguage {
   if (typeof window !== "undefined") {
     const saved = window.localStorage.getItem("ui_language");
@@ -84,10 +101,12 @@ function readInitialLanguage(): UiLanguage {
 
 const INITIAL_STATE = {
   uiLanguage: readInitialLanguage(),
+  theme: readInitialTheme(),
   sessionId: null,
   importProfile: "standard" as ImportProfile,
   sessionExpiredMessage: null,
   currentScreen: "upload" as Screen,
+  illustratorStage: 1 as IllustratorStage,
   wizardStep: 0,
   wizardData: {} as Record<string, unknown>,
   geojsonData: null as Record<string, unknown> | null,
@@ -114,6 +133,12 @@ export const useAppStore = create<AppState>((set) => ({
     }
     set({ uiLanguage });
   },
+  setTheme: (theme) => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("ui_theme", theme);
+    }
+    set({ theme });
+  },
   setSessionId: (sessionId) => set({ sessionId }),
   setImportProfile: (importProfile) => set({ importProfile }),
   setSessionExpiredMessage: (sessionExpiredMessage) => set({ sessionExpiredMessage }),
@@ -121,10 +146,16 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       ...INITIAL_STATE,
       layerVisibility: state.layerVisibility,
+      // Display preferences are the operator's, not the session's: INITIAL_STATE
+      // holds whatever was read at module load, so spreading it would snap the
+      // theme and language back mid-session.
+      theme: state.theme,
+      uiLanguage: state.uiLanguage,
       currentScreen: "upload",
       sessionExpiredMessage: null
     })),
   setCurrentScreen: (currentScreen) => set({ currentScreen }),
+  setIllustratorStage: (illustratorStage) => set({ illustratorStage }),
   setWizardStep: (wizardStep) => set({ wizardStep }),
   mergeWizardData: (payload) =>
     set((state) => ({ wizardData: { ...state.wizardData, ...payload } })),

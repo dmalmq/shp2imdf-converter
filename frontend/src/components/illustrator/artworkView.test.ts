@@ -69,11 +69,30 @@ test("the active floor's paint ignores what happens to the others", () => {
   );
 });
 
-test("ghost paint is the floor tint at 0.06 / 0.35, never artwork colours", () => {
+test("ghost paint is monochrome ink at 0.06 / 0.35 — never the tint, never artwork colours", () => {
   const p = floorPaint("other", DEFAULT_ARTWORK_VIEW, TINT);
   expect(p.layout.visibility).toBe("visible");
-  expect(p.fill).toEqual({ "fill-color": TINT, "fill-opacity": 0.06 });
-  expect(p.line).toEqual({ "line-color": TINT, "line-width": 0.5, "line-opacity": 0.35 });
+  expect(p.fill).toEqual({ "fill-color": "#0a0a0a", "fill-opacity": 0.06 });
+  expect(p.line).toEqual({ "line-color": "#0a0a0a", "line-width": 0.5, "line-opacity": 0.35 });
+});
+
+test("the ghost neutral flips on imagery basemaps, because ink at 6% vanishes over them", () => {
+  const onMap = floorPaint("other", DEFAULT_ARTWORK_VIEW, TINT, false);
+  const onImagery = floorPaint("other", DEFAULT_ARTWORK_VIEW, TINT, true);
+  expect(onMap.fill["fill-color"]).toBe("#0a0a0a");
+  expect(onImagery.fill["fill-color"]).toBe("#ffffff");
+  expect(onImagery.line["line-color"]).toBe("#ffffff");
+  // Only the hue changes: opacities and widths are the same on both.
+  expect(onImagery.fill["fill-opacity"]).toBe(onMap.fill["fill-opacity"]);
+  expect(onImagery.line["line-opacity"]).toBe(onMap.line["line-opacity"]);
+  expect(onImagery.line["line-width"]).toBe(onMap.line["line-width"]);
+});
+
+test("the active floor keeps the artwork's own colours on either basemap", () => {
+  const onMap = floorPaint("active", DEFAULT_ARTWORK_VIEW, TINT, false);
+  const onImagery = floorPaint("active", DEFAULT_ARTWORK_VIEW, TINT, true);
+  expect(onImagery).toEqual(onMap);
+  expect(onMap.fill["fill-color"]).toEqual(["coalesce", ["get", "fill_color"], TINT]);
 });
 
 test("hidden others are layout-only: visibility none over unchanged ghost paint", () => {

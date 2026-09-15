@@ -2,12 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { fetchFootprintPreview, type FootprintPreview, type FootprintWizardState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import {
+  Field,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../ui";
+import { useRegisterSave } from "./wizardSave";
 import { useAppStore } from "../../store/useAppStore";
 
 
 type Props = {
   footprint: FootprintWizardState;
-  saving: boolean;
   onSave: (payload: FootprintWizardState) => void;
 };
 
@@ -24,7 +32,7 @@ function polygonsToSvgPaths(
     .map((ring) => {
       const points = ring.map(
         ([x, y]) =>
-          `${((x - minX) * scale + SVG_PAD).toFixed(1)},${(SVG_SIZE - ((y - minY) * scale + SVG_PAD)).toFixed(1)}`
+          `${((x - minX) * scale + SVG_PAD).toFixed(1)} m,${(SVG_SIZE - ((y - minY) * scale + SVG_PAD)).toFixed(1)} m`
       );
       return `M${points.join("L")}Z`;
     })
@@ -32,7 +40,7 @@ function polygonsToSvgPaths(
 }
 
 
-export function FootprintStep({ footprint, saving, onSave }: Props) {
+export function FootprintStep({ footprint, onSave }: Props) {
   const { t } = useUiLanguage();
   const sessionId = useAppStore((state) => state.sessionId);
   const [form, setForm] = useState<FootprintWizardState>(footprint);
@@ -43,6 +51,8 @@ export function FootprintStep({ footprint, saving, onSave }: Props) {
   useEffect(() => {
     setForm(footprint);
   }, [footprint]);
+
+  useRegisterSave(() => onSave(form), { canSave: true });
 
   const fetchPreview = useCallback(
     (state: FootprintWizardState) => {
@@ -96,46 +106,45 @@ export function FootprintStep({ footprint, saving, onSave }: Props) {
   }
 
   return (
-    <section className="rounded border bg-white p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{t("Step 9: Footprint Options", "Step 9: Footprint 設定")}</h2>
-        <button
-          type="button"
-          className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-60"
-          disabled={saving}
-          onClick={() => onSave(form)}
-        >
-          {saving ? t("Saving...", "保存中...") : t("Save Footprint Options", "Footprint 設定を保存")}
-        </button>
-      </div>
+    <section className="rounded-lg border border-border bg-card p-5">
 
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
         {/* Controls */}
         <div className="grid gap-4 self-start md:grid-cols-2 lg:grid-cols-1">
-          <label className="text-sm">
-            <span className="mb-1 block text-slate-600">{t("Footprint Method", "Footprint 生成方法")}</span>
-            <select
-              className="w-full rounded border px-2 py-1.5"
-              value={form.method}
-              onChange={(event) =>
-                updateForm({
-                  ...form,
-                  method: event.target.value as FootprintWizardState["method"]
-                })
-              }
-            >
-              <option value="union_buffer">{t("Union + buffer (default)", "Union + バッファ（標準）")}</option>
-              <option value="convex_hull">{t("Convex hull", "凸包")}</option>
-              <option value="concave_hull">{t("Concave hull", "凹包")}</option>
-            </select>
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-slate-600">
-              {t("Footprint Buffer (m)", "Footprint バッファ (m)")}: {form.footprint_buffer_m.toFixed(1)}
-            </span>
+          <Field label={t("Footprint Method", "Footprint 生成方法")}>
+            {(id) => (
+              <Select
+                value={form.method}
+                onValueChange={(value) =>
+                  updateForm({ ...form, method: value as FootprintWizardState["method"] })
+                }
+              >
+                <SelectTrigger id={id}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="union_buffer">
+                    {t("Union + buffer (default)", "Union + バッファ（標準）")}
+                  </SelectItem>
+                  <SelectItem value="convex_hull">{t("Convex hull", "凸包")}</SelectItem>
+                  <SelectItem value="concave_hull">{t("Concave hull", "凹包")}</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </Field>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <label htmlFor="fp-footprint_buffer_m" className="text-[13px] font-medium leading-[18px] text-foreground">
+                {t("Footprint buffer", "Footprint バッファ")}
+              </label>
+              <span className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
+                {form.footprint_buffer_m.toFixed(1)} m
+              </span>
+            </div>
             <input
+              id="fp-footprint_buffer_m"
               type="range"
-              className="w-full"
+              className="h-4 w-full accent-foreground"
               min={0}
               max={3}
               step={0.1}
@@ -144,14 +153,20 @@ export function FootprintStep({ footprint, saving, onSave }: Props) {
                 updateForm({ ...form, footprint_buffer_m: Number(event.target.value) })
               }
             />
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-slate-600">
-              {t("Gap Fill (m)", "隙間埋め (m)")}: {form.level_gap_fill_m.toFixed(2)}
-            </span>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <label htmlFor="fp-level_gap_fill_m" className="text-[13px] font-medium leading-[18px] text-foreground">
+                {t("Gap fill", "隙間埋め")}
+              </label>
+              <span className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
+                {form.level_gap_fill_m.toFixed(2)} m
+              </span>
+            </div>
             <input
+              id="fp-level_gap_fill_m"
               type="range"
-              className="w-full"
+              className="h-4 w-full accent-foreground"
               min={0}
               max={1}
               step={0.05}
@@ -160,14 +175,20 @@ export function FootprintStep({ footprint, saving, onSave }: Props) {
                 updateForm({ ...form, level_gap_fill_m: Number(event.target.value) })
               }
             />
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-slate-600">
-              {t("Venue Buffer (m)", "Venue バッファ (m)")}: {form.venue_buffer_m.toFixed(1)}
-            </span>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <label htmlFor="fp-venue_buffer_m" className="text-[13px] font-medium leading-[18px] text-foreground">
+                {t("Venue buffer", "Venue バッファ")}
+              </label>
+              <span className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
+                {form.venue_buffer_m.toFixed(1)} m
+              </span>
+            </div>
             <input
+              id="fp-venue_buffer_m"
               type="range"
-              className="w-full"
+              className="h-4 w-full accent-foreground"
               min={0}
               max={10}
               step={0.5}
@@ -176,24 +197,24 @@ export function FootprintStep({ footprint, saving, onSave }: Props) {
                 updateForm({ ...form, venue_buffer_m: Number(event.target.value) })
               }
             />
-          </label>
+          </div>
         </div>
 
         {/* Preview */}
-        <div className="flex flex-col items-center rounded border bg-slate-50 p-3">
-          <span className="mb-2 text-xs font-medium text-slate-500">{t("Preview", "プレビュー")}</span>
+        <div className="flex flex-col items-center rounded-lg border border-border bg-muted p-3">
+          <span className="mb-2 text-xs font-medium text-muted-foreground">{t("Preview", "プレビュー")}</span>
           <svg
             width={SVG_SIZE}
             height={SVG_SIZE}
             viewBox={`0 0 ${SVG_SIZE} ${SVG_SIZE}`}
-            className={`rounded bg-white ${loadingPreview ? "opacity-50" : ""}`}
+            className={`rounded bg-card ${loadingPreview ? "opacity-50" : ""}`}
           >
             {venuePath ? (
               <path
                 d={venuePath}
-                fill="var(--color-primary, #2563eb)"
+                fill="hsl(var(--primary))"
                 fillOpacity={0.1}
-                stroke="var(--color-primary, #2563eb)"
+                stroke="hsl(var(--primary))"
                 strokeWidth={1.5}
                 strokeDasharray="6 3"
               />
@@ -201,9 +222,9 @@ export function FootprintStep({ footprint, saving, onSave }: Props) {
             {footprintPath ? (
               <path
                 d={footprintPath}
-                fill="var(--color-success, #059669)"
+                fill="hsl(var(--success))"
                 fillOpacity={0.15}
-                stroke="var(--color-success, #059669)"
+                stroke="hsl(var(--success))"
                 strokeWidth={2}
               />
             ) : null}
@@ -212,19 +233,19 @@ export function FootprintStep({ footprint, saving, onSave }: Props) {
                 x={SVG_SIZE / 2}
                 y={SVG_SIZE / 2}
                 textAnchor="middle"
-                className="fill-slate-400 text-xs"
+                className="fill-muted-foreground text-xs"
               >
                 {t("No unit geometry available", "ユニットジオメトリがありません")}
               </text>
             ) : null}
           </svg>
-          <div className="mt-2 flex gap-4 text-[10px] text-slate-500">
+          <div className="mt-2 flex gap-4 text-[10px] text-muted-foreground">
             <span className="flex items-center gap-1">
-              <span className="inline-block h-2.5 w-2.5 rounded-sm border border-emerald-600 bg-emerald-600/20" />
+              <span className="inline-block h-2.5 w-2.5 rounded-sm border border-success bg-success/20" />
               {t("Footprint", "Footprint")}
             </span>
             <span className="flex items-center gap-1">
-              <span className="inline-block h-2.5 w-2.5 rounded-sm border border-blue-600 border-dashed bg-blue-600/10" />
+              <span className="inline-block h-2.5 w-2.5 rounded-sm border border-primary border-dashed bg-primary/10" />
               {t("Venue", "Venue")}
             </span>
           </div>

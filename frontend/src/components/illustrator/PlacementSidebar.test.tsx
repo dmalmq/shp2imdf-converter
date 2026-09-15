@@ -95,31 +95,46 @@ function SidebarHarness({
   );
 }
 
+// The Place tab now nests its own Control points / Shape match tabs, so a bare
+// [role=tabpanel] query sees five panels. `data-tab` marks the three outer ones.
+const outerPanels = () =>
+  [...document.querySelectorAll("[role=tabpanel][data-tab]")] as HTMLElement[];
+const exposedPanel = () => outerPanels().filter((node) => !node.hasAttribute("hidden"));
+
+// Radix selects a tab on mousedown, not on a bare synthetic click, so
+// `fireEvent.click` alone leaves the tab unchanged.
+const clickTab = (name: string) =>
+  fireEvent.mouseDown(screen.getByRole("tab", { name }));
+
+// The drawing scale and pt/m calibration live behind the Advanced disclosure.
+const openAdvanced = () => fireEvent.click(screen.getByRole("button", { name: /Advanced/ }));
+
 const scaleInput = () =>
   screen.getByText("1:").closest("div")!.querySelector("input")!;
 
 
 test("all three panels stay in the DOM with exactly one exposed", () => {
   render(<SidebarHarness />);
-  expect(document.querySelectorAll("[role=tabpanel]")).toHaveLength(3);
-  expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
+  expect(outerPanels()).toHaveLength(3);
+  expect(exposedPanel()).toHaveLength(1);
 });
 
 test("switching tabs flips which panel is exposed", () => {
   render(<SidebarHarness />);
-  expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "placement-panel-fit");
-  fireEvent.click(screen.getByRole("tab", { name: "Reference" }));
-  expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "placement-panel-reference");
-  fireEvent.click(screen.getByRole("tab", { name: "Export" }));
-  expect(screen.getByRole("tabpanel")).toHaveAttribute("id", "placement-panel-export");
+  expect(exposedPanel()[0]).toHaveAttribute("data-tab", "fit");
+  clickTab("Reference");
+  expect(exposedPanel()[0]).toHaveAttribute("data-tab", "reference");
+  clickTab("Export");
+  expect(exposedPanel()[0]).toHaveAttribute("data-tab", "export");
 });
 
 test("a typed drawing scale survives a tab round trip", () => {
   render(<SidebarHarness />);
+  openAdvanced();
   fireEvent.change(scaleInput(), { target: { value: "1234" } });
   expect(scaleInput()).toHaveValue(1234);
-  fireEvent.click(screen.getByRole("tab", { name: "Reference" }));
-  fireEvent.click(screen.getByRole("tab", { name: "Scale & fit" }));
+  clickTab("Reference");
+  clickTab("Place");
   expect(scaleInput()).toHaveValue(1234);
 });
 
@@ -127,13 +142,14 @@ test("the pinned scale lock stays visible on the Export tab", () => {
   render(<SidebarHarness placement={{ ...STATE, scaleLocked: true }} />);
   expect(screen.getByRole("button", { name: /^Unlock$/ })).toBeInTheDocument();
   expect(screen.getByText(/scale 1:1000/i)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("tab", { name: "Export" }));
+  clickTab("Export");
   expect(screen.getByRole("button", { name: /^Unlock$/ })).toBeInTheDocument();
   expect(screen.getByText(/scale 1:1000/i)).toBeInTheDocument();
 });
 
-test("Scale & fit apply and calibrate are disabled while locked", () => {
+test("Place-tab apply and calibrate are disabled while locked", () => {
   render(<SidebarHarness placement={{ ...STATE, scaleLocked: true }} />);
+  openAdvanced();
   expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Calibrate" })).toBeDisabled();
 });
@@ -171,10 +187,16 @@ test("the export CRS list follows the pin's working CRS, not the Tokyo seed", ()
     frame: { ...STATE.frame, workingCrs: "EPSG:6679" }
   };
   render(<SidebarHarness placement={hakodate} />);
-  fireEvent.click(screen.getByRole("tab", { name: "Export" }));
+  clickTab("Export");
+
+  // The picker is a Radix Select now, so the current value reads off the
+  // trigger and the choices only exist once it is open.
+  const trigger = screen.getByRole("combobox", { name: "Output CRS" });
+  expect(trigger).toHaveTextContent("EPSG:6679");
+
+  fireEvent.click(trigger);
   expect(screen.getByRole("option", { name: /EPSG:6679/ })).toBeInTheDocument();
   expect(screen.queryByRole("option", { name: /EPSG:6677/ })).toBeNull();
-  expect(document.querySelector("select")).toHaveValue("EPSG:6679");
 });
 
 test("Nominatim hits stay out of the document until the locate row is opened", async () => {
@@ -183,13 +205,13 @@ test("Nominatim hits stay out of the document until the locate row is opened", a
   await waitFor(() => expect(screen.getByText(/first match/i)).toBeInTheDocument());
   expect(screen.queryByRole("listitem")).toBeNull();
   expect(screen.queryByText(oimachiStaWire.display_name)).toBeNull();
-  expect(screen.getByRole("tab", { name: "Scale & fit" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Place" })).toBeInTheDocument();
   expect(screen.getByRole("tab", { name: "Reference" })).toBeInTheDocument();
   expect(screen.getByRole("tab", { name: "Export" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /大井町/ }));
   expect(screen.getByRole("button", { name: oimachiStaWire.display_name })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: oimachiTownWire.display_name })).toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "Scale & fit" })).toBeInTheDocument();
-  expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
+  expect(screen.getByRole("tab", { name: "Place" })).toBeInTheDocument();
+  expect(exposedPanel()).toHaveLength(1);
 });
 

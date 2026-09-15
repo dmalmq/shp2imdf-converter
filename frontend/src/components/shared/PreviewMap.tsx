@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { Layer, type MapRef, Source } from "react-map-gl/maplibre";
 import { MapView } from "./MapView";
 import { STREET_MAP_STYLE } from "./streetMapStyle";
+import { featureColorMatchExpr, featureColorMatchTail } from "./featureColors";
 import { buildUnitFillColorExpr, buildUnitLineColorExpr, buildUnitOpacityExpr } from "./unitCategoryColors";
 
 
@@ -29,17 +30,7 @@ const FILL_LAYER: any = {
   id: "preview-fill",
   type: "fill" as const,
   paint: {
-    "fill-color": buildUnitFillColorExpr("feature_type", [
-      "opening", "#047857",
-      "fixture", "#7c3aed",
-      "detail", "#0f766e",
-      "level", "#475569",
-      "section", "#0f766e",
-      "geofence", "#16a34a",
-      "kiosk", "#f97316",
-      "facility", "#a855f7",
-      "#64748b"
-    ]),
+    "fill-color": buildUnitFillColorExpr("feature_type", featureColorMatchTail("fill")),
     "fill-opacity": buildUnitOpacityExpr("feature_type", 0.65, 0.3)
   }
 };
@@ -48,17 +39,7 @@ const LINE_LAYER: any = {
   id: "preview-line",
   type: "line" as const,
   paint: {
-    "line-color": buildUnitLineColorExpr("feature_type", [
-      "opening", "#047857",
-      "fixture", "#7c3aed",
-      "detail", "#0f766e",
-      "level", "#475569",
-      "relationship", "#6d28d9",
-      "section", "#0f766e",
-      "geofence", "#15803d",
-      "facility", "#7e22ce",
-      "#64748b"
-    ]),
+    "line-color": buildUnitLineColorExpr("feature_type", featureColorMatchTail("line")),
     "line-width": 2
   }
 };
@@ -67,17 +48,7 @@ const POINT_LAYER: any = {
   id: "preview-point",
   type: "circle" as const,
   paint: {
-    "circle-color": [
-      "match",
-      ["get", "feature_type"],
-      "amenity",
-      "#16a34a",
-      "anchor",
-      "#2563eb",
-      "kiosk",
-      "#f97316",
-      "#0ea5e9"
-    ],
+    "circle-color": featureColorMatchExpr("feature_type", "fill"),
     "circle-radius": 4.5,
     "circle-stroke-color": "#ffffff",
     "circle-stroke-width": 1

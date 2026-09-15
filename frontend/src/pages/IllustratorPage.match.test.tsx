@@ -165,7 +165,7 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
 }));
 
 vi.mock("../components/illustrator/PlacementMap", () => ({
-  FLOOR_TINTS: ["#111111", "#222222", "#333333"],
+  ARTWORK_TINT: "#ea580c",
   PlacementMap: ({
     state,
     dispatch,
@@ -338,7 +338,8 @@ test("ranks and previews shapes without moving floors until explicit apply", asy
       artwork: { source_table: "Fill_Layer", source_row: 0 },
       scale_locked: true,
       reference: referenceLayer.data
-    })
+    }),
+    expect.any(AbortSignal)
   );
 
   fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
@@ -375,7 +376,8 @@ test("matching another floor posts that floor and unlinks only the active floor"
       artwork: { source_table: "Fill_Layer", source_row: 0 },
       scale_locked: true,
       reference_floor: expect.objectContaining({ label: "2F" })
-    })
+    }),
+    expect.any(AbortSignal)
   );
   const payload = matchShapes.mock.calls[matchShapes.mock.calls.length - 1]?.[1] as ApiClient.IllustratorShapeMatchRequest;
   expect(payload.reference).toBeUndefined();
@@ -428,7 +430,8 @@ test("two drawn areas are compared through the region endpoint", async () => {
       region: expect.arrayContaining([expect.any(Number)]),
       scale_locked: true,
       reference_floor: expect.objectContaining({ label: "2F" })
-    })
+    }),
+    expect.any(AbortSignal)
   );
 
   fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));
@@ -469,7 +472,8 @@ test("boxing an area brings that level to the front and survives switching level
     expect.objectContaining({
       floor_label: "1F",
       reference_floor: expect.objectContaining({ label: "2F" })
-    })
+    }),
+    expect.any(AbortSignal)
   );
 
   fireEvent.click(screen.getByRole("button", { name: "Apply suggestion" }));

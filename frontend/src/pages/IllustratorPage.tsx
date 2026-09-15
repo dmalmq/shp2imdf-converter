@@ -16,10 +16,11 @@ import {
   type TransformPayload
 } from "../api/client";
 import { isApiClientError, isBackendUnreachableError, toErrorMessage } from "../api/errors";
+import { ArtworkDropzone } from "../components/illustrator/ArtworkDropzone";
 import { AssignmentPanel } from "../components/illustrator/AssignmentPanel";
 import { PageAssignmentPanel } from "../components/illustrator/PageAssignmentPanel";
 import {
-  FLOOR_TINTS,
+  ARTWORK_TINT,
   type ArtworkShapeSelection,
   type FloorLayer,
   type ReferenceLayer
@@ -38,7 +39,6 @@ import {
   parseMatchTarget,
   type ShapeMatchPanelModel
 } from "../components/illustrator/ShapeMatchPanel";
-import { Button, Card } from "../components/ui";
 import {
   floorsNeedingArtworkMatch,
   preferredArtworkMatchTarget
@@ -52,6 +52,7 @@ import {
 } from "../lib/placementPose";
 import { stationQueryFromFilename } from "../lib/siteName";
 import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
+import { useAppStore } from "../store/useAppStore";
 import {
   DEFAULT_METRES_PER_POINT,
   MIN_CONTROL_POINTS,
@@ -101,6 +102,8 @@ type ShapeMatchState = {
   sourceRegion: ArtworkRegion | null;
   targetRegion: ArtworkRegion | null;
 };
+
+const SHAPE_MATCH_TIMEOUT_MS = 120_000;
 
 const EMPTY_SHAPE_MATCH: ShapeMatchState = {
   referenceName: "",
@@ -280,10 +283,12 @@ export function IllustratorPage() {
   const [pickSession, setPickSession] = useState<PickSession | null>(null);
   const [shapeMatch, setShapeMatch] = useState<ShapeMatchState>(EMPTY_SHAPE_MATCH);
   const [outputCrs, setOutputCrs] = useState("EPSG:4326");
+  // Shapefile only by default. This route's job is Illustrator -> shapefiles;
+  // defaulting all three handed the user two artifacts they never asked for.
   const [formats, setFormats] = useState<ExportFormatsPayload>({
-    geopackage: true,
+    geopackage: false,
     shapefile: true,
-    qgis: true
+    qgis: false
   });
   const [history, dispatch] = useReducer(
     placementHistoryReducer,
@@ -297,6 +302,55 @@ export function IllustratorPage() {
   const [surveyNotice, setSurveyNotice] = useState<string | null>(null);
   const [surveyPose, setSurveyPose] = useState<SurveyPose>("idle");
   const [locateSettled, setLocateSettled] = useState(false);
+
+  // A shape match against a station-sized reference layer is a long request, and
+  // an unbounded one is indistinguishable from a hang. Bound it, let the user
+  // stop it, and make a superseded request abandon quietly.
+  const matchAbortRef = useRef<AbortController | null>(null);
+  const matchTimedOutRef = useRef(false);
+
+  const beginMatch = () => {
+    matchAbortRef.current?.abort();
+    matchTimedOutRef.current = false;
+    const controller = new AbortController();
+    matchAbortRef.current = controller;
+    const timer = window.setTimeout(() => {
+      matchTimedOutRef.current = true;
+      controller.abort();
+    }, SHAPE_MATCH_TIMEOUT_MS);
+    return { controller, timer };
+  };
+
+  const endMatch = (handle: { controller: AbortController; timer: number }) => {
+    window.clearTimeout(handle.timer);
+    if (matchAbortRef.current === handle.controller) matchAbortRef.current = null;
+  };
+
+  /** True when the throw was an abort we caused, so the state is someone else's. */
+  const handledAbort = (error: unknown) => {
+    if (!(error instanceof DOMException) || error.name !== "AbortError") return false;
+    if (matchTimedOutRef.current) {
+      matchTimedOutRef.current = false;
+      setShapeMatch((current) => ({
+        ...current,
+        loading: false,
+        searched: true,
+        error: t(
+          "The comparison ran too long and was stopped. Try a more distinctive outline, or trim the reference layer.",
+          "比較に時間がかかりすぎたため中止しました。より特徴的な外周を選ぶか、参照レイヤーを絞り込んでください。"
+        )
+      }));
+    }
+    return true;
+  };
+
+  const cancelShapeMatch = () => {
+    matchAbortRef.current?.abort();
+    matchAbortRef.current = null;
+    matchTimedOutRef.current = false;
+    setShapeMatch((current) => ({ ...current, loading: false, searched: false, error: null }));
+  };
+
   // The Station_pg collection last sent for a snap, keyed with the pin it used.
   // A re-trimmed layer is a new object and snaps again; a frame nudge or a lock
   // toggle leaves it alone. The counter drops a response that lands after a
@@ -307,6 +361,13 @@ export function IllustratorPage() {
   // switches to individual mode for final per-floor nudges. UI-level only —
   // never an undo step.
   const [adjustmentMode, setAdjustmentMode] = useState<AdjustmentMode>("group");
+
+  // Publish the stage so the header rail can show THIS route's progress. Derived
+  // rather than stored so it can never disagree with what is on screen.
+  const setIllustratorStage = useAppStore((s) => s.setIllustratorStage);
+  useEffect(() => {
+    setIllustratorStage(!preview ? 1 : assignment === null ? 2 : 3);
+  }, [preview, assignment, setIllustratorStage]);
 
   // Only on the placement view: the upload and assignment screens have their own
   // keyboard behaviour and no floor to nudge.
@@ -366,11 +427,11 @@ export function IllustratorPage() {
         layerNames: region.layer_names
       }))
     );
-    return regions.map((region, index) => ({
+    return regions.map((region) => ({
       label: region.label,
       features: perFloor.get(region.label) ?? [],
       bounds: boundsFor(preview, region),
-      color: FLOOR_TINTS[index % FLOOR_TINTS.length]
+      color: ARTWORK_TINT
     }));
   }, [preview, assignment]);
 
@@ -558,6 +619,7 @@ export function IllustratorPage() {
 
     setShapeMatch((current) => ({ ...current, loading: true, searched: false, error: null }));
     const currentTransform = resolvedTransform(state, active);
+    const handle = beginMatch();
     try {
       const response = await matchIllustratorShape(preview.conversion_id, {
         floor_label: active.label,
@@ -575,7 +637,8 @@ export function IllustratorPage() {
               }
             }
           : { reference: reference!.data })
-      });
+      }, handle.controller.signal);
+      endMatch(handle);
       setShapeMatch((current) =>
         current.selection?.floorLabel === selection.floorLabel &&
         current.selection.sourceTable === selection.sourceTable &&
@@ -591,9 +654,11 @@ export function IllustratorPage() {
               searched: true,
               error: null
             }
-          : current
+          : { ...current, loading: false }
       );
     } catch (error) {
+      endMatch(handle);
+      if (handledAbort(error)) return;
       setShapeMatch((current) =>
         current.selection?.floorLabel === selection.floorLabel &&
         current.selection.sourceTable === selection.sourceTable &&
@@ -613,7 +678,7 @@ export function IllustratorPage() {
                 )
               )
             }
-          : current
+          : { ...current, loading: false }
       );
     }
   };
@@ -627,6 +692,7 @@ export function IllustratorPage() {
     if (!preview || !sourceRegion || !targetRegion) return;
 
     setShapeMatch((current) => ({ ...current, loading: true, searched: false, error: null }));
+    const handle = beginMatch();
     try {
       const response = await matchIllustratorRegions(preview.conversion_id, {
         floor_label: sourceFloor.label,
@@ -638,7 +704,8 @@ export function IllustratorPage() {
           transform: transformPayload(resolvedTransform(state, referenceFloor)),
           region: targetRegion
         }
-      });
+      }, handle.controller.signal);
+      endMatch(handle);
       setShapeMatch((current) =>
         current.sourceRegion === sourceRegion && current.targetRegion === targetRegion
           ? {
@@ -649,9 +716,11 @@ export function IllustratorPage() {
               searched: true,
               error: null
             }
-          : current
+          : { ...current, loading: false }
       );
     } catch (error) {
+      endMatch(handle);
+      if (handledAbort(error)) return;
       setShapeMatch((current) =>
         current.sourceRegion === sourceRegion && current.targetRegion === targetRegion
           ? {
@@ -666,7 +735,7 @@ export function IllustratorPage() {
                 )
               )
             }
-          : current
+          : { ...current, loading: false }
       );
     }
   };
@@ -741,6 +810,7 @@ export function IllustratorPage() {
       );
     },
     onFind: () => void findShapeMatches(),
+    onCancel: cancelShapeMatch,
     onPreview: (previewRank) => setShapeMatch((current) => ({ ...current, previewRank })),
     artworkMatchTarget:
       state.floors.find((floor) => floor.label === state.activeFloorLabel)?.artworkMatch
@@ -851,41 +921,7 @@ export function IllustratorPage() {
   };
 
   if (!preview) {
-    return (
-      <div className="flex flex-1 items-start justify-center px-4 py-10">
-        <Card padding="lg" className="w-full max-w-2xl">
-          <h1 className="text-lg font-semibold">
-            {t("Place Illustrator artwork", "Illustrator図面の配置")}
-          </h1>
-          <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-            {t(
-              "Convert an .ai file, position it on the map, then export georeferenced files.",
-              ".ai を変換し、地図上に配置してから、座標付きファイルを書き出します。"
-            )}
-          </p>
-          <input
-            type="file"
-            accept=".ai,.pdf"
-            className="hidden"
-            id="illustrator-georef-input"
-            disabled={loading}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void convert(file);
-              event.target.value = "";
-            }}
-          />
-          <Button
-            className="mt-4 w-full"
-            disabled={loading}
-            onClick={() => document.getElementById("illustrator-georef-input")?.click()}
-          >
-            {loading ? t("Converting...", "変換中...") : t("Choose .ai file", ".ai を選択")}
-          </Button>
-          {error ? <p className="mt-2 text-xs text-[var(--color-error)]">{error}</p> : null}
-        </Card>
-      </div>
-    );
+    return <ArtworkDropzone loading={loading} error={error} onFile={(file) => void convert(file)} />;
   }
 
   if (assignment === null) {
@@ -921,11 +957,25 @@ export function IllustratorPage() {
     };
 
     return (
-      <div className="flex flex-1 items-start justify-center px-4 py-10">
-        <Card padding="lg" className="w-full max-w-4xl">
-          <h1 className="text-lg font-semibold">
-            {t("Assign floors", "フロアを割り当て")}
+      <div className="mx-auto w-full max-w-[1120px] px-10 py-10">
+        {/* Two different jobs behind one stage: naming pages, or drawing boxes on
+            a single sheet. The heading has to say which one you are doing. */}
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-semibold leading-9 tracking-tight text-foreground">
+            {preview.pages.length > 1
+              ? t("Name each floor", "フロア名を入力")
+              : t("Mark each floor", "フロアを囲む")}
           </h1>
+          {preview.pages.length > 1 ? (
+            <p className="text-sm leading-5 text-muted-foreground">
+              {t(
+                "Pages given the same name become one floor. Untick a cover sheet or legend to leave it out.",
+                "同じ名前を付けたページは1つのフロアになります。表紙や凡例は除外してください。"
+              )}
+            </p>
+          ) : null}
+        </div>
+        <div className="mt-5">
           {preview.pages.length > 1 ? (
             <PageAssignmentPanel
               preview={preview.preview}
@@ -944,8 +994,12 @@ export function IllustratorPage() {
               onAssigned={commitAssignment}
             />
           )}
-          {error ? <p className="mt-2 text-xs text-[var(--color-error)]">{error}</p> : null}
-        </Card>
+        </div>
+        {error ? (
+          <p role="alert" className="mt-3 text-[13px] leading-[18px] text-destructive">
+            {error}
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -996,11 +1050,13 @@ export function IllustratorPage() {
         error={error}
       />
 
-      <div className="relative min-h-0 flex-1 overflow-hidden rounded-[var(--radius-md)] border">
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-md border border-border">
+        {/* `bg-popover` rather than a literal white: this sits over the map and
+            has to stay readable when the page is dark. */}
         {!poseReady ? (
           <p
             data-testid="placement-hold"
-            className="pointer-events-none absolute inset-x-0 top-3 z-30 mx-auto w-fit rounded-[var(--radius-md)] bg-white/90 px-3 py-1 text-xs shadow"
+            className="pointer-events-none absolute inset-x-0 top-3 z-30 mx-auto w-fit rounded-md border border-border bg-popover/95 px-3 py-1 text-xs leading-4 text-muted-foreground shadow-sm"
           >
             {state.stationPin
               ? t("Snapping to Station_pg…", "Station_pg に合わせています…")

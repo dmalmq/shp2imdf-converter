@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import {
   flexRender,
@@ -6,8 +6,12 @@ import {
   useReactTable,
   type ColumnDef
 } from "@tanstack/react-table";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { EmptyState } from "../shared/EmptyState";
+import { FeatureTypeIcon } from "../shared/FeatureTypeIcon";
+import { Badge, Checkbox } from "../ui";
 import { featureName, type ReviewFeature } from "./types";
 
 
@@ -44,7 +48,6 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
   const { t } = useUiLanguage();
   const selectedSet = useMemo(() => new Set(selectedFeatureIds), [selectedFeatureIds]);
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
-  const selectAllRef = useRef<HTMLInputElement | null>(null);
 
   const visibleIds = useMemo(() => features.map((item) => item.id), [features]);
   const visibleSet = useMemo(() => new Set(visibleIds), [visibleIds]);
@@ -61,13 +64,6 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
     });
     return mapped;
   }, [visibleIds]);
-
-  useEffect(() => {
-    if (!selectAllRef.current) {
-      return;
-    }
-    selectAllRef.current.indeterminate = someVisibleSelected;
-  }, [someVisibleSelected]);
 
   const setSelection = (ids: string[]) => {
     if (onSelectionChange) {
@@ -153,30 +149,45 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
     setSelection(selectedFeatureIds.filter((id) => !visibleSet.has(id)));
   };
 
-  const columns: ColumnDef<ReviewFeature>[] = [
+  // The column list is memoized so TanStack does not rebuild the row model on
+  // every render — that walk is O(rows), and it was happening on each keystroke
+  // in the filter bar. The handlers close over state that changes every render,
+  // so they go through a ref rather than into the dependency list.
+  const handlersRef = useRef({ handleRowSelection, toggleAllVisible });
+  handlersRef.current = { handleRowSelection, toggleAllVisible };
+  const onRowSelect = useCallback(
+    (id: string, shiftKey: boolean) => handlersRef.current.handleRowSelection(id, shiftKey),
+    []
+  );
+  const onSelectAll = useCallback(
+    (checked: boolean) => handlersRef.current.toggleAllVisible(checked),
+    []
+  );
+
+  const columns: ColumnDef<ReviewFeature>[] = useMemo(
+    () => [
     {
       id: "select",
       header: () => (
-        <input
-          ref={selectAllRef}
-          type="checkbox"
-          checked={allVisibleSelected}
+        <Checkbox
+          checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false}
           disabled={visibleIds.length === 0}
           aria-label={t("Select all visible rows", "表示中の行をすべて選択")}
-          onChange={(event) => toggleAllVisible(event.target.checked)}
+          onCheckedChange={(next) => toggleAllVisible(next === true)}
           onClick={(event) => event.stopPropagation()}
         />
       ),
       cell: ({ row }) => {
         const id = row.original.id;
         return (
-          <input
-            type="checkbox"
+          // Shift-click extends the selection, and `onCheckedChange` does not
+          // carry the modifier keys — so the click event is what decides.
+          <Checkbox
             checked={selectedSet.has(id)}
-            onChange={() => undefined}
+            aria-label={featureName(row.original) || id}
             onClick={(event) => {
               event.stopPropagation();
-              handleRowSelection(id, event.shiftKey);
+              onRowSelect(id, event.shiftKey);
             }}
           />
         );
@@ -197,8 +208,13 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
     },
     {
       accessorKey: "feature_type",
-      header: t("Feature Type", "フィーチャー種別"),
-      cell: ({ getValue }) => <span className="capitalize">{String(getValue())}</span>
+      header: t("Type", "種別"),
+      cell: ({ getValue }) => (
+        <span className="flex items-center gap-1.5">
+          <FeatureTypeIcon featureType={String(getValue())} size="sm" />
+          <span className="capitalize">{String(getValue())}</span>
+        </span>
+      )
     },
     {
       id: "category",
@@ -218,16 +234,25 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
       header: t("Status", "ステータス"),
       cell: ({ row }) => {
         const status = statusValue(row.original);
-        const className =
-          status === "error"
-            ? "bg-red-100 text-red-700"
-            : status === "warning"
-              ? "bg-amber-100 text-amber-700"
-              : "bg-emerald-100 text-emerald-700";
-        return <span className={`rounded px-2 py-0.5 text-xs ${className}`}>{status}</span>;
+        return (
+          <Badge
+            variant="outline"
+            className={
+              status === "error"
+                ? "border-destructive/40 text-destructive"
+                : status === "warning"
+                  ? "border-warning/40 text-warning"
+                  : "text-muted-foreground"
+            }
+          >
+            {status}
+          </Badge>
+        );
       }
     }
-  ];
+    ],
+    [t, selectedSet, allVisibleSelected, someVisibleSelected, visibleIds.length, onRowSelect, onSelectAll]
+  );
 
   const table = useReactTable({
     data: features,
@@ -235,41 +260,109 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
     getCoreRowModel: getCoreRowModel()
   });
 
+  // Above the threshold, only the rows in view are rendered. Every row used to
+  // be, and a row is not cheap — a Radix checkbox, a swatch and a badge each —
+  // so a station-sized session spent seconds building DOM nobody was looking at
+  // before the table appeared at all.
+  //
+  // Below it the whole table stays in the DOM, which costs nothing at that size
+  // and keeps find-in-page and screen-reader table navigation working on the
+  // sessions where they are most likely to be used.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const rows = table.getRowModel().rows;
+  const windowed = rows.length > VIRTUALIZE_ABOVE;
+  const virtualizer = useVirtualizer({
+    count: windowed ? rows.length : 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 12
+  });
+  const virtualRows = virtualizer.getVirtualItems();
+  const shownRows = windowed ? virtualRows.map((item) => rows[item.index]) : rows;
+  const padTop = windowed && virtualRows.length ? virtualRows[0].start : 0;
+  const padBottom =
+    windowed && virtualRows.length
+      ? virtualizer.getTotalSize() - virtualRows[virtualRows.length - 1].end
+      : 0;
+
   return (
-    <div className="rounded border bg-white">
-      <div className="max-h-[360px] overflow-auto">
-        <table className="min-w-full border-collapse text-sm">
-          <thead className="sticky top-0 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
+        {/* Fixed widths: with only a window of rows mounted, letting the browser
+            size columns from their content would make them jump as you scroll. */}
+        <table className="w-full min-w-[46rem] table-fixed border-collapse text-sm">
+          <colgroup>
+            <col style={{ width: "3rem" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "26%" }} />
+            <col style={{ width: "15%" }} />
+            <col style={{ width: "18%" }} />
+            <col style={{ width: "15%" }} />
+            <col style={{ width: "12%" }} />
+          </colgroup>
+          <thead className="sticky top-0 z-[1] bg-muted text-left font-mono text-[10px] uppercase leading-[13px] tracking-[0.06em] text-muted-foreground">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
-                  <th key={header.id} className="px-2 py-2">
-                    {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                  <th key={header.id} className="whitespace-nowrap px-3 py-2.5">
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(header.column.columnDef.header, header.getContext())}
                   </th>
                 ))}
               </tr>
             ))}
           </thead>
           <tbody>
-            {table.getRowModel().rows.map((row) => {
+            {padTop > 0 ? (
+              <tr aria-hidden="true">
+                <td colSpan={7} style={{ height: padTop }} />
+              </tr>
+            ) : null}
+            {shownRows.map((row) => {
               const isSelected = selectedSet.has(row.original.id);
               return (
                 <tr
                   key={row.id}
-                  className={`cursor-pointer border-t ${isSelected ? "bg-blue-50" : "bg-white hover:bg-slate-50"}`}
-                  onClick={(event) => handleRowSelection(row.original.id, event.shiftKey)}
+                  style={{ height: ROW_HEIGHT }}
+                  className={`cursor-pointer border-t border-border transition-colors ${
+                    isSelected ? "bg-accent" : "bg-card hover:bg-muted"
+                  }`}
+                  onClick={(event) => onRowSelect(row.original.id, event.shiftKey)}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-2 py-2">
+                    <td key={cell.id} className="truncate px-3 py-2">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}
                 </tr>
               );
             })}
+            {padBottom > 0 ? (
+              <tr aria-hidden="true">
+                <td colSpan={7} style={{ height: padBottom }} />
+              </tr>
+            ) : null}
           </tbody>
         </table>
+
+        {features.length === 0 ? (
+          <EmptyState
+            icon="search"
+            title={t("No features match", "\u4e00\u81f4\u3059\u308b\u30d5\u30a3\u30fc\u30c1\u30e3\u30fc\u304c\u3042\u308a\u307e\u305b\u3093")}
+            description={t(
+              "Clear a filter above to see more.",
+              "\u4e0a\u306e\u30d5\u30a3\u30eb\u30bf\u30fc\u3092\u89e3\u9664\u3059\u308b\u3068\u8868\u793a\u3055\u308c\u307e\u3059\u3002"
+            )}
+          />
+        ) : null}
       </div>
     </div>
   );
 }
+
+/** Row height in px; the virtualiser needs it before a row exists to measure. */
+const ROW_HEIGHT = 37;
+
+/** Rows above which the table renders only what is on screen. */
+const VIRTUALIZE_ABOVE = 200;

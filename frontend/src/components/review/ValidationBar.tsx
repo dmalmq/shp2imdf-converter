@@ -32,13 +32,13 @@ export function ValidationBar({
   const { t } = useUiLanguage();
 
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2">
+    <div className="flex items-center justify-between gap-3 border-t border-border bg-card px-4 py-2">
       <div className="flex items-center gap-4 text-sm">
         {validation ? (
           <>
             <span className="flex items-center gap-1.5">
               <StatusDot status={validation.summary.error_count > 0 ? "error" : "success"} size="sm" />
-              <Badge variant={validation.summary.error_count > 0 ? "error" : "success"}>
+              <Badge variant={validation.summary.error_count > 0 ? "destructive" : "success"}>
                 {validation.summary.error_count} {t("errors", "エラー")}
               </Badge>
             </span>
@@ -49,13 +49,13 @@ export function ValidationBar({
               </Badge>
             </span>
             {validation.summary.auto_fixable_count > 0 ? (
-              <Badge variant="primary">
+              <Badge variant="default">
                 {validation.summary.auto_fixable_count} {t("auto-fixable", "自動修正可能")}
               </Badge>
             ) : null}
           </>
         ) : (
-          <span className="text-[var(--color-text-muted)]">
+          <span className="text-muted-foreground">
             {t("Not yet validated", "未検証")}
           </span>
         )}
@@ -64,7 +64,7 @@ export function ValidationBar({
       <div className="flex items-center gap-2">
         {validation && validation.summary.overlap_count > 0 ? (
           <Button
-            variant="secondary"
+            variant="outline"
             size="sm"
             onClick={onFixOverlaps}
             disabled={overlapResolving}
@@ -74,7 +74,7 @@ export function ValidationBar({
         ) : null}
         {validation && validation.summary.auto_fixable_count > 0 ? (
           <Button
-            variant="secondary"
+            variant="outline"
             size="sm"
             onClick={onAutoFix}
             disabled={autofixing}
@@ -83,7 +83,7 @@ export function ValidationBar({
           </Button>
         ) : null}
         <Button
-          variant="secondary"
+          variant="outline"
           size="sm"
           onClick={onValidate}
           disabled={validating || loading}
@@ -91,7 +91,7 @@ export function ValidationBar({
           {validating ? t("Validating...", "検証中...") : t("Validate", "検証")}
         </Button>
         <Button
-          variant="primary"
+          variant="default"
           size="sm"
           onClick={onExport}
           disabled={exporting || validating || loading}

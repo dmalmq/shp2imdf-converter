@@ -2,12 +2,12 @@ import { useMemo } from "react";
 
 import type { ImportedFile, OpeningMappingState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { ColumnField } from "./ColumnField";
 
 
 type Props = {
   files: ImportedFile[];
   mapping: OpeningMappingState;
-  saving: boolean;
   onSave: (mapping: OpeningMappingState) => void;
 };
 
@@ -21,7 +21,7 @@ function uniqueColumns(files: ImportedFile[]): string[] {
 }
 
 
-export function OpeningMapStep({ files, mapping, saving, onSave }: Props) {
+export function OpeningMapStep({ files, mapping, onSave }: Props) {
   const { t } = useUiLanguage();
   const openingFiles = useMemo(() => files.filter((item) => item.detected_type === "opening"), [files]);
   const columns = useMemo(() => uniqueColumns(openingFiles), [openingFiles]);
@@ -34,118 +34,57 @@ export function OpeningMapStep({ files, mapping, saving, onSave }: Props) {
   };
 
   return (
-    <section className="rounded border bg-white p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">{t("Step 6: Opening Mapping", "Step 6: Opening 対応付け")}</h2>
-        {saving && <span className="text-xs text-slate-500">{t("Saving...", "保存中...")}</span>}
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2">
-        <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Category Column", "カテゴリ列")}</span>
-          <select
-            className="w-full rounded border px-2 py-1.5"
-            value={mapping.category_column ?? ""}
-            onChange={(event) => updateField("category_column", event.target.value || null)}
-          >
-            <option value="">{t("(default to pedestrian)", "（未設定時は pedestrian）")}</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>
-                {column}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Name Column", "名称列")}</span>
-          <select
-            className="w-full rounded border px-2 py-1.5"
-            value={mapping.name_column ?? ""}
-            onChange={(event) => updateField("name_column", event.target.value || null)}
-          >
-            <option value="">{t("(none)", "（なし）")}</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>
-                {column}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Accessibility Column", "アクセシビリティ列")}</span>
-          <select
-            className="w-full rounded border px-2 py-1.5"
-            value={mapping.accessibility_column ?? ""}
-            onChange={(event) => updateField("accessibility_column", event.target.value || null)}
-          >
-            <option value="">{t("(none)", "（なし）")}</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>
-                {column}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Access Control Column", "入退室制御列")}</span>
-          <select
-            className="w-full rounded border px-2 py-1.5"
-            value={mapping.access_control_column ?? ""}
-            onChange={(event) => updateField("access_control_column", event.target.value || null)}
-          >
-            <option value="">{t("(none)", "（なし）")}</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>
-                {column}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Door Automatic Column", "自動ドア列")}</span>
-          <select
-            className="w-full rounded border px-2 py-1.5"
-            value={mapping.door_automatic_column ?? ""}
-            onChange={(event) => updateField("door_automatic_column", event.target.value || null)}
-          >
-            <option value="">{t("(none)", "（なし）")}</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>
-                {column}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Door Material Column", "ドア材質列")}</span>
-          <select
-            className="w-full rounded border px-2 py-1.5"
-            value={mapping.door_material_column ?? ""}
-            onChange={(event) => updateField("door_material_column", event.target.value || null)}
-          >
-            <option value="">{t("(none)", "（なし）")}</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>
-                {column}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block text-slate-600">{t("Door Type Column", "ドア種別列")}</span>
-          <select
-            className="w-full rounded border px-2 py-1.5"
-            value={mapping.door_type_column ?? ""}
-            onChange={(event) => updateField("door_type_column", event.target.value || null)}
-          >
-            <option value="">{t("(none)", "（なし）")}</option>
-            {columns.map((column) => (
-              <option key={column} value={column}>
-                {column}
-              </option>
-            ))}
-          </select>
-        </label>
+    <section className="rounded-lg border border-border bg-card p-5">
+      <div className="grid gap-4 md:grid-cols-2">
+        <ColumnField
+          label={t("Category Column", "カテゴリ列")}
+          columns={columns}
+          value={mapping.category_column}
+          emptyLabel={t("Default: pedestrian", "未設定時は pedestrian")}
+          onChange={(value) => updateField("category_column", value)}
+        />
+        <ColumnField
+          label={t("Name Column", "名称列")}
+          columns={columns}
+          value={mapping.name_column}
+          emptyLabel={t("Not mapped", "未設定")}
+          onChange={(value) => updateField("name_column", value)}
+        />
+        <ColumnField
+          label={t("Accessibility Column", "アクセシビリティ列")}
+          columns={columns}
+          value={mapping.accessibility_column}
+          emptyLabel={t("Not mapped", "未設定")}
+          onChange={(value) => updateField("accessibility_column", value)}
+        />
+        <ColumnField
+          label={t("Access Control Column", "入退室制御列")}
+          columns={columns}
+          value={mapping.access_control_column}
+          emptyLabel={t("Not mapped", "未設定")}
+          onChange={(value) => updateField("access_control_column", value)}
+        />
+        <ColumnField
+          label={t("Door Automatic Column", "自動ドア列")}
+          columns={columns}
+          value={mapping.door_automatic_column}
+          emptyLabel={t("Not mapped", "未設定")}
+          onChange={(value) => updateField("door_automatic_column", value)}
+        />
+        <ColumnField
+          label={t("Door Material Column", "ドア材質列")}
+          columns={columns}
+          value={mapping.door_material_column}
+          emptyLabel={t("Not mapped", "未設定")}
+          onChange={(value) => updateField("door_material_column", value)}
+        />
+        <ColumnField
+          label={t("Door Type Column", "ドア種別列")}
+          columns={columns}
+          value={mapping.door_type_column}
+          emptyLabel={t("Not mapped", "未設定")}
+          onChange={(value) => updateField("door_type_column", value)}
+        />
       </div>
     </section>
   );

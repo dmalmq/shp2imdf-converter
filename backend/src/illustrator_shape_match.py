@@ -21,6 +21,7 @@ from shapely import make_valid
 from shapely import to_geojson
 from shapely.affinity import affine_transform
 from shapely.geometry import LineString
+from shapely.geometry import box
 from shapely.geometry import Point
 from shapely.geometry import Polygon
 from shapely.geometry import mapping
@@ -53,6 +54,10 @@ _REGION_CANDIDATE_LIMIT = 40
 _REGION_MIN_SCALE = 0.2
 _REGION_MAX_SCALE = 5.0
 _SHORTLIST_LIMIT = 48
+# Bounding-box area band for the pre-filter, as a ratio against the artwork's
+# predicted footprint. 25 is 5x either way on a side — deliberately loose, since
+# it only needs to exclude the obviously-impossible.
+_BBOX_AREA_BAND = 25.0
 NO_ASSIGNMENT_ERROR = "No floor assignment is stored; assign floors before matching."
 _OUTLINE_ERROR = "The selected artwork feature is not a usable outline."
 _SAME_FLOOR_ERROR = "The reference floor must be different from the selected floor."
@@ -134,8 +139,13 @@ def match_shapes(
         reference = {"type": "FeatureCollection", "features": []}
 
     fixed_scale = current.metres_per_point if scale_locked else None
+    minx, miny, maxx, maxy = artwork.bounds
     candidates = _collect_candidates(
-        reference, current.working_crs, art_descriptor, fixed_scale
+        reference,
+        current.working_crs,
+        art_descriptor,
+        fixed_scale,
+        art_bbox_area=abs((maxx - minx) * (maxy - miny)),
     )
     if not candidates:
         return []
@@ -501,11 +511,60 @@ def _collect_candidates(
     working_crs: str,
     art_descriptor: _Descriptor,
     fixed_scale: float | None,
+    art_bbox_area: float | None = None,
 ) -> list[_Candidate]:
+    """Shortlist reference parts worth fitting against the artwork outline.
+
+    `_SHORTLIST_LIMIT` bounds the *fitting* stage only. Everything here runs for
+    every part in the posted layer, so on a station-sized Station_pg it, not the
+    fit, is what the request spends its time on. Two things keep it in hand:
+
+    * a bounding-box size pre-filter, when the drawing scale is locked and the
+      artwork's footprint is therefore known in metres; and
+    * one batched reprojection instead of a GeoSeries — and a fresh pyproj
+      transformer — per part, which measured ~11x faster over a few thousand.
+    """
+    parts = list(_iter_reference_parts(reference))
+    if not parts:
+        return []
+
+    kept = parts
+    if fixed_scale is not None and art_bbox_area:
+        predicted = art_bbox_area * fixed_scale * fixed_scale
+        boxes = gpd.GeoSeries(
+            [box(*geom.bounds) for _, _, geom in parts], crs="EPSG:4326"
+        ).to_crs(working_crs)
+        plausible = [
+            part
+            for part, projected_box in zip(parts, boxes)
+            if predicted / _BBOX_AREA_BAND <= projected_box.area <= predicted * _BBOX_AREA_BAND
+        ]
+        # If nothing is plausible the locked scale is probably wrong, and the
+        # ranked list is how the user finds that out. Never let the pre-filter
+        # turn a wrong scale into a silent "no matches".
+        if plausible:
+            kept = plausible
+
+    repaired: list[tuple[int, int, Any]] = []
+    for feature_index, part_index, geom in kept:
+        geom = make_valid(geom)
+        if geom.geom_type == "MultiPolygon":
+            geom = max(geom.geoms, key=lambda part: part.area)
+        if geom.is_empty or geom.geom_type != "Polygon" or geom.area <= 0:
+            continue
+        repaired.append((feature_index, part_index, geom))
+    if not repaired:
+        return []
+
+    projected = gpd.GeoSeries([geom for _, _, geom in repaired], crs="EPSG:4326").to_crs(working_crs)
+
     collected: list[_Candidate] = []
-    for feature_index, part_index, geom in _iter_reference_parts(reference):
-        working = _project_wgs84(geom, working_crs)
-        if working is None or working.is_empty or working.geom_type != "Polygon" or working.area <= 0:
+    for (feature_index, part_index, geom), working in zip(repaired, projected):
+        if not working.is_valid:
+            working = make_valid(working)
+            if working.geom_type == "MultiPolygon":
+                working = max(working.geoms, key=lambda part: part.area)
+        if working.is_empty or working.geom_type != "Polygon" or working.area <= 0:
             continue
         samples = _sample_ring(working, _SAMPLE_COUNT)
         if len(samples) < 2:
@@ -527,6 +586,15 @@ def _collect_candidates(
 
 
 def _iter_reference_parts(reference: Mapping[str, Any]):
+    """Yield ``(feature_index, part_index, geometry)`` for every reference part.
+
+    Geometry is returned as parsed, NOT repaired: `make_valid` is the expensive
+    step on the malformed polygons GIS exports are full of, and most parts are
+    discarded by the size pre-filter before anything needs repairing. Callers
+    repair what survives. `part_index` is therefore the index within the parsed
+    MultiPolygon rather than within a repaired one; nothing resolves geometry
+    back through it, it is only an identity label on the response.
+    """
     features = reference.get("features") or []
     for feature_index, feature in enumerate(features):
         if not isinstance(feature, dict):
@@ -535,7 +603,7 @@ def _iter_reference_parts(reference: Mapping[str, Any]):
         if not raw:
             continue
         try:
-            geom = make_valid(shape(raw))
+            geom = shape(raw)
         except (TypeError, ValueError, AttributeError):
             continue
         if geom.is_empty:

@@ -1,6 +1,18 @@
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { featureTypeColor } from "../shared/featureColors";
+import {
+  Checkbox,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../ui";
 import { layerKeyLabel } from "./types";
+import { cn } from "@/lib/utils";
 
+/** Radix Select has no empty-string value, so "all floors" needs a sentinel. */
+const ALL_FLOORS = "__all__";
 
 type Props = {
   featureTypes: string[];
@@ -16,6 +28,33 @@ type Props = {
   onShowBasemapChange: (next: boolean) => void;
 };
 
+function ToggleRow({
+  label,
+  checked,
+  onChange,
+  swatch,
+  capitalize
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  swatch?: string;
+  capitalize?: boolean;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 rounded-sm py-1 text-[13px] leading-[18px] text-foreground">
+      <Checkbox checked={checked} onCheckedChange={(next) => onChange(next === true)} />
+      {swatch ? (
+        <span
+          aria-hidden="true"
+          className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
+          style={{ backgroundColor: swatch }}
+        />
+      ) : null}
+      <span className={cn("min-w-0 flex-1 truncate", capitalize && "capitalize")}>{label}</span>
+    </label>
+  );
+}
 
 export function LayerTree({
   featureTypes,
@@ -33,80 +72,87 @@ export function LayerTree({
   const { t } = useUiLanguage();
 
   return (
-    <div className="rounded border bg-white p-3">
-      <h3 className="mb-2 text-sm font-semibold text-slate-700">{t("Layers", "レイヤー")}</h3>
-      <div className="grid gap-1">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={showBasemap}
-            onChange={(event) => onShowBasemapChange(event.target.checked)}
-          />
-          <span>{t("OpenStreetMap", "OpenStreetMap")}</span>
-        </label>
-        <hr className="my-1 border-slate-200" />
-        {featureTypes.map((featureType) => {
-          const checked = layerVisibility[featureType] ?? true;
-          return (
-            <label key={featureType} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={(event) =>
-                  onLayerVisibilityChange({
-                    ...layerVisibility,
-                    [featureType]: event.target.checked
-                  })
-                }
-              />
-              <span className="capitalize">{layerKeyLabel(featureType)}</span>
-            </label>
-          );
-        })}
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1.5">
+        <span className="font-mono text-[10px] font-medium uppercase leading-[13px] tracking-[0.06em] text-muted-foreground">
+          {t("Floor", "フロア")}
+        </span>
+        <Select
+          value={floorFilter || ALL_FLOORS}
+          onValueChange={(value) => onFloorFilterChange(value === ALL_FLOORS ? "" : value)}
+        >
+          <SelectTrigger aria-label={t("Floor filter", "フロアフィルター")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_FLOORS}>{t("All floors", "すべてのフロア")}</SelectItem>
+            {floorOptions.map((option) => (
+              <SelectItem key={option.id} value={option.id}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
-      <label className="mt-3 block text-sm">
-        <span className="mb-1 block text-slate-600">{t("Floor Filter", "フロアフィルター")}</span>
-        <select
-          className="w-full rounded border px-2 py-1.5"
-          value={floorFilter}
-          onChange={(event) => onFloorFilterChange(event.target.value)}
-        >
-          <option value="">{t("All Floors", "すべてのフロア")}</option>
-          {floorOptions.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.label}
-            </option>
+      <div className="flex flex-col gap-1.5">
+        <span className="font-mono text-[10px] font-medium uppercase leading-[13px] tracking-[0.06em] text-muted-foreground">
+          {t("Feature layers", "フィーチャーレイヤー")}
+        </span>
+        {/* The swatch is the same table the map paints from, so the legend
+            cannot disagree with what is on screen. */}
+        <div className="flex flex-col">
+          {featureTypes.map((featureType) => (
+            <ToggleRow
+              key={featureType}
+              label={layerKeyLabel(featureType)}
+              capitalize
+              swatch={featureTypeColor(featureType)}
+              checked={layerVisibility[featureType] ?? true}
+              onChange={(next) =>
+                onLayerVisibilityChange({ ...layerVisibility, [featureType]: next })
+              }
+            />
           ))}
-        </select>
-      </label>
+        </div>
+      </div>
 
       {validationLoaded ? (
-        <div className="mt-3 border-t pt-3">
-          <h4 className="mb-2 text-sm font-medium text-slate-700">{t("Validation Overlays", "検証オーバーレイ")}</h4>
-          <div className="grid gap-1">
-            {[
-              ["errors", t("Error highlights", "エラー表示")],
-              ["warnings", t("Warning highlights", "警告表示")],
-              ["overlaps", t("Overlap polygons", "重なりポリゴン")]
-            ].map(([key, label]) => (
-              <label key={key} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={overlayVisibility[key] ?? true}
-                  onChange={(event) =>
-                    onOverlayVisibilityChange({
-                      ...overlayVisibility,
-                      [key]: event.target.checked
-                    })
-                  }
-                />
-                <span>{label}</span>
-              </label>
+        <div className="flex flex-col gap-1.5">
+          <span className="font-mono text-[10px] font-medium uppercase leading-[13px] tracking-[0.06em] text-muted-foreground">
+            {t("Validation overlays", "検証オーバーレイ")}
+          </span>
+          <div className="flex flex-col">
+            {(
+              [
+                ["errors", t("Error highlights", "エラー表示")],
+                ["warnings", t("Warning highlights", "警告表示")],
+                ["overlaps", t("Overlap polygons", "重なりポリゴン")]
+              ] as const
+            ).map(([key, label]) => (
+              <ToggleRow
+                key={key}
+                label={label}
+                checked={overlayVisibility[key] ?? true}
+                onChange={(next) =>
+                  onOverlayVisibilityChange({ ...overlayVisibility, [key]: next })
+                }
+              />
             ))}
           </div>
         </div>
       ) : null}
+
+      <div className="flex flex-col gap-1.5 border-t border-border pt-3">
+        <span className="font-mono text-[10px] font-medium uppercase leading-[13px] tracking-[0.06em] text-muted-foreground">
+          {t("Background", "背景")}
+        </span>
+        <ToggleRow
+          label={t("OpenStreetMap", "OpenStreetMap")}
+          checked={showBasemap}
+          onChange={onShowBasemapChange}
+        />
+      </div>
     </div>
   );
 }

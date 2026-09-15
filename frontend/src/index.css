@@ -1,51 +1,144 @@
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+/* Only the japanese + latin subsets. The bare `400.css` entrypoints pull in every
+   subset IBM Plex ships (cyrillic, greek, vietnamese, ...), which cost ~350 kB of
+   @font-face declarations for glyphs this app will never render. */
+@import "@fontsource/ibm-plex-sans-jp/japanese-400.css";
+@import "@fontsource/ibm-plex-sans-jp/japanese-500.css";
+@import "@fontsource/ibm-plex-sans-jp/japanese-600.css";
+@import "@fontsource/ibm-plex-sans-jp/latin-400.css";
+@import "@fontsource/ibm-plex-sans-jp/latin-500.css";
+@import "@fontsource/ibm-plex-sans-jp/latin-600.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  /* ── Design tokens ───────────────────────────────────────────────
+     HSL channel triplets, not hex, so Tailwind opacity modifiers work
+     (`bg-signal/10`, `fill-foreground/[0.06]`). Mirrors the Figma
+     "Color" collection 1:1 — the variable names are the same, and each
+     Figma variable carries `var(--name)` as its Dev Mode code syntax. */
   :root {
-    --color-surface: #ffffff;
-    --color-surface-muted: #f8fafc;
-    --color-surface-raised: #ffffff;
-    --color-border: #e2e8f0;
-    --color-border-muted: #f1f5f9;
+    color-scheme: light;
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
 
-    --color-primary: #2563eb;
-    --color-primary-hover: #1d4ed8;
-    --color-primary-muted: #dbeafe;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
 
-    --color-success: #059669;
-    --color-success-muted: #d1fae5;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 3.9%;
 
-    --color-warning: #d97706;
-    --color-warning-muted: #fef3c7;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
 
-    --color-error: #dc2626;
-    --color-error-muted: #fee2e2;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
 
-    --color-text: #1e293b;
-    --color-text-secondary: #475569;
-    --color-text-muted: #94a3b8;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
 
-    --radius-sm: 0.25rem;
-    --radius-md: 0.375rem;
-    --radius-lg: 0.5rem;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
 
-    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-    --shadow-md: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+    --destructive: 0 72.2% 50.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
+
+    /* Reserved for the placed artwork and its active floor. Nothing else. */
+    --signal: 20 90% 48%;
+    --signal-foreground: 0 0% 100%;
+    --signal-muted: 33 100% 96.5%;
+
+    --success: 142 76% 36%;
+    --warning: 32 95% 44%;
+
+    /* Reference overlays — data colours, subordinate to signal. */
+    --layer-1: 221 83% 53%;
+    --layer-2: 192 91% 36%;
+    --layer-3: 85 85% 35%;
+    --layer-4: 33 5% 32%;
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    color-scheme: dark;
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 240 5.9% 10%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+
+    --signal: 25 95% 53%;
+    --signal-foreground: 0 0% 100%;
+    --signal-muted: 13 81% 15%;
+
+    --success: 142 71% 45%;
+    --warning: 38 92% 50%;
+
+    --layer-1: 213 94% 68%;
+    --layer-2: 188 86% 53%;
+    --layer-3: 83 78% 55%;
+    --layer-4: 24 5% 64%;
+  }
+
+}
+
+@layer base {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  select,
+  textarea {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    border-color: hsl(var(--input));
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: hsl(var(--muted-foreground));
   }
 }
 
 body {
   margin: 0;
-  font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", Meiryo, sans-serif;
-  background: var(--color-surface-muted);
-  color: var(--color-text);
+  font-family: "Geist Variable", "IBM Plex Sans JP", "Hiragino Kaku Gothic ProN",
+    "Yu Gothic UI", Meiryo, system-ui, sans-serif;
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
 }
 
 :root:lang(ja) body,
 .lang-ja {
-  font-family: "Yu Gothic UI", "Hiragino Kaku Gothic ProN", Meiryo, "Segoe UI", sans-serif;
+  font-family: "IBM Plex Sans JP", "Geist Variable", "Hiragino Kaku Gothic ProN",
+    "Yu Gothic UI", Meiryo, sans-serif;
 }
 
 a {

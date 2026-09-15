@@ -36,10 +36,6 @@ vi.mock("../api/client", () => ({
   validateSession: vi.fn()
 }));
 
-vi.mock("../components/review/FilterBar", () => ({
-  FilterBar: () => <div data-testid="filter-bar" />
-}));
-
 vi.mock("../components/review/LayerTree", () => ({
   LayerTree: () => <div data-testid="layer-tree" />
 }));
@@ -50,10 +46,6 @@ vi.mock("../components/review/MapPanel", () => ({
 
 vi.mock("../components/review/PropertiesPanel", () => ({
   PropertiesPanel: () => <div data-testid="properties-panel" />
-}));
-
-vi.mock("../components/review/TablePanel", () => ({
-  TablePanel: () => <div data-testid="table-panel" />
 }));
 
 vi.mock("../components/shared/ErrorBoundary", () => ({
@@ -265,7 +257,7 @@ test("hides shapefile export when the session includes geopackage sources", asyn
   expect(screen.queryByRole("option", { name: "Shapefiles (.zip)" })).not.toBeInTheDocument();
   expect(
     screen.getByText(
-      "Shapefile (.zip) export is only available for shapefile-backed sessions. This session includes GeoPackage sources, so only IMDF export is available."
+      "This session includes GeoPackage sources, so only IMDF export is available."
     )
   ).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Download .imdf" })).toBeEnabled();
@@ -299,18 +291,19 @@ test("requires an explicit prefix for open data export", async () => {
   fireEvent.click(exportButton);
 
   await waitFor(() => expect(validateSessionMock).toHaveBeenCalledWith("session-123"));
-  const formatSelect = screen.getByRole("combobox", { name: "Format" });
-  fireEvent.change(formatSelect, { target: { value: "odc2026_shapefiles" } });
-  await waitFor(() => expect(formatSelect).toHaveValue("odc2026_shapefiles"));
-  const nameInput = await screen.findByRole("textbox", { name: "Export file prefix (required)" });
+  fireEvent.click(screen.getByRole("combobox", { name: "Format" }));
+  fireEvent.click(
+    await screen.findByRole("option", { name: "Open Data Contest 2026 shapefiles (.zip)" })
+  );
+  const nameInput = await screen.findByRole("textbox", { name: /Export file prefix/ });
   expect(nameInput).toHaveValue("");
 
-  fireEvent.click(screen.getByRole("button", { name: "Download Open Data Contest 2026 shapefiles .zip" }));
+  fireEvent.click(screen.getByRole("button", { name: "Download ODC 2026 .zip" }));
   expect(await screen.findAllByText("Enter an export file prefix.")).not.toHaveLength(0);
   expect(exportSessionShapefilesMock).not.toHaveBeenCalled();
 
   fireEvent.change(nameInput, { target: { value: "TokyoSta" } });
-  fireEvent.click(screen.getByRole("button", { name: "Download Open Data Contest 2026 shapefiles .zip" }));
+  fireEvent.click(screen.getByRole("button", { name: "Download ODC 2026 .zip" }));
   await waitFor(() =>
     expect(exportSessionShapefilesMock).toHaveBeenCalledWith(
       "session-123",
@@ -318,4 +311,67 @@ test("requires an explicit prefix for open data export", async () => {
     )
   );
   anchorClick.mockRestore();
+});
+
+// The table view and its filter bar were built, tested in isolation, and then
+// quietly dropped out of the page — the unit tests kept passing because they
+// never asked whether anything rendered them. These do.
+test("the table view lists features and its filters narrow them", async () => {
+  fetchSessionFeaturesMock.mockResolvedValue({
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        id: "unit-1",
+        feature_type: "unit",
+        geometry: null,
+        properties: { name: { en: "Ticket hall" }, category: "room", status: "mapped" }
+      },
+      {
+        type: "Feature",
+        id: "opening-1",
+        feature_type: "opening",
+        geometry: null,
+        properties: { name: { en: "North door" }, category: "pedestrian", status: "mapped" }
+      }
+    ]
+  });
+
+  renderPage();
+  fireEvent.click(await screen.findByRole("button", { name: "Table" }));
+
+  expect(await screen.findByText("Ticket hall")).toBeInTheDocument();
+  expect(screen.getByText("North door")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("combobox", { name: "Type" }));
+  fireEvent.click(await screen.findByRole("option", { name: "opening" }));
+
+  await waitFor(() => expect(screen.queryByText("Ticket hall")).not.toBeInTheDocument());
+  expect(screen.getByText("North door")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+  expect(await screen.findByText("Ticket hall")).toBeInTheDocument();
+});
+
+test("selecting a table row selects it for the rest of the screen", async () => {
+  fetchSessionFeaturesMock.mockResolvedValue({
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        id: "unit-1",
+        feature_type: "unit",
+        geometry: null,
+        properties: { name: { en: "Ticket hall" }, category: "room", status: "mapped" }
+      }
+    ]
+  });
+
+  renderPage();
+  fireEvent.click(await screen.findByRole("button", { name: "Table" }));
+  fireEvent.click(await screen.findByRole("checkbox", { name: "Ticket hall" }));
+
+  await waitFor(() =>
+    expect(useAppStore.getState().selectedFeatureIds).toEqual(["unit-1"])
+  );
 });

@@ -372,11 +372,22 @@ def _transform_from_payload(payload: TransformPayload) -> SimilarityTransform:
     )
 
 
+# These handlers are deliberately `def`, not `async def`.
+#
+# Their bodies are synchronous and CPU-bound — shape ranking, region ranking,
+# survey consensus, floor assignment and the export writers. An `async def`
+# handler runs ON the event loop, so that work blocks every other request for
+# its whole duration: a Station_pg match against a large reference layer took
+# the entire API down with it, `/api/health` included. Declared `def`, FastAPI
+# runs them in a threadpool and the server stays responsive.
+#
+# Do not "tidy" these into `async def`. If one ever needs to await something,
+# wrap the CPU-bound call in `run_in_threadpool` instead.
 @router.post(
     "/convert/illustrator/{conversion_id}/shape-matches",
     response_model=IllustratorShapeMatchResponse,
 )
-async def match_illustrator_shape(
+def match_illustrator_shape(
     conversion_id: str,
     request: Request,
     payload: IllustratorShapeMatchRequest,
@@ -405,7 +416,7 @@ async def match_illustrator_shape(
     "/convert/illustrator/{conversion_id}/region-matches",
     response_model=IllustratorShapeMatchResponse,
 )
-async def match_illustrator_region(
+def match_illustrator_region(
     conversion_id: str,
     request: Request,
     payload: IllustratorRegionMatchRequest,
@@ -429,7 +440,7 @@ async def match_illustrator_region(
     "/convert/illustrator/{conversion_id}/survey-snap",
     response_model=IllustratorSurveySnapResponse,
 )
-async def snap_illustrator_survey(
+def snap_illustrator_survey(
     conversion_id: str,
     request: Request,
     payload: IllustratorSurveySnapRequest,
@@ -447,7 +458,7 @@ async def snap_illustrator_survey(
 
 
 @router.post("/convert/illustrator/{conversion_id}/assign", response_model=AssignFloorsResponse)
-async def assign_illustrator_floors(
+def assign_illustrator_floors(
     conversion_id: str,
     request: Request,
     payload: AssignFloorsRequest,
@@ -495,7 +506,7 @@ async def assign_illustrator_floors(
 
 
 @router.post("/convert/illustrator/{conversion_id}/export")
-async def export_illustrator(
+def export_illustrator(
     conversion_id: str,
     request: Request,
     payload: IllustratorExportRequest,

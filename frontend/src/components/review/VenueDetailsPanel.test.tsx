@@ -44,7 +44,7 @@ test("opens flagged when the facility is still a placeholder", () => {
       onRequestAutofill={vi.fn()}
     />
   );
-  expect(screen.getByText("required")).toBeInTheDocument();
+  expect(screen.getByText("Needs input")).toBeInTheDocument();
   expect(screen.getByDisplayValue("Venue")).toBeInTheDocument();
 });
 
@@ -62,7 +62,8 @@ test("saves the name as a language label and the category as a spec code", () =>
   );
 
   fireEvent.change(screen.getByLabelText("Facility name"), { target: { value: "JR新宿駅" } });
-  fireEvent.change(screen.getByLabelText("Facility category"), { target: { value: "A001" } });
+  fireEvent.click(screen.getByLabelText("Facility category"));
+  fireEvent.click(screen.getByRole("option", { name: /^A001/ }));
   fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "JR新宿駅" } });
   fireEvent.change(screen.getByLabelText("City"), { target: { value: "新宿区" } });
   fireEvent.click(screen.getByText("Save facility details"));

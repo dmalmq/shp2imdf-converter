@@ -23,6 +23,22 @@ export type FloorLayerProps = Readonly<{
   line: LinePaint;
 }>;
 
+/**
+ * Ghost floors are monochrome, and the neutral flips with the basemap.
+ *
+ * They used to take a per-floor tint from a six-colour list, which spent six
+ * hues on something only one of which is editable and left the artwork
+ * competing with itself and with the reference overlay. Only one floor is
+ * active at a time and the floor switcher names the rest, so the tints bought
+ * very little.
+ *
+ * A single fixed neutral does not work: ink at 6% fill disappears over aerial
+ * imagery, paper disappears over a street map. Flipping on basemap luminance is
+ * the whole of the rule.
+ */
+const GHOST_INK = "#0a0a0a";
+const GHOST_PAPER = "#ffffff";
+
 const APPEARANCE = {
   solid: { fillOpacity: 0.45, lineWidth: 1, lineOpacity: 1 },
   // fill-opacity 0 is still hittable; visibility none is not.
@@ -30,7 +46,12 @@ const APPEARANCE = {
   ghost: { fillOpacity: 0.06, lineWidth: 0.5, lineOpacity: 0.35 }
 } as const;
 
-export function floorPaint(role: FloorRole, view: ArtworkView, tint: string): FloorLayerProps {
+export function floorPaint(
+  role: FloorRole,
+  view: ArtworkView,
+  tint: string,
+  imageryBasemap = false
+): FloorLayerProps {
   if (role === "active") {
     const p = APPEARANCE[view.active];
     return {
@@ -47,10 +68,11 @@ export function floorPaint(role: FloorRole, view: ArtworkView, tint: string): Fl
     };
   }
   const p = APPEARANCE.ghost;
+  const ghost = imageryBasemap ? GHOST_PAPER : GHOST_INK;
   return {
     layout: { visibility: layerVisibility(view.others === "ghost") },
-    fill: { "fill-color": tint, "fill-opacity": p.fillOpacity },
-    line: { "line-color": tint, "line-width": p.lineWidth, "line-opacity": p.lineOpacity }
+    fill: { "fill-color": ghost, "fill-opacity": p.fillOpacity },
+    line: { "line-color": ghost, "line-width": p.lineWidth, "line-opacity": p.lineOpacity }
   };
 }
 
