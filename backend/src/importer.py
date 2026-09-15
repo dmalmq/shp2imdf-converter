@@ -84,15 +84,34 @@ class LoadedSource:
     source_feature_count: int | None = None
 
 
-def _expand_archives(file_blobs: Sequence[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
+# Overlay never draws attributes. Station_pl.dbf is 322 MB in the regional
+# extract and is discarded after inflate; skip it on this path and stub a table.
+_OVERLAY_SKIP_DBF_STEMS = frozenset({"station_pl"})
+
+
+def _expand_archives(
+    file_blobs: Sequence[tuple[str, bytes]],
+    *,
+    skip_dbf_stems: frozenset[str] = frozenset(),
+) -> list[tuple[str, bytes]]:
     expanded: list[tuple[str, bytes]] = []
+    skipped = {stem.lower() for stem in skip_dbf_stems}
     for name, content in file_blobs:
         if name.lower().endswith(".zip"):
             with zipfile.ZipFile(BytesIO(content)) as archive:
                 for info in archive.infolist():
                     if info.is_dir():
                         continue
-                    expanded.append((Path(info.filename).name, archive.read(info.filename)))
+                    member = Path(info.filename).name
+                    suffix = Path(member).suffix.lower()
+                    stem = Path(member).stem.lower()
+                    if suffix == ".dbf" and stem in skipped:
+                        continue
+                    expanded.append((member, archive.read(info.filename)))
+            continue
+        suffix = Path(name).suffix.lower()
+        stem = Path(name).stem.lower()
+        if suffix == ".dbf" and stem in skipped:
             continue
         expanded.append((Path(name).name, content))
     return expanded
@@ -500,44 +519,53 @@ def _reproject_to_wgs84(
     return gdf, warnings, crs_detected
 
 
-def _read_shapefile_from_group(
-    stem: str,
-    grouped_files: dict[str, bytes],
+def _read_shapefile_overlay_path(
+    shapefile_path: Path,
+    *,
     focus_bbox_4326: tuple[float, float, float, float] | None = None,
+    geometry_only: bool = True,
+    allow_stub_dbf: bool = True,
 ) -> LoadedSource:
+    """Read one shapefile in place for map display. Does not copy sidecars.
+
+    GDAL can filter in the file's own CRS, so the reader never materialises
+    the distant features the focus trim is about to drop anyway. Reading
+    the header via pyogrio also yields the file's full feature count for
+    the display total, which a bbox read would otherwise lose. If the
+    probe itself fails the read below is the one that decides the fate of
+    the upload; the count then falls back to the read frame's length.
+    """
+    from backend.src.reference_overlay import ensure_stub_dbf
+
     warnings: list[str] = []
-    required = {".shp", ".dbf", ".shx"}
-    missing_required = sorted(required - set(grouped_files))
-    if missing_required:
-        raise ValueError(f"Missing required shapefile sidecars for '{stem}': {', '.join(missing_required)}")
-    if ".prj" not in grouped_files:
+    stem = shapefile_path.stem
+    if not shapefile_path.exists():
+        raise ValueError(f"Missing required shapefile sidecars for '{stem}': .shp")
+    if not shapefile_path.with_suffix(".shx").exists():
+        raise ValueError(f"Missing required shapefile sidecars for '{stem}': .shx")
+    if not shapefile_path.with_suffix(".dbf").exists():
+        if not allow_stub_dbf:
+            raise ValueError(f"Missing required shapefile sidecars for '{stem}': .dbf")
+        ensure_stub_dbf(shapefile_path)
+    if not shapefile_path.with_suffix(".prj").exists():
         warnings.append(f"{stem}: missing .prj; CRS could not be auto-detected.")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        directory = Path(tmpdir)
-        for extension, content in grouped_files.items():
-            (directory / f"{stem}{extension}").write_bytes(content)
-        shapefile_path = directory / f"{stem}.shp"
-        # GDAL can filter in the file's own CRS, so the reader never materialises
-        # the distant features the focus trim is about to drop anyway. Reading
-        # the header via pyogrio also yields the file's full feature count for
-        # the display total, which a bbox read would otherwise lose. If the
-        # probe itself fails the read below is the one that decides the fate of
-        # the upload; the count then falls back to the read frame's length.
-        try:
-            info = pyogrio.read_info(shapefile_path)
-        except Exception:
-            info = None
-        if info is not None:
-            bbox = _focus_bbox_in_crs(focus_bbox_4326, info["crs"])
-            source_feature_count = info["features"]
-        else:
-            bbox = None
-            source_feature_count = None
-        if bbox is None:
-            gdf = gpd.read_file(shapefile_path)
-        else:
-            gdf = gpd.read_file(shapefile_path, bbox=bbox)
+    try:
+        info = pyogrio.read_info(shapefile_path)
+    except Exception:
+        info = None
+    if info is not None:
+        bbox = _focus_bbox_in_crs(focus_bbox_4326, info["crs"])
+        source_feature_count = info["features"]
+    else:
+        bbox = None
+        source_feature_count = None
+    read_kwargs: dict[str, Any] = {}
+    if bbox is not None:
+        read_kwargs["bbox"] = bbox
+    if geometry_only:
+        read_kwargs["columns"] = ["geometry"]
+    gdf = gpd.read_file(shapefile_path, **read_kwargs)
 
     gdf, crs_warnings, crs_detected = _reproject_to_wgs84(gdf)
     warnings.extend(crs_warnings)
@@ -550,6 +578,30 @@ def _read_shapefile_from_group(
         crs_detected=crs_detected,
         source_feature_count=source_feature_count,
     )
+
+
+def _read_shapefile_from_group(
+    stem: str,
+    grouped_files: dict[str, bytes],
+    focus_bbox_4326: tuple[float, float, float, float] | None = None,
+    *,
+    overlay: bool = False,
+) -> LoadedSource:
+    required = {".shp", ".shx"} if overlay else {".shp", ".dbf", ".shx"}
+    missing_required = sorted(required - set(grouped_files))
+    if missing_required:
+        raise ValueError(f"Missing required shapefile sidecars for '{stem}': {', '.join(missing_required)}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        directory = Path(tmpdir)
+        for extension, content in grouped_files.items():
+            (directory / f"{stem}{extension}").write_bytes(content)
+        return _read_shapefile_overlay_path(
+            directory / f"{stem}.shp",
+            focus_bbox_4326=focus_bbox_4326,
+            geometry_only=overlay,
+            allow_stub_dbf=overlay,
+        )
 
 
 def _focus_bbox_in_crs(
@@ -774,7 +826,7 @@ def read_reference_layers(
     if not file_blobs:
         raise ValueError("No files provided.")
 
-    expanded = _expand_archives(file_blobs)
+    expanded = _expand_archives(file_blobs, skip_dbf_stems=_OVERLAY_SKIP_DBF_STEMS)
     shapefile_groups = _group_shapefile_components(expanded)
     geopackages = _collect_geopackage_blobs(expanded)
     if not shapefile_groups and not geopackages:
@@ -786,7 +838,11 @@ def read_reference_layers(
     for stem, files in sorted(shapefile_groups.items()):
         if ".shp" not in files:
             continue
-        sources.append(_read_shapefile_from_group(stem, files, focus_bbox_4326=focus_bbox_4326))
+        sources.append(
+            _read_shapefile_from_group(
+                stem, files, focus_bbox_4326=focus_bbox_4326, overlay=True
+            )
+        )
     for package_stem, content in geopackages:
         package_sources, _package_warnings = _read_geopackage_blob(
             package_stem, content, used_stems, focus_bbox_4326=focus_bbox_4326

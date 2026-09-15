@@ -93,11 +93,16 @@ pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
   tolerance and every 1.2 m footprint collapsed to a triangle. Fixtures here need small
   features spread over a wide area — a single building hides this entirely, since extent
   and feature size are then the same number.
-  Regional extracts are also trimmed spatially: the placement screen sends the placed
-  artwork's WGS84 box as `focus_bounds`, and the reader keeps only what falls within
-  `_REFERENCE_FOCUS_MARGIN_METRES` (1 km) of it, pushing that box down into GDAL so
-  distant features are never even read. Omitting the field keeps the untrimmed
-  behaviour, so the endpoint stays usable on its own.
+  Regional extracts are also trimmed spatially: the placement screen sends the
+  station pin as a degenerate WGS84 `focus_bounds` box (`pinFocusBounds`), and
+  the reader keeps only what falls within `_REFERENCE_FOCUS_MARGIN_METRES`
+  (1 km) of it, pushing that box down into GDAL so distant features are never
+  even read. Omitting the field keeps the untrimmed behaviour, so the upload
+  endpoint stays usable on its own. The shared-PC 駅データ extract is read from
+  `REFERENCE_OVERLAY_PATH` via `POST /api/reference-layers/preloaded` so pin and
+  gizmo moves re-query that copy instead of re-uploading the zip. `Station_pl`
+  is skipped until the operator opts in. The file picker still POSTs other
+  shapefiles to `POST /api/reference-layers`.
 - ODC output is one file **per floor**, and a floor routinely holds several Level
   features: 新宿 2F is ラチ内 / ラチ外 / 屋外, 1F is eight platforms plus 1F and
   1F屋外. `_write_odc2026_shapefiles` therefore accumulates rows per

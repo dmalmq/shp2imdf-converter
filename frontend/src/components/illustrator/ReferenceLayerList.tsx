@@ -1,11 +1,18 @@
 import { Eye, EyeOff, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { uploadReferenceLayers } from "../../api/client";
+import {
+  fetchPreloadedReferenceLayers,
+  getPreloadedReferenceOverlay,
+  uploadReferenceLayers,
+  type PreloadedReferenceOverlayInfo,
+  type ReferenceLayerItem
+} from "../../api/client";
 import { isBackendUnreachableError, toErrorMessage } from "../../api/errors";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { preferredArtworkMatchTarget } from "../../lib/artworkMatch";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { DisabledHint } from "../ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { ReferenceLayer } from "./PlacementMap";
@@ -29,6 +36,7 @@ export const REFERENCE_TINTS = ["#2563eb", "#0891b2", "#65a30d", "#57534e"];
 
 const SURVEY_POLYGON_STEM = "Station_pg";
 const SURVEY_LINE_STEM = "Station_pl";
+const PIN_REQUERY_MS = 300;
 
 function layerHasStem(name: string, stem: string): boolean {
   return name === stem || name.startsWith(`${stem} `);
@@ -85,6 +93,40 @@ export function nextMatchTarget(
   return { referenceName: "", referenceFloorLabel: "" };
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === "AbortError"
+    : error instanceof Error && error.name === "AbortError";
+}
+
+function mapLoadedLayers(
+  loaded: ReferenceLayerItem[],
+  colorBase: number,
+  taken: Set<string>
+): { added: ReferenceLayer[]; empty: string[] } {
+  const added: ReferenceLayer[] = [];
+  const empty: string[] = [];
+  for (const layer of loaded) {
+    const kept = layer.geojson.features.length;
+    if (kept === 0) {
+      empty.push(layer.name);
+      continue;
+    }
+    let name = layer.name;
+    for (let n = 2; taken.has(name); n += 1) name = `${layer.name} (${n})`;
+    taken.add(name);
+    added.push({
+      name,
+      data: layer.geojson,
+      color: REFERENCE_TINTS[(colorBase + added.length) % REFERENCE_TINTS.length],
+      visible: true,
+      featureCount: layer.feature_count,
+      truncated: layer.truncated
+    });
+  }
+  return { added, empty };
+}
+
 /**
  * Existing survey/GIS data drawn under the artwork to align against.
  *
@@ -103,92 +145,149 @@ export function ReferenceLayerList({
   const archiveRef = useRef<File[]>([]);
   const omittedRef = useRef<Set<string>>(new Set());
   const boundsKeyRef = useRef(focusBounds?.join(",") ?? "");
+  const layersRef = useRef(layers);
+  layersRef.current = layers;
+  const preloadedActiveRef = useRef(false);
+  const includeLinesRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const debounceRef = useRef<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [preloadInfo, setPreloadInfo] = useState<PreloadedReferenceOverlayInfo>({
+    available: false,
+    label: "駅データ"
+  });
+  const [preloadedActive, setPreloadedActive] = useState(false);
+  const [includeLines, setIncludeLines] = useState(false);
   const pinReady = Boolean(focusBounds);
 
-  const add = useCallback(
-    async (files: File[], mode: "append" | "replace") => {
-      if (!focusBounds) return;
-      const batch = mode === "replace" ? archiveRef.current : files;
-      if (batch.length === 0) return;
-      boundsKeyRef.current = focusBounds.join(",");
+  useEffect(() => {
+    let cancelled = false;
+    void getPreloadedReferenceOverlay()
+      .then((info) => {
+        if (cancelled) return;
+        setPreloadInfo((current) =>
+          current.available === info.available && current.label === info.label ? current : info
+        );
+      })
+      .catch(() => {
+        /* Stay on the unavailable default so a dead backend does not flash a button. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const refresh = useCallback(
+    async (mode: "append" | "replace", extraFiles: File[] = []): Promise<"ok" | "abort" | "error"> => {
+      if (!focusBounds) return "error";
+      if (mode === "replace") boundsKeyRef.current = focusBounds.join(",");
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
       setLoading(true);
       setError(null);
       setNotice(null);
+      const emptyNotice = (empty: string[]) => {
+        if (empty.length === 0) return;
+        setNotice(
+          t(
+            `Nothing was found near the station in ${empty.join(", ")}.`,
+            `駅周辺では見つかりませんでした：${empty.join("、")}。`
+          )
+        );
+      };
       try {
-        const loaded = await uploadReferenceLayers(batch, focusBounds);
-        const taken = new Set(mode === "replace" ? [] : layers.map((layer) => layer.name));
-        const added: ReferenceLayer[] = [];
-        const empty: string[] = [];
-        const colorBase = mode === "replace" ? 0 : layers.length;
-        for (const layer of loaded) {
-          const kept = layer.geojson.features.length;
-          if (kept === 0) {
-            empty.push(layer.name);
-            continue;
-          }
-          let name = layer.name;
-          for (let n = 2; taken.has(name); n += 1) name = `${layer.name} (${n})`;
-          taken.add(name);
-          added.push({
-            name,
-            data: layer.geojson,
-            color: REFERENCE_TINTS[(colorBase + added.length) % REFERENCE_TINTS.length],
-            visible: true,
-            featureCount: layer.feature_count,
-            truncated: layer.truncated
-          });
-        }
         if (mode === "append") {
-          archiveRef.current = [...archiveRef.current, ...files];
+          if (extraFiles.length === 0) return "ok";
+          const loaded = await uploadReferenceLayers(extraFiles, focusBounds, controller.signal);
+          const taken = new Set(layersRef.current.map((layer) => layer.name));
+          const { added, empty } = mapLoadedLayers(loaded, layersRef.current.length, taken);
+          archiveRef.current = [...archiveRef.current, ...extraFiles];
           for (const layer of added) omittedRef.current.delete(layer.name);
+          emptyNotice(empty);
+          if (added.length > 0) onChange([...layersRef.current, ...added]);
+          return "ok";
         }
-        const visible =
-          mode === "replace" ? added.filter((layer) => !omittedRef.current.has(layer.name)) : added;
-        if (empty.length > 0) {
-          setNotice(
-            t(
-              `Nothing was found near the station in ${empty.join(", ")}.`,
-              `駅周辺では見つかりませんでした：${empty.join("、")}。`
-            )
+        const parts: ReferenceLayer[] = [];
+        const taken = new Set<string>();
+        const empty: string[] = [];
+        if (preloadedActiveRef.current) {
+          const loaded = await fetchPreloadedReferenceLayers(
+            focusBounds,
+            includeLinesRef.current,
+            controller.signal
           );
+          const mapped = mapLoadedLayers(loaded, parts.length, taken);
+          parts.push(...mapped.added);
+          empty.push(...mapped.empty);
         }
-        if (mode === "replace") {
-          onChange(visible);
-        } else if (visible.length > 0) {
-          onChange([...layers, ...visible]);
+        if (archiveRef.current.length > 0) {
+          const loaded = await uploadReferenceLayers(
+            archiveRef.current,
+            focusBounds,
+            controller.signal
+          );
+          const mapped = mapLoadedLayers(loaded, parts.length, taken);
+          parts.push(...mapped.added);
+          empty.push(...mapped.empty);
         }
-      } catch (error) {
+        emptyNotice(empty);
+        onChange(parts.filter((layer) => !omittedRef.current.has(layer.name)));
+        return "ok";
+      } catch (caught) {
+        if (isAbortError(caught) || controller.signal.aborted) return "abort";
         setError(
-          isBackendUnreachableError(error)
+          isBackendUnreachableError(caught)
             ? t(
                 "Could not reach the converter. The server may be down or restarting - check it is running, then try again.",
                 "コンバーターに接続できません。サーバーが停止または再起動中の可能性があります。稼働状況を確認してから、もう一度お試しください。"
               )
             : toErrorMessage(
-                error,
+                caught,
                 t(
                   "Could not read that file. Select the .shp with its .dbf/.shx/.prj, a .zip of them, or a .gpkg.",
                   "読み込めませんでした。.shp と .dbf/.shx/.prj、それらの .zip、または .gpkg を選択してください。"
                 )
               )
         );
+        return "error";
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     },
-    [focusBounds, layers, onChange, t]
+    [focusBounds, onChange, t]
   );
 
   useEffect(() => {
     const key = focusBounds?.join(",") ?? "";
     if (boundsKeyRef.current === key) return;
     boundsKeyRef.current = key;
-    if (!focusBounds || archiveRef.current.length === 0) return;
-    void add(archiveRef.current, "replace");
-  }, [add, focusBounds]);
+    if (!focusBounds || (!preloadedActiveRef.current && archiveRef.current.length === 0)) {
+      return;
+    }
+    abortRef.current?.abort();
+    if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => {
+      void refresh("replace");
+    }, PIN_REQUERY_MS);
+    return () => {
+      if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+    };
+  }, [focusBounds, refresh]);
+
+  const loadPreloaded = () => {
+    const wasActive = preloadedActiveRef.current;
+    preloadedActiveRef.current = true;
+    setPreloadedActive(true);
+    void refresh("replace").then((result) => {
+      if (result === "error" && !wasActive) {
+        preloadedActiveRef.current = false;
+        setPreloadedActive(false);
+      }
+    });
+  };
 
   const addButton = (
     <Button
@@ -223,10 +322,44 @@ export function ReferenceLayerList({
         className="hidden"
         onChange={(event) => {
           const files = Array.from(event.target.files ?? []);
-          if (files.length) void add(files, "append");
+          if (files.length) void refresh("append", files);
           event.target.value = "";
         }}
       />
+      {preloadInfo.available ? (
+        preloadedActive ? (
+          <label className="flex cursor-pointer items-center gap-2 text-[13px] leading-[18px] text-foreground">
+            <Checkbox
+              data-testid="include-survey-lines"
+              checked={includeLines}
+              disabled={loading || !pinReady}
+              onCheckedChange={(checked) => {
+                const next = checked === true;
+                includeLinesRef.current = next;
+                setIncludeLines(next);
+                void refresh("replace");
+              }}
+            />
+            <span>{t("Show survey lines", "線路を表示")}</span>
+          </label>
+        ) : (
+          <DisabledHint
+            hint={pinReady ? null : t("Identify the station first", "先に駅を特定してください")}
+          >
+            <Button
+              size="sm"
+              className="w-full"
+              data-testid="load-eki-data"
+              disabled={loading || !pinReady}
+              onClick={loadPreloaded}
+            >
+              {loading
+                ? t("Loading...", "読み込み中...")
+                : t("Load 駅データ", "駅データを読み込む")}
+            </Button>
+          </DisabledHint>
+        )
+      ) : null}
 
       {!pinReady ? (
         <p className="text-xs leading-4 text-muted-foreground">

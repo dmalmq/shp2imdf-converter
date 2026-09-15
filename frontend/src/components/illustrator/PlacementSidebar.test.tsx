@@ -10,7 +10,9 @@ vi.mock("../../api/client", () => ({
   deletePlacement: vi.fn(),
   geocodeSearch: vi.fn(),
   listPlacements: vi.fn(() => new Promise(() => {})),
-  uploadReferenceLayers: vi.fn()
+  uploadReferenceLayers: vi.fn(),
+  getPreloadedReferenceOverlay: vi.fn().mockResolvedValue({ available: false, label: "駅データ" }),
+  fetchPreloadedReferenceLayers: vi.fn()
 }));
 
 function stateWith(floors: { label: string; linked: boolean }[], active: string): PlacementState {

@@ -25,6 +25,7 @@ from backend.src.illustrator_importer import IllustratorConversionError
 from backend.src.illustrator_store import ConversionExpiredError, ConversionStore
 from backend.src.placements import DuplicatePlacementError, PlacementStore
 from backend.src.qgis_export import QgisExportError, QgisUnavailableError
+from backend.src.reference_overlay import ReferenceOverlayStore
 from backend.src.schemas import ErrorResponse
 from backend.src.session import SessionManager, build_session_backend
 
@@ -55,6 +56,14 @@ def _load_max_upload_bytes() -> int:
     return int(max_upload_mb * 1024 * 1024)
 
 
+def _load_reference_overlay() -> ReferenceOverlayStore:
+    raw = os.getenv("REFERENCE_OVERLAY_PATH", "").strip()
+    source = Path(raw).expanduser() if raw else None
+    cache = Path(os.getenv("TEMP_DATA_DIR", "./data/tmp")) / "reference-overlay"
+    cache.mkdir(parents=True, exist_ok=True)
+    return ReferenceOverlayStore(source, cache)
+
+
 async def _session_cleanup_loop(app: FastAPI, stop: asyncio.Event) -> None:
     while True:
         try:
@@ -82,6 +91,7 @@ async def lifespan(app: FastAPI):
     app.state.placement_store = PlacementStore(
         Path(os.getenv("PLACEMENTS_DB", "./data/placements.db"))
     )
+    app.state.reference_overlay = _load_reference_overlay()
     app.state.geocoder = build_geocoder(
         provider=os.getenv("GEOCODER_PROVIDER", "nominatim"),
         base_url=os.getenv("GEOCODER_BASE_URL", "https://nominatim.openstreetmap.org"),

@@ -36,8 +36,9 @@ from backend.src.illustrator_store import ConversionStore
 from backend.src.illustrator_survey_snap import match_survey_consensus
 from backend.src.imdf_reader import read_imdf_zip
 from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
-from backend.src.importer import import_file_blobs, read_reference_layers
+from backend.src.importer import ReferenceLayer, import_file_blobs, read_reference_layers
 from backend.src.placements import PlacementStore
+from backend.src.reference_overlay import PRELOADED_LABEL, ReferenceOverlayStore
 from backend.src.schemas import (
     AssignFloorSummary,
     AssignFloorsRequest,
@@ -52,6 +53,8 @@ from backend.src.schemas import (
     PlacementItem,
     PlacementListResponse,
     PlacementRequest,
+    PreloadedReferenceLayersRequest,
+    PreloadedReferenceOverlayInfo,
     ReferenceLayerItem,
     ReferenceLayersResponse,
     IllustratorRegionMatchRequest,
@@ -240,6 +243,34 @@ def _parse_focus_bounds(raw: str | None) -> tuple[float, float, float, float] | 
     return (min_lon, min_lat, max_lon, max_lat)
 
 
+def _require_focus_bounds(raw: str | None) -> tuple[float, float, float, float]:
+    """Preload queries the server copy around the pin; a missing box is an error."""
+    parsed = _parse_focus_bounds(raw)
+    if parsed is None:
+        raise ValueError("A station pin is required before loading the overlay (focus_bounds).")
+    return parsed
+
+
+def _overlay_store(request: Request) -> ReferenceOverlayStore:
+    return request.app.state.reference_overlay
+
+
+def _reference_layers_response(layers: list[ReferenceLayer]) -> ReferenceLayersResponse:
+    return ReferenceLayersResponse(
+        layers=[
+            ReferenceLayerItem(
+                name=layer.name,
+                crs=layer.crs,
+                feature_count=layer.feature_count,
+                truncated=layer.truncated,
+                warnings=layer.warnings,
+                geojson=layer.geojson,
+            )
+            for layer in layers
+        ]
+    )
+
+
 @router.post("/reference-layers", response_model=ReferenceLayersResponse)
 async def upload_reference_layers(
     request: Request,
@@ -251,8 +282,9 @@ async def upload_reference_layers(
 ) -> ReferenceLayersResponse:
     """Read overlay geometry for the placement map.
 
-    Stateless on purpose: the layers are only drawn under the artwork to align
-    it, so the response is the whole contract and nothing is cached or exported.
+    Stateless on purpose for picked files: the layers are only drawn under the
+    artwork to align it, so the response is the whole contract and nothing is
+    cached or exported.
 
     ``focus_bounds`` optionally pins the trim to a WGS84 box.
     """
@@ -267,19 +299,30 @@ async def upload_reference_layers(
         blobs.append((upload.filename or "reference.bin", payload))
 
     layers = read_reference_layers(blobs, focus=_parse_focus_bounds(focus_bounds))
-    return ReferenceLayersResponse(
-        layers=[
-            ReferenceLayerItem(
-                name=layer.name,
-                crs=layer.crs,
-                feature_count=layer.feature_count,
-                truncated=layer.truncated,
-                warnings=layer.warnings,
-                geojson=layer.geojson,
-            )
-            for layer in layers
-        ]
+    return _reference_layers_response(layers)
+
+
+@router.get("/reference-layers/preloaded", response_model=PreloadedReferenceOverlayInfo)
+def preloaded_reference_overlay(request: Request) -> PreloadedReferenceOverlayInfo:
+    """Whether the shared-PC 駅データ extract can be loaded without an upload."""
+    store = _overlay_store(request)
+    return PreloadedReferenceOverlayInfo(available=store.available(), label=PRELOADED_LABEL)
+
+
+@router.post("/reference-layers/preloaded", response_model=ReferenceLayersResponse)
+def read_preloaded_reference_layers(
+    request: Request,
+    body: PreloadedReferenceLayersRequest,
+) -> ReferenceLayersResponse:
+    """Bbox-query the configured 駅データ copy. Pin required. No zip in the body."""
+    store = _overlay_store(request)
+    if not store.available():
+        raise ValueError("No preloaded 駅データ. Set REFERENCE_OVERLAY_PATH to the zip or folder.")
+    layers = store.read(
+        focus=_require_focus_bounds(body.focus_bounds),
+        include_lines=body.include_lines,
     )
+    return _reference_layers_response(layers)
 
 
 @router.post("/convert/illustrator/preview", response_model=IllustratorPreviewResponse)
