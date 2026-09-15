@@ -17,6 +17,18 @@ export type BasemapId = "osm" | "gsi-photo" | "gsi-std" | "esri";
 
 export const BASEMAP_ORDER: BasemapId[] = ["osm", "gsi-photo", "gsi-std", "esri"];
 
+/**
+ * True for the photographic basemaps.
+ *
+ * Ghost floors are drawn as a neutral, and which neutral works depends on what
+ * is underneath: near-black at 6% fill is invisible over aerial imagery, and
+ * near-white is invisible over a street map. This is the only thing the paint
+ * rule needs to know about the basemap.
+ */
+export function isImageryBasemap(id: BasemapId): boolean {
+  return id === "gsi-photo" || id === "esri";
+}
+
 const GSI_ATTRIBUTION =
   '出典：<a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>';
 

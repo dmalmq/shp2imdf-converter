@@ -20,7 +20,7 @@ import { ArtworkDropzone } from "../components/illustrator/ArtworkDropzone";
 import { AssignmentPanel } from "../components/illustrator/AssignmentPanel";
 import { PageAssignmentPanel } from "../components/illustrator/PageAssignmentPanel";
 import {
-  FLOOR_TINTS,
+  ARTWORK_TINT,
   type ArtworkShapeSelection,
   type FloorLayer,
   type ReferenceLayer
@@ -400,11 +400,11 @@ export function IllustratorPage() {
         layerNames: region.layer_names
       }))
     );
-    return regions.map((region, index) => ({
+    return regions.map((region) => ({
       label: region.label,
       features: perFloor.get(region.label) ?? [],
       bounds: boundsFor(preview, region),
-      color: FLOOR_TINTS[index % FLOOR_TINTS.length]
+      color: ARTWORK_TINT
     }));
   }, [preview, assignment]);
 
