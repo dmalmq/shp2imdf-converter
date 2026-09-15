@@ -8,6 +8,8 @@ import MapGL, {
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { attachMapHealth } from "../../lib/mapHealth";
+import { useAppStore } from "../../store/useAppStore";
+import { MAP_BACKGROUND } from "./streetMapStyle";
 import { Button } from "../ui";
 
 const MAP_LIB = import("maplibre-gl");
@@ -70,6 +72,7 @@ export const MapView = forwardRef<MapRef, Props>(function MapView(
   ref
 ) {
   const { t } = useUiLanguage();
+  const theme = useAppStore((state) => state.theme);
   const [generation, setGeneration] = useState(0);
   const [failed, setFailed] = useState(false);
   const attemptsRef = useRef(0);
@@ -159,8 +162,13 @@ export const MapView = forwardRef<MapRef, Props>(function MapView(
     setGeneration((value) => value + 1);
   };
 
+  // Matches the style's own background layer, which follows the theme; a
+  // hardcoded light value flashed white here on a dark page.
   return (
-    <div className="relative h-full w-full bg-[#e8eef4]">
+    <div
+      className="relative h-full w-full"
+      style={{ backgroundColor: theme === "dark" ? MAP_BACKGROUND.dark : MAP_BACKGROUND.light }}
+    >
       {failed ? (
         <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
           <p className="text-sm text-muted-foreground">

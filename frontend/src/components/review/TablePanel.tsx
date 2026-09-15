@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   flexRender,
@@ -8,6 +8,9 @@ import {
 } from "@tanstack/react-table";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { EmptyState } from "../shared/EmptyState";
+import { FeatureTypeIcon } from "../shared/FeatureTypeIcon";
+import { Badge, Checkbox } from "../ui";
 import { featureName, type ReviewFeature } from "./types";
 
 
@@ -44,7 +47,6 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
   const { t } = useUiLanguage();
   const selectedSet = useMemo(() => new Set(selectedFeatureIds), [selectedFeatureIds]);
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
-  const selectAllRef = useRef<HTMLInputElement | null>(null);
 
   const visibleIds = useMemo(() => features.map((item) => item.id), [features]);
   const visibleSet = useMemo(() => new Set(visibleIds), [visibleIds]);
@@ -61,13 +63,6 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
     });
     return mapped;
   }, [visibleIds]);
-
-  useEffect(() => {
-    if (!selectAllRef.current) {
-      return;
-    }
-    selectAllRef.current.indeterminate = someVisibleSelected;
-  }, [someVisibleSelected]);
 
   const setSelection = (ids: string[]) => {
     if (onSelectionChange) {
@@ -157,23 +152,22 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
     {
       id: "select",
       header: () => (
-        <input
-          ref={selectAllRef}
-          type="checkbox"
-          checked={allVisibleSelected}
+        <Checkbox
+          checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false}
           disabled={visibleIds.length === 0}
           aria-label={t("Select all visible rows", "表示中の行をすべて選択")}
-          onChange={(event) => toggleAllVisible(event.target.checked)}
+          onCheckedChange={(next) => toggleAllVisible(next === true)}
           onClick={(event) => event.stopPropagation()}
         />
       ),
       cell: ({ row }) => {
         const id = row.original.id;
         return (
-          <input
-            type="checkbox"
+          // Shift-click extends the selection, and `onCheckedChange` does not
+          // carry the modifier keys — so the click event is what decides.
+          <Checkbox
             checked={selectedSet.has(id)}
-            onChange={() => undefined}
+            aria-label={featureName(row.original) || id}
             onClick={(event) => {
               event.stopPropagation();
               handleRowSelection(id, event.shiftKey);
@@ -197,8 +191,13 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
     },
     {
       accessorKey: "feature_type",
-      header: t("Feature Type", "フィーチャー種別"),
-      cell: ({ getValue }) => <span className="capitalize">{String(getValue())}</span>
+      header: t("Type", "種別"),
+      cell: ({ getValue }) => (
+        <span className="flex items-center gap-1.5">
+          <FeatureTypeIcon featureType={String(getValue())} size="sm" />
+          <span className="capitalize">{String(getValue())}</span>
+        </span>
+      )
     },
     {
       id: "category",
@@ -218,13 +217,20 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
       header: t("Status", "ステータス"),
       cell: ({ row }) => {
         const status = statusValue(row.original);
-        const className =
-          status === "error"
-            ? "bg-destructive/20 text-destructive"
-            : status === "warning"
-              ? "bg-warning/20 text-warning"
-              : "bg-success/20 text-success";
-        return <span className={`rounded px-2 py-0.5 text-xs ${className}`}>{status}</span>;
+        return (
+          <Badge
+            variant="outline"
+            className={
+              status === "error"
+                ? "border-destructive/40 text-destructive"
+                : status === "warning"
+                  ? "border-warning/40 text-warning"
+                  : "text-muted-foreground"
+            }
+          >
+            {status}
+          </Badge>
+        );
       }
     }
   ];
@@ -236,15 +242,17 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
   });
 
   return (
-    <div className="rounded border bg-card">
-      <div className="max-h-[360px] overflow-auto">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card">
+      <div className="min-h-0 flex-1 overflow-auto">
         <table className="min-w-full border-collapse text-sm">
-          <thead className="sticky top-0 bg-muted text-left text-xs uppercase tracking-wide text-muted-foreground">
+          <thead className="sticky top-0 z-[1] bg-muted text-left font-mono text-[10px] uppercase leading-[13px] tracking-[0.06em] text-muted-foreground">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
-                  <th key={header.id} className="px-2 py-2">
-                    {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                  <th key={header.id} className="whitespace-nowrap px-3 py-2.5">
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(header.column.columnDef.header, header.getContext())}
                   </th>
                 ))}
               </tr>
@@ -256,11 +264,13 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
               return (
                 <tr
                   key={row.id}
-                  className={`cursor-pointer border-t ${isSelected ? "bg-accent" : "bg-card hover:bg-muted"}`}
+                  className={`cursor-pointer border-t border-border transition-colors ${
+                    isSelected ? "bg-accent" : "bg-card hover:bg-muted"
+                  }`}
                   onClick={(event) => handleRowSelection(row.original.id, event.shiftKey)}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-2 py-2">
+                    <td key={cell.id} className="px-3 py-2">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}
@@ -269,6 +279,17 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
             })}
           </tbody>
         </table>
+
+        {features.length === 0 ? (
+          <EmptyState
+            icon="search"
+            title={t("No features match", "一致するフィーチャーがありません")}
+            description={t(
+              "Clear a filter above to see more.",
+              "上のフィルターを解除すると表示されます。"
+            )}
+          />
+        ) : null}
       </div>
     </div>
   );

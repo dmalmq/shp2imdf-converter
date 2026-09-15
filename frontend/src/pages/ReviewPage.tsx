@@ -24,6 +24,7 @@ import {
   type ValidationIssue,
   type ValidationResponse} from "../api/client";
 import { FeatureList } from "../components/review/FeatureList";
+import { FilterBar, activeFilterCount } from "../components/review/FilterBar";
 import { IssuesPanel } from "../components/review/IssuesPanel";
 import {
   buildFloorGroups,
@@ -36,6 +37,7 @@ import { LayerTree } from "../components/review/LayerTree";
 import { VenueDetailsPanel, type AddressParts } from "../components/review/VenueDetailsPanel";
 import { MapPanel } from "../components/review/MapPanel";
 import { PropertiesPanel } from "../components/review/PropertiesPanel";
+import { TablePanel } from "../components/review/TablePanel";
 import { ValidationBar } from "../components/review/ValidationBar";
 import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
@@ -66,6 +68,7 @@ import {
   Textarea
 } from "../components/ui";
 import { StepIndicator } from "../components/shell/StepIndicator";
+import { cn } from "@/lib/utils";
 
 
 /** Only these feature types are visible by default on the map. */
@@ -262,6 +265,7 @@ export function ReviewPage() {
   const [exportOptionsError, setExportOptionsError] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarTab, setSidebarTab] = useState("features");
+  const [mainView, setMainView] = useState<"map" | "table">("map");
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [activeIssueIndex, setActiveIssueIndex] = useState<number | null>(null);
   const [issuesPanelCollapsed, setIssuesPanelCollapsed] = useState(false);
@@ -365,6 +369,23 @@ export function ReviewPage() {
 
   const layerKeys = useMemo(() => orderedLayerKeys(features), [features]);
 
+  // Filter options come from the data rather than a fixed list: a session only
+  // ever holds the feature types and categories its own shapefiles produced.
+  const filterFeatureTypes = useMemo(
+    () => [...new Set(features.map((item) => item.feature_type))].sort(),
+    [features]
+  );
+  const filterCategories = useMemo(() => {
+    const found = new Set<string>();
+    features.forEach((item) => {
+      const category = item.properties.category;
+      if (typeof category === "string" && category.trim()) {
+        found.add(category);
+      }
+    });
+    return [...found].sort();
+  }, [features]);
+
   // Initialize layer visibility: only unit/detail/opening ON by default
   useEffect(() => {
     if (layerKeys.length === 0) {
@@ -383,6 +404,7 @@ export function ReviewPage() {
   }, [layerVisibility, layerKeys, setLayerVisibility]);
 
   const filteredFeatures = useMemo(() => applyFilters(features, filters), [features, filters]);
+  const filterCount = activeFilterCount(filters);
 
   const selectedFeature = useMemo(() => {
     if (selectedFeatureIds.length === 0) {
@@ -1243,27 +1265,101 @@ export function ReviewPage() {
           </aside>
         ) : null}
 
-        {/* ── Map area ── */}
-        <div className="flex-1">
-          {loading ? (
-            <div className="flex h-full items-center justify-center bg-muted">
-              <SkeletonBlock className="h-full w-full" />
+        {/* ── Main area: map or table ── */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-3 py-1.5">
+            <div
+              role="group"
+              aria-label={t("View", "表示")}
+              className="inline-flex gap-0.5 rounded-md bg-muted p-1"
+            >
+              {([
+                ["map", t("Map", "地図")],
+                ["table", t("Table", "表")]
+              ] as const).map(([view, label]) => (
+                <button
+                  key={view}
+                  type="button"
+                  aria-pressed={mainView === view}
+                  onClick={() => setMainView(view)}
+                  className={cn(
+                    "rounded-sm px-3 py-1 text-[13px] font-medium leading-[18px] transition-colors",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    mainView === view
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-          ) : (
-            <ErrorBoundary>
-              <MapPanel
-                features={features}
-                selectedFeatureIds={selectedFeatureIds}
-                layerVisibility={layerVisibility}
-                validationIssues={allValidationIssues}
-                overlayVisibility={overlayVisibility}
-                visibleLevelIds={visibleLevelIds}
-                showBasemap={showBasemap}
-                activeIssue={activeIssue}
-                onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
-              />
-            </ErrorBoundary>
-          )}
+
+            <span className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
+              {filterCount > 0
+                ? t(
+                    `${filteredFeatures.length} of ${features.length} features`,
+                    `${features.length} 件中 ${filteredFeatures.length} 件`
+                  )
+                : t(`${features.length} features`, `${features.length} 件`)}
+            </span>
+          </div>
+
+          {/* The map stays mounted behind the table rather than unmounting on
+              every view switch: rebuilding a MapLibre instance throws away the
+              tiles, the camera and the fitted bounds. */}
+          <div className="relative min-h-0 flex-1">
+            {/* Hidden with opacity rather than `visibility` or `display`: a
+                descendant can override `visibility` — MapLibre's attribution
+                control does, and the © OpenStreetMap pill floated over the
+                table — and `display: none` makes the map lose its size, which
+                means a resize on every switch back. Opacity does neither. */}
+            <div
+              className={cn(
+                "absolute inset-0 transition-opacity",
+                mainView === "table" && "pointer-events-none opacity-0"
+              )}
+              aria-hidden={mainView === "table"}
+            >
+              {loading ? (
+                <div className="flex h-full items-center justify-center bg-muted">
+                  <SkeletonBlock className="h-full w-full" />
+                </div>
+              ) : (
+                <ErrorBoundary>
+                  <MapPanel
+                    features={features}
+                    selectedFeatureIds={selectedFeatureIds}
+                    layerVisibility={layerVisibility}
+                    validationIssues={allValidationIssues}
+                    overlayVisibility={overlayVisibility}
+                    visibleLevelIds={visibleLevelIds}
+                    showBasemap={showBasemap}
+                    activeIssue={activeIssue}
+                    onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
+                  />
+                </ErrorBoundary>
+              )}
+            </div>
+
+            {mainView === "table" ? (
+              <div className="absolute inset-0 flex flex-col gap-3 overflow-auto bg-muted p-3">
+                <FilterBar
+                  filters={filters}
+                  featureTypes={filterFeatureTypes}
+                  levels={levelOptions}
+                  categories={filterCategories}
+                  onChange={(next) => setFilters(next)}
+                />
+                <TablePanel
+                  features={filteredFeatures}
+                  selectedFeatureIds={selectedFeatureIds}
+                  onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
+                  onSelectionChange={(ids) => setSelectedFeatureIds(ids)}
+                />
+              </div>
+            ) : null}
+          </div>
         </div>
 
         {/* ── Right sidebar: Properties ── */}
