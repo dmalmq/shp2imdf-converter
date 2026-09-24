@@ -47,6 +47,8 @@ type Fixture = {
   generation: WizardState["generation_status"];
   venue: string;
   files: ImportedFile[];
+  /** Drafted features exist, whatever `generation` says now. */
+  drafted?: boolean;
 };
 
 function file(stem: string): ImportedFile {
@@ -129,11 +131,19 @@ function wizardFor(fixture: Fixture): WizardState {
   } as WizardState;
 }
 
-// "tokyo" is still in Set up, "shinjuku" has a generated draft, "ueno" is an
-// IMDF-shapefile import (no Set up), "empty" has nothing in it yet.
+// "tokyo" is still in Set up, "shinjuku" has a generated draft, "ikebukuro"
+// has a draft but was opened in Set up since (which resets the status), "ueno"
+// is an IMDF-shapefile import (no Set up), "empty" has nothing in it yet.
 const PROJECTS: Record<string, Fixture> = {
   tokyo: { profile: "standard", generation: "not_started", venue: "Tokyo Station", files: [file("Tokyo_B1_Space")] },
   shinjuku: { profile: "standard", generation: "generated", venue: "Shinjuku", files: [file("Shinjuku_1_Space")] },
+  ikebukuro: {
+    profile: "standard",
+    generation: "not_started",
+    drafted: true,
+    venue: "Ikebukuro",
+    files: [file("Ikebukuro_1_Space")]
+  },
   ueno: { profile: "imdf_shapefile", generation: "generated", venue: "Ueno", files: [file("Ueno_1_Space")] },
   empty: { profile: "standard", generation: "not_started", venue: "", files: [] }
 };
@@ -205,10 +215,11 @@ beforeEach(() => {
   });
   vi.mocked(fetchWizardState).mockImplementation(async (id) => ({ session_id: id, wizard: wizardFor(lookup(id)) }));
   vi.mocked(fetchSessionFeatures).mockImplementation(async (id) => {
-    lookup(id);
+    const fixture = lookup(id);
+    const drafted = fixture.drafted || fixture.generation !== "not_started";
     return {
       type: "FeatureCollection",
-      features: [
+      features: drafted ? [
         {
           type: "Feature",
           id: `${id}-level`,
@@ -216,7 +227,7 @@ beforeEach(() => {
           geometry: null,
           properties: { name: { en: "Ground" }, short_name: { en: "G" }, ordinal: 0 }
         }
-      ]
+      ] : []
     };
   });
   vi.mocked(generateSessionDraft).mockResolvedValue({
@@ -282,6 +293,8 @@ describe("redirects", () => {
     ["/p/tokyo", "/p/tokyo/set-up"],
     ["/p/shinjuku", "/p/shinjuku/check"],
     ["/p/ueno", "/p/ueno/check"],
+    ["/p/ikebukuro", "/p/ikebukuro/check"],
+    ["/p/ikebukuro/deliver", "/p/ikebukuro/deliver"],
     ["/p/tokyo/check", "/p/tokyo/set-up"],
     ["/p/tokyo/deliver", "/p/tokyo/set-up"],
     ["/p/tokyo/not-a-stage", "/p/tokyo/set-up"],

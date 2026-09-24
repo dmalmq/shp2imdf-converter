@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, Outlet, useParams } from "react-router-dom";
 
-import { fetchSessionFiles, fetchWizardState } from "../api/client";
+import { fetchSessionFeatures, fetchSessionFiles, fetchWizardState } from "../api/client";
 import { isSessionNotFoundError, toErrorMessage } from "../api/errors";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import {
@@ -17,6 +17,17 @@ import { useAppStore } from "../store/useAppStore";
 import { ReviewPage } from "./ReviewPage";
 import { UploadPage } from "./UploadPage";
 import { WizardPage } from "./WizardPage";
+
+/**
+ * Whether a draft was generated at some point. Opening Set up re-sends the
+ * levels, and every wizard write resets `generation_status`, but the drafted
+ * features stay; without this, a reload on Check after a look at Set up
+ * would be sent back to Set up.
+ */
+async function hasDraft(sessionId: string): Promise<boolean> {
+  const response = await fetchSessionFeatures(sessionId);
+  return (response.features as Array<{ feature_type?: unknown }>).some((item) => item.feature_type === "level");
+}
 
 /**
  * A shapefile project addressed by URL. The URL's id is the project; the
@@ -41,17 +52,23 @@ export function ProjectLayout() {
     state.switchProject(id);
     setFailure(null);
     let active = true;
-    Promise.all([fetchSessionFiles(id), fetchWizardState(id)]).then(
-      ([fileResponse, wizardResponse]) => {
-        if (!active) return;
-        const importProfile = fileResponse.import_profile ?? "standard";
-        const wizard = wizardResponse.wizard;
-        useAppStore.getState().projectLoaded(id, {
-          importProfile,
-          files: fileResponse.files,
-          wizardState: wizard,
-          reviewReached: importProfile === "imdf_shapefile" || wizard.generation_status !== "not_started"
-        });
+    const load = async () => {
+      const [fileResponse, wizardResponse] = await Promise.all([fetchSessionFiles(id), fetchWizardState(id)]);
+      const importProfile = fileResponse.import_profile ?? "standard";
+      const wizard = wizardResponse.wizard;
+      return {
+        importProfile,
+        files: fileResponse.files,
+        wizardState: wizard,
+        reviewReached:
+          importProfile === "imdf_shapefile" ||
+          wizard.generation_status !== "not_started" ||
+          (fileResponse.files.length > 0 && (await hasDraft(id)))
+      };
+    };
+    load().then(
+      (project) => {
+        if (active) useAppStore.getState().projectLoaded(id, project);
       },
       (error: unknown) => {
         if (!active) return;
