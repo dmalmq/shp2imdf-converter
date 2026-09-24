@@ -68,16 +68,18 @@ Stable handles (do not use click coordinates):
 | User control | Handle |
 |---|---|
 | App identity | top-bar wordmark `shp2imdf`; document title `SHP to IMDF Converter` |
-| Language | button `日本語` or `EN` (title `Switch UI language`) |
+| Language | group `Display language` (`[data-language-switch]`) holding buttons `EN` and `日本語`; the current one has `aria-pressed="true"` |
 | Theme | button `Switch theme` (toggles `.dark` on `<html>`) |
-| Steps | buttons `Import`, `Configure`, `Review & Export` |
+| Breadcrumb | nav `Breadcrumb`: link `Projects` / station / current stage |
+| Stages | nav `Stages` under the top bar: `1 · Bring in`, `2 · Set up`, `3 · Check`, `4 · Deliver` (Illustrator: `Bring in artwork`, `Name floors`, `Place on map`, `Deliver`); the current one has `aria-current="step"`, reachable ones are buttons |
+| Top-bar action | the stage's primary action (e.g. `Import & Continue`) appears in the banner only while the page's own button for it is off screen; use `.first()` when clicking by name |
 | Import profile | buttons `Standard`, `IMDF schema` |
 | Shapefile file input | `input[type=file]:not(#imdf-file-input)` |
 | Import | button `Import & Continue` (standard) or `Import to Review` (IMDF schema) |
 | Open archive | card `Open IMDF archive` / `#imdf-file-input` |
 | Illustrator entry | card `Illustrator artwork`; then `Choose file` / `#illustrator-georef-input` |
 | Wizard sections | `Sections` nav buttons, e.g. `Venue Info`, `Summary & Generate`; the h1 names the section |
-| Venue | textbox named `Venue Name*`; `Locality*` (autosaves, footer shows `Saved · HH:MM`) |
+| Venue | textbox named `Venue Name*`; `Locality*` (autosaves; the top bar shows `Saved · HH:MM`, or `Not saved yet` while a required field is missing) |
 | Generate | button `Generate & open Review` |
 | Review | buttons `Validate`, `Export`, `Download .imdf` |
 

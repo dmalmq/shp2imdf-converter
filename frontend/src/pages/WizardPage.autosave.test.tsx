@@ -1,5 +1,5 @@
 import React from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import {
@@ -16,6 +16,7 @@ import {
   type WizardState
 } from "../api/client";
 import { ToastProvider } from "../components/shared/ToastProvider";
+import { AppShell } from "../components/shell/AppShell";
 import { AUTOSAVE_DELAY_MS } from "../components/wizard/wizardSave";
 import { useAppStore } from "../store/useAppStore";
 import { WizardPage } from "./WizardPage";
@@ -457,4 +458,46 @@ test("Generate sends a failed save first, and stops if it fails again", async ()
   await waitFor(() => expect(generateSessionDraft).toHaveBeenCalledTimes(1));
   expect(patchProjectMock).toHaveBeenCalledTimes(3);
   expect(server.project?.venue_name).toBe("Tokyo Sta.");
+});
+
+test("Enter on a focused button is that button's, not Generate's", async () => {
+  vi.mocked(generateSessionDraft).mockResolvedValue({} as never);
+  await renderWizard(COMPLETE_PROJECT);
+
+  openSection("Summary & Generate");
+  const generate = await screen.findByRole("button", { name: "Generate & open Review" });
+  await waitFor(() => expect(generate).toBeEnabled());
+
+  const nav = screen.getByRole("button", { name: /Summary & Generate/ });
+  nav.focus();
+  fireEvent.keyDown(nav, { key: "Enter" });
+  await sleep(50);
+  expect(generateSessionDraft).not.toHaveBeenCalled();
+
+  fireEvent.keyDown(document.body, { key: "Enter" });
+  await waitFor(() => expect(generateSessionDraft).toHaveBeenCalledWith("session-1"));
+});
+
+test("the top bar's save status agrees with the footer while a draft is held", async () => {
+  server = wizard(null);
+  vi.mocked(fetchWizardState).mockImplementation(async () => ({ session_id: "session-1", wizard: server }));
+  render(
+    <MemoryRouter initialEntries={["/wizard"]}>
+      <ToastProvider>
+        <AppShell>
+          <WizardPage />
+        </AppShell>
+      </ToastProvider>
+    </MemoryRouter>
+  );
+  await screen.findByLabelText(/Venue Name/);
+  act(() => useAppStore.getState().setWizardSaveStatus("saved"));
+  const topBar = screen.getByRole("banner");
+  expect(within(topBar).getByRole("status")).toHaveTextContent(/^Saved ·/);
+
+  type(/Venue Name/, "Tokyo Station");
+
+  expect(await within(topBar).findByText("Not saved yet")).toBeInTheDocument();
+  expect(within(topBar).queryByText(/^Saved/)).toBeNull();
+  expect(screen.getByText(/required to save/)).toBeInTheDocument();
 });

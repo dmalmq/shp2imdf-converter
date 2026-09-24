@@ -43,7 +43,7 @@ import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore, type WizardDrafts } from "../store/useAppStore";
 import { Button, DisabledHint } from "../components/ui";
-import { useInShell, usePrimaryAction } from "../components/shell/ShellContext";
+import { useInShell, usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
 import { formatClock } from "../lib/clock";
 import { WizardFooterProvider, sameAsSaved, useAutosave, useWizardFooterState } from "../components/wizard/wizardSave";
 
@@ -867,6 +867,7 @@ export function WizardPage() {
         }
       : null
   );
+  usePageShell({ saveHeld: projectHeld || buildingsHeld });
 
   // ─── Render ─────────────────────────────────────────────────────────
 

@@ -9,7 +9,7 @@ import {
   type RefObject
 } from "react";
 
-import type { Bilingual, PageStages, StageId } from "./stages";
+import type { PageStages, StageId } from "./stages";
 
 /**
  * The action the top bar offers for the stage on screen. `anchor` is the
@@ -27,12 +27,17 @@ export type PrimaryAction = {
   anchor?: RefObject<HTMLElement | null>;
 };
 
-export type PageShell = PageStages & {
+/**
+ * What a page tells the shell about itself. The next stage's blocked reason
+ * is not here: the shell takes it from the page's disabled primary action.
+ */
+export type PageShell = Omit<PageStages, "nextBlockedReason"> & {
   /** Station for the breadcrumb when the page knows better than the store. */
   station?: string | null;
   /** Handlers for the stages listed in `targets`. */
   go?: Partial<Record<StageId, () => void>>;
-  nextBlockedReason?: Bilingual | null;
+  /** Edits are on screen that the server has not been sent, and will not be until they are complete. */
+  saveHeld?: boolean;
 };
 
 /**
@@ -159,8 +164,7 @@ export function usePageShell(page: PageShell | null) {
       page?.current,
       page?.targets?.join(","),
       page?.checkErrors,
-      page?.nextBlockedReason?.en,
-      page?.nextBlockedReason?.ja
+      page?.saveHeld
     ]
   );
 }

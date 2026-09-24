@@ -114,6 +114,19 @@ describe("primary action", () => {
     expect(within(topBar()).queryByRole("button", { name: "Import & Continue" })).toBeNull();
   });
 
+  test("the top-bar button keeps focus when the page's button scrolls back into view", () => {
+    renderShell(<Page action={{ label: "Import & Continue", run: () => {} }} withAnchor />);
+    setVisible(false);
+    const button = within(topBar()).getByRole("button", { name: "Import & Continue" });
+    act(() => button.focus());
+    setVisible(true);
+    expect(button).toBeInTheDocument();
+    expect(document.activeElement).toBe(button);
+
+    act(() => screen.getByRole("button", { name: "Switch theme" }).focus());
+    expect(within(topBar()).queryByRole("button", { name: "Import & Continue" })).toBeNull();
+  });
+
   test("a disabled action says why and counts what blocks it", () => {
     renderShell(
       <Page

@@ -1,5 +1,5 @@
 import { Moon, Sun } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
@@ -110,7 +110,7 @@ function ShellFrame({ children }: Props) {
         {/* Search and commands arrive in phase 12; until then the space is kept, not faked. */}
         <div className="min-w-0 flex-1" data-slot="search" />
 
-        {location.pathname === "/wizard" ? <SaveStatus /> : null}
+        {location.pathname === "/wizard" ? <SaveStatus held={Boolean(page?.saveHeld)} /> : null}
         <LanguageSwitch />
         <Button
           variant="ghost"
@@ -175,19 +175,24 @@ function useStation(pathname: string, page: PageShell | null): string | null {
   return stationName(wizardState, files);
 }
 
-function SaveStatus() {
+function SaveStatus({ held }: { held: boolean }) {
   const { t } = useUiLanguage();
   const status = useAppStore((s) => s.wizardSaveStatus);
   const savedAt = useAppStore((s) => s.wizardSavedAt);
 
   let content: React.ReactNode = null;
   let dot = "bg-primary";
+  // Same order as the wizard footer, so the two never disagree: a held draft
+  // outranks an older "saved".
   if (status === "saving") {
     content = t("Saving…", "保存中…");
     dot = "bg-muted-foreground";
   } else if (status === "error") {
-    content = t("Not saved", "未保存");
+    content = t("Could not save", "保存できませんでした");
     dot = "bg-destructive";
+  } else if (held) {
+    content = t("Not saved yet", "未保存");
+    dot = "bg-warning";
   } else if (status === "saved" && savedAt !== null) {
     content = (
       <>
@@ -253,21 +258,32 @@ function LanguageSwitch() {
 function PrimaryActionButton({ action }: { action: PrimaryAction }) {
   const { t } = useUiLanguage();
   const inView = useAnchorInView(action.anchor);
-  if (inView) return null;
+  // Unmounting the focused button would drop focus to <body>, so it stays
+  // until focus leaves it.
+  const [focused, setFocused] = useState(false);
+  if (inView && !focused) return null;
   const blockers = action.blockers ?? 0;
   const disabled = Boolean(action.disabledReason) || Boolean(action.busy);
 
   return (
-    <DisabledHint className="w-auto shrink-0" hint={action.busy ? null : (action.disabledReason ?? null)}>
-      <Button variant={blockers > 0 ? "outline" : "default"} disabled={disabled} onClick={() => action.run()}>
-        {action.label}
-        {blockers > 0 ? (
-          <span className="rounded-full bg-destructive px-[7px] text-[11px] font-semibold leading-[18px] text-destructive-foreground">
-            {blockers}
-            <span className="sr-only">{t(" to fix", " 件の要修正")}</span>
-          </span>
-        ) : null}
-      </Button>
-    </DisabledHint>
+    <div
+      className="flex shrink-0"
+      onFocus={() => setFocused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
+      }}
+    >
+      <DisabledHint className="w-auto shrink-0" hint={action.busy ? null : (action.disabledReason ?? null)}>
+        <Button variant={blockers > 0 ? "outline" : "default"} disabled={disabled} onClick={() => action.run()}>
+          {action.label}
+          {blockers > 0 ? (
+            <span className="rounded-full bg-destructive px-[7px] text-[11px] font-semibold leading-[18px] text-destructive-foreground">
+              {blockers}
+              <span className="sr-only">{t(" to fix", " 件の要修正")}</span>
+            </span>
+          ) : null}
+        </Button>
+      </DisabledHint>
+    </div>
   );
 }
