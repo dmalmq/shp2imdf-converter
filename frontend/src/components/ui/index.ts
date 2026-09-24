@@ -17,6 +17,7 @@ export { Field } from "./field";
 export { Input, type InputProps } from "./input";
 export { Metric } from "./metric";
 export { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "./popover";
+export { RadioGroup, RadioGroupItem } from "./radio-group";
 export { ScrollArea } from "./scroll-area";
 export { SectionHeader } from "./section-header";
 export {
