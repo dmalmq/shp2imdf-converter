@@ -605,12 +605,20 @@ export async function fetchWizardState(sessionId: string): Promise<WizardStateRe
   return handleJson<WizardStateResponse>(response);
 }
 
+/**
+ * `keepalive` lets a request sent as the tab closes still reach the server;
+ * the wizard sets it only for the save it flushes on beforeunload.
+ */
+export type SaveRequestOptions = { keepalive?: boolean };
+
 export async function patchWizardProject(
   sessionId: string,
-  payload: ProjectWizardState
+  payload: ProjectWizardState,
+  { keepalive = false }: SaveRequestOptions = {}
 ): Promise<ProjectWizardResponse> {
   const response = await fetch(`/api/session/${sessionId}/wizard/project`, {
     method: "PATCH",
+    keepalive,
     headers: {
       "Content-Type": "application/json"
     },
@@ -669,10 +677,12 @@ export async function patchWizardLevels(
 
 export async function patchWizardBuildings(
   sessionId: string,
-  buildings: BuildingWizardState[]
+  buildings: BuildingWizardState[],
+  { keepalive = false }: SaveRequestOptions = {}
 ): Promise<BuildingsWizardResponse> {
   const response = await fetch(`/api/session/${sessionId}/wizard/buildings`, {
     method: "PATCH",
+    keepalive,
     headers: {
       "Content-Type": "application/json"
     },
@@ -697,10 +707,12 @@ export async function patchWizardMappings(
 
 export async function patchWizardFootprint(
   sessionId: string,
-  payload: FootprintWizardState
+  payload: FootprintWizardState,
+  { keepalive = false }: SaveRequestOptions = {}
 ): Promise<WizardStateResponse> {
   const response = await fetch(`/api/session/${sessionId}/wizard/footprint`, {
     method: "PATCH",
+    keepalive,
     headers: {
       "Content-Type": "application/json"
     },

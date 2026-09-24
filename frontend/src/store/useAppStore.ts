@@ -1,6 +1,28 @@
 import { create } from "zustand";
 
-import type { CleanupSummary, ImportedFile, LearningSuggestion, WizardState } from "../api/client";
+import type {
+  BuildingWizardState,
+  CleanupSummary,
+  FootprintWizardState,
+  ImportedFile,
+  LearningSuggestion,
+  ProjectWizardState,
+  WizardState
+} from "../api/client";
+
+/**
+ * Wizard form edits the server does not have yet: waiting out the autosave
+ * delay, or held because the server would refuse them. A section with no
+ * draft shows the saved state. Kept here rather than in the page so leaving
+ * /wizard and coming back within the session does not drop a held draft.
+ */
+export type WizardDrafts = {
+  project: ProjectWizardState | null;
+  buildings: BuildingWizardState[] | null;
+  footprint: FootprintWizardState | null;
+};
+
+const NO_DRAFTS: WizardDrafts = { project: null, buildings: null, footprint: null };
 
 type Screen = "upload" | "wizard" | "review";
 /** The Illustrator route has its own three stages, unrelated to the wizard's. */
@@ -46,6 +68,12 @@ type AppState = {
   hoveredFileStem: string | null;
   wizardSaveStatus: SaveStatus;
   wizardSaveError: string | null;
+  /** When the last save succeeded, for the footer's "Saved · HH:MM". */
+  wizardSavedAt: number | null;
+  /** Re-runs the save that just failed; cleared by the next status change. */
+  wizardSaveRetry: (() => void) | null;
+  wizardDrafts: WizardDrafts;
+  setWizardDraft: <K extends keyof WizardDrafts>(section: K, draft: WizardDrafts[K]) => void;
   learningSuggestion: LearningSuggestion | null;
   setUiLanguage: (language: UiLanguage) => void;
   setTheme: (theme: Theme) => void;
@@ -72,7 +100,7 @@ type AppState = {
   upsertFile: (file: ImportedFile) => void;
   setSelectedFileStem: (stem: string | null) => void;
   setHoveredFileStem: (stem: string | null) => void;
-  setWizardSaveStatus: (status: SaveStatus, error?: string | null) => void;
+  setWizardSaveStatus: (status: SaveStatus, error?: string | null, retry?: (() => void) | null) => void;
   setLearningSuggestion: (suggestion: LearningSuggestion | null) => void;
 };
 
@@ -122,6 +150,9 @@ const INITIAL_STATE = {
   hoveredFileStem: null as string | null,
   wizardSaveStatus: "idle" as SaveStatus,
   wizardSaveError: null as string | null,
+  wizardSavedAt: null as number | null,
+  wizardSaveRetry: null as (() => void) | null,
+  wizardDrafts: NO_DRAFTS,
   learningSuggestion: null as LearningSuggestion | null
 };
 
@@ -139,7 +170,8 @@ export const useAppStore = create<AppState>((set) => ({
     }
     set({ theme });
   },
-  setSessionId: (sessionId) => set({ sessionId }),
+  setSessionId: (sessionId) =>
+    set((state) => (state.sessionId === sessionId ? {} : { sessionId, wizardDrafts: NO_DRAFTS })),
   setImportProfile: (importProfile) => set({ importProfile }),
   setSessionExpiredMessage: (sessionExpiredMessage) => set({ sessionExpiredMessage }),
   clearSession: () =>
@@ -202,6 +234,14 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   setSelectedFileStem: (selectedFileStem) => set({ selectedFileStem }),
   setHoveredFileStem: (hoveredFileStem) => set({ hoveredFileStem }),
-  setWizardSaveStatus: (wizardSaveStatus, wizardSaveError = null) => set({ wizardSaveStatus, wizardSaveError }),
+  setWizardSaveStatus: (wizardSaveStatus, wizardSaveError = null, wizardSaveRetry = null) =>
+    set((state) => ({
+      wizardSaveStatus,
+      wizardSaveError,
+      wizardSaveRetry,
+      wizardSavedAt: wizardSaveStatus === "saved" ? Date.now() : state.wizardSavedAt
+    })),
+  setWizardDraft: (section, draft) =>
+    set((state) => ({ wizardDrafts: { ...state.wizardDrafts, [section]: draft } })),
   setLearningSuggestion: (learningSuggestion) => set({ learningSuggestion })
 }));

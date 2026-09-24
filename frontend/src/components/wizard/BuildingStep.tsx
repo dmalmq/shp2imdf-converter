@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useRef } from "react";
 
 import type { AddressInput, BuildingWizardState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
@@ -13,15 +13,15 @@ import {
   SelectValue
 } from "../ui";
 import { ProvinceSelect } from "./ProvinceSelect";
-import { useRegisterSave } from "./wizardSave";
 
 
 type Props = {
+  /** What the form shows: the unsaved draft if there is one, else the saved rows. */
   buildings: BuildingWizardState[];
   allFileStems: string[];
   venueName: string;
   venueAddress: AddressInput | null;
-  onSave: (buildings: BuildingWizardState[]) => void;
+  onChange: (buildings: BuildingWizardState[]) => void;
 };
 
 const BUILDING_CATEGORIES = ["unspecified", "parking", "transit", "transit.bus", "transit.train"];
@@ -78,7 +78,23 @@ function normalizeAddress(address: AddressInput | null): AddressInput | null {
 }
 
 
-function normalizeForSave(buildings: BuildingWizardState[]): BuildingWizardState[] {
+/**
+ * Whether the backend would take these rows: every stem is a known file and
+ * none is assigned twice. The stems box is free text, so a half-typed stem is
+ * routine and has to be held back rather than sent.
+ */
+export function canSaveBuildings(buildings: BuildingWizardState[], allFileStems: string[]): boolean {
+  const known = new Set(allFileStems);
+  const seen = new Set<string>();
+  for (const stem of buildings.flatMap((building) => building.file_stems)) {
+    if (!known.has(stem) || seen.has(stem)) return false;
+    seen.add(stem);
+  }
+  return true;
+}
+
+
+export function normalizeBuildingsForSave(buildings: BuildingWizardState[]): BuildingWizardState[] {
   return buildings.map((item) => ({
     ...item,
     name: emptyToNull(item.name ?? ""),
@@ -90,26 +106,20 @@ function normalizeForSave(buildings: BuildingWizardState[]): BuildingWizardState
 }
 
 
-export function BuildingStep({ buildings, allFileStems, venueName, venueAddress, onSave }: Props) {
+export function BuildingStep({ buildings, allFileStems, venueName, venueAddress, onChange }: Props) {
   const { t } = useUiLanguage();
-  const [rows, setRows] = useState<BuildingWizardState[]>(
-    () => (buildings.length ? buildings : [createDefaultBuilding(allFileStems)])
-  );
-
-  useEffect(() => {
-    if (buildings.length) {
-      setRows(buildings);
-      return;
-    }
-    setRows([createDefaultBuilding(allFileStems)]);
-  }, [allFileStems, buildings]);
+  const rows = buildings.length ? buildings : [createDefaultBuilding(allFileStems)];
+  const latest = useRef(rows);
+  latest.current = rows;
+  const setRows = (update: (previous: BuildingWizardState[]) => BuildingWizardState[]) => {
+    latest.current = update(latest.current);
+    onChange(latest.current);
+  };
 
   const assignedCount = useMemo(
     () => rows.reduce((count, row) => count + row.file_stems.length, 0),
     [rows]
   );
-
-  useRegisterSave(() => onSave(normalizeForSave(rows)), { canSave: true });
 
   const patch = (index: number, changes: Partial<BuildingWizardState>) => {
     setRows((prev) => prev.map((item, i) => (i === index ? { ...item, ...changes } : item)));

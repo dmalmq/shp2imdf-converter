@@ -10,13 +10,13 @@ import {
   SelectTrigger,
   SelectValue
 } from "../ui";
-import { useRegisterSave } from "./wizardSave";
 import { useAppStore } from "../../store/useAppStore";
 
 
 type Props = {
+  /** What the form shows: the unsaved draft if there is one, else the saved options. */
   footprint: FootprintWizardState;
-  onSave: (payload: FootprintWizardState) => void;
+  onChange: (payload: FootprintWizardState) => void;
 };
 
 const SVG_SIZE = 320;
@@ -40,19 +40,12 @@ export function polygonsToSvgPaths(
 }
 
 
-export function FootprintStep({ footprint, onSave }: Props) {
+export function FootprintStep({ footprint: form, onChange }: Props) {
   const { t } = useUiLanguage();
   const sessionId = useAppStore((state) => state.sessionId);
-  const [form, setForm] = useState<FootprintWizardState>(footprint);
   const [preview, setPreview] = useState<FootprintPreview | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    setForm(footprint);
-  }, [footprint]);
-
-  useRegisterSave(() => onSave(form), { canSave: true });
 
   const fetchPreview = useCallback(
     (state: FootprintWizardState) => {
@@ -81,11 +74,11 @@ export function FootprintStep({ footprint, onSave }: Props) {
   // Debounced fetch on form change
   const updateForm = useCallback(
     (next: FootprintWizardState) => {
-      setForm(next);
+      onChange(next);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => fetchPreview(next), 300);
     },
-    [fetchPreview]
+    [fetchPreview, onChange]
   );
 
   // Compute SVG paths from preview data
