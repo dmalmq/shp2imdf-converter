@@ -31,6 +31,8 @@ If a port already serves this app, launch attaches and records `startedBackend` 
 
 A backend this skill starts is `python -m uvicorn backend.main:app --port 8310` **without** `--reload`. A frontend this skill starts is `node frontend/node_modules/vite/bin/vite.js` (same Vite config as `npm run dev`). Logs: `.run/frontend.log` plus `.err.log`. PIDs: `.run/state.json`.
 
+Other ports (a worktree beside the shared instance): every command takes `--frontend-port N --backend-port N`. The pair gets its own state file (`.run/state-<fe>-<be>.json`) and logs, uvicorn gets `CORS_ALLOWED_ORIGINS` for that frontend, and Vite runs from a derived config written to `frontend/node_modules/.capture/` (untracked) that proxies `/api` to the chosen backend. Pass the same flags to `doctor`, `drive` and `cleanup`.
+
 Teardown is `cleanup`, not Ctrl+C in a random terminal.
 
 ## Doctor
@@ -65,19 +67,18 @@ Stable handles (do not use click coordinates):
 
 | User control | Handle |
 |---|---|
-| App identity | heading/text `IMDF Converter`; document title `SHP to IMDF Converter` |
-| Language | button `日本語` or `EN` |
+| App identity | text `IMDF Converter`; document title `SHP to IMDF Converter` |
+| Language | button `日本語` or `EN` (title `Switch UI language`) |
+| Theme | button `Switch theme` (toggles `.dark` on `<html>`) |
 | Steps | buttons `Import`, `Configure`, `Review & Export` |
-| Standard import | button `Standard import` |
-| IMDF-schema shapefiles | button `IMDF-schema shapefiles` |
+| Import profile | buttons `Standard`, `IMDF schema` |
 | Shapefile file input | `input[type=file]:not(#imdf-file-input)` |
-| Import | button `Import & Continue` (standard) or `Import to Review` (IMDF-schema) |
-| Open archive | button `Open IMDF archive` / `#imdf-file-input` |
-| Illustrator entry | button `Illustrator (.ai) → place on map` |
-| Wizard save | button `Save Project Info` |
-| Venue | textbox named `Venue Name *` |
-| Locality | textbox named `Locality *` |
-| Generate | button `Confirm & Open Review` |
+| Import | button `Import & Continue` (standard) or `Import to Review` (IMDF schema) |
+| Open archive | card `Open IMDF archive` / `#imdf-file-input` |
+| Illustrator entry | card `Illustrator artwork`; then `Choose file` / `#illustrator-georef-input` |
+| Wizard sections | `Sections` nav buttons, e.g. `Venue Info`, `Summary & Generate`; the h1 names the section |
+| Venue | textbox named `Venue Name*`; `Locality*` (autosaves, footer shows `Saved · HH:MM`) |
+| Generate | button `Generate & open Review` |
 | Review | buttons `Validate`, `Export`, `Download .imdf` |
 
 Playwright in this repo: `@playwright/test` from `frontend/node_modules`. `audit-ui.mjs` is the older full-flow screenshot script; prefer `control.mjs` so doctor/cleanup/evidence stay consistent.
@@ -96,6 +97,14 @@ Proof standards:
 - Side effects: a successful import navigates to `/wizard` (standard) or `/review` (IMDF-schema / `.imdf` reopen). Confirm the URL, not only a toast.
 - Import **does** create a real in-memory session and can evict the oldest of `MAX_SESSIONS` (default 5). That is a production behavior — record it; do not pretend it is a dry-run.
 - Do not save, overwrite, or delete named Illustrator placements (`data/placements.db`). Opening `/illustrator` is safe; clicking Save on a named placement is not.
+
+## Capture
+
+```powershell
+node .cursor/skills/verify-shp2imdf/scripts/capture.mjs --label baseline [--frontend-port 5420 --backend-port 8420] [--cleanup]
+```
+
+Screenshots every screen in light/dark × EN/日本語 for before/after review: Upload (empty, queued), each wizard section with Project & Venue filled, Summary, Review (map, after Validate, export dialog), and the Illustrator route (bring in, name floors from a generated three-page `.ai`, place, export tab). Launches or attaches like `launch`; `--cleanup` then stops only what the pair's state file owns. Output replaces `artifacts/captures/<label>/` (gitignored, `--out` overrides): `<screen>.<theme>.<lang>.png` plus `manifest.json`, an array of `{ screen, theme, lang, path }` with `path` relative to the manifest. Theme and language are switched with the app's own toggles (theme falls back to the `.dark` class); toasts are dismissed before each shot. It creates a real import session and an Illustrator conversion, and never saves a placement.
 
 ## Cleanup
 
