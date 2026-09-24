@@ -753,6 +753,55 @@ def test_opening_the_wizard_on_a_delivered_project_changes_nothing(test_client, 
     _assert_untouched(test_client, session_id, before)
 
 
+_LEVEL_FILE_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section"}
+
+
+def _levels_as_the_wizard_sends_them(client, session_id: str) -> dict[str, Any]:
+    """WizardPage.toLevelItemsFromFiles: built from the file list, names null until typed."""
+    files = client.get(f"/api/session/{session_id}/files").json()["files"]
+    return {
+        "items": [
+            {
+                "stem": item["stem"],
+                "detected_type": item["detected_type"],
+                "ordinal": item["detected_level"],
+                "name": item["level_name"],
+                "short_name": item["short_name"],
+                "outdoor": item["outdoor"],
+                "category": item["level_category"],
+            }
+            for item in files
+            if (item["detected_type"] or "") in _LEVEL_FILE_TYPES
+        ]
+    }
+
+
+@pytest.mark.phase5
+def test_the_wizards_level_sync_on_every_section_change_is_not_an_edit(test_client, sample_dir: Path) -> None:
+    session_id = _import(test_client, sample_dir)
+    import_files = _levels_as_the_wizard_sends_them(test_client, session_id)
+    assert any(item["name"] is None for item in import_files["items"])
+    assert test_client.get(f"/api/session/{session_id}/wizard").status_code == 200
+    assert test_client.patch(f"/api/session/{session_id}/wizard/levels", json=import_files).status_code == 200
+    assert test_client.patch(f"/api/session/{session_id}/wizard/project", json=_PROJECT).status_code == 200
+    assert test_client.patch(f"/api/session/{session_id}/wizard/levels", json=import_files).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+    assert test_client.get(f"/api/session/{session_id}/export").status_code == 200
+    before = _stored(test_client, session_id).model_copy(deep=True)
+
+    assert test_client.get(f"/api/session/{session_id}/wizard").status_code == 200
+    for payload in (import_files, _levels_as_the_wizard_sends_them(test_client, session_id)) * 4:
+        assert test_client.patch(f"/api/session/{session_id}/wizard/levels", json=payload).status_code == 200
+        _assert_untouched(test_client, session_id, before)
+
+    renamed = _levels_as_the_wizard_sends_them(test_client, session_id)
+    renamed["items"][0]["name"] = "Concourse"
+    assert test_client.patch(f"/api/session/{session_id}/wizard/levels", json=renamed).status_code == 200
+    assert _rev(test_client, session_id) == before.content_rev + 1
+    assert test_client.patch(f"/api/session/{session_id}/wizard/levels", json=renamed).status_code == 200
+    assert _rev(test_client, session_id) == before.content_rev + 1
+
+
 @pytest.mark.phase5
 def test_a_wizard_edit_and_its_revert_each_count(test_client, sample_dir: Path) -> None:
     session_id = _delivered_route_session(test_client, sample_dir)

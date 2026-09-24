@@ -574,7 +574,17 @@ def patch_wizard_levels(session_id: str, payload: LevelsWizardRequest, request: 
     seed_wizard_state(session)
     before = setup_snapshot(session)
 
+    # The wizard builds this payload from its file list, whose names stay null
+    # until someone types one; null keeps the stored name, as it does for files.
+    current = {item.stem: item for item in session.wizard.levels.items}
+    for item in payload.items:
+        stored = current.get(item.stem)
+        if stored is not None and item.name is None:
+            item.name = stored.name
+        if stored is not None and item.short_name is None:
+            item.short_name = stored.short_name
     session.wizard.levels.items = payload.items
+    seed_wizard_state(session)
 
     by_stem = {item.stem: item for item in payload.items}
     updated_files = []
