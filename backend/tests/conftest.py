@@ -62,6 +62,7 @@ def sample_company_mappings() -> dict:
 
 
 @pytest.fixture()
-def test_client() -> TestClient:
+def test_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
+    monkeypatch.setenv("SESSION_DATA_DIR", str(tmp_path / "sessions"))
     with TestClient(app) as client:
         yield client

@@ -42,8 +42,8 @@ class ApiError(Exception):
 
 def _load_session_manager() -> SessionManager:
     ttl_hours = int(os.getenv("SESSION_TTL_HOURS", "24"))
-    max_sessions = int(os.getenv("MAX_SESSIONS", "5"))
-    backend_name = os.getenv("SESSION_BACKEND", "memory")
+    max_sessions = int(os.getenv("MAX_SESSIONS", "50"))
+    backend_name = os.getenv("SESSION_BACKEND", "filesystem")
     data_dir = os.getenv("SESSION_DATA_DIR", "./data/sessions")
     backend = build_session_backend(backend_name=backend_name, session_data_dir=data_dir)
     return SessionManager(backend=backend, ttl_hours=ttl_hours, max_sessions=max_sessions)
