@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import codecs
 from collections import Counter, defaultdict
 import copy
 import json
@@ -84,9 +85,77 @@ class LoadedSource:
     source_feature_count: int | None = None
 
 
+# Enough records to see the text; a regional extract's DBF runs to hundreds of MB.
+_DBF_SAMPLE_BYTES = 4 * 1024 * 1024
+
+
+def _dbf_text_bytes(dbf: bytes) -> bytes:
+    if len(dbf) < 32:
+        return b""
+    header_length = int.from_bytes(dbf[8:10], "little")
+    field_names = [
+        dbf[offset : offset + 11].split(b"\x00", 1)[0]
+        for offset in range(32, header_length - 1, 32)
+        if dbf[offset] != 0x0D
+    ]
+    return b"".join(field_names) + dbf[header_length:].rstrip(b"\x1a")
+
+
+def _cpg_is_recognised(cpg: bytes) -> bool:
+    label = cpg.decode("ascii", errors="ignore").strip()
+    if label.upper().startswith("ANSI "):
+        label = label[5:].strip()
+    if label.isdigit():
+        label = f"cp{label}"
+    elif label.startswith("8859"):
+        label = f"iso{label}"
+    try:
+        codecs.lookup(label)
+    except LookupError:
+        return False
+    return True
+
+
+def detect_dbf_encoding(dbf_path: Path | None, cpg_path: Path | None = None) -> str | None:
+    """Encoding to force when reading a DBF, or None to let GDAL decide.
+
+    GDAL honours a .cpg or the DBF language-driver byte; with neither it
+    assumes Latin-1, which turns the cp932 attributes of Japanese CAD/GIS
+    exports into mojibake that every later export then writes out as UTF-8.
+    """
+    if cpg_path is not None and cpg_path.exists() and _cpg_is_recognised(cpg_path.read_bytes()):
+        return None
+    if dbf_path is None or not dbf_path.exists():
+        return None
+    with dbf_path.open("rb") as handle:
+        dbf = handle.read(_DBF_SAMPLE_BYTES)
+    if len(dbf) > 29 and dbf[29] != 0:
+        return None
+    text = _dbf_text_bytes(dbf)
+    if text.isascii():
+        return None
+    for encoding in ("utf-8", "cp932"):
+        try:
+            codecs.getincrementaldecoder(encoding)().decode(text, final=False)
+        except UnicodeDecodeError:
+            continue
+        return encoding
+    return None
+
+
 # Overlay never draws attributes. Station_pl.dbf is 322 MB in the regional
 # extract and is discarded after inflate; skip it on this path and stub a table.
 _OVERLAY_SKIP_DBF_STEMS = frozenset({"station_pl"})
+
+
+def zip_member_name(info: zipfile.ZipInfo) -> str:
+    """Member path, decoding flagless names as cp932 the way Japanese Windows wrote them."""
+    if info.flag_bits & 0x800:
+        return info.filename
+    try:
+        return info.filename.encode("cp437").decode("cp932")
+    except UnicodeError:
+        return info.filename
 
 
 def _expand_archives(
@@ -102,7 +171,7 @@ def _expand_archives(
                 for info in archive.infolist():
                     if info.is_dir():
                         continue
-                    member = Path(info.filename).name
+                    member = Path(zip_member_name(info)).name
                     suffix = Path(member).suffix.lower()
                     stem = Path(member).stem.lower()
                     if suffix == ".dbf" and stem in skipped:
@@ -565,6 +634,12 @@ def _read_shapefile_overlay_path(
         read_kwargs["bbox"] = bbox
     if geometry_only:
         read_kwargs["columns"] = ["geometry"]
+    else:
+        encoding = detect_dbf_encoding(shapefile_path.with_suffix(".dbf"), shapefile_path.with_suffix(".cpg"))
+        if encoding is not None:
+            read_kwargs["encoding"] = encoding
+        if encoding == "cp932":
+            warnings.append(f"{stem}.dbf: no .cpg or DBF language driver; attributes read as cp932 (Shift-JIS).")
     gdf = gpd.read_file(shapefile_path, **read_kwargs)
 
     gdf, crs_warnings, crs_detected = _reproject_to_wgs84(gdf)

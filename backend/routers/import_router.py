@@ -36,7 +36,7 @@ from backend.src.illustrator_store import ConversionStore
 from backend.src.illustrator_survey_snap import match_survey_consensus
 from backend.src.imdf_reader import read_imdf_zip
 from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
-from backend.src.importer import ReferenceLayer, import_file_blobs, read_reference_layers
+from backend.src.importer import ReferenceLayer, import_file_blobs, read_reference_layers, zip_member_name
 from backend.src.placements import PlacementStore
 from backend.src.reference_overlay import PRELOADED_LABEL, ReferenceOverlayStore
 from backend.src.schemas import (
@@ -140,7 +140,7 @@ def _expand_upload(upload: UploadFile, payload: bytes) -> list[tuple[str, bytes]
             for info in archive.infolist():
                 if info.is_dir():
                     continue
-                blobs.append((Path(info.filename).name, archive.read(info.filename)))
+                blobs.append((Path(zip_member_name(info)).name, archive.read(info)))
         return blobs
     return [(upload.filename or "upload.bin", payload)]
 
