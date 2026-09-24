@@ -198,6 +198,13 @@ const OVERLAP_INTERSECTION_FILL: LayerProps = {
 };
 
 
+/** Deepest zoom the basemap has tiles for; framing past it leaves a blank page. */
+const BASEMAP_MAX_ZOOM = Math.min(
+  ...Object.values(STREET_MAP_STYLE.sources).map((source) =>
+    "maxzoom" in source && typeof source.maxzoom === "number" ? source.maxzoom : 22
+  )
+);
+
 function flattenCoordinates(value: unknown, points: [number, number][]): void {
   if (!Array.isArray(value)) {
     return;
@@ -488,7 +495,7 @@ export function MapPanel({
       return;
     }
     framedBoundsRef.current = datasetKey;
-    mapRef.current.fitBounds(bounds, { padding: 40, duration: 0 });
+    mapRef.current.fitBounds(bounds, { padding: 40, duration: 0, maxZoom: BASEMAP_MAX_ZOOM });
   }, [mapReady, datasetKey, visibleFeatures, features]);
 
   // Framing follows the selection and nothing else.
@@ -516,13 +523,13 @@ export function MapPanel({
     }
     // `maxZoom` because a single door is metres across: fitting it exactly
     // lands past the deepest tile and shows a blank page with a dot on it.
-    mapRef.current.fitBounds(bounds, { padding: 80, duration: 400, maxZoom: 20 });
+    mapRef.current.fitBounds(bounds, { padding: 80, duration: 400, maxZoom: BASEMAP_MAX_ZOOM });
   }, [mapReady, selectedFeatures]);
 
   const zoomToFit = () => {
     const bounds = computeBounds(visibleFeatures.length ? visibleFeatures : features);
     if (bounds) {
-      mapRef.current?.fitBounds(bounds, { padding: 40, duration: 400 });
+      mapRef.current?.fitBounds(bounds, { padding: 40, duration: 400, maxZoom: BASEMAP_MAX_ZOOM });
     }
   };
 
@@ -533,7 +540,7 @@ export function MapPanel({
     const targetFeatures = features.filter((f) => targetIds.includes(f.id));
     const bounds = computeBounds(targetFeatures);
     if (bounds) {
-      mapRef.current.fitBounds(bounds, { padding: 60, duration: 400 });
+      mapRef.current.fitBounds(bounds, { padding: 60, duration: 400, maxZoom: BASEMAP_MAX_ZOOM });
     }
   }, [activeIssue, features]);
 

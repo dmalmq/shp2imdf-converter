@@ -154,3 +154,24 @@ test("re-rendering with the same selection does not re-frame", () => {
 
   expect(fitBounds).not.toHaveBeenCalled();
 });
+
+test("framing a selection or an issue stops at the basemap's deepest tile", () => {
+  // OSM serves nothing past z19; fitting a metre-wide door went to z21 and
+  // left the basemap blank.
+  const { rerender } = render(panel());
+  fitBounds.mockClear();
+
+  rerender(panel({ selectedFeatureIds: ["b"] }));
+  rerender(
+    panel({
+      selectedFeatureIds: ["b"],
+      activeIssue: { feature_id: "c", check: "overlap", message: "", severity: "error", auto_fixable: false }
+    })
+  );
+
+  expect(fitBounds).toHaveBeenCalledTimes(2);
+  for (const [, options] of fitBounds.mock.calls) {
+    expect(options.maxZoom).toBe(19);
+    expect(options.padding).toBeGreaterThan(0);
+  }
+});
