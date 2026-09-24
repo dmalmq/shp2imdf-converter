@@ -1,5 +1,5 @@
 import React from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import {
   autofixSession,
@@ -273,7 +273,11 @@ test("hides shapefile export when the session includes geopackage sources", asyn
   fireEvent.click(exportButton);
 
   await waitFor(() => expect(validateSessionMock).toHaveBeenCalledWith("session-123"));
-  expect(screen.queryByRole("option", { name: "Shapefiles (.zip)" })).not.toBeInTheDocument();
+  expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("value"))).toEqual([
+    "imdf",
+    "imdf_zip"
+  ]);
+  expect(screen.queryByRole("radio", { name: /Shapefiles \(\.zip\)/ })).not.toBeInTheDocument();
   expect(
     screen.getByText(
       "This session includes GeoPackage sources, so only IMDF export is available."
@@ -310,10 +314,14 @@ test("requires an explicit prefix for open data export", async () => {
   fireEvent.click(exportButton);
 
   await waitFor(() => expect(validateSessionMock).toHaveBeenCalledWith("session-123"));
-  fireEvent.click(screen.getByRole("combobox", { name: "Format" }));
-  fireEvent.click(
-    await screen.findByRole("option", { name: "Open Data Contest 2026 shapefiles (.zip)" })
-  );
+  const formats = screen.getByRole("radiogroup", { name: "Format" });
+  expect(within(formats).getAllByRole("radio")).toHaveLength(5);
+  const odc = within(formats).getByRole("radio", { name: /Open Data Contest 2026 shapefiles \(\.zip\)/ });
+  expect(odc).toBeChecked();
+  fireEvent.click(within(formats).getByRole("radio", { name: /IMDF \(\.zip\)/ }));
+  expect(odc).not.toBeChecked();
+  fireEvent.click(odc);
+  expect(odc).toBeChecked();
   const nameInput = await screen.findByRole("textbox", { name: /Export file prefix/ });
   expect(nameInput).toHaveValue("");
 

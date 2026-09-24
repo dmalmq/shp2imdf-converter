@@ -59,6 +59,8 @@ import {
   Field,
   Input,
   Metric,
+  RadioGroup,
+  RadioGroupItem,
   Select,
   SelectContent,
   SelectItem,
@@ -77,6 +79,53 @@ import { cn } from "@/lib/utils";
 /** Only these feature types are visible by default on the map. */
 const DEFAULT_VISIBLE_TYPES = new Set(["unit", "detail", "opening"]);
 type ExportFormat = "imdf" | "imdf_zip" | "shapefiles" | "odc2026_shapefiles" | "qgis_project";
+
+/**
+ * Shown as a radio list rather than a closed select: the five formats serve
+ * different consumers (Apple, the IMDF Sandbox, the GSI contest spec, QGIS) and
+ * choosing between them is easier when each one says what it is for.
+ */
+const EXPORT_FORMATS: ReadonlyArray<{
+  value: ExportFormat;
+  label: readonly [string, string];
+  note: readonly [string, string];
+  needsShapefileSources: boolean;
+}> = [
+  {
+    value: "imdf",
+    label: ["IMDF (.imdf)", "IMDF (.imdf)"],
+    note: ["For Apple Indoor Maps", "Apple Indoor Maps 向け"],
+    needsShapefileSources: false
+  },
+  {
+    value: "imdf_zip",
+    label: ["IMDF (.zip)", "IMDF (.zip)"],
+    note: ["Same contents, zipped for the IMDF Sandbox validator", "同じ内容を IMDF Sandbox 検証用に .zip 化"],
+    needsShapefileSources: false
+  },
+  {
+    value: "shapefiles",
+    label: ["Shapefiles (.zip)", "Shapefiles (.zip)"],
+    note: ["Your source files with unit categories written back", "元のファイルにユニット分類を書き戻し"],
+    needsShapefileSources: true
+  },
+  {
+    value: "odc2026_shapefiles",
+    label: ["Open Data Contest 2026 shapefiles (.zip)", "オープンデータコンテスト2026 シェープファイル (.zip)"],
+    note: ["GSI spec · one file set per floor", "国土地理院仕様 · フロアごとに1セット"],
+    needsShapefileSources: true
+  },
+  {
+    value: "qgis_project",
+    label: ["QGIS project (.qgz + shapefiles .zip)", "QGIS プロジェクト (.qgz + シェープファイル .zip)"],
+    note: ["Styled project over the ODC 2026 files", "ODC 2026 ファイルを読み込むスタイル付きプロジェクト"],
+    needsShapefileSources: true
+  }
+];
+
+function needsShapefileSources(format: ExportFormat): boolean {
+  return EXPORT_FORMATS.some((option) => option.value === format && option.needsShapefileSources);
+}
 
 function normalizeFeature(item: Record<string, unknown>): ReviewFeature | null {
   if (typeof item.id !== "string" || typeof item.feature_type !== "string") {
@@ -869,13 +918,13 @@ export function ReviewPage() {
     () => files.some((item) => item.source_format === "gpkg"),
     [files]
   );
-  const exportBlocked = (exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles" || exportFormat === "qgis_project") && hasGeoPackageSources;
+  const exportBlocked = needsShapefileSources(exportFormat) && hasGeoPackageSources;
 
   useEffect(() => {
-    if (hasGeoPackageSources && (exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles" || exportFormat === "qgis_project")) {
+    if (exportBlocked) {
       setExportFormat("imdf");
     }
-  }, [exportFormat, hasGeoPackageSources]);
+  }, [exportBlocked]);
   const openExportDialog = async () => {
     const validationResult = await runValidation();
     if (!validationResult) {
@@ -899,7 +948,7 @@ export function ReviewPage() {
     if (!sessionId) {
       return;
     }
-    if ((exportFormat === "shapefiles" || exportFormat === "odc2026_shapefiles" || exportFormat === "qgis_project") && hasGeoPackageSources) {
+    if (exportBlocked) {
       const message = t(
         "Shapefile/QGIS export is unavailable for sessions imported from GeoPackages. Use IMDF export instead.",
         "シェープファイル・QGIS エクスポートは GeoPackage から読み込んだセッションでは利用できません。IMDF エクスポートを使用してください。"
@@ -1542,42 +1591,46 @@ export function ReviewPage() {
           <DialogTitle>{t("Export", "エクスポート")}</DialogTitle>
 
           <div className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
-            <Field label={t("Format", "形式")}>
-              {(id) => (
-                <Select
-                  value={exportFormat}
-                  onValueChange={(value) => setExportFormat(value as ExportFormat)}
-                >
-                  <SelectTrigger id={id}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="imdf">{t("IMDF (.imdf)", "IMDF (.imdf)")}</SelectItem>
-                    <SelectItem value="imdf_zip">{t("IMDF (.zip)", "IMDF (.zip)")}</SelectItem>
-                    {!hasGeoPackageSources ? (
-                      <>
-                        <SelectItem value="shapefiles">{t("Shapefiles (.zip)", "Shapefiles (.zip)")}</SelectItem>
-                        <SelectItem value="odc2026_shapefiles">
-                          {t("Open Data Contest 2026 shapefiles (.zip)", "オープンデータコンテスト2026 シェープファイル (.zip)")}
-                        </SelectItem>
-                        <SelectItem value="qgis_project">
-                          {t("QGIS project (.qgz + shapefiles .zip)", "QGIS プロジェクト (.qgz + シェープファイル .zip)")}
-                        </SelectItem>
-                      </>
-                    ) : null}
-                  </SelectContent>
-                </Select>
-              )}
-            </Field>
-
-            {exportFormat === "imdf_zip" ? (
-              <p className="-mt-2 text-xs leading-4 text-muted-foreground">
-                {t(
-                  "Same contents as the .imdf archive, packaged as .zip for the IMDF Sandbox validator.",
-                  "内容は .imdf アーカイブと同じで、IMDF Sandbox 検証用に .zip 形式でパッケージ化しています。"
+            <div className="flex flex-col gap-1.5">
+              <span id="export-format-label" className="text-[13px] font-medium leading-[18px] text-foreground">
+                {t("Format", "形式")}
+              </span>
+              <RadioGroup
+                aria-labelledby="export-format-label"
+                value={exportFormat}
+                onValueChange={(value) => setExportFormat(value as ExportFormat)}
+                className="gap-0 overflow-hidden rounded-lg border border-border bg-card"
+              >
+                {EXPORT_FORMATS.filter((option) => !(hasGeoPackageSources && option.needsShapefileSources)).map(
+                  (option, index) => (
+                    <label
+                      key={option.value}
+                      htmlFor={`export-format-${option.value}`}
+                      className={cn(
+                        "flex cursor-pointer items-center gap-3 px-3 py-2.5",
+                        index > 0 && "border-t border-border",
+                        exportFormat === option.value && "bg-accent"
+                      )}
+                    >
+                      <RadioGroupItem id={`export-format-${option.value}`} value={option.value} />
+                      <span className="flex min-w-0 flex-col gap-0.5">
+                        <span
+                          className={cn(
+                            "text-[13px] leading-[18px] text-foreground",
+                            exportFormat === option.value && "font-medium"
+                          )}
+                        >
+                          {t(...option.label)}
+                        </span>
+                        <span className="font-mono text-[10px] uppercase leading-[13px] tracking-[0.04em] text-muted-foreground">
+                          {t(...option.note)}
+                        </span>
+                      </span>
+                    </label>
+                  )
                 )}
-              </p>
-            ) : null}
+              </RadioGroup>
+            </div>
 
             {hasGeoPackageSources ? (
               <p className="rounded-md border border-warning/20 bg-warning/10 px-3 py-2 text-xs leading-4 text-warning">
@@ -1608,9 +1661,7 @@ export function ReviewPage() {
               </div>
             ) : null}
 
-            {exportFormat !== "shapefiles" &&
-            exportFormat !== "odc2026_shapefiles" &&
-            exportFormat !== "qgis_project" &&
+            {!needsShapefileSources(exportFormat) &&
             validation &&
             validation.summary.error_count > 0 ? (
               <p className="rounded-md border border-warning/20 bg-warning/10 px-3 py-2 text-xs leading-4 text-warning">
@@ -1621,10 +1672,7 @@ export function ReviewPage() {
               </p>
             ) : null}
 
-            {(exportFormat === "shapefiles" ||
-              exportFormat === "odc2026_shapefiles" ||
-              exportFormat === "qgis_project") &&
-            !hasGeoPackageSources ? (
+            {needsShapefileSources(exportFormat) && !hasGeoPackageSources ? (
               <div className="flex flex-col gap-4 rounded-lg border border-border bg-muted/40 p-4">
                 <Field label={t("Encoding", "文字コード")}>
                   {(id) => (
