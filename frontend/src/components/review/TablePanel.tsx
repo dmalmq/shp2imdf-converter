@@ -12,11 +12,13 @@ import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { EmptyState } from "../shared/EmptyState";
 import { FeatureTypeIcon } from "../shared/FeatureTypeIcon";
 import { Badge, Checkbox } from "../ui";
+import { buildLevelOptions } from "./floorGroups";
 import { featureName, type ReviewFeature } from "./types";
 
 
 type Props = {
   features: ReviewFeature[];
+  levelOptions?: Array<{ id: string; label: string }>;
   selectedFeatureIds: string[];
   onSelectFeature: (id: string, multi?: boolean) => void;
   onSelectionChange?: (ids: string[]) => void;
@@ -29,12 +31,15 @@ function categoryValue(feature: ReviewFeature): string {
 }
 
 
-function levelValue(feature: ReviewFeature): string {
+function levelValue(feature: ReviewFeature, levelLabels: Map<string, string>): string {
   if (feature.feature_type === "level") {
-    return feature.id;
+    return "";
   }
   const levelId = feature.properties.level_id;
-  return typeof levelId === "string" ? levelId : "";
+  if (typeof levelId !== "string" || !levelId) {
+    return "";
+  }
+  return levelLabels.get(levelId) ?? levelId.slice(0, 8);
 }
 
 
@@ -44,8 +49,12 @@ function statusValue(feature: ReviewFeature): string {
 }
 
 
-export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSelectionChange }: Props) {
+export function TablePanel({ features, levelOptions, selectedFeatureIds, onSelectFeature, onSelectionChange }: Props) {
   const { t } = useUiLanguage();
+  const levelLabels = useMemo(
+    () => new Map((levelOptions ?? buildLevelOptions(features)).map((option) => [option.id, option.label])),
+    [levelOptions, features]
+  );
   const selectedSet = useMemo(() => new Set(selectedFeatureIds), [selectedFeatureIds]);
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
 
@@ -224,10 +233,7 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
     {
       id: "level",
       header: t("Level", "レベル"),
-      cell: ({ row }) => {
-        const value = levelValue(row.original);
-        return value ? <span className="font-mono text-xs">{value.slice(0, 8)}</span> : "-";
-      }
+      cell: ({ row }) => levelValue(row.original, levelLabels) || "-"
     },
     {
       id: "status",
@@ -251,7 +257,7 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
       }
     }
     ],
-    [t, selectedSet, allVisibleSelected, someVisibleSelected, visibleIds.length, onRowSelect, onSelectAll]
+    [t, levelLabels, selectedSet, allVisibleSelected, someVisibleSelected, visibleIds.length, onRowSelect, onSelectAll]
   );
 
   const table = useReactTable({

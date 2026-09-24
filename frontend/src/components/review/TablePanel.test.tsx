@@ -66,6 +66,43 @@ test("header checkbox toggles all visible rows", () => {
 });
 
 
+test("level column names the referenced level, not a fragment of its id", () => {
+  const level: ReviewFeature = {
+    type: "Feature",
+    id: "9d22cff9-0000-0000-0000-000000000000",
+    feature_type: "level",
+    geometry: null,
+    properties: { name: { ja: "1F" }, short_name: { ja: "1F" }, ordinal: 0 }
+  };
+  const unit = { ...makeFeature("u1"), properties: { name: "Unit A", level_id: level.id } };
+  const orphan = { ...makeFeature("u2"), properties: { name: "Unit B", level_id: "deadbeef-1111" } };
+
+  render(<TablePanel features={[level, unit, orphan]} selectedFeatureIds={[]} onSelectFeature={() => {}} />);
+
+  const levelCell = (name: string) => screen.getByText(name).closest("tr")!.querySelectorAll("td")[5].textContent;
+  expect(levelCell("Unit A")).toBe("1F");
+  expect(levelCell("Unit B")).toBe("deadbeef");
+  expect(screen.getAllByText("1F")).toHaveLength(2);
+  expect(screen.getByText("9d22cff9").closest("tr")!.querySelectorAll("td")[5].textContent).toBe("-");
+});
+
+
+test("level column resolves levels the active filter hid from the rows", () => {
+  const unit = { ...makeFeature("u1"), properties: { name: "Unit A", level_id: "lvl-2" } };
+
+  render(
+    <TablePanel
+      features={[unit]}
+      levelOptions={[{ id: "lvl-2", label: "2F" }]}
+      selectedFeatureIds={[]}
+      onSelectFeature={() => {}}
+    />
+  );
+
+  expect(screen.getByText("Unit A").closest("tr")!.querySelectorAll("td")[5].textContent).toBe("2F");
+});
+
+
 test("shift-click selects checkbox ranges", () => {
   const features = [makeFeature("f1"), makeFeature("f2"), makeFeature("f3"), makeFeature("f4")];
   renderWithSelection(features);
