@@ -36,4 +36,5 @@ Thumbs.db
 
 # Verification skill runtime (keep proof artifacts on disk, not in git)
 artifacts/verify-shp2imdf/
+artifacts/captures/
 .cursor/skills/verify-shp2imdf/.run/

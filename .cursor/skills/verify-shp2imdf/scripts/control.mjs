@@ -11,14 +11,16 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 dns.setDefaultResultOrder("verbatim");
 
-const FRONTEND_PORT = 5310;
-const BACKEND_PORT = 8310;
-const FRONTEND_URL = `http://localhost:${FRONTEND_PORT}`;
-const BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
+export const DEFAULT_FRONTEND_PORT = 5310;
+export const DEFAULT_BACKEND_PORT = 8310;
+let FRONTEND_PORT = DEFAULT_FRONTEND_PORT;
+let BACKEND_PORT = DEFAULT_BACKEND_PORT;
+let FRONTEND_URL = `http://localhost:${FRONTEND_PORT}`;
+let BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
 const HEALTH_PATH = "/api/health";
 const APP_TITLE = "SHP to IMDF Converter";
 const APP_HEADER = "IMDF Converter";
@@ -27,10 +29,71 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const skillRoot = path.resolve(here, "..");
 const repoRoot = findRepoRoot(here);
 const runDir = path.join(skillRoot, ".run");
-const statePath = path.join(runDir, "state.json");
+let statePath = path.join(runDir, "state.json");
 const artifactsRoot = path.join(repoRoot, "artifacts", "verify-shp2imdf");
 const fixturesDir = path.join(repoRoot, "backend", "tests", "fixtures", "tokyo_station");
 const spaceShp = path.join(fixturesDir, "JRTokyoSta_B1_Space.shp");
+
+function isDefaultPair() {
+  return FRONTEND_PORT === DEFAULT_FRONTEND_PORT && BACKEND_PORT === DEFAULT_BACKEND_PORT;
+}
+
+// A worktree runs its own pair beside the shared 5310/8310 instance; each pair
+// keeps its own state file so cleanup never reaches the other pair's PIDs.
+export function configurePorts({ frontend = DEFAULT_FRONTEND_PORT, backend = DEFAULT_BACKEND_PORT } = {}) {
+  FRONTEND_PORT = Number(frontend);
+  BACKEND_PORT = Number(backend);
+  FRONTEND_URL = `http://localhost:${FRONTEND_PORT}`;
+  BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
+  statePath = path.join(runDir, isDefaultPair() ? "state.json" : `state-${FRONTEND_PORT}-${BACKEND_PORT}.json`);
+  return { frontendUrl: FRONTEND_URL, backendUrl: BACKEND_URL };
+}
+
+export function takePortFlags(argv) {
+  const rest = [];
+  const ports = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    const match = /^--(frontend|backend)-port(?:=(.*))?$/.exec(arg);
+    if (!match) {
+      rest.push(arg);
+      continue;
+    }
+    const value = match[2] ?? argv[(i += 1)];
+    if (!/^\d+$/.test(value ?? "")) throw new Error(`${arg} needs a port number`);
+    ports[match[1]] = Number(value);
+  }
+  return { ports, rest };
+}
+
+function logName(base) {
+  return isDefaultPair() ? `${base}.log` : `${base}-${FRONTEND_PORT}-${BACKEND_PORT}.log`;
+}
+
+// vite.config.ts pins 5310 with strictPort and proxies to 8310, so another pair
+// gets a derived config. It lives under node_modules so it stays untracked and
+// still resolves `vite` and the base config; its own cacheDir keeps two dev
+// servers of one checkout from sharing a dep-optimiser cache.
+function viteConfigForPorts() {
+  if (isDefaultPair()) return null;
+  const dir = path.join(repoRoot, "frontend", "node_modules", ".capture");
+  ensureDir(dir);
+  const file = path.join(dir, `vite.config.${FRONTEND_PORT}-${BACKEND_PORT}.mjs`);
+  const body = `import { mergeConfig } from "vite";
+import base from "../../vite.config.ts";
+
+export default mergeConfig(base, {
+  cacheDir: "node_modules/.vite-${FRONTEND_PORT}",
+  server: {
+    port: ${FRONTEND_PORT},
+    strictPort: true,
+    proxy: { "/api": "http://localhost:${BACKEND_PORT}" }
+  }
+});
+`;
+  fs.writeFileSync(file, body, "utf8");
+  return file;
+}
 
 function findRepoRoot(start) {
   let dir = start;
@@ -167,7 +230,7 @@ function resolveExecutable(command) {
   return preferred;
 }
 
-function spawnLogged(command, args, cwd, logFile) {
+function spawnLogged(command, args, cwd, logFile, env = {}) {
   ensureDir(runDir);
   const stdoutLog = logFile;
   const stderrLog = logFile.replace(/\.log$/i, ".err.log");
@@ -175,20 +238,26 @@ function spawnLogged(command, args, cwd, logFile) {
     if (fs.existsSync(file)) fs.unlinkSync(file);
   }
   const exe = resolveExecutable(command);
+  const pidFile = logFile.replace(/\.log$/i, ".pid");
+  if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
   const ps = [
     `$p = Start-Process -FilePath ${psQuote(exe)} -ArgumentList @(${args.map(psQuote).join(",")}) -WorkingDirectory ${psQuote(cwd)} -RedirectStandardOutput ${psQuote(stdoutLog)} -RedirectStandardError ${psQuote(stderrLog)} -WindowStyle Hidden -PassThru`,
-    "Write-Output $p.Id"
+    `Set-Content -Path ${psQuote(pidFile)} -Value $p.Id`
   ].join("; ");
+  // The server inherits PowerShell's handles, so a piped stdout would stay open
+  // until the server exits and spawnSync would block for its whole lifetime.
+  // The PID comes back through a file instead.
   const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", ps], {
-    encoding: "utf8",
-    windowsHide: true
+    stdio: "ignore",
+    windowsHide: true,
+    env: { ...process.env, ...env }
   });
   if (result.status !== 0) {
-    throw new Error(`Start-Process failed for ${exe}: ${result.stderr || result.stdout}`);
+    throw new Error(`Start-Process failed for ${exe} (exit ${result.status})`);
   }
-  const pid = Number((result.stdout || "").trim().split(/\r?\n/).pop());
+  const pid = fs.existsSync(pidFile) ? Number(fs.readFileSync(pidFile, "utf8").trim()) : NaN;
   if (!Number.isFinite(pid) || pid <= 0) {
-    throw new Error(`Start-Process returned no PID: ${result.stdout}`);
+    throw new Error(`Start-Process returned no PID for ${exe}`);
   }
   return pid;
 }
@@ -205,7 +274,8 @@ function taskkill(pid) {
 
 async function cmdLaunch() {
   cmdFixtures();
-  const state = readState();
+  // Timestamps from the previous launch/cleanup would read as this run's.
+  const { cleanedAt: _cleaned, launchedAt: _launched, ...state } = readState();
   const backend = await probe(`${BACKEND_URL}${HEALTH_PATH}`);
   const frontend = await probe(FRONTEND_URL);
 
@@ -223,14 +293,16 @@ async function cmdLaunch() {
   }
 
   if (!parseHealth(backend.body)) {
-    const logFile = path.join(runDir, "backend.log");
+    const logFile = path.join(runDir, logName("backend"));
     const pid = spawnLogged(
       "python",
       ["-m", "uvicorn", "backend.main:app", "--port", String(BACKEND_PORT)],
       repoRoot,
-      logFile
+      logFile,
+      { CORS_ALLOWED_ORIGINS: FRONTEND_URL }
     );
     state.backendPid = pid;
+    state.backendMatch = ["uvicorn", "backend.main:app", `--port ${BACKEND_PORT}`];
     state.startedBackend = true;
     state.backendLog = logFile;
     writeState(state);
@@ -247,9 +319,12 @@ async function cmdLaunch() {
     if (!fs.existsSync(viteJs)) {
       throw new Error(`Vite is not installed at ${viteJs} — run npm ci in frontend/`);
     }
-    const logFile = path.join(runDir, "frontend.log");
-    const pid = spawnLogged(process.execPath, [viteJs], path.join(repoRoot, "frontend"), logFile);
+    const logFile = path.join(runDir, logName("frontend"));
+    const viteConfig = viteConfigForPorts();
+    const viteArgs = viteConfig ? [viteJs, "--config", viteConfig] : [viteJs];
+    const pid = spawnLogged(process.execPath, viteArgs, path.join(repoRoot, "frontend"), logFile);
     state.frontendPid = pid;
+    state.frontendMatch = viteConfig ? [viteJs, viteConfig] : [viteJs];
     state.startedFrontend = true;
     state.frontendLog = logFile;
     writeState(state);
@@ -305,26 +380,56 @@ async function cmdDoctor() {
   if (problems.length) {
     for (const p of problems) console.error(`doctor FAIL: ${p}`);
     process.exitCode = 1;
-    return;
+    return false;
   }
   console.log("doctor OK");
+  return true;
 }
 
 function cmdStatus() {
   console.log(JSON.stringify({ repoRoot, ...readState() }, null, 2));
 }
 
+function processCommandLine(pid) {
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}").CommandLine`],
+    { encoding: "utf8", windowsHide: true }
+  );
+  return (result.stdout || "").trim();
+}
+
+function normalisedCommand(text) {
+  return text.replace(/\//g, "\\").replace(/["']/g, "").toLowerCase();
+}
+
+// Windows reuses PIDs, so after a crash the recorded one can belong to someone
+// else's process. Kill it only if its command line still carries what launch ran.
+function stopOwned(role, pid, match) {
+  const commandLine = processCommandLine(pid);
+  if (!commandLine) {
+    console.log(`cleanup: ${role} pid=${pid} is no longer running`);
+    return;
+  }
+  const haystack = normalisedCommand(commandLine);
+  const missing = (match || []).filter((needle) => !haystack.includes(normalisedCommand(needle)));
+  if (!match || missing.length) {
+    console.log(`cleanup: skipping ${role} pid=${pid}; its command line is not the one launched: ${commandLine}`);
+    return;
+  }
+  console.log(`stopping ${role} pid=${pid}`);
+  taskkill(pid);
+}
+
 function cmdCleanup() {
   const state = readState();
   if (state.startedFrontend && state.frontendPid) {
-    console.log(`stopping frontend pid=${state.frontendPid}`);
-    taskkill(state.frontendPid);
+    stopOwned("frontend", state.frontendPid, state.frontendMatch);
   } else {
     console.log("cleanup: not stopping frontend (not started by this run)");
   }
   if (state.startedBackend && state.backendPid) {
-    console.log(`stopping backend pid=${state.backendPid}`);
-    taskkill(state.backendPid);
+    stopOwned("backend", state.backendPid, state.backendMatch);
   } else {
     console.log("cleanup: not stopping backend (not started by this run)");
   }
@@ -403,19 +508,41 @@ async function gotoEnglishHome(page) {
   }
 }
 
-async function importTokyoStation(page) {
+async function queueTokyoStation(page) {
   await gotoEnglishHome(page);
-  await page.getByRole("button", { name: "Standard import" }).click();
+  await page.getByRole("button", { name: "Standard", exact: true }).click();
   const files = shapefileParts();
   if (files.length === 0) {
     throw new Error("no tokyo_station shapefile parts — run fixtures");
   }
   await page.locator('input[type="file"]:not(#imdf-file-input)').first().setInputFiles(files);
-  await page.getByText("JRTokyoSta_B1_Space").waitFor({ timeout: 15000 });
+  await page.getByText("JRTokyoSta_B1_Space").first().waitFor({ timeout: 15000 });
+}
+
+async function importTokyoStation(page) {
+  await queueTokyoStation(page);
   await page.getByRole("button", { name: "Import & Continue" }).click();
   await page.waitForURL("**/wizard", { timeout: 60000 });
-  await page.getByRole("heading", { name: /Step 1: Project Info/ }).waitFor({ timeout: 30000 });
   await page.getByLabel(/Venue Name/).waitFor({ timeout: 30000 });
+}
+
+// The wizard autosaves 800 ms after typing stops; Summary reads the server's
+// copy, so wait for the footer to confirm the save before moving on.
+async function fillVenue(page) {
+  await page.getByLabel(/Venue Name/).fill("Tokyo Station");
+  await page.getByLabel(/Locality/).first().fill("Chiyoda-ku");
+  await page.getByText(/^Saved ·/).waitFor({ timeout: 20000 });
+}
+
+async function generateReview(page) {
+  const generate = page.getByRole("button", { name: "Generate & open Review" });
+  await generate.waitFor({ timeout: 15000 });
+  if (await generate.isDisabled()) {
+    throw new Error("Generate & open Review is disabled — venue/classification/levels/unit mapping incomplete");
+  }
+  await generate.click();
+  await page.waitForURL("**/review", { timeout: 60000 });
+  await page.getByRole("button", { name: "Export", exact: true }).waitFor({ timeout: 30000 });
 }
 
 async function driveImportShapefiles() {
@@ -424,11 +551,11 @@ async function driveImportShapefiles() {
     await writeEvidence("import-shapefiles", page, {
       entry: "Import dropzone + Import & Continue",
       notes: `header ${APP_HEADER}; landed on /wizard`,
-      body: "Expected: Standard import of tokyo_station fixtures navigates to the wizard Project Info step."
+      body: "Expected: Standard import of tokyo_station fixtures navigates to the wizard Venue Info section."
     });
     const text = await page.locator("body").innerText();
-    if (!text.includes("Step 1: Project Info") || !text.includes(APP_HEADER) || !text.includes("Venue Name")) {
-      throw new Error("import-shapefiles proof missing Project Info form or app header");
+    if (!text.includes(APP_HEADER) || !text.includes("Venue Name")) {
+      throw new Error("import-shapefiles proof missing Venue Info form or app header");
     }
     console.log("drive import-shapefiles OK");
   });
@@ -437,39 +564,33 @@ async function driveImportShapefiles() {
 async function driveWizardConfigure() {
   await withPage(async (page) => {
     await importTokyoStation(page);
-    await page.getByLabel(/Venue Name/).fill("Tokyo Station");
-    await page.getByLabel(/Locality/).first().fill("Chiyoda-ku");
-    await page.getByRole("button", { name: "Save Project Info" }).click();
-    await page.getByText(/Venue Info|saved|Project Info/i).first().waitFor({ timeout: 15000 });
+    await fillVenue(page);
     await page.getByRole("button", { name: "Summary & Generate" }).click();
-    await page.getByRole("heading", { name: /Step 10: Summary/ }).waitFor({ timeout: 15000 });
-    const confirm = page.getByRole("button", { name: "Confirm & Open Review" });
-    await confirm.waitFor({ timeout: 10000 });
-    if (await confirm.isDisabled()) {
-      throw new Error("Confirm & Open Review is disabled — classification/levels/unit mapping incomplete");
-    }
-    await confirm.click();
-    await page.waitForURL("**/review", { timeout: 60000 });
-    await page.getByRole("button", { name: "Export" }).waitFor({ timeout: 30000 });
+    await page.getByRole("heading", { name: "Summary & Generate", level: 1 }).waitFor({ timeout: 15000 });
+    await generateReview(page);
     await writeEvidence("wizard-configure", page, {
       entry: "wizard Venue Info → Summary & Generate",
       notes: "generated draft and opened review",
-      body: "Expected: review chrome with Export enabled after Confirm & Open Review."
+      body: "Expected: review chrome with Export enabled after Generate & open Review."
     });
     console.log("drive wizard-configure OK");
   });
 }
 
+async function openIllustrator(page) {
+  await gotoEnglishHome(page);
+  await page.getByRole("button", { name: /Illustrator artwork/ }).click();
+  await page.waitForURL("**/illustrator", { timeout: 15000 });
+  await page.getByRole("heading", { name: /Place Illustrator artwork/ }).waitFor({ timeout: 15000 });
+  await page.getByRole("button", { name: "Choose file", exact: true }).waitFor();
+}
+
 async function driveIllustratorOpen() {
   await withPage(async (page) => {
-    await gotoEnglishHome(page);
-    await page.getByRole("button", { name: "Illustrator (.ai) → place on map" }).click();
-    await page.waitForURL("**/illustrator", { timeout: 15000 });
-    await page.getByRole("heading", { name: /Place Illustrator artwork/ }).waitFor({ timeout: 15000 });
-    await page.getByRole("button", { name: "Choose .ai file" }).waitFor();
+    await openIllustrator(page);
     await writeEvidence("illustrator-open", page, {
-      entry: "Import page button Illustrator (.ai) → place on map",
-      body: "Expected: Place Illustrator artwork heading and Choose .ai file. Did not write placements.db."
+      entry: "Import page card Illustrator artwork",
+      body: "Expected: Place Illustrator artwork heading and Choose file. Did not write placements.db."
     });
     console.log("drive illustrator-open OK");
   });
@@ -508,12 +629,32 @@ commands:
   status                print .run/state.json
   drive <feature-id>    import-shapefiles | wizard-configure | illustrator-open
   cleanup               kill only PIDs this run started; keep artifacts
+
+options (any command):
+  --frontend-port N     default ${DEFAULT_FRONTEND_PORT}
+  --backend-port N      default ${DEFAULT_BACKEND_PORT}
 `);
 }
 
-const [command, ...rest] = process.argv.slice(2);
+export {
+  cmdCleanup,
+  cmdDoctor,
+  cmdFixtures,
+  cmdLaunch,
+  fillVenue,
+  generateReview,
+  gotoEnglishHome,
+  importTokyoStation,
+  loadPlaywright,
+  openIllustrator,
+  queueTokyoStation,
+  repoRoot
+};
 
 async function main() {
+  const { ports, rest: args } = takePortFlags(process.argv.slice(2));
+  configurePorts(ports);
+  const [command, ...rest] = args;
   if (!command || command === "help" || command === "-h" || command === "--help") {
     cmdHelp();
     return;
@@ -530,7 +671,12 @@ async function main() {
   throw new Error(`unknown command ${command}`);
 }
 
-main().catch((err) => {
-  console.error(err.message || err);
-  process.exit(1);
-});
+const invokedDirectly =
+  process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href.toLowerCase() === import.meta.url.toLowerCase();
+
+if (invokedDirectly) {
+  main().catch((err) => {
+    console.error(err.message || err);
+    process.exit(1);
+  });
+}

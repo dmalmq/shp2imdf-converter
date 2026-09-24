@@ -17,7 +17,8 @@ uvicorn backend.main:app --reload --port 8310   # backend only
 cd frontend && npm run dev                       # frontend only
 pytest                               # testpaths = backend/tests
 cd frontend && npx vitest            # frontend unit tests
-npx playwright test                  # e2e
+cd frontend && npx tsc --noEmit -p tsconfig.app.json && npx tsc --noEmit -p tsconfig.node.json   # type gate
+node .cursor/skills/verify-shp2imdf/scripts/capture.mjs --label baseline   # screenshots, see below
 node audit-ui.mjs                    # UI audit helper
 node audit-review.mjs                # review-screen audit helper
 ```
@@ -29,6 +30,16 @@ sets the dev-server port AND proxies `/api` to the backend port, `dev.ps1`/`dev.
 `--port` to uvicorn, and `CORS_ALLOWED_ORIGINS` must name the frontend port or the
 browser blocks every API call. `HOST`/`PORT` in `.env.example` are documentation of what
 to pass on the command line, not settings the app reads — there is no `uvicorn.run()`.
+
+The type gate is the two `-p` runs above. `npx tsc --noEmit -p .` passes without
+checking anything: `frontend/tsconfig.json` is `files: []` with project references.
+
+There are no Playwright specs, so `npx playwright test` runs nothing. The live check
+is the capture script: it drives Upload, every wizard section, Review and the
+Illustrator route in light/dark and EN/日本語, writing PNGs and `manifest.json` to
+`artifacts/captures/<label>/` (gitignored). `--frontend-port`/`--backend-port` run it on
+a separate pair (a worktree beside the shared 5310/8310), `--cleanup` stops only the
+servers it started. Details in `.cursor/skills/verify-shp2imdf/SKILL.md`.
 
 `dev.ps1` spawns two `pwsh` windows and kills both on exit — if a port is still held
 after a crash, check for orphaned uvicorn/node processes.
