@@ -212,7 +212,7 @@ export function LevelMapStep({ files, onPatchFile }: Props) {
           {gapOrdinals.map((ordinal) => (
             <div
               key={`gap-${ordinal}`}
-              className="rounded border border-dashed border-warning bg-warning/10 px-3 py-2 text-xs text-warning-foreground"
+              className="rounded border border-dashed border-warning bg-warning-surface px-3 py-2 text-xs text-warning-foreground"
             >
               {t(`Gap at ordinal ${ordinal}`, `階層 ${ordinal} に欠番があります`)}
             </div>

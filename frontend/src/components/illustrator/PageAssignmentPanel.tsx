@@ -176,7 +176,7 @@ export function PageAssignmentPanel({
       {/* One warning region, not two. The alignment failure and the size mismatch
           are the same problem to the reader — stacked separately they competed. */}
       {failedPages.length > 0 || sizesDiffer ? (
-        <div className="flex items-start gap-2 rounded-lg border border-warning bg-signal-muted p-3">
+        <div className="flex items-start gap-2 rounded-lg border border-warning bg-warning-surface p-3">
           <AlertTriangle className="mt-px h-4 w-4 shrink-0 text-warning-foreground" />
           <div className="flex flex-col gap-1">
             {failedPages.length > 0 ? (

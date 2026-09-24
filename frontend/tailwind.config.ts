@@ -18,17 +18,30 @@ const config: Config = {
         secondary: { DEFAULT: "hsl(var(--secondary))", foreground: "hsl(var(--secondary-foreground))" },
         muted: { DEFAULT: "hsl(var(--muted))", foreground: "hsl(var(--muted-foreground))" },
         accent: { DEFAULT: "hsl(var(--accent))", foreground: "hsl(var(--accent-foreground))" },
-        destructive: { DEFAULT: "hsl(var(--destructive))", foreground: "hsl(var(--destructive-foreground))" },
-        // `signal` is reserved for the placed artwork and its active floor.
-        signal: {
-          DEFAULT: "hsl(var(--signal))",
-          foreground: "hsl(var(--signal-foreground))",
-          muted: "hsl(var(--signal-muted))"
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+          muted: "hsl(var(--destructive-muted))"
+        },
+        info: {
+          DEFAULT: "hsl(var(--info))",
+          foreground: "hsl(var(--info-foreground))",
+          muted: "hsl(var(--info-muted))"
+        },
+        // `artwork` (plum) is reserved for the placed artwork and its active floor.
+        artwork: {
+          DEFAULT: "hsl(var(--artwork))",
+          foreground: "hsl(var(--artwork-foreground))",
+          muted: "hsl(var(--artwork-muted))"
         },
         success: "hsl(var(--success))",
-        warning: { DEFAULT: "hsl(var(--warning))", foreground: "hsl(var(--warning-foreground))" },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
+          surface: "hsl(var(--warning-surface))"
+        },
         // Reference overlays are data, not brand: distinguishable from each other,
-        // subordinate to `signal`.
+        // subordinate to `artwork`.
         layer: {
           1: "hsl(var(--layer-1))",
           2: "hsl(var(--layer-2))",
@@ -39,6 +52,15 @@ const config: Config = {
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))"
       },
+      // In dark mode a fill that carries a white label is too dark to read as text
+      // on the dark surfaces, so text utilities take each colour's lifted `-text`
+      // variant. `text-primary-foreground` and the rest still resolve from `colors`.
+      textColor: {
+        primary: { DEFAULT: "hsl(var(--primary-text))" },
+        destructive: { DEFAULT: "hsl(var(--destructive-text))" },
+        artwork: { DEFAULT: "hsl(var(--artwork-text))" },
+        success: "hsl(var(--success-text))"
+      },
       borderRadius: {
         xl: "calc(var(--radius) + 4px)",
         lg: "var(--radius)",
@@ -46,8 +68,9 @@ const config: Config = {
         sm: "calc(var(--radius) - 4px)"
       },
       fontFamily: {
-        sans: ["Geist Variable", "IBM Plex Sans JP", "system-ui", "sans-serif"],
-        mono: ["Geist Mono Variable", "ui-monospace", "monospace"]
+        sans: ["IBM Plex Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", "system-ui", "sans-serif"],
+        mono: ["Geist Mono Variable", "ui-monospace", "monospace"],
+        display: ["Fraunces", "IBM Plex Sans JP", "Georgia", "serif"]
       },
       keyframes: {
         "accordion-down": {

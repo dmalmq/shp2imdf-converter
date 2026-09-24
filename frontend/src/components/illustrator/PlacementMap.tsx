@@ -78,12 +78,12 @@ import {
 
 /**
  * Fallback colour for the active floor, used when the artwork carries no colour
- * of its own. `signal` — reserved for the placed artwork and nothing else.
+ * of its own. `artwork` (plum) — reserved for the placed artwork and nothing else.
  *
  * Replaces a six-entry `FLOOR_TINTS` list: floors no longer each own a hue, so
  * there is one tint rather than one per floor.
  */
-export const ARTWORK_TINT = "#ea580c";
+export const ARTWORK_TINT = "#7a3b7e";
 const PLACEMENT_GLYPHS = "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf";
 
 /** Snap radius for control-point picking, in screen pixels. */
@@ -1098,7 +1098,7 @@ export function PlacementMap({
                   variant={floor.label === state.activeFloorLabel ? "default" : "ghost"}
                   className={cn(
                     floor.label === state.activeFloorLabel &&
-                      "bg-signal text-signal-foreground hover:bg-signal/90"
+                      "bg-artwork text-artwork-foreground hover:bg-artwork/90"
                   )}
                   aria-pressed={floor.label === state.activeFloorLabel}
                   onClick={() => dispatch({ type: "setActiveFloor", label: floor.label })}

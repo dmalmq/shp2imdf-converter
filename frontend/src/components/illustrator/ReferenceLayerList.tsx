@@ -28,7 +28,7 @@ type Props = {
 
 /**
  * Reference overlays are data, not brand: they need to be distinguishable from
- * each other and subordinate to `signal`, which is reserved for the placed
+ * each other and subordinate to `artwork`, which is reserved for the placed
  * artwork. These mirror the `layer-1..4` tokens — they cannot be Tailwind
  * classes because MapLibre paint takes colour strings, not CSS variables.
  */

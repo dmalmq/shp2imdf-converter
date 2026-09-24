@@ -877,7 +877,7 @@ export function WizardPage() {
 
           {/* Learning suggestion banner */}
           {learningSuggestion ? (
-            <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-[13px] leading-[18px] text-warning-foreground">
+            <div className="rounded-lg border border-warning/30 bg-warning-surface p-3 text-[13px] leading-[18px] text-warning-foreground">
               <p>{learningSuggestion.message}</p>
               <div className="mt-2 flex gap-2">
                 <Button variant="default" size="sm" onClick={() => void applyLearningSuggestion()}>
@@ -892,7 +892,7 @@ export function WizardPage() {
 
           {/* Every section saves as you edit, so the footer reports rather than
               asks. The one button it can carry is Summary's Generate. */}
-          <div className="sticky bottom-0 z-10 -mb-5 flex items-center justify-between gap-3 border-t border-border bg-muted py-3">
+          <div className="sticky bottom-0 z-10 -mb-5 flex items-center justify-between gap-3 border-t border-border bg-background py-3">
             <span
               className="flex items-center gap-2 text-xs leading-4 text-muted-foreground"
               role={wizardSaveStatus === "error" ? "alert" : undefined}

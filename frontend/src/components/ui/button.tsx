@@ -10,14 +10,20 @@ const buttonVariants = cva(
   "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium " +
     "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
     "focus-visible:ring-offset-2 focus-visible:ring-offset-background " +
-    "disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+    // Disabled drops the variant's fill for a dashed outline and muted label, a
+    // look no enabled variant has. Fading the variant instead left a disabled
+    // pine button looking like an enabled pine-tint one in dark mode. It is an
+    // outline rather than a border so that disabling never resizes a button.
+    "disabled:pointer-events-none disabled:border-transparent disabled:bg-transparent disabled:text-muted-foreground " +
+    "disabled:outline disabled:outline-1 disabled:-outline-offset-1 disabled:outline-dashed disabled:outline-input " +
+    "[&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary/90",
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
+        ghost: "hover:bg-accent hover:text-accent-foreground disabled:outline-none",
         destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90"
       },
       size: {

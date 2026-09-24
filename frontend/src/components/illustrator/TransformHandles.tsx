@@ -28,9 +28,9 @@ type Props = {
 };
 
 const HANDLE_BOX =
-  "flex h-[18px] w-[18px] items-center justify-center rounded-[3px] border border-signal bg-background shadow";
+  "flex h-[18px] w-[18px] items-center justify-center rounded-[3px] border border-artwork bg-background shadow";
 const HANDLE_ROUND =
-  "flex h-[22px] w-[22px] items-center justify-center rounded-full border border-signal bg-background shadow";
+  "flex h-[22px] w-[22px] items-center justify-center rounded-full border border-artwork bg-background shadow";
 
 /**
  * Direct-manipulation gizmo for the active floor.
