@@ -11,6 +11,7 @@ from fastapi import APIRouter, File, Request, UploadFile
 from shapely.geometry import shape
 from shapely.ops import unary_union
 
+from backend.routers.common import get_session_or_raise, session_manager
 from backend.src.generator import _close_gaps
 from backend.src.geocoding import GeocodeMatch, GeocoderClient, GeocodingError
 from backend.src.illustrator_georeference import resolve_working_crs
@@ -37,15 +38,10 @@ from backend.src.schemas import (
     SessionRecord,
     WizardStateResponse,
 )
-from backend.src.session import SessionManager
 from backend.src.wizard import build_address_feature, seed_wizard_state
 
 
 router = APIRouter(prefix="/api/session/{session_id}", tags=["wizard"])
-
-
-def _session_manager(request: Request) -> SessionManager:
-    return request.app.state.session_manager
 
 
 def _unit_categories_path(request: Request) -> str:
@@ -444,17 +440,10 @@ def _refresh_unit_preview(session: SessionRecord, request: Request) -> tuple[int
     return len(preview), unresolved
 
 
-def _get_session_or_raise(session_id: str, request: Request) -> SessionRecord:
-    session = _session_manager(request).get_session(session_id=session_id)
-    if session is None:
-        raise KeyError("Session not found")
-    return session
-
-
 @router.get("/wizard", response_model=WizardStateResponse)
 def get_wizard_state(session_id: str, request: Request) -> WizardStateResponse:
-    manager = _session_manager(request)
-    session = _get_session_or_raise(session_id, request)
+    manager = session_manager(request)
+    session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
     _set_default_mapping_columns(session)
     _refresh_unit_preview(session, request)
@@ -470,7 +459,7 @@ def search_wizard_address(
     language: str = "en",
     limit: int = 5,
 ) -> AddressSearchResponse:
-    _get_session_or_raise(session_id, request)
+    get_session_or_raise(session_id, request)
     geocoder = _geocoder(request)
     if geocoder is None:
         raise GeocodingError(
@@ -498,7 +487,7 @@ def autofill_wizard_address(
     request: Request,
     language: str = "en",
 ) -> AddressAutofillResponse:
-    session = _get_session_or_raise(session_id, request)
+    session = get_session_or_raise(session_id, request)
     geocoder = _geocoder(request)
     if geocoder is None:
         raise GeocodingError(
@@ -534,8 +523,8 @@ def autofill_wizard_address(
 
 @router.patch("/wizard/project", response_model=ProjectWizardResponse)
 def patch_wizard_project(session_id: str, payload: ProjectWizardRequest, request: Request) -> ProjectWizardResponse:
-    manager = _session_manager(request)
-    session = _get_session_or_raise(session_id, request)
+    manager = session_manager(request)
+    session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
 
     if not payload.venue_name.strip():
@@ -567,8 +556,8 @@ def patch_wizard_project(session_id: str, payload: ProjectWizardRequest, request
 
 @router.patch("/wizard/levels", response_model=WizardStateResponse)
 def patch_wizard_levels(session_id: str, payload: LevelsWizardRequest, request: Request) -> WizardStateResponse:
-    manager = _session_manager(request)
-    session = _get_session_or_raise(session_id, request)
+    manager = session_manager(request)
+    session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
 
     session.wizard.levels.items = payload.items
@@ -603,8 +592,8 @@ def patch_wizard_buildings(
     payload: BuildingsWizardRequest,
     request: Request,
 ) -> BuildingsWizardResponse:
-    manager = _session_manager(request)
-    session = _get_session_or_raise(session_id, request)
+    manager = session_manager(request)
+    session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
 
     ids = [item.id for item in payload.buildings]
@@ -648,8 +637,8 @@ def patch_wizard_mappings(
     payload: MappingsWizardRequest,
     request: Request,
 ) -> WizardStateResponse:
-    manager = _session_manager(request)
-    session = _get_session_or_raise(session_id, request)
+    manager = session_manager(request)
+    session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
 
     if payload.unit is not None:
@@ -677,8 +666,8 @@ def patch_wizard_footprint(
     payload: FootprintWizardRequest,
     request: Request,
 ) -> WizardStateResponse:
-    manager = _session_manager(request)
-    session = _get_session_or_raise(session_id, request)
+    manager = session_manager(request)
+    session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
     session.wizard.footprint = payload
     session.wizard.generation_status = "not_started"
@@ -699,7 +688,7 @@ def footprint_preview(
     level_gap_fill_m: float = 0.0,
 ) -> dict:
     """Return simplified footprint + venue outlines for live preview."""
-    session = _get_session_or_raise(session_id, request)
+    session = get_session_or_raise(session_id, request)
 
     # Collect all unit geometries
     collection = session.source_feature_collection or session.feature_collection
@@ -764,8 +753,8 @@ async def upload_company_mappings(
     request: Request,
     file: Annotated[UploadFile, File(description="company_mappings.json")],
 ) -> CompanyMappingsUploadResponse:
-    manager = _session_manager(request)
-    session = _get_session_or_raise(session_id, request)
+    manager = session_manager(request)
+    session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
 
     payload_raw = await file.read()

@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from backend.src.errors import NotFoundError
+
 # A saved placement is anchored on the artboard it was authored against; warn if
 # the new drawing differs by more than this fraction in width or height.
 _BOUNDS_TOLERANCE = 0.01
@@ -32,7 +34,7 @@ class DuplicatePlacementError(Exception):
     """Raised when a placement name is already taken."""
 
 
-class PlacementNotFoundError(KeyError):
+class PlacementNotFoundError(NotFoundError):
     """Raised when a placement id does not exist."""
 
 

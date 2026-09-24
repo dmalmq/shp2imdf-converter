@@ -14,6 +14,7 @@ import zipfile
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from fastapi.responses import Response
 
+from backend.routers.common import session_manager
 from backend.src.detector import sync_feature_types
 from backend.src.illustrator_export import (
     ExportFloor,
@@ -70,14 +71,9 @@ from backend.src.schemas import (
     IllustratorSurveySnapResponse,
     TransformPayload,
 )
-from backend.src.session import SessionManager
 
 
 router = APIRouter(prefix="/api", tags=["import"])
-
-
-def _session_manager(request: Request) -> SessionManager:
-    return request.app.state.session_manager
 
 
 def _keyword_config_path(request: Request) -> Path:
@@ -187,7 +183,7 @@ async def import_imdf(
     feature_collection = read_imdf_zip(payload, max_uncompressed_bytes=max_upload_bytes)
     feature_count = len(feature_collection["features"])
 
-    manager = _session_manager(request)
+    manager = session_manager(request)
     session = manager.create_session(
         files=[],
         cleanup_summary=CleanupSummary(),
@@ -677,7 +673,7 @@ async def import_files(
     files: Annotated[list[UploadFile], File(description="Shapefile components, GeoPackages, or a zip file")],
 ) -> ImportResponse:
     raw_blobs = await _read_uploaded_blobs(request, files)
-    manager = _session_manager(request)
+    manager = session_manager(request)
     artifacts = import_file_blobs(raw_blobs, filename_keywords_path=_keyword_config_path(request))
     source_feature_collection = sync_feature_types(artifacts.source_feature_collection, artifacts.files)
     feature_collection = sync_feature_types(artifacts.feature_collection, artifacts.files)
@@ -711,7 +707,7 @@ async def import_imdf_shapefiles(
     prefer_filename_floor: Annotated[bool, Query()] = False,
 ) -> ImportResponse:
     raw_blobs = await _read_uploaded_blobs(request, files)
-    manager = _session_manager(request)
+    manager = session_manager(request)
     artifacts = import_imdf_shapefile_blobs(
         raw_blobs,
         filename_keywords_path=_keyword_config_path(request),
