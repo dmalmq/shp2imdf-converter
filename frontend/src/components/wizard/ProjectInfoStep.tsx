@@ -1,5 +1,5 @@
 ﻿import { ChevronRight } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useRef, useState } from "react";
 
 import type { GeocodeResultItem, ProjectWizardState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
@@ -15,12 +15,12 @@ import {
 } from "../ui";
 import { HoursEditor } from "./HoursEditor";
 import { ProvinceSelect } from "./ProvinceSelect";
-import { useRegisterSave } from "./wizardSave";
 
 
 type Props = {
+  /** What the form shows: the unsaved draft if there is one, else the saved project. */
   project: ProjectWizardState | null;
-  onSave: (payload: ProjectWizardState) => void;
+  onChange: (next: ProjectWizardState) => void;
   onSearchAddress: (query: string, language: string) => Promise<GeocodeResultItem[]>;
   onAutofillFromGeometry: (language: string) => Promise<GeocodeResultItem | null>;
 };
@@ -55,7 +55,7 @@ const VENUE_CATEGORIES = [
 const NO_RESTRICTION = "__none__";
 
 
-function createDefaultProject(): ProjectWizardState {
+export function createDefaultProject(): ProjectWizardState {
   return {
     project_name: "",
     venue_name: "",
@@ -85,7 +85,19 @@ function emptyToNull(value: string): string | null {
 }
 
 
-function normalizeForSave(payload: ProjectWizardState): ProjectWizardState {
+/** The fields IMDF requires, and so the ones the backend refuses to store without. */
+export function isProjectComplete(project: ProjectWizardState | null | undefined): boolean {
+  if (!project) return false;
+  return Boolean(
+    project.venue_name.trim() &&
+      project.venue_category.trim() &&
+      project.address.locality.trim() &&
+      project.address.country.trim()
+  );
+}
+
+
+export function normalizeProjectForSave(payload: ProjectWizardState): ProjectWizardState {
   return {
     ...payload,
     project_name: emptyToNull(payload.project_name ?? ""),
@@ -130,30 +142,26 @@ function applyGeocodeResult(project: ProjectWizardState, result: GeocodeResultIt
 
 export function ProjectInfoStep({
   project,
-  onSave,
+  onChange,
   onSearchAddress,
   onAutofillFromGeometry
 }: Props) {
   const { t } = useUiLanguage();
-  const [form, setForm] = useState<ProjectWizardState>(() => project ?? createDefaultProject());
+  const form = project ?? createDefaultProject();
+  // Address search and autofill resolve after an await; reading the latest
+  // value through a ref keeps a slow lookup from overwriting what was typed
+  // while it ran.
+  const latest = useRef(form);
+  latest.current = form;
+  const setForm = (update: (previous: ProjectWizardState) => ProjectWizardState) => {
+    latest.current = update(latest.current);
+    onChange(latest.current);
+  };
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<GeocodeResultItem[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [autofillLoading, setAutofillLoading] = useState(false);
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
-
-  useEffect(() => {
-    setForm(project ?? createDefaultProject());
-  }, [project]);
-
-  const canSave = useMemo(
-    () =>
-      form.venue_name.trim().length > 0 &&
-      form.venue_category.trim().length > 0 &&
-      form.address.locality.trim().length > 0 &&
-      form.address.country.trim().length > 0,
-    [form]
-  );
 
   const runAddressSearch = async () => {
     const query = searchQuery.trim();
@@ -196,14 +204,6 @@ export function ProjectInfoStep({
     setForm((previous) => applyGeocodeResult(previous, result));
     setSearchStatus(t("Address fields updated from selected result.", "選択した結果で住所項目を更新しました。"));
   };
-
-  useRegisterSave(() => onSave(normalizeForSave(form)), {
-    canSave,
-    blockedReason: t(
-      "Venue name, category, locality and country are required",
-      "会場名・カテゴリ・市区町村・国は必須です"
-    )
-  });
 
   return (
     <div className="flex flex-col gap-4">

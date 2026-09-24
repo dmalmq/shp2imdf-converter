@@ -1,65 +1,119 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+
+/** How long typing has to pause before an edit is sent. */
+export const AUTOSAVE_DELAY_MS = 800;
 
 /**
- * The action the wizard footer performs for the section currently on screen.
+ * The button the wizard footer shows for the section on screen.
  *
- * Every step used to carry its own Save button in its own header, so the
- * control moved, changed label and changed colour as you walked the rail. The
- * footer is one place; the step only says what saving means for it.
+ * Form sections do not register one: they save as you edit (see
+ * `useAutosave`), so the footer only reports save status for them. Only a
+ * section whose last step is an action rather than a save — Summary's
+ * Generate — puts a button there.
  */
-export type WizardSaveAction = {
+export type WizardFooterAction = {
   run: () => void;
-  canSave: boolean;
-  /** Overrides the plain "Save" when the action is not a save (e.g. Generate). */
-  label?: string;
-  /** Shown as a tooltip when `canSave` is false. */
+  label: string;
+  enabled: boolean;
+  /** Shown as a tooltip while `enabled` is false. */
   blockedReason?: string | null;
 };
 
-type Registry = { set: (action: WizardSaveAction | null) => void };
+type Registry = { set: (action: WizardFooterAction | null) => void };
 
-const WizardSaveContext = createContext<Registry>({ set: () => {} });
+const WizardFooterContext = createContext<Registry>({ set: () => {} });
 
-export function WizardSaveProvider({
+export function WizardFooterProvider({
   children,
   onAction
 }: {
   children: React.ReactNode;
-  onAction: (action: WizardSaveAction | null) => void;
+  onAction: (action: WizardFooterAction | null) => void;
 }) {
   const onActionRef = useRef(onAction);
   onActionRef.current = onAction;
   const registry = useMemo<Registry>(() => ({ set: (action) => onActionRef.current(action) }), []);
-  return <WizardSaveContext.Provider value={registry}>{children}</WizardSaveContext.Provider>;
+  return <WizardFooterContext.Provider value={registry}>{children}</WizardFooterContext.Provider>;
 }
 
 /**
- * Publishes this step's save action to the footer.
+ * Publishes this section's footer action.
  *
  * `run` is held in a ref rather than in the effect's dependencies: it closes
- * over the step's form state and so changes on every keystroke, which would
- * re-register — and therefore re-render the footer — on every character typed.
+ * over page state and so changes on every render, which would re-register —
+ * and therefore re-render the footer — each time.
  */
-export function useRegisterSave(
-  run: () => void,
-  { canSave, label, blockedReason }: Omit<WizardSaveAction, "run">
-) {
-  const registry = useContext(WizardSaveContext);
+export function useFooterAction(run: () => void, { label, enabled, blockedReason }: Omit<WizardFooterAction, "run">) {
+  const registry = useContext(WizardFooterContext);
   const runRef = useRef(run);
   runRef.current = run;
 
   useEffect(() => {
-    registry.set({
-      run: () => runRef.current(),
-      canSave,
-      label,
-      blockedReason: blockedReason ?? null
-    });
+    registry.set({ run: () => runRef.current(), label, enabled, blockedReason: blockedReason ?? null });
     return () => registry.set(null);
-  }, [registry, canSave, label, blockedReason]);
+  }, [registry, label, enabled, blockedReason]);
 }
 
-export function useWizardSaveState() {
-  const [action, setAction] = useState<WizardSaveAction | null>(null);
+export function useWizardFooterState() {
+  const [action, setAction] = useState<WizardFooterAction | null>(null);
   return { action, setAction };
+}
+
+/**
+ * Sends a section's draft to the server shortly after the operator stops
+ * editing it.
+ *
+ * `draft` is null until the section is first edited, so opening a section
+ * never writes. A draft the server would reject (`canSave` false) is held, not
+ * sent: it stays on screen and is sent as soon as it becomes valid. Saves run
+ * one at a time, so an older response can never land after a newer one.
+ *
+ * `flush` sends any waiting edit immediately. The page calls it before
+ * switching section, and it runs on unmount, so leaving a section never drops
+ * an edit still inside the debounce window.
+ */
+export function useAutosave<T>(
+  draft: T | null,
+  save: (value: T) => Promise<unknown>,
+  { canSave, delayMs = AUTOSAVE_DELAY_MS }: { canSave: boolean; delayMs?: number }
+): { flush: () => void } {
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  const pending = useRef<T | null>(null);
+  const lastSent = useRef<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlight = useRef(false);
+
+  const flush = useCallback(() => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    if (inFlight.current || pending.current === null) return;
+    const value = pending.current;
+    pending.current = null;
+    lastSent.current = JSON.stringify(value);
+    inFlight.current = true;
+    void saveRef.current(value).finally(() => {
+      inFlight.current = false;
+      flush();
+    });
+  }, []);
+
+  useEffect(() => {
+    if (draft === null) return;
+    if (!canSave || JSON.stringify(draft) === lastSent.current) {
+      pending.current = null;
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = null;
+      return;
+    }
+    pending.current = draft;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(flush, delayMs);
+  }, [draft, canSave, delayMs, flush]);
+
+  useEffect(() => flush, [flush]);
+
+  return { flush };
 }

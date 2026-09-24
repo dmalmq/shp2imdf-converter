@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import type { CleanupSummary, ImportedFile, WizardState } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { Card, SectionHeader } from "../ui";
-import { useRegisterSave } from "./wizardSave";
+import { useFooterAction } from "./wizardSave";
 
 
 type Props = {
@@ -33,9 +33,10 @@ function formatVenueAddress(wizard: WizardState | null): string {
 export function SummaryStep({ files, cleanupSummary, wizard, disabled, onConfirm }: Props) {
   const { t } = useUiLanguage();
 
-  // The last section's action is not a save, so it says what it does.
-  useRegisterSave(onConfirm, {
-    canSave: !disabled,
+  // The only section with a footer button: every other one saves as you edit,
+  // and generating is an action, not a save.
+  useFooterAction(onConfirm, {
+    enabled: !disabled,
     label: t("Generate & open Review", "生成してレビューへ"),
     blockedReason: t(
       "Finish the sections still marked incomplete first",

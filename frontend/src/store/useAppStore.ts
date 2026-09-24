@@ -46,6 +46,10 @@ type AppState = {
   hoveredFileStem: string | null;
   wizardSaveStatus: SaveStatus;
   wizardSaveError: string | null;
+  /** When the last save succeeded, for the footer's "Saved · HH:MM". */
+  wizardSavedAt: number | null;
+  /** Re-runs the save that just failed; cleared by the next status change. */
+  wizardSaveRetry: (() => void) | null;
   learningSuggestion: LearningSuggestion | null;
   setUiLanguage: (language: UiLanguage) => void;
   setTheme: (theme: Theme) => void;
@@ -72,7 +76,7 @@ type AppState = {
   upsertFile: (file: ImportedFile) => void;
   setSelectedFileStem: (stem: string | null) => void;
   setHoveredFileStem: (stem: string | null) => void;
-  setWizardSaveStatus: (status: SaveStatus, error?: string | null) => void;
+  setWizardSaveStatus: (status: SaveStatus, error?: string | null, retry?: (() => void) | null) => void;
   setLearningSuggestion: (suggestion: LearningSuggestion | null) => void;
 };
 
@@ -122,6 +126,8 @@ const INITIAL_STATE = {
   hoveredFileStem: null as string | null,
   wizardSaveStatus: "idle" as SaveStatus,
   wizardSaveError: null as string | null,
+  wizardSavedAt: null as number | null,
+  wizardSaveRetry: null as (() => void) | null,
   learningSuggestion: null as LearningSuggestion | null
 };
 
@@ -202,6 +208,12 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   setSelectedFileStem: (selectedFileStem) => set({ selectedFileStem }),
   setHoveredFileStem: (hoveredFileStem) => set({ hoveredFileStem }),
-  setWizardSaveStatus: (wizardSaveStatus, wizardSaveError = null) => set({ wizardSaveStatus, wizardSaveError }),
+  setWizardSaveStatus: (wizardSaveStatus, wizardSaveError = null, wizardSaveRetry = null) =>
+    set((state) => ({
+      wizardSaveStatus,
+      wizardSaveError,
+      wizardSaveRetry,
+      wizardSavedAt: wizardSaveStatus === "saved" ? Date.now() : state.wizardSavedAt
+    })),
   setLearningSuggestion: (learningSuggestion) => set({ learningSuggestion })
 }));

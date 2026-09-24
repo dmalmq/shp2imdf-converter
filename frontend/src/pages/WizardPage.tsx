@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -28,14 +28,14 @@ import {
 } from "../api/client";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
-import { BuildingStep } from "../components/wizard/BuildingStep";
+import { BuildingStep, canSaveBuildings, normalizeBuildingsForSave } from "../components/wizard/BuildingStep";
 import { DetailMapStep } from "../components/wizard/DetailMapStep";
 import { FileClassStep } from "../components/wizard/FileClassStep";
 import { FixtureMapStep } from "../components/wizard/FixtureMapStep";
 import { FootprintStep } from "../components/wizard/FootprintStep";
 import { LevelMapStep } from "../components/wizard/LevelMapStep";
 import { OpeningMapStep } from "../components/wizard/OpeningMapStep";
-import { ProjectInfoStep } from "../components/wizard/ProjectInfoStep";
+import { ProjectInfoStep, isProjectComplete, normalizeProjectForSave } from "../components/wizard/ProjectInfoStep";
 import { SectionNav, type SectionDef } from "../components/wizard/SectionNav";
 import { SummaryStep } from "../components/wizard/SummaryStep";
 import { UnitMapStep } from "../components/wizard/UnitMapStep";
@@ -43,7 +43,7 @@ import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
 import { Button, DisabledHint } from "../components/ui";
-import { WizardSaveProvider, useWizardSaveState } from "../components/wizard/wizardSave";
+import { WizardFooterProvider, useAutosave, useWizardFooterState } from "../components/wizard/wizardSave";
 
 const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail", "kiosk", "section"]);
 
@@ -155,6 +155,11 @@ function toLevelItemsFromFiles(
     }));
 }
 
+function formatClock(timestamp: number): string {
+  const date = new Date(timestamp);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
 function isFormTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -194,6 +199,8 @@ export function WizardPage() {
   const wizardSaveStatus = useAppStore((state) => state.wizardSaveStatus);
   const wizardSaveError = useAppStore((state) => state.wizardSaveError);
   const setWizardSaveStatus = useAppStore((state) => state.setWizardSaveStatus);
+  const wizardSavedAt = useAppStore((state) => state.wizardSavedAt);
+  const wizardSaveRetry = useAppStore((state) => state.wizardSaveRetry);
   const learningSuggestion = useAppStore((state) => state.learningSuggestion);
   const setLearningSuggestion = useAppStore((state) => state.setLearningSuggestion);
   const setSessionExpiredMessage = useAppStore((state) => state.setSessionExpiredMessage);
@@ -202,8 +209,14 @@ export function WizardPage() {
   const { t, isJapanese } = useUiLanguage();
 
   const [activeSection, setActiveSection] = useState("project");
-  // What the footer's button does for whichever section is on screen.
-  const { action: saveAction, setAction: setSaveAction } = useWizardSaveState();
+  const { action: footerAction, setAction: setFooterAction } = useWizardFooterState();
+  // The form sections' edits, held here rather than in the steps so they
+  // outlive a section switch: a draft the backend cannot take yet (a venue
+  // without its required fields) is still on screen when the operator returns.
+  // Null until first edited; the saved state shows until then.
+  const [projectDraft, setProjectDraft] = useState<ProjectWizardState | null>(null);
+  const [buildingsDraft, setBuildingsDraft] = useState<BuildingWizardState[] | null>(null);
+  const [footprintDraft, setFootprintDraft] = useState<FootprintWizardState | null>(null);
   const [loading, setLoading] = useState(false);
   const [features, setFeatures] = useState<
     {
@@ -218,19 +231,17 @@ export function WizardPage() {
   const hasFixtureFiles = useMemo(() => files.some((f) => f.detected_type === "fixture"), [files]);
   const hasDetailFiles = useMemo(() => files.some((f) => f.detected_type === "detail"), [files]);
   const hasUnitFiles = useMemo(() => files.some((f) => f.detected_type === "unit"), [files]);
+  const allFileStems = useMemo(() => files.map((f) => f.stem), [files]);
+
+  const project = projectDraft ?? wizardState?.project ?? null;
+  const buildings = buildingsDraft ?? wizardState?.buildings ?? [];
+  const footprint = footprintDraft ?? wizardState?.footprint ?? EMPTY_FOOTPRINT;
+  const projectHeld = projectDraft !== null && !isProjectComplete(projectDraft);
+  const buildingsHeld = buildingsDraft !== null && !canSaveBuildings(buildingsDraft, allFileStems);
 
   // ─── Validation ─────────────────────────────────────────────────────
 
-  const projectComplete = useMemo(() => {
-    const project = wizardState?.project;
-    if (!project) return false;
-    return Boolean(
-      project.venue_name.trim() &&
-      project.venue_category.trim() &&
-      project.address.locality.trim() &&
-      project.address.country.trim()
-    );
-  }, [wizardState]);
+  const projectComplete = isProjectComplete(project);
 
   const allClassified = useMemo(() => files.every((f) => Boolean(f.detected_type)), [files]);
 
@@ -242,18 +253,17 @@ export function WizardPage() {
   const buildingsComplete = useMemo(() => {
     const required = files.filter((f) => LEVEL_REQUIRED_TYPES.has(f.detected_type ?? ""));
     if (required.length === 0) return true;
-    const buildings = wizardState?.buildings ?? [];
-    if (buildings.length === 0) return false;
+    if (buildingsHeld || buildings.length === 0) return false;
     const assigned = new Set(buildings.flatMap((b) => b.file_stems));
     const allAssigned = required.every((f) => assigned.has(f.stem));
-    const venueName = wizardState?.project?.venue_name?.trim();
+    const venueName = project?.venue_name?.trim();
     const allNamed = buildings.every((b) => Boolean(b.name?.trim() || venueName));
     const addressesValid = buildings.every((b) => {
       if (b.address_mode !== "different_address") return true;
       return Boolean(b.address?.locality?.trim() && b.address?.country?.trim());
     });
     return allAssigned && allNamed && addressesValid;
-  }, [files, wizardState]);
+  }, [files, buildings, buildingsHeld, project]);
 
   const unitMappingComplete = useMemo(
     () => !hasUnitFiles || Boolean(wizardState?.mappings.unit.code_column),
@@ -392,11 +402,23 @@ export function WizardPage() {
     setWizardState(response.wizard);
   };
 
-  const syncLevels = async () => {
-    if (!sessionId) return;
-    const response = await patchWizardLevels(sessionId, toLevelItemsFromFiles(files));
-    setWizardState(response.wizard);
+  // Every wizard PATCH answers with the whole wizard state, which replaces the
+  // store's copy. Two in flight at once can land out of order, and the older
+  // answer then undoes the newer save. Leaving a section sends its save and the
+  // level sync together, so this is the ordinary case, not a corner.
+  const writeQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const serialize = <T,>(task: () => Promise<T>): Promise<T> => {
+    const run = writeQueue.current.then(task, task);
+    writeQueue.current = run.catch(() => undefined);
+    return run;
   };
+
+  const syncLevels = () =>
+    serialize(async () => {
+      if (!sessionId) return;
+      const response = await patchWizardLevels(sessionId, toLevelItemsFromFiles(files));
+      setWizardState(response.wizard);
+    });
 
   const runDetectAll = async () => {
     if (!sessionId) return;
@@ -420,41 +442,49 @@ export function WizardPage() {
     }
   };
 
-  const patchFile = async (stem: string, payload: UpdateFileRequest) => {
-    if (!sessionId) return;
-    try {
-      setWizardSaveStatus("saving");
-      const response = await updateSessionFile(sessionId, stem, payload);
-      setFiles(response.files);
-      if (response.learning_suggestion) {
-        setLearningSuggestion(response.learning_suggestion);
-      } else if (payload.apply_learning) {
-        setLearningSuggestion(null);
+  // Every save reports through the footer. A failure keeps its own retry, so
+  // the operator can resend exactly what failed without re-editing anything.
+  const persist = async (task: () => Promise<void>, fallback: string, title: string): Promise<void> => {
+    const attempt = async () => {
+      try {
+        setWizardSaveStatus("saving");
+        await serialize(task);
+        setWizardSaveStatus("saved");
+      } catch (error) {
+        const message = handleApiError(error, fallback, { title });
+        setWizardSaveStatus("error", message, () => void attempt());
       }
-      await refreshFeatures();
-      setWizardSaveStatus("saved");
-    } catch (error) {
-      const message = handleApiError(error, t("Failed to save file mapping", "ファイル分類の保存に失敗しました"), {
-        title: t("Failed to save classification", "分類保存失敗")
-      });
-      setWizardSaveStatus("error", message);
-    }
+    };
+    await attempt();
   };
 
-  const saveProject = async (payload: ProjectWizardState) => {
-    if (!sessionId) return;
-    try {
-      setWizardSaveStatus("saving");
-      const response = await patchWizardProject(sessionId, payload);
-      setWizardState(response.wizard);
-      setWizardSaveStatus("saved");
-    } catch (error) {
-      const message = handleApiError(error, t("Failed to save project info", "プロジェクト情報の保存に失敗しました"), {
-        title: t("Failed to save project", "保存失敗")
-      });
-      setWizardSaveStatus("error", message);
-    }
-  };
+  const patchFile = (stem: string, payload: UpdateFileRequest) =>
+    persist(
+      async () => {
+        if (!sessionId) return;
+        const response = await updateSessionFile(sessionId, stem, payload);
+        setFiles(response.files);
+        if (response.learning_suggestion) {
+          setLearningSuggestion(response.learning_suggestion);
+        } else if (payload.apply_learning) {
+          setLearningSuggestion(null);
+        }
+        await refreshFeatures();
+      },
+      t("Failed to save file mapping", "ファイル分類の保存に失敗しました"),
+      t("Failed to save classification", "分類保存失敗")
+    );
+
+  const saveProject = (payload: ProjectWizardState) =>
+    persist(
+      async () => {
+        if (!sessionId) return;
+        const response = await patchWizardProject(sessionId, payload);
+        setWizardState(response.wizard);
+      },
+      t("Failed to save project info", "プロジェクト情報の保存に失敗しました"),
+      t("Failed to save project", "保存失敗")
+    );
 
   const searchProjectAddress = async (query: string, language: string): Promise<GeocodeResultItem[]> => {
     if (!sessionId) return [];
@@ -489,55 +519,58 @@ export function WizardPage() {
     }
   };
 
-  const saveBuildings = async (buildings: BuildingWizardState[]) => {
-    if (!sessionId) return;
-    try {
-      setWizardSaveStatus("saving");
-      const response = await patchWizardBuildings(sessionId, buildings);
-      setWizardState(response.wizard);
-      setWizardSaveStatus("saved");
-    } catch (error) {
-      const message = handleApiError(error, t("Failed to save building assignments", "建物割り当ての保存に失敗しました"), {
-        title: t("Failed to save buildings", "建物保存失敗")
-      });
-      setWizardSaveStatus("error", message);
-    }
-  };
+  const saveBuildings = (payload: BuildingWizardState[]) =>
+    persist(
+      async () => {
+        if (!sessionId) return;
+        const response = await patchWizardBuildings(sessionId, payload);
+        setWizardState(response.wizard);
+      },
+      t("Failed to save building assignments", "建物割り当ての保存に失敗しました"),
+      t("Failed to save buildings", "建物保存失敗")
+    );
 
-  const saveMappings = async (payload: {
+  const saveMappings = (payload: {
     unit?: UnitMappingState;
     opening?: OpeningMappingState;
     fixture?: FixtureMappingState;
     detail_confirmed?: boolean;
     unit_category_overrides?: Record<string, string>;
-  }) => {
-    if (!sessionId) return;
-    try {
-      setWizardSaveStatus("saving");
-      const response = await patchWizardMappings(sessionId, payload);
-      setWizardState(response.wizard);
-      setWizardSaveStatus("saved");
-    } catch (error) {
-      const message = handleApiError(error, t("Failed to save mappings", "マッピングの保存に失敗しました"), {
-        title: t("Failed to save mappings", "保存失敗")
-      });
-      setWizardSaveStatus("error", message);
-    }
-  };
+  }) =>
+    persist(
+      async () => {
+        if (!sessionId) return;
+        const response = await patchWizardMappings(sessionId, payload);
+        setWizardState(response.wizard);
+      },
+      t("Failed to save mappings", "マッピングの保存に失敗しました"),
+      t("Failed to save mappings", "保存失敗")
+    );
 
-  const saveFootprint = async (payload: FootprintWizardState) => {
-    if (!sessionId) return;
-    try {
-      setWizardSaveStatus("saving");
-      const response = await patchWizardFootprint(sessionId, payload);
-      setWizardState(response.wizard);
-      setWizardSaveStatus("saved");
-    } catch (error) {
-      const message = handleApiError(error, t("Failed to save footprint options", "Footprint 設定の保存に失敗しました"), {
-        title: t("Failed to save footprint", "Footprint 保存失敗")
-      });
-      setWizardSaveStatus("error", message);
-    }
+  const saveFootprint = (payload: FootprintWizardState) =>
+    persist(
+      async () => {
+        if (!sessionId) return;
+        const response = await patchWizardFootprint(sessionId, payload);
+        setWizardState(response.wizard);
+      },
+      t("Failed to save footprint options", "Footprint 設定の保存に失敗しました"),
+      t("Failed to save footprint", "Footprint 保存失敗")
+    );
+
+  const projectAutosave = useAutosave(projectDraft, (value) => saveProject(normalizeProjectForSave(value)), {
+    canSave: !projectHeld
+  });
+  const buildingsAutosave = useAutosave(buildingsDraft, (value) => saveBuildings(normalizeBuildingsForSave(value)), {
+    canSave: !buildingsHeld
+  });
+  const footprintAutosave = useAutosave(footprintDraft, saveFootprint, { canSave: true });
+
+  const selectSection = (id: string) => {
+    projectAutosave.flush();
+    buildingsAutosave.flush();
+    footprintAutosave.flush();
+    setActiveSection(id);
   };
 
   const applyLearningSuggestion = async () => {
@@ -618,8 +651,8 @@ export function WizardPage() {
       case "project-info":
         return (
           <ProjectInfoStep
-            project={wizardState?.project ?? null}
-            onSave={(payload) => void saveProject(payload)}
+            project={project}
+            onChange={setProjectDraft}
             onSearchAddress={(query, language) => searchProjectAddress(query, language)}
             onAutofillFromGeometry={(language) => autofillProjectAddressFromGeometry(language)}
           />
@@ -628,19 +661,19 @@ export function WizardPage() {
       case "building":
         return (
           <BuildingStep
-            buildings={wizardState?.buildings ?? []}
-            allFileStems={files.map((f) => f.stem)}
-            venueName={wizardState?.project?.venue_name ?? ""}
-            venueAddress={wizardState?.project?.address ?? null}
-            onSave={(buildings) => void saveBuildings(buildings)}
+            buildings={buildings}
+            allFileStems={allFileStems}
+            venueName={project?.venue_name ?? ""}
+            venueAddress={project?.address ?? null}
+            onChange={setBuildingsDraft}
           />
         );
 
       case "footprint":
         return (
           <FootprintStep
-            footprint={wizardState?.footprint ?? EMPTY_FOOTPRINT}
-            onSave={(payload) => void saveFootprint(payload)}
+            footprint={footprint}
+            onChange={setFootprintDraft}
           />
         );
 
@@ -754,7 +787,7 @@ export function WizardPage() {
         <SectionNav
           sections={sections}
           activeSection={activeSection}
-          onSelect={setActiveSection}
+          onSelect={selectSection}
         />
 
         <div className="flex flex-col gap-4">
@@ -770,9 +803,9 @@ export function WizardPage() {
           </div>
 
           {/* Section content */}
-          <WizardSaveProvider onAction={setSaveAction}>
+          <WizardFooterProvider onAction={setFooterAction}>
             {loading ? <WizardStepSkeleton /> : showSection()}
-          </WizardSaveProvider>
+          </WizardFooterProvider>
 
           {/* Learning suggestion banner */}
           {learningSuggestion ? (
@@ -789,40 +822,56 @@ export function WizardPage() {
             </div>
           ) : null}
 
-          {/* One place to save, always in the same place. Each step used to
-              carry its own Save in its own header, so the control moved and
-              renamed itself as you walked the rail. */}
+          {/* Every section saves as you edit, so the footer reports rather than
+              asks. The one button it can carry is Summary's Generate. */}
           <div className="sticky bottom-0 z-10 -mb-5 flex items-center justify-between gap-3 border-t border-border bg-muted py-3">
             <span
-              className="text-xs leading-4 text-muted-foreground"
+              className="flex items-center gap-2 text-xs leading-4 text-muted-foreground"
               role={wizardSaveStatus === "error" ? "alert" : undefined}
             >
-              {wizardSaveStatus === "saving"
-                ? t("Saving…", "保存中…")
-                : wizardSaveStatus === "error"
-                  ? (
-                      <span className="text-destructive">
-                        {t("Could not save", "保存できませんでした")}
-                        {wizardSaveError ? ` — ${wizardSaveError}` : ""}
-                      </span>
-                    )
-                  : wizardSaveStatus === "saved"
-                    ? t("Saved", "保存済み")
-                    : saveAction
-                      ? null
-                      : t("Changes are saved as you edit.", "編集内容は自動的に保存されます。")}
+              {wizardSaveStatus === "saving" ? (
+                t("Saving…", "保存中…")
+              ) : wizardSaveStatus === "error" ? (
+                <>
+                  <span className="text-destructive">
+                    {t("Could not save", "保存できませんでした")}
+                    {wizardSaveError ? ` — ${wizardSaveError}` : ""}
+                  </span>
+                  {wizardSaveRetry ? (
+                    <Button variant="outline" size="sm" onClick={() => wizardSaveRetry()}>
+                      {t("Retry", "再試行")}
+                    </Button>
+                  ) : null}
+                </>
+              ) : projectHeld ? (
+                t(
+                  "Venue info not saved yet: venue name, category, locality and country are required to save.",
+                  "会場情報は未保存です。保存には会場名・カテゴリ・市区町村・国が必要です。"
+                )
+              ) : buildingsHeld ? (
+                t(
+                  "Buildings not saved yet: each assigned file must be a known file, assigned once, to save.",
+                  "建物は未保存です。保存するには、割り当てファイルを既存のファイル名で重複なく指定してください。"
+                )
+              ) : wizardSaveStatus === "saved" && wizardSavedAt !== null ? (
+                <>
+                  {t("Saved", "保存済み")} · <span className="font-mono">{formatClock(wizardSavedAt)}</span>
+                </>
+              ) : footerAction ? null : (
+                t("Changes are saved as you edit.", "編集内容は自動的に保存されます。")
+              )}
             </span>
 
-            {saveAction ? (
+            {footerAction ? (
               <DisabledHint
                 className="w-auto"
-                hint={saveAction.canSave ? null : (saveAction.blockedReason ?? null)}
+                hint={footerAction.enabled ? null : (footerAction.blockedReason ?? null)}
               >
                 <Button
-                  disabled={!saveAction.canSave || wizardSaveStatus === "saving"}
-                  onClick={() => saveAction.run()}
+                  disabled={!footerAction.enabled || wizardSaveStatus === "saving"}
+                  onClick={() => footerAction.run()}
                 >
-                  {saveAction.label ?? t("Save", "保存")}
+                  {footerAction.label}
                 </Button>
               </DisabledHint>
             ) : null}
