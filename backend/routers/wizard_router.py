@@ -9,6 +9,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, File, Request, UploadFile
 from shapely.geometry import shape
+from starlette.concurrency import run_in_threadpool
 from shapely.ops import unary_union
 
 from backend.routers.common import get_session_or_raise, session_manager
@@ -753,11 +754,15 @@ async def upload_company_mappings(
     request: Request,
     file: Annotated[UploadFile, File(description="company_mappings.json")],
 ) -> CompanyMappingsUploadResponse:
+    payload_raw = await file.read()
+    return await run_in_threadpool(_apply_company_mappings, session_id, request, payload_raw)
+
+
+def _apply_company_mappings(session_id: str, request: Request, payload_raw: bytes) -> CompanyMappingsUploadResponse:
     manager = session_manager(request)
     session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
 
-    payload_raw = await file.read()
     if not payload_raw:
         raise ValueError("Uploaded company mappings file is empty")
     try:
