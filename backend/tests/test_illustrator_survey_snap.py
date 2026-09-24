@@ -284,7 +284,7 @@ def test_survey_snap_endpoint_returns_the_consensus_or_null(test_client, tmp_pat
     store = ConversionStore(root=tmp_path / "illustrator", ttl_seconds=3600, max_entries=5)
     assigned = _install_cached(store, _station_artwork(tmp_path / "assigned"))
     unassigned_cached = _station_artwork(tmp_path / "unassigned", assigned=False)
-    unassigned_cached.conversion_id = "unassigned"
+    unassigned_cached.conversion_id = "0a551643" * 4
     unassigned = _install_cached(store, unassigned_cached)
     previous = test_client.app.state.illustrator_store
     test_client.app.state.illustrator_store = store

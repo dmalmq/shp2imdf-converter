@@ -131,8 +131,12 @@ class FileSystemSessionBackend(SessionBackend):
         path = self._path_for(session_id)
         if not path.exists():
             return None
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        return SessionRecord.model_validate(payload)
+        try:
+            return SessionRecord.from_stored(json.loads(path.read_text(encoding="utf-8")))
+        except ValueError:
+            # Left on disk untouched: a newer or repaired build may still read it.
+            logger.exception("Session record %s is unreadable; treating it as not found", path)
+            return None
 
     def _write_atomic(self, path: Path, text: str) -> None:
         tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")

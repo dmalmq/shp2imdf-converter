@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import time
 from dataclasses import dataclass
@@ -28,6 +29,12 @@ _META_NAME = "conversion.json"
 _GPKG_NAME = "artwork.gpkg"
 _FLOORS_NAME = "floors.json"
 _LAST_USED_NAME = "last_used"
+
+# ``put`` names entries with ``uuid4().hex``. Ids arrive from the URL, so anything
+# else is rejected before it can name a path.
+_CONVERSION_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
+
+_UNAVAILABLE = "That conversion is no longer available. Convert the file again."
 
 
 class ConversionExpiredError(Exception):
@@ -94,13 +101,15 @@ class ConversionStore:
         return cached
 
     def get(self, conversion_id: str) -> CachedConversion:
-        directory = self.root / conversion_id
+        directory = self._directory_for(conversion_id)
         meta_path = directory / _META_NAME
         if not meta_path.is_file():
-            raise ConversionExpiredError(
-                "That conversion is no longer available. Convert the file again."
-            )
-        cached = self._load(meta_path)
+            raise ConversionExpiredError(_UNAVAILABLE)
+        try:
+            cached = self._load(meta_path)
+        except (OSError, ValueError, KeyError) as exc:
+            self._discard(directory)
+            raise ConversionExpiredError(_UNAVAILABLE) from exc
         if self._is_expired(cached):
             self._discard(directory)
             raise ConversionExpiredError("That conversion has expired. Convert the file again.")
@@ -128,6 +137,14 @@ class ConversionStore:
             json.dumps(floors, ensure_ascii=False), encoding="utf-8"
         )
         return self.get(conversion_id)
+
+    def _directory_for(self, conversion_id: str) -> Path:
+        if not isinstance(conversion_id, str) or not _CONVERSION_ID_PATTERN.fullmatch(conversion_id):
+            raise ConversionExpiredError(_UNAVAILABLE)
+        directory = self.root / conversion_id
+        if directory.resolve().parent != self.root.resolve():
+            raise ConversionExpiredError(_UNAVAILABLE)
+        return directory
 
     def _load(self, meta_path: Path) -> CachedConversion:
         payload = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -163,9 +180,7 @@ class ConversionStore:
             marker.touch()
             os.utime(marker, (now, now))
         except FileNotFoundError as exc:
-            raise ConversionExpiredError(
-                "That conversion is no longer available. Convert the file again."
-            ) from exc
+            raise ConversionExpiredError(_UNAVAILABLE) from exc
         cached.last_used_at = now
 
     def _enforce_cap(self) -> None:
@@ -181,6 +196,13 @@ class ConversionStore:
         for cached in sorted(entries, key=lambda item: item.last_used_at)[:surplus]:
             self._discard(cached.directory)
 
-    @staticmethod
-    def _discard(directory: Path) -> None:
-        shutil.rmtree(directory, ignore_errors=True)
+    def _discard(self, directory: Path) -> None:
+        # Only ever delete an entry directory: a direct child of the store root.
+        try:
+            target = Path(directory).resolve()
+            root = self.root.resolve()
+        except OSError:
+            return
+        if target.parent != root or target == root:
+            return
+        shutil.rmtree(target, ignore_errors=True)

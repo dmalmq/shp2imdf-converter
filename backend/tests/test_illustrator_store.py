@@ -181,3 +181,174 @@ def test_the_cap_evicts_the_least_recently_used_entry(
     assert store.get(entries[0].conversion_id).stem == "one"
     with pytest.raises(ConversionExpiredError):
         store.get(entries[1].conversion_id)
+
+
+def _plant_expired_entry(directory: Path) -> Path:
+    """Write something shaped like an expired cache entry, outside the store."""
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "conversion.json").write_text(
+        '{"conversion_id": "x", "stem": "s", "written_layers": [], "layer_order": [],'
+        ' "report": {}, "created_at": 0}',
+        encoding="utf-8",
+    )
+    (directory / "keep.txt").write_text("not the store's to delete", encoding="utf-8")
+    return directory
+
+
+INVALID_IDS = [
+    "..",
+    ".",
+    "",
+    "../victim",
+    "..\\victim",
+    "/etc",
+    "C:\\Windows",
+    "C:/Windows",
+    "\\\\attacker\\share",
+    "\\\\127.0.0.1\\x",
+    "//attacker/share",
+    "%2e%2e",
+    "%5C%5Cattacker%5Cshare",
+    "0123456789ABCDEF0123456789ABCDEF",
+    "0123456789abcDEF0123456789abcdef",
+    "0123456789abcdef0123456789abcdeg",
+    "0123456789abcdef0123456789abcde",
+    "0123456789abcdef0123456789abcdef0",
+    "0123456789abcdef0123456789abcdef/..",
+    "0123456789abcdef0123456789abcdef\n",
+    "a" * 4096,
+]
+
+
+@pytest.mark.georef
+@pytest.mark.parametrize("bad_id", INVALID_IDS)
+def test_invalid_ids_are_not_found_and_touch_nothing(tmp_path: Path, bad_id: str) -> None:
+    root = tmp_path / "store"
+    store = ConversionStore(root=root, ttl_seconds=-1, max_entries=3)
+    victim = _plant_expired_entry(tmp_path / "victim")
+    _plant_expired_entry(tmp_path)
+
+    with pytest.raises(ConversionExpiredError):
+        store.get(bad_id)
+    with pytest.raises(ConversionExpiredError):
+        store.assign(bad_id, FLOORS)
+
+    assert root.is_dir()
+    assert (victim / "keep.txt").is_file()
+    assert (tmp_path / "keep.txt").is_file()
+    assert not (tmp_path / "floors.json").exists()
+    assert not (victim / "floors.json").exists()
+
+
+@pytest.fixture()
+def filesystem_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
+    """Record every stat, realpath, open, mkdir, utime and rmtree made."""
+    calls: list[tuple[str, str]] = []
+
+    def spy(name: str, real):
+        def wrapper(path, *args, **kwargs):
+            calls.append((name, str(path)))
+            return real(path, *args, **kwargs)
+
+        return wrapper
+
+    import builtins
+    import io
+    import os
+    import shutil
+
+    for owner, name in [
+        (os, "stat"),
+        (os, "lstat"),
+        (os, "mkdir"),
+        (os, "utime"),
+        (os, "open"),
+        (os.path, "realpath"),
+        (io, "open"),
+        (builtins, "open"),
+        (shutil, "rmtree"),
+    ]:
+        monkeypatch.setattr(owner, name, spy(name, getattr(owner, name)))
+    return calls
+
+
+@pytest.mark.georef
+@pytest.mark.parametrize("bad_id", INVALID_IDS)
+def test_invalid_ids_are_rejected_before_any_filesystem_call(
+    tmp_path: Path, bad_id: str, request: pytest.FixtureRequest
+) -> None:
+    store = ConversionStore(root=tmp_path / "store", ttl_seconds=3600, max_entries=3)
+    calls = request.getfixturevalue("filesystem_calls")
+
+    with pytest.raises(ConversionExpiredError):
+        store.get(bad_id)
+    with pytest.raises(ConversionExpiredError):
+        store.assign(bad_id, FLOORS)
+
+    assert calls == []
+
+
+@pytest.mark.georef
+def test_the_filesystem_spy_sees_a_valid_lookup(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    store = ConversionStore(root=tmp_path / "store", ttl_seconds=3600, max_entries=3)
+    calls = request.getfixturevalue("filesystem_calls")
+    with pytest.raises(ConversionExpiredError):
+        store.get("0123456789abcdef0123456789abcdef")
+    assert calls
+
+
+@pytest.mark.georef
+def test_a_corrupt_entry_is_not_found_and_removed(store: ConversionStore) -> None:
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+    (cached.directory / "conversion.json").write_text("not json", encoding="utf-8")
+    with pytest.raises(ConversionExpiredError):
+        store.get(cached.conversion_id)
+    assert not cached.directory.exists()
+    assert store.root.is_dir()
+
+
+@pytest.mark.georef
+def test_generated_ids_match_the_accepted_format(store: ConversionStore) -> None:
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+    assert len(cached.conversion_id) == 32
+    assert store.get(cached.conversion_id).conversion_id == cached.conversion_id
+    assert store.assign(cached.conversion_id, FLOORS).floors == FLOORS
+
+
+@pytest.mark.georef
+def test_discard_refuses_anything_but_a_direct_child_of_the_root(tmp_path: Path) -> None:
+    root = tmp_path / "store"
+    store = ConversionStore(root=root, ttl_seconds=3600, max_entries=3)
+    outside = _plant_expired_entry(tmp_path / "outside")
+    nested = _plant_expired_entry(root / "0123456789abcdef0123456789abcdef" / "inner")
+
+    store._discard(root)
+    store._discard(tmp_path)
+    store._discard(outside)
+    store._discard(root / ".." / "outside")
+    store._discard(nested)
+
+    assert root.is_dir()
+    assert (outside / "keep.txt").is_file()
+    assert (nested / "keep.txt").is_file()
+
+    store._discard(nested.parent)
+    assert not nested.parent.exists()
+    assert root.is_dir()
+
+
+@pytest.mark.georef
+def test_expired_entry_discard_stays_within_the_root(tmp_path: Path) -> None:
+    root = tmp_path / "store"
+    store = ConversionStore(root=root, ttl_seconds=-1, max_entries=3)
+    sibling = _plant_expired_entry(tmp_path / "sibling")
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+
+    with pytest.raises(ConversionExpiredError):
+        store.get(cached.conversion_id)
+
+    assert not cached.directory.exists()
+    assert root.is_dir()
+    assert (sibling / "keep.txt").is_file()

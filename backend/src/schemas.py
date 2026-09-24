@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
+from types import UnionType
 from typing import Annotated
 from typing import Any
 from typing import Literal
+from typing import Union
+from typing import get_args
+from typing import get_origin
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -306,9 +310,14 @@ class AutofixResponse(BaseModel):
     revalidation: ValidationResponse
 
 
+SESSION_RECORD_SCHEMA_VERSION = 1
+
+
 class SessionRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    # Records written before versioning have the version-1 shape, hence the default.
+    schema_version: int = SESSION_RECORD_SCHEMA_VERSION
     session_id: str
     import_profile: Literal["standard", "imdf_shapefile"] = "standard"
     created_at: datetime
@@ -322,6 +331,58 @@ class SessionRecord(BaseModel):
     upload_artifact_dir: str | None = None
     wizard: WizardState = Field(default_factory=WizardState)
     validation: ValidationResponse | None = None
+
+    @classmethod
+    def from_stored(cls, payload: Any) -> SessionRecord:
+        """Load a persisted record, ignoring fields this version does not know.
+
+        The nested models double as request bodies and keep ``extra="forbid"``
+        for those; a record written by a newer version must still load after a
+        rollback, so unknown keys are dropped here rather than relaxed there.
+        What remains is this version's shape, and is labelled as such so a
+        later version re-running its migration sees what was dropped.
+        """
+        record = _drop_unknown_fields(cls, payload)
+        if isinstance(record, dict):
+            record["schema_version"] = SESSION_RECORD_SCHEMA_VERSION
+        return cls.model_validate(record)
+
+
+def _drop_unknown_fields(annotation: Any, value: Any) -> Any:
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return _drop_unknown_fields(get_args(annotation)[0], value)
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        if not isinstance(value, dict):
+            return value
+        fields = annotation.model_fields
+        by_key = dict(fields)
+        by_key.update({field.alias: field for field in fields.values() if field.alias})
+        keep_extra = annotation.model_config.get("extra") == "allow"
+        result: dict[Any, Any] = {}
+        for key, item in value.items():
+            field = by_key.get(key)
+            if field is not None:
+                result[key] = _drop_unknown_fields(field.annotation, item)
+            elif keep_extra:
+                result[key] = item
+        return result
+    if origin in (Union, UnionType):
+        if value is None:
+            return value
+        members = [arg for arg in get_args(annotation) if arg is not type(None)]
+        return _drop_unknown_fields(members[0], value) if len(members) == 1 else value
+    if origin in (list, tuple, set, frozenset) and isinstance(value, list):
+        args = get_args(annotation)
+        if not args or (origin is tuple and not (len(args) == 2 and args[1] is Ellipsis)):
+            return value
+        return [_drop_unknown_fields(args[0], item) for item in value]
+    if origin is dict and isinstance(value, dict):
+        args = get_args(annotation)
+        if len(args) != 2:
+            return value
+        return {key: _drop_unknown_fields(args[1], item) for key, item in value.items()}
+    return value
 
 
 class DetectResponse(BaseModel):
