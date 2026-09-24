@@ -342,16 +342,18 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
     if "level_category" in changed_fields:
         updated.level_category = payload.level_category or "unspecified"
 
+    keyword = (payload.learning_keyword or "").strip().lower()
+    feature_type = (payload.detected_type or updated.detected_type or "").strip().lower()
+    # Rejected before the cached record is touched, so a later save cannot persist half a request.
+    if payload.apply_learning and not keyword:
+        raise ValueError("learning_keyword is required when apply_learning=true")
+    if payload.apply_learning and not feature_type:
+        raise ValueError("detected_type is required when apply_learning=true")
+
     session.files[file_index] = updated
     learning_suggestion = None
 
     if payload.apply_learning:
-        keyword = (payload.learning_keyword or "").strip().lower()
-        feature_type = (payload.detected_type or updated.detected_type or "").strip().lower()
-        if not keyword:
-            raise ValueError("learning_keyword is required when apply_learning=true")
-        if not feature_type:
-            raise ValueError("detected_type is required when apply_learning=true")
         learned_key = keyword if keyword.startswith("suffix:") else f"suffix:{keyword}"
         session.learned_keywords[learned_key] = feature_type
         merged = _merged_keyword_map(request, session.learned_keywords)

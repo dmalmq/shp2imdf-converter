@@ -90,6 +90,26 @@ def reset_generation(record: SessionRecord) -> None:
     mark_changed(record)
 
 
+def setup_snapshot(record: SessionRecord) -> str:
+    """What a wizard request can change, less the generation status it resets.
+
+    File level names are left out: the levels section copies them from
+    ``wizard.levels.items``, which is compared and is what generation reads,
+    so the first sync of seeded names fills them without changing any output.
+    """
+    wizard = record.wizard.model_dump_json(exclude={"generation_status"})
+    files = "".join(item.model_dump_json(exclude={"level_name", "short_name"}) for item in record.files)
+    return wizard + files
+
+
+def reset_generation_if_changed(record: SessionRecord, before: str) -> bool:
+    """The wizard re-sends unchanged sections on every visit; only a real change counts."""
+    if setup_snapshot(record) == before:
+        return False
+    reset_generation(record)
+    return True
+
+
 def mark_validated(record: SessionRecord, validation: ValidationResponse) -> None:
     record.validation = validation
     record.validation_rev = record.content_rev

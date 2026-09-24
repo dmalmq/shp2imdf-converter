@@ -340,7 +340,7 @@ _WIZARD_ROUTES: list[tuple[str, Callable[[Any, str, dict[str, Any]], Any]]] = [
     ("levels", lambda c, s, _: c.patch(f"/api/session/{s}/wizard/levels", json=_LEVELS)),
     ("buildings", lambda c, s, _: c.patch(f"/api/session/{s}/wizard/buildings", json=_BUILDINGS)),
     ("mappings", lambda c, s, _: c.patch(f"/api/session/{s}/wizard/mappings", json={"detail_confirmed": True})),
-    ("footprint", lambda c, s, _: c.patch(f"/api/session/{s}/wizard/footprint", json={"method": "union_buffer"})),
+    ("footprint", lambda c, s, _: c.patch(f"/api/session/{s}/wizard/footprint", json={"method": "union_buffer", "footprint_buffer_m": 2.5})),
     (
         "company-mappings",
         lambda c, s, _: c.post(
@@ -480,11 +480,12 @@ def _fake_qgis(monkeypatch) -> None:
     ("method", "path", "body", "export_format"),
     [
         ("get", "export", None, "imdf"),
+        ("get", "export?ext=zip", None, "imdf_zip"),
         ("post", "export/shapefiles", {}, "shapefiles:imdf_roundtrip"),
         ("post", "export/shapefiles", {"profile": "odc2026", "export_name": "Demo"}, "shapefiles:odc2026"),
         ("post", "export/qgis", {"export_name": "Demo"}, "qgis"),
     ],
-    ids=["imdf", "shapefiles", "shapefiles-odc", "qgis"],
+    ids=["imdf", "imdf-zip", "shapefiles", "shapefiles-odc", "qgis"],
 )
 def test_every_export_marks_delivery_with_the_blocker_count(
     test_client, sample_dir: Path, monkeypatch, method: str, path: str, body, export_format: str
@@ -693,3 +694,114 @@ def test_version_1_records_load_with_default_project_fields(tmp_path: Path) -> N
     assert loaded.delivered is None
     assert loaded.content_changed_at == datetime.fromisoformat(record["last_accessed"])
     assert derive_session_project(loaded).blockers is None
+
+
+def _delivered_route_session(client, sample_dir: Path) -> str:
+    session_id = _generated_session(client, sample_dir)
+    assert client.get(f"/api/session/{session_id}/export").status_code == 200
+    session = _stored(client, session_id)
+    assert derive_session_project(session).stage == "deliver"
+    return session_id
+
+
+def _assert_untouched(client, session_id: str, before: SessionRecord) -> None:
+    after = _stored(client, session_id)
+    assert after.content_rev == before.content_rev
+    assert after.content_changed_at == before.content_changed_at
+    assert after.validation == before.validation
+    assert after.validation_rev == before.validation_rev
+    assert after.delivered == before.delivered
+    assert after.wizard.generation_status == "generated"
+    project = derive_session_project(after)
+    assert project.stage == "deliver"
+    assert project.changed_since_delivery is False
+
+
+@pytest.mark.phase5
+@pytest.mark.parametrize("call", [call for _, call in _WIZARD_ROUTES], ids=[name for name, _ in _WIZARD_ROUTES])
+def test_resending_an_unchanged_wizard_section_is_not_an_edit(test_client, sample_dir: Path, call) -> None:
+    session_id = _generated_session(test_client, sample_dir)
+    assert call(test_client, session_id, {}).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+    assert test_client.get(f"/api/session/{session_id}/export").status_code == 200
+    before = _stored(test_client, session_id).model_copy(deep=True)
+
+    for _ in range(2):
+        assert call(test_client, session_id, {}).status_code == 200
+        _assert_untouched(test_client, session_id, before)
+
+
+@pytest.mark.phase5
+def test_opening_the_wizard_on_a_delivered_project_changes_nothing(test_client, sample_dir: Path) -> None:
+    session_id = _delivered_route_session(test_client, sample_dir)
+    before = _stored(test_client, session_id).model_copy(deep=True)
+
+    wizard = test_client.get(f"/api/session/{session_id}/wizard").json()["wizard"]
+    project = {key: value for key, value in wizard["project"].items() if value is not None}
+    responses = [
+        test_client.patch(f"/api/session/{session_id}/wizard/levels", json={"items": wizard["levels"]["items"]}),
+        test_client.patch(f"/api/session/{session_id}/wizard/project", json=project),
+        test_client.patch(f"/api/session/{session_id}/wizard/buildings", json={"buildings": wizard["buildings"]}),
+        test_client.patch(f"/api/session/{session_id}/wizard/footprint", json=wizard["footprint"]),
+        test_client.patch(
+            f"/api/session/{session_id}/wizard/mappings",
+            json={key: wizard["mappings"][key] for key in ("unit", "opening", "fixture", "detail_confirmed")},
+        ),
+    ]
+    for response in responses:
+        assert response.status_code == 200, response.text
+    _assert_untouched(test_client, session_id, before)
+
+
+@pytest.mark.phase5
+def test_a_wizard_edit_and_its_revert_each_count(test_client, sample_dir: Path) -> None:
+    session_id = _delivered_route_session(test_client, sample_dir)
+    rev = _rev(test_client, session_id)
+    footprint = test_client.get(f"/api/session/{session_id}/wizard").json()["wizard"]["footprint"]
+
+    changed = {**footprint, "venue_buffer_m": footprint["venue_buffer_m"] + 3}
+    assert test_client.patch(f"/api/session/{session_id}/wizard/footprint", json=changed).status_code == 200
+    assert _rev(test_client, session_id) == rev + 1
+    assert test_client.patch(f"/api/session/{session_id}/wizard/footprint", json=changed).status_code == 200
+    assert _rev(test_client, session_id) == rev + 1
+    assert test_client.patch(f"/api/session/{session_id}/wizard/footprint", json=footprint).status_code == 200
+    assert _rev(test_client, session_id) == rev + 2
+
+    project = derive_session_project(_stored(test_client, session_id))
+    assert project.changed_since_delivery is True
+    assert project.stage == "set-up"
+
+
+@pytest.mark.phase2
+def test_a_rejected_file_patch_leaves_the_cached_record_alone(test_client, sample_dir: Path) -> None:
+    session_id = _import(test_client, sample_dir)
+    before = _stored(test_client, session_id).model_copy(deep=True)
+
+    response = test_client.patch(
+        f"/api/session/{session_id}/files/JRTokyoSta_GF_Space",
+        json={"level_name": "Ground", "apply_learning": True},
+    )
+    assert response.status_code == 400, response.text
+
+    after = _stored(test_client, session_id)
+    assert after.files == before.files
+    assert after.content_rev == before.content_rev
+
+
+@pytest.mark.phase5
+def test_resending_a_building_with_its_own_address_keeps_the_address_feature(test_client, sample_dir: Path) -> None:
+    session_id = _generated_session(test_client, sample_dir)
+    annex = {
+        **_BUILDINGS["buildings"][0],
+        "address_mode": "different_address",
+        "address": {"address": "2-1-1 Annex Rd", "locality": "Chiyoda-ku", "country": "JP"},
+    }
+    body = {"buildings": [annex]}
+    first = test_client.patch(f"/api/session/{session_id}/wizard/buildings", json=body)
+    assert first.status_code == 200
+    rev = _rev(test_client, session_id)
+
+    second = test_client.patch(f"/api/session/{session_id}/wizard/buildings", json=body)
+    assert second.status_code == 200
+    assert _rev(test_client, session_id) == rev
+    assert second.json()["address_features"][0]["id"] == first.json()["address_features"][0]["id"]

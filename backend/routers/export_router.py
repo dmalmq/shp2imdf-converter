@@ -82,7 +82,7 @@ def export_imdf(session_id: str, request: Request, ext: str = "imdf") -> Respons
     mark_validated(session, validation)
 
     payload, filename = build_export_archive(session, extension=ext)
-    mark_delivered(session, "imdf", validation.summary.error_count)
+    mark_delivered(session, "imdf_zip" if ext == "zip" else "imdf", validation.summary.error_count)
     manager.save_session(session)
     return Response(
         content=payload,
