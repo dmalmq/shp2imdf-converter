@@ -1,3 +1,5 @@
+import { labelText } from "./labels";
+
 export type ReviewFeature = {
   type: string;
   id: string;
@@ -138,16 +140,6 @@ export function orderedLayerKeys(features: ReviewFeature[]): string[] {
   return keys;
 }
 
-export function featureName(feature: ReviewFeature): string {
-  const value = feature.properties.name;
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const label = Object.values(value as Record<string, unknown>).find((item) => typeof item === "string");
-    if (typeof label === "string") {
-      return label;
-    }
-  }
-  if (typeof value === "string") {
-    return value;
-  }
-  return "";
+export function featureName(feature: ReviewFeature, language?: string): string {
+  return labelText(feature.properties.name, language);
 }
