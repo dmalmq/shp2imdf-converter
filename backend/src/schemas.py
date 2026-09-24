@@ -775,6 +775,7 @@ class ArtworkProjectPayload(BaseModel):
 
     name: str
     updated_at: str | None = None
+    content_changed_at: str | None = None
     delivered_at: str | None = None
     floors_total: int
     floors_placed: int

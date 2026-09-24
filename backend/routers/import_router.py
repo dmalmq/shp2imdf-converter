@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import json
+import logging
 import math
 from pathlib import Path
 import shutil
@@ -79,6 +80,7 @@ from backend.src.schemas import (
 
 
 router = APIRouter(prefix="/api", tags=["import"])
+logger = logging.getLogger(__name__)
 
 
 def _keyword_config_path(request: Request) -> Path:
@@ -379,10 +381,12 @@ def _project_payload(cached: CachedConversion, project: ArtworkProject) -> Artwo
         floors_total=project.floors_total,
         floors_placed=project.floors_placed,
         delivered_at=project.delivered_at,
+        content_changed_at=project.content_changed_at,
     )
     return ArtworkProjectPayload(
         name=project.name,
         updated_at=project.updated_at,
+        content_changed_at=project.content_changed_at,
         delivered_at=project.delivered_at,
         floors_total=project.floors_total,
         floors_placed=project.floors_placed,
@@ -585,7 +589,7 @@ def export_illustrator(
     if not (payload.formats.geopackage or payload.formats.shapefile or payload.formats.qgis):
         raise ValueError("Select at least one output format.")
 
-    cached = _illustrator_store(request).get(conversion_id)
+    cached, snapshot = _illustrator_store(request).open_for_export(conversion_id)
     if cached.floors:
         stored = {floor["label"] for floor in cached.floors}
         requested = {floor.label for floor in payload.floors}
@@ -638,7 +642,13 @@ def export_illustrator(
             qgis=payload.formats.qgis,
         ),
     )
-    _illustrator_store(request).mark_delivered(conversion_id, floors_placed=len(floors))
+    try:
+        _illustrator_store(request).mark_delivered(
+            conversion_id, floors_placed=len(floors), snapshot=snapshot
+        )
+    except Exception:
+        # The archive is already built; losing the delivery mark must not lose the download.
+        logger.exception("Could not record delivery of conversion %s", conversion_id)
     ascii_name = filename.encode("ascii", "ignore").decode() or "output.zip"
     return Response(
         content=zip_bytes,

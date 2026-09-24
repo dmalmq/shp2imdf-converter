@@ -29,6 +29,7 @@ from backend.src.geocoding import GeocodingError, build_geocoder
 from backend.src.illustrator_export import FloorExportError
 from backend.src.illustrator_importer import IllustratorConversionError
 from backend.src.illustrator_store import (
+    ConversionBusyError,
     ConversionExpiredError,
     ConversionStore,
     migrate_legacy_conversions,
@@ -227,6 +228,12 @@ async def illustrator_conversion_error_handler(_: Request, exc: IllustratorConve
 async def conversion_expired_handler(_: Request, exc: ConversionExpiredError) -> JSONResponse:
     payload = ErrorResponse(detail=str(exc), code="CONVERSION_EXPIRED")
     return JSONResponse(status_code=404, content=payload.model_dump())
+
+
+@app.exception_handler(ConversionBusyError)
+async def conversion_busy_handler(_: Request, exc: ConversionBusyError) -> JSONResponse:
+    payload = ErrorResponse(detail=str(exc), code="CONVERSION_BUSY")
+    return JSONResponse(status_code=503, content=payload.model_dump())
 
 
 @app.exception_handler(FloorExportError)

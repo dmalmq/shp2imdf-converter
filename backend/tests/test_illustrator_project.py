@@ -143,6 +143,33 @@ def test_rename_trims_and_rejects_blank_or_long_names(store: ConversionStore) ->
         store.rename("0" * 32, "name")
 
 
+@pytest.mark.parametrize(
+    "spoof",
+    [
+        "invoice‮gpj.ai",  # RIGHT-TO-LEFT OVERRIDE
+        "Tokyo‍B1",  # ZERO WIDTH JOINER
+        "Tokyo​B1",  # ZERO WIDTH SPACE
+        "﻿Tokyo",  # BYTE ORDER MARK
+        "Tokyo⁦B1⁩",  # bidi isolates
+        "Tokyo\tB1",
+        "Tokyo\nB1",
+        "Tokyo B1",  # LINE SEPARATOR
+        "TokyoㅤB1",  # HANGUL FILLER
+    ],
+)
+def test_names_with_invisible_characters_are_rejected(store: ConversionStore, spoof: str) -> None:
+    cached = _put(store)
+    with pytest.raises(ValueError, match="invisible or control"):
+        store.rename(cached.conversion_id, spoof)
+    assert _project_json(cached.directory)["name"] == "sample"
+
+
+def test_ordinary_names_are_kept(store: ConversionStore) -> None:
+    cached = _put(store)
+    for name in ("東京駅　B1", "Tokyo — B1 (v2)", "Café"):
+        assert store.rename(cached.conversion_id, name).name == name
+
+
 def test_concurrent_rename_and_assign_both_persist(store: ConversionStore) -> None:
     cached = _put(store)
     for round_number in range(25):
@@ -184,8 +211,8 @@ def test_sidecar_writes_are_serialised_per_conversion(store: ConversionStore, mo
     inside = threading.Event()
     release = threading.Event()
 
-    def slow_read(directory: Path, stem: str):
-        project = real_read(directory, stem)
+    def slow_read(directory: Path, stem: str, **kwargs):
+        project = real_read(directory, stem, **kwargs)
         if threading.current_thread().name == "slow":
             inside.set()
             release.wait(5)
@@ -209,35 +236,140 @@ def test_sidecar_writes_are_serialised_per_conversion(store: ConversionStore, mo
 def test_assign_resets_placed_floors(store: ConversionStore) -> None:
     cached = _put(store)
     store.assign(cached.conversion_id, _FLOORS)
-    store.mark_delivered(cached.conversion_id, floors_placed=2)
+    _, snapshot = store.open_for_export(cached.conversion_id)
+    assert store.mark_delivered(cached.conversion_id, 2, snapshot) is not None
     store.assign(cached.conversion_id, _FLOORS[:1])
     project = _project_json(cached.directory)
     assert (project["floors_total"], project["floors_placed"]) == (1, 0)
+    (summary,) = store.list_summaries()
+    assert (summary.stage, summary.blockers) == ("place", 1)
+    assert summary.delivered_at == project["delivered_at"]
+
+
+def test_rename_after_delivery_keeps_it_current(store: ConversionStore) -> None:
+    cached = _put(store)
+    store.assign(cached.conversion_id, _FLOORS)
+    _, snapshot = store.open_for_export(cached.conversion_id)
+    store.mark_delivered(cached.conversion_id, 2, snapshot)
+    store.rename(cached.conversion_id, "renamed")
+    (summary,) = store.list_summaries()
+    assert (summary.stage, summary.blockers) == ("deliver", 0)
+
+
+def test_an_assignment_during_export_is_not_marked_delivered(store: ConversionStore) -> None:
+    cached = _put(store)
+    store.assign(cached.conversion_id, _FLOORS)
+    _, snapshot = store.open_for_export(cached.conversion_id)
+    store.assign(cached.conversion_id, _FLOORS)
+
+    assert store.mark_delivered(cached.conversion_id, 2, snapshot) is None
+    project = _project_json(cached.directory)
+    assert project["delivered_at"] is None
+    assert project["floors_placed"] == 0
+
+
+# --- robustness -------------------------------------------------------------
+
+
+def _vanish_on_sidecar_read(monkeypatch, directory: Path) -> None:
+    import backend.src.illustrator_store as module
+
+    real_read = module._read_project
+
+    def read_then_vanish(target: Path, stem: str, **kwargs):
+        project = real_read(target, stem, **kwargs)
+        shutil.rmtree(directory)
+        return project
+
+    monkeypatch.setattr(module, "_read_project", read_then_vanish)
+
+
+@pytest.mark.parametrize("operation", ["rename", "assign"])
+def test_a_write_after_the_entry_was_discarded_is_not_found(
+    store: ConversionStore, monkeypatch, operation: str
+) -> None:
+    cached = _put(store)
+    _vanish_on_sidecar_read(monkeypatch, cached.directory)
+    with pytest.raises(ConversionExpiredError):
+        if operation == "rename":
+            store.rename(cached.conversion_id, "gone")
+        else:
+            store.assign(cached.conversion_id, _FLOORS)
+
+
+def _lock_project_json(monkeypatch, failures: int | None) -> list[int]:
+    real_read_text = Path.read_text
+    calls: list[int] = []
+
+    def read_text(self: Path, *args, **kwargs):
+        if self.name == "project.json":
+            calls.append(1)
+            if failures is None or len(calls) <= failures:
+                raise PermissionError(13, "locked", str(self))
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    return calls
+
+
+def test_a_briefly_locked_sidecar_is_retried(store: ConversionStore, monkeypatch) -> None:
+    cached = _put(store)
+    store.rename(cached.conversion_id, "kept")
+    calls = _lock_project_json(monkeypatch, failures=2)
+    assert store.project(store.get(cached.conversion_id)).name == "kept"
+    assert len(calls) == 3
+
+
+def test_a_stuck_sidecar_lock_never_overwrites_the_project(
+    store: ConversionStore, monkeypatch
+) -> None:
+    from backend.src.illustrator_store import ConversionBusyError
+
+    cached = _put(store)
+    store.rename(cached.conversion_id, "kept")
+    _lock_project_json(monkeypatch, failures=None)
+    assert store.project(store.get(cached.conversion_id)).name == "sample"
+    with pytest.raises(ConversionBusyError):
+        store.assign(cached.conversion_id, _FLOORS)
+    monkeypatch.undo()
+    assert _project_json(cached.directory)["name"] == "kept"
+    assert not (cached.directory / "floors.json").exists()
 
 
 # --- stage ------------------------------------------------------------------
 
 
+_EARLIER = "2026-09-25T00:00:00.000000+00:00"
+_DELIVERED = "2026-09-25T01:00:00.000000+00:00"
+_LATER = "2026-09-25T02:00:00.000000+00:00"
+
+
 @pytest.mark.parametrize(
-    ("has_floors", "total", "placed", "delivered_at", "expected"),
+    ("has_floors", "total", "placed", "delivered_at", "changed_at", "expected"),
     [
-        (False, 0, 0, None, ("name-floors", None)),
-        (True, 2, 0, None, ("place", 2)),
-        (True, 3, 1, None, ("place", 2)),
-        (True, 2, 2, None, ("deliver", 0)),
-        (True, 2, 3, None, ("deliver", 0)),
-        (True, 0, 0, None, ("place", None)),
-        (False, 0, 0, "2026-09-25T00:00:00+00:00", ("deliver", 0)),
-        (True, 2, 0, "2026-09-25T00:00:00+00:00", ("deliver", 0)),
+        (False, 0, 0, None, _EARLIER, ("name-floors", None)),
+        (True, 2, 0, None, _EARLIER, ("place", 2)),
+        (True, 3, 1, None, _EARLIER, ("place", 2)),
+        (True, 2, 2, None, _EARLIER, ("deliver", 0)),
+        (True, 2, 3, None, _EARLIER, ("deliver", 0)),
+        (True, 0, 0, None, _EARLIER, ("place", None)),
+        (True, 2, 2, _DELIVERED, _EARLIER, ("deliver", 0)),
+        (True, 2, 2, _DELIVERED, _DELIVERED, ("deliver", 0)),
+        (False, 0, 0, _DELIVERED, None, ("deliver", 0)),
+        # Floors reassigned after the export: the delivery is stale.
+        (True, 2, 0, _DELIVERED, _LATER, ("place", 2)),
+        (False, 0, 0, _DELIVERED, _LATER, ("name-floors", None)),
+        (True, 2, 2, _DELIVERED, _LATER, ("deliver", 0)),
     ],
 )
-def test_artwork_stage_table(has_floors, total, placed, delivered_at, expected) -> None:
+def test_artwork_stage_table(has_floors, total, placed, delivered_at, changed_at, expected) -> None:
     assert (
         derive_artwork_stage(
             has_floors=has_floors,
             floors_total=total,
             floors_placed=placed,
             delivered_at=delivered_at,
+            content_changed_at=changed_at,
         )
         == expected
     )
@@ -277,6 +409,73 @@ def test_migration_keeps_an_entry_already_in_the_durable_root(tmp_path: Path) ->
     assert migrate_legacy_conversions(legacy, durable) == 0
     assert (durable / cached.conversion_id / "keep.txt").is_file()
     assert (legacy / cached.conversion_id).is_dir()
+
+
+def _force_cross_drive(monkeypatch, legacy: Path) -> None:
+    real_rename = os.rename
+
+    def rename(source, target):
+        if Path(source).parent == legacy:
+            raise OSError(18, "Invalid cross-device link", str(source))
+        return real_rename(source, target)
+
+    monkeypatch.setattr(os, "rename", rename)
+
+
+def test_a_cross_drive_migration_copies_then_renames(monkeypatch, tmp_path: Path) -> None:
+    legacy = tmp_path / "legacy"
+    durable = tmp_path / "durable"
+    cached = ConversionStore(root=legacy, ttl_seconds=3600, max_entries=10).put(
+        parse_ai(_build_minimal_ai_pdf(), "a.ai")
+    )
+    _force_cross_drive(monkeypatch, legacy)
+
+    assert migrate_legacy_conversions(legacy, durable) == 1
+    assert not legacy.exists()
+    assert [entry.name for entry in durable.iterdir()] == [cached.conversion_id]
+    store = ConversionStore(root=durable, ttl_seconds=3600, max_entries=10)
+    assert store.get(cached.conversion_id).gpkg_path.is_file()
+
+
+def test_an_interrupted_copy_leaves_no_entry_under_the_real_id(
+    monkeypatch, tmp_path: Path
+) -> None:
+    legacy = tmp_path / "legacy"
+    durable = tmp_path / "durable"
+    cached = ConversionStore(root=legacy, ttl_seconds=3600, max_entries=10).put(
+        parse_ai(_build_minimal_ai_pdf(), "a.ai")
+    )
+    _force_cross_drive(monkeypatch, legacy)
+
+    def partial_copy(source, target, *args, **kwargs):
+        Path(target).mkdir(parents=True)
+        shutil.copy2(Path(source) / "conversion.json", Path(target) / "conversion.json")
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(shutil, "copytree", partial_copy)
+
+    assert migrate_legacy_conversions(legacy, durable) == 0
+    assert list(durable.iterdir()) == []
+    assert (legacy / cached.conversion_id / "artwork.gpkg").is_file()
+
+    monkeypatch.undo()
+    assert migrate_legacy_conversions(legacy, durable) == 1
+    store = ConversionStore(root=durable, ttl_seconds=3600, max_entries=10)
+    assert store.get(cached.conversion_id).gpkg_path.is_file()
+
+
+def test_startup_removes_a_copy_left_by_a_crash(tmp_path: Path) -> None:
+    durable = tmp_path / "durable"
+    leftover = durable / f".{'a' * 32}.{'b' * 32}.migrating"
+    leftover.mkdir(parents=True)
+    (leftover / "conversion.json").write_text("{}", encoding="utf-8")
+    kept = durable / ("c" * 32)
+    kept.mkdir()
+
+    migrate_legacy_conversions(tmp_path / "missing", durable)
+
+    assert not leftover.exists()
+    assert kept.is_dir()
 
 
 def test_migration_without_a_legacy_root_is_a_no_op(tmp_path: Path) -> None:
@@ -390,3 +589,103 @@ def test_a_failed_export_does_not_mark_delivery(test_client) -> None:
     ).status_code == 400
     project = test_client.get(f"/api/convert/illustrator/{conversion_id}").json()["project"]
     assert project["delivered_at"] is None
+
+
+def _two_floor_export(test_client, preview: dict):
+    conversion_id = preview["conversion_id"]
+    body = _body(preview["artwork_bounds"])
+    body["floors"] = [
+        {"label": label, "transform": body["floors"][0]["transform"]} for label in ("1F", "2F")
+    ]
+    return test_client.post(f"/api/convert/illustrator/{conversion_id}/export", json=body)
+
+
+def _assign(test_client, conversion_id: str) -> None:
+    response = test_client.post(
+        f"/api/convert/illustrator/{conversion_id}/assign", json=_assign_body()
+    )
+    assert response.status_code == 200, response.text
+
+
+def _project(test_client, conversion_id: str) -> dict:
+    return test_client.get(f"/api/convert/illustrator/{conversion_id}").json()["project"]
+
+
+def test_reassigning_after_export_reopens_placement(test_client) -> None:
+    preview = _preview(test_client).json()
+    conversion_id = preview["conversion_id"]
+    _assign(test_client, conversion_id)
+    assert _two_floor_export(test_client, preview).status_code == 200
+    delivered = _project(test_client, conversion_id)
+    assert delivered["stage"] == "deliver"
+
+    _assign(test_client, conversion_id)
+    project = _project(test_client, conversion_id)
+    assert project["delivered_at"] == delivered["delivered_at"]
+    assert project["content_changed_at"] > delivered["delivered_at"]
+    assert (project["stage"], project["blockers"]) == ("place", 2)
+
+
+def test_an_assignment_landing_mid_export_is_not_marked_delivered(
+    test_client, monkeypatch
+) -> None:
+    import backend.routers.import_router as router_module
+
+    preview = _preview(test_client).json()
+    conversion_id = preview["conversion_id"]
+    _assign(test_client, conversion_id)
+    real_build = router_module.build_georeferenced_bundle
+
+    def build_while_reassigned(*args, **kwargs):
+        result = real_build(*args, **kwargs)
+        test_client.app.state.illustrator_store.assign(conversion_id, _FLOORS)
+        return result
+
+    monkeypatch.setattr(router_module, "build_georeferenced_bundle", build_while_reassigned)
+    assert _two_floor_export(test_client, preview).status_code == 200
+
+    project = _project(test_client, conversion_id)
+    assert project["delivered_at"] is None
+    assert (project["stage"], project["blockers"]) == ("place", 2)
+
+
+def test_a_failed_delivery_mark_still_returns_the_export(test_client, monkeypatch) -> None:
+    preview = _preview(test_client).json()
+    _assign(test_client, preview["conversion_id"])
+    store = test_client.app.state.illustrator_store
+
+    def broken(*_args, **_kwargs):
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(store, "mark_delivered", broken)
+    response = _two_floor_export(test_client, preview)
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "application/zip"
+
+
+@pytest.mark.parametrize("spoof", ["abc‮txt.exe", "東京‍駅"])
+def test_patch_rejects_names_that_spoof_rendering(test_client, spoof: str) -> None:
+    conversion_id = _preview(test_client).json()["conversion_id"]
+    response = test_client.patch(f"/api/convert/illustrator/{conversion_id}", json={"name": spoof})
+    assert response.status_code == 400, response.text
+    assert _project(test_client, conversion_id)["name"] == "sample"
+
+
+def test_patch_on_an_entry_discarded_mid_write_is_404(test_client, monkeypatch) -> None:
+    conversion_id = _preview(test_client).json()["conversion_id"]
+    store = test_client.app.state.illustrator_store
+    _vanish_on_sidecar_read(monkeypatch, store.root / conversion_id)
+    response = test_client.patch(f"/api/convert/illustrator/{conversion_id}", json={"name": "x"})
+    assert response.status_code == 404, response.text
+    assert response.json()["code"] == "CONVERSION_EXPIRED"
+
+
+def test_a_locked_sidecar_is_503_on_patch_and_defaults_on_get(test_client, monkeypatch) -> None:
+    conversion_id = _preview(test_client).json()["conversion_id"]
+    _lock_project_json(monkeypatch, failures=None)
+    response = test_client.patch(f"/api/convert/illustrator/{conversion_id}", json={"name": "x"})
+    assert response.status_code == 503, response.text
+    assert response.json()["code"] == "CONVERSION_BUSY"
+    reopened = test_client.get(f"/api/convert/illustrator/{conversion_id}")
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["project"]["name"] == "sample"

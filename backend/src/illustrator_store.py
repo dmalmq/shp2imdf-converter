@@ -53,10 +53,23 @@ logger = logging.getLogger(__name__)
 _CONVERSION_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
 
 _UNAVAILABLE = "That conversion is no longer available. Convert the file again."
+_BUSY = "That project is busy. Try again in a moment."
 
 
 class ConversionExpiredError(Exception):
     """Raised when a conversion id is unknown or has aged out of the cache."""
+
+
+class ConversionBusyError(Exception):
+    """Raised when a sidecar stays locked by another process past a short retry."""
+
+
+@dataclass(frozen=True, slots=True)
+class ContentSnapshot:
+    """What an export was built from, so a later assignment cannot be marked delivered."""
+
+    content_changed_at: str | None
+    floors_total: int
 
 
 @dataclass(slots=True)
@@ -86,6 +99,7 @@ class ConversionSummary:
     last_used_at: float
     expires_at: float
     updated_at: str | None
+    content_changed_at: str | None
     delivered_at: str | None
     floors_total: int
     floors_placed: int
@@ -123,9 +137,10 @@ class ConversionStore:
             created_at=time.time(),
             parser_version=PARSER_VERSION,
         )
+        now = utc_now_iso()
         _write_json(
             directory / _PROJECT_NAME,
-            ArtworkProject(name=cached.stem, updated_at=utc_now_iso()).to_dict(),
+            ArtworkProject(name=cached.stem, updated_at=now, content_changed_at=now).to_dict(),
         )
         (directory / _META_NAME).write_text(
             json.dumps(
@@ -191,11 +206,13 @@ class ConversionStore:
         """
         cached = self.get(conversion_id)  # raises ConversionExpiredError for unknown ids
         with self._lock_for(conversion_id):
+            project = _read_project(cached.directory, cached.stem, strict=True)
             _write_json(cached.directory / _FLOORS_NAME, floors)
-            project = _read_project(cached.directory, cached.stem)
+            now = utc_now_iso()
             project.floors_total = len(floors)
             project.floors_placed = 0
-            project.updated_at = utc_now_iso()
+            project.updated_at = now
+            project.content_changed_at = now
             _write_json(cached.directory / _PROJECT_NAME, project.to_dict())
         return self.get(conversion_id)
 
@@ -206,17 +223,42 @@ class ConversionStore:
         cached = self.get(conversion_id)
         cleaned = normalise_project_name(name)
         with self._lock_for(conversion_id):
-            project = _read_project(cached.directory, cached.stem)
+            project = _read_project(cached.directory, cached.stem, strict=True)
             project.name = cleaned
             project.updated_at = utc_now_iso()
             _write_json(cached.directory / _PROJECT_NAME, project.to_dict())
         return project
 
-    def mark_delivered(self, conversion_id: str, floors_placed: int) -> ArtworkProject:
-        """Record an export. Every exported floor carried a transform, so each counts as placed."""
+    def open_for_export(self, conversion_id: str) -> tuple[CachedConversion, ContentSnapshot]:
+        """Load a conversion and snapshot its content under the lock ``assign`` writes under.
+
+        The floors an export uses and the snapshot it is later recorded against
+        are therefore from the same assignment.
+        """
+        with self._lock_for(conversion_id):
+            cached = self.get(conversion_id)
+            project = _read_project(cached.directory, cached.stem)
+        return cached, ContentSnapshot(project.content_changed_at, project.floors_total)
+
+    def mark_delivered(
+        self, conversion_id: str, floors_placed: int, snapshot: ContentSnapshot
+    ) -> ArtworkProject | None:
+        """Record an export built from ``snapshot``; ``None`` if the content moved on since.
+
+        Every exported floor carried a transform, so each counts as placed.
+        """
         cached = self.get(conversion_id)
         with self._lock_for(conversion_id):
-            project = _read_project(cached.directory, cached.stem)
+            project = _read_project(cached.directory, cached.stem, strict=True)
+            if (
+                project.content_changed_at != snapshot.content_changed_at
+                or project.floors_total != snapshot.floors_total
+            ):
+                logger.info(
+                    "Conversion %s changed during export; the delivery is not recorded as current",
+                    conversion_id,
+                )
+                return None
             now = utc_now_iso()
             project.floors_total = max(project.floors_total, floors_placed)
             project.floors_placed = floors_placed
@@ -277,6 +319,7 @@ class ConversionStore:
             floors_total=project.floors_total,
             floors_placed=project.floors_placed,
             delivered_at=project.delivered_at,
+            content_changed_at=project.content_changed_at,
         )
         return ConversionSummary(
             conversion_id=directory.name,
@@ -286,6 +329,7 @@ class ConversionStore:
             last_used_at=last_used_at,
             expires_at=last_used_at + self.ttl_seconds,
             updated_at=project.updated_at,
+            content_changed_at=project.content_changed_at,
             delivered_at=project.delivered_at,
             floors_total=project.floors_total,
             floors_placed=project.floors_placed,
@@ -375,36 +419,62 @@ class ConversionStore:
         shutil.rmtree(target, ignore_errors=True)
 
 
-def _read_project(directory: Path, stem: str) -> ArtworkProject:
-    try:
-        payload = json.loads((directory / _PROJECT_NAME).read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        payload = None
-    except ValueError:
-        logger.warning("Project sidecar for %s is corrupt; using defaults", directory.name)
-        payload = None
+_LOCKED_FILE_ATTEMPTS = 5
+
+
+def _read_project(directory: Path, stem: str, *, strict: bool = False) -> ArtworkProject:
+    """Read a sidecar, retrying briefly while Windows holds it locked.
+
+    A read-only caller falls back to defaults if it stays locked. A ``strict``
+    caller is about to write the result back, and defaults would overwrite the
+    real values, so it raises ``ConversionBusyError`` instead.
+    """
+    path = directory / _PROJECT_NAME
+    payload = None
+    for attempt in range(_LOCKED_FILE_ATTEMPTS):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            break
+        except FileNotFoundError:
+            break
+        except PermissionError:
+            if attempt < _LOCKED_FILE_ATTEMPTS - 1:
+                time.sleep(0.02 * (attempt + 1))
+                continue
+            if strict:
+                raise ConversionBusyError(_BUSY) from None
+            logger.warning("Project sidecar for %s stayed locked; using defaults", directory.name)
+        except ValueError:
+            logger.warning("Project sidecar for %s is corrupt; using defaults", directory.name)
+            break
     return ArtworkProject.from_dict(payload, stem)
 
 
-_REPLACE_ATTEMPTS = 5
-
-
 def _write_json(path: Path, payload: object) -> None:
-    """Write via a temporary file and rename, so a reader never sees half a file."""
+    """Write via a temporary file and rename, so a reader never sees half a file.
+
+    The entry directory can disappear underneath (expiry, the cap), which is
+    reported as the conversion being gone rather than as a server error.
+    """
     temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     try:
-        for attempt in range(_REPLACE_ATTEMPTS):
+        temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        for attempt in range(_LOCKED_FILE_ATTEMPTS):
             try:
                 os.replace(temporary, path)
                 return
             except PermissionError:
                 # Windows refuses to replace a file another thread has open for reading.
-                if attempt == _REPLACE_ATTEMPTS - 1:
-                    raise
+                if attempt == _LOCKED_FILE_ATTEMPTS - 1:
+                    raise ConversionBusyError(_BUSY) from None
                 time.sleep(0.01 * (attempt + 1))
+    except FileNotFoundError as exc:
+        raise ConversionExpiredError(_UNAVAILABLE) from exc
     finally:
-        temporary.unlink(missing_ok=True)
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def migrate_legacy_conversions(legacy_root: Path, root: Path) -> int:
@@ -414,8 +484,13 @@ def migrate_legacy_conversions(legacy_root: Path, root: Path) -> int:
     files; as projects they belong in the data directory. An entry whose id
     already exists in ``root``, or that cannot be moved, stays where it was and
     is logged, since the running store no longer looks there.
+
+    Across drives a move is a copy, so the copy goes to a temporary sibling and
+    is renamed into place only once complete: an interrupted copy never leaves a
+    half entry under the real id that later starts would skip as a duplicate.
     """
     legacy_root, root = Path(legacy_root), Path(root)
+    _remove_migration_leftovers(root)
     try:
         if not legacy_root.is_dir() or legacy_root.resolve() == root.resolve():
             return 0
@@ -440,7 +515,7 @@ def migrate_legacy_conversions(legacy_root: Path, root: Path) -> int:
             )
             continue
         try:
-            shutil.move(str(entry), str(target))
+            _move_entry(entry, target)
         except OSError as exc:
             logger.warning("Could not move conversion %s to %s: %s", entry.name, root, exc)
             continue
@@ -452,3 +527,36 @@ def migrate_legacy_conversions(legacy_root: Path, root: Path) -> int:
     except OSError:
         pass
     return moved
+
+
+_MIGRATING_SUFFIX = ".migrating"
+
+
+def _move_entry(entry: Path, target: Path) -> None:
+    try:
+        os.rename(entry, target)
+        return
+    except OSError:
+        pass
+    staging = target.with_name(f".{target.name}.{uuid4().hex}{_MIGRATING_SUFFIX}")
+    try:
+        shutil.copytree(entry, staging)
+        os.rename(staging, target)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    shutil.rmtree(entry, ignore_errors=True)
+
+
+def _remove_migration_leftovers(root: Path) -> None:
+    try:
+        leftovers = [
+            entry
+            for entry in root.iterdir()
+            if entry.name.startswith(".") and entry.name.endswith(_MIGRATING_SUFFIX)
+        ]
+    except OSError:
+        return
+    for leftover in leftovers:
+        logger.warning("Removing an interrupted conversion migration: %s", leftover.name)
+        shutil.rmtree(leftover, ignore_errors=True)
