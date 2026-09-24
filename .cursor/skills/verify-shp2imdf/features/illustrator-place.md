@@ -5,12 +5,12 @@ The Illustrator screen converts a PDF-compatible `.ai` file, lets the user assig
 ## Sub-features
 
 - `illustrator-open` reaches `/illustrator` from Import.
-- `illustrator-choose` shows `Choose .ai file` and `#illustrator-georef-input`.
+- `illustrator-choose` shows `Choose file` and `#illustrator-georef-input`.
 - `illustrator-skip-placement-save` never writes `data/placements.db` during verification.
 
 ## How to get to it (user POV)
 
-- On `/`, choose `Illustrator (.ai) → place on map`.
+- On `/`, choose `Illustrator artwork`.
 - Open `/illustrator` directly.
 
 ## Driving it with control.mjs
@@ -21,10 +21,10 @@ Preconditions:
 - English UI.
 - One-shot: `node .cursor/skills/verify-shp2imdf/scripts/control.mjs drive illustrator-open`.
 
-- **Enter.** From `/`, choose `Illustrator (.ai) → place on map`. Run `getByRole('button', { name: 'Illustrator (.ai) → place on map' }).click()`. URL is `/illustrator`.
-- **Idle state.** Heading `Place Illustrator artwork` and button `Choose .ai file` are visible. The file input id is `illustrator-georef-input`.
+- **Enter.** From `/`, choose `Illustrator artwork`. Run `getByRole('button', { name: /Illustrator artwork/ }).click()`. URL is `/illustrator`.
+- **Idle state.** Heading `Place Illustrator artwork` and button `Choose file` are visible. The file input id is `illustrator-georef-input`.
 - **Do not save placements.** Leave named placement controls untouched.
-- **Proof.** Write `artifacts/verify-shp2imdf/illustrator-open/` (folder name matches the drive id) showing the heading and `Choose .ai file`. `IMDF Converter` remains in the shell header.
+- **Proof.** Write `artifacts/verify-shp2imdf/illustrator-open/` (folder name matches the drive id) showing the heading and `Choose file`. `IMDF Converter` remains in the shell header.
 
 ## Gotchas
 

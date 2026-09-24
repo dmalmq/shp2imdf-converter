@@ -11,7 +11,7 @@ Review shows generated features on a map and in a list, runs validation, and dow
 
 ## How to get to it (user POV)
 
-- Finish the wizard with `Confirm & Open Review`.
+- Finish the wizard with `Generate & open Review`.
 - Choose `Review & Export` in the step indicator when a session exists.
 
 ## Driving it with control.mjs
