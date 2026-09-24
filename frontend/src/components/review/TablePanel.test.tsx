@@ -103,6 +103,21 @@ test("level column resolves levels the active filter hid from the rows", () => {
 });
 
 
+test("issue column shows the first validation message for the row", () => {
+  const broken = { ...makeFeature("u1"), properties: { name: "Unit A", status: "error" } };
+  const clean = { ...makeFeature("u2"), properties: { name: "Unit B" } };
+  const issues = new Map([["u1", [{ message: "Overlaps unit u9" }, { message: "Missing name" }]]]);
+
+  render(
+    <TablePanel features={[broken, clean]} issuesByFeature={issues} selectedFeatureIds={[]} onSelectFeature={() => {}} />
+  );
+
+  const issueCell = (name: string) => screen.getByText(name).closest("tr")!.querySelectorAll("td")[7].textContent;
+  expect(issueCell("Unit A")).toBe("Overlaps unit u9");
+  expect(issueCell("Unit B")).toBe("-");
+});
+
+
 test("shift-click selects checkbox ranges", () => {
   const features = [makeFeature("f1"), makeFeature("f2"), makeFeature("f3"), makeFeature("f4")];
   renderWithSelection(features);
