@@ -18,6 +18,7 @@ import pandas as pd
 from shapely.geometry import mapping, shape
 from shapely.ops import unary_union
 
+from backend.src.importer import detect_dbf_encoding
 from backend.src.schemas import SessionRecord, ShapefileExportRequest
 
 
@@ -1580,7 +1581,11 @@ def build_shapefile_export_archive(
 
         for stem, components in sorted(shapefile_groups.items()):
             shapefile_path = components[".shp"]
-            gdf = gpd.read_file(shapefile_path)
+            source_encoding = detect_dbf_encoding(components.get(".dbf"), components.get(".cpg"))
+            if source_encoding is None:
+                gdf = gpd.read_file(shapefile_path)
+            else:
+                gdf = gpd.read_file(shapefile_path, encoding=source_encoding)
             detected_type = _resolved_export_feature_type(
                 stem,
                 detected_type_by_stem.get(stem, ""),
