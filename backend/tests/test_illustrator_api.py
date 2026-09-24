@@ -526,12 +526,12 @@ def test_route_bodies_are_valid_so_the_id_is_what_is_rejected(test_client, route
 @pytest.mark.parametrize("encoded_id", _TRAVERSING_IDS)
 @pytest.mark.parametrize("route", _ID_ROUTES)
 def test_traversing_conversion_ids_are_404_and_delete_nothing(
-    test_client, tmp_path, encoded_id: str, route: str
+    test_client, encoded_id: str, route: str
 ) -> None:
-    temp_dir = tmp_path / "tmp"
-    parent = _plant(temp_dir, _EXPIRED_META)
-    victim = _plant(temp_dir / "victim", _EXPIRED_META)
-    test_client.app.state.illustrator_store.ttl_seconds = -1
+    store = test_client.app.state.illustrator_store
+    parent = _plant(store.root.parent, _EXPIRED_META)
+    victim = _plant(store.root.parent / "victim", _EXPIRED_META)
+    store.ttl_seconds = -1
 
     response = test_client.post(
         f"/api/convert/illustrator/{encoded_id}/{route}", json=_route_body(route)
@@ -541,7 +541,7 @@ def test_traversing_conversion_ids_are_404_and_delete_nothing(
     assert response.json()["code"] == "CONVERSION_EXPIRED"
     assert (parent / "keep.txt").is_file()
     assert (victim / "keep.txt").is_file()
-    assert (temp_dir / "illustrator").is_dir()
+    assert store.root.is_dir()
     assert not (parent / "floors.json").exists()
 
 
@@ -581,8 +581,8 @@ def test_a_hostile_id_never_reaches_the_filesystem(
 
 
 @pytest.mark.georef
-def test_a_traversing_id_onto_a_corrupt_entry_is_404_not_500(test_client, tmp_path) -> None:
-    _plant(tmp_path / "tmp", "not json")
+def test_a_traversing_id_onto_a_corrupt_entry_is_404_not_500(test_client) -> None:
+    _plant(test_client.app.state.illustrator_store.root.parent, "not json")
     response = test_client.post("/api/convert/illustrator/%2E%2E/assign", json=_assign_body())
     assert response.status_code == 404, response.text
     assert response.json()["code"] == "CONVERSION_EXPIRED"

@@ -28,7 +28,12 @@ from backend.src.errors import ApiError
 from backend.src.geocoding import GeocodingError, build_geocoder
 from backend.src.illustrator_export import FloorExportError
 from backend.src.illustrator_importer import IllustratorConversionError
-from backend.src.illustrator_store import ConversionExpiredError, ConversionStore
+from backend.src.illustrator_store import (
+    ConversionBusyError,
+    ConversionExpiredError,
+    ConversionStore,
+    migrate_legacy_conversions,
+)
 from backend.src.placements import DuplicatePlacementError, PlacementStore
 from backend.src.qgis_export import QgisExportError, QgisUnavailableError
 from backend.src.reference_overlay import ReferenceOverlayStore
@@ -63,6 +68,17 @@ def _load_reference_overlay() -> ReferenceOverlayStore:
     cache = Path(os.getenv("TEMP_DATA_DIR", "./data/tmp")) / "reference-overlay"
     cache.mkdir(parents=True, exist_ok=True)
     return ReferenceOverlayStore(source, cache)
+
+
+def _load_illustrator_store() -> ConversionStore:
+    root = Path(os.getenv("ILLUSTRATOR_DATA_DIR", "./data/illustrator"))
+    legacy = Path(os.getenv("TEMP_DATA_DIR", "./data/tmp")) / "illustrator"
+    migrate_legacy_conversions(legacy, root)
+    return ConversionStore(
+        root=root,
+        ttl_seconds=float(os.getenv("ILLUSTRATOR_CACHE_TTL_MINUTES", "120")) * 60,
+        max_entries=int(os.getenv("ILLUSTRATOR_CACHE_MAX_ENTRIES", "20")),
+    )
 
 
 async def _session_cleanup_loop(app: FastAPI, stop: asyncio.Event) -> None:
@@ -119,11 +135,7 @@ async def lifespan(app: FastAPI):
     app.state.filename_keywords_path = Path(__file__).parent / "config" / "filename_keywords.json"
     app.state.unit_categories_path = Path(__file__).parent / "config" / "unit_categories.json"
     app.state.company_mappings_path = Path(__file__).parent / "config" / "company_mappings.json"
-    app.state.illustrator_store = ConversionStore(
-        root=Path(os.getenv("TEMP_DATA_DIR", "./data/tmp")) / "illustrator",
-        ttl_seconds=float(os.getenv("ILLUSTRATOR_CACHE_TTL_MINUTES", "120")) * 60,
-        max_entries=int(os.getenv("ILLUSTRATOR_CACHE_MAX_ENTRIES", "20")),
-    )
+    app.state.illustrator_store = _load_illustrator_store()
     app.state.placement_store = PlacementStore(
         Path(os.getenv("PLACEMENTS_DB", "./data/placements.db"))
     )
@@ -216,6 +228,12 @@ async def illustrator_conversion_error_handler(_: Request, exc: IllustratorConve
 async def conversion_expired_handler(_: Request, exc: ConversionExpiredError) -> JSONResponse:
     payload = ErrorResponse(detail=str(exc), code="CONVERSION_EXPIRED")
     return JSONResponse(status_code=404, content=payload.model_dump())
+
+
+@app.exception_handler(ConversionBusyError)
+async def conversion_busy_handler(_: Request, exc: ConversionBusyError) -> JSONResponse:
+    payload = ErrorResponse(detail=str(exc), code="CONVERSION_BUSY")
+    return JSONResponse(status_code=503, content=payload.model_dump())
 
 
 @app.exception_handler(FloorExportError)

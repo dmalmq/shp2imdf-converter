@@ -50,6 +50,10 @@ from backend.src.illustrator_qgis import QgisLayerSpec, build_qgs_project
 
 log = logging.getLogger(__name__)
 
+# Recorded with every stored conversion. Bump it when a parser change alters the
+# stored geometry, so entries parsed by an older parser can be refused or re-derived.
+PARSER_VERSION = 1
+
 NO_LAYER = "(no layer)"
 _LINE_SUFFIX = "__lines"
 # Curves (`c`/`v`/`y`) are flattened into this many straight segments.

@@ -66,6 +66,7 @@ def test_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
     monkeypatch.setenv("SESSION_DATA_DIR", str(tmp_path / "sessions"))
     monkeypatch.setenv("SESSION_UPLOADS_DIR", str(tmp_path / "session_uploads"))
     monkeypatch.setenv("TEMP_DATA_DIR", str(tmp_path / "tmp"))
+    monkeypatch.setenv("ILLUSTRATOR_DATA_DIR", str(tmp_path / "illustrator"))
     monkeypatch.setenv("PLACEMENTS_DB", str(tmp_path / "placements.db"))
     with TestClient(app) as client:
         yield client

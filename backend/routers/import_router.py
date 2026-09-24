@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import json
+import logging
 import math
 from pathlib import Path
 import shutil
@@ -16,6 +17,7 @@ from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
 from backend.routers.common import session_manager
+from backend.src.artwork_projects import ArtworkProject, derive_artwork_stage
 from backend.src.detector import sync_feature_types
 from backend.src.illustrator_export import (
     ExportFloor,
@@ -34,7 +36,7 @@ from backend.src.illustrator_importer import _sanitize_layer_name
 from backend.src.illustrator_importer import convert_ai_to_geopackage_bundle, parse_ai
 from backend.src.illustrator_shape_match import match_regions
 from backend.src.illustrator_shape_match import match_shapes
-from backend.src.illustrator_store import ConversionStore
+from backend.src.illustrator_store import CachedConversion, ConversionStore
 from backend.src.illustrator_survey_snap import match_survey_consensus
 from backend.src.imdf_reader import read_imdf_zip
 from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
@@ -48,12 +50,14 @@ from backend.src.importer import (
 from backend.src.placements import PlacementStore
 from backend.src.reference_overlay import PRELOADED_LABEL, ReferenceOverlayStore
 from backend.src.schemas import (
+    ArtworkProjectPayload,
     AssignFloorSummary,
     AssignFloorsRequest,
     AssignFloorsResponse,
     CleanupSummary,
     GeocodeSearchResponse,
     FloorExportPayload,
+    IllustratorConversionResponse,
     IllustratorExportRequest,
     IllustratorPreviewResponse,
     ImportImdfResponse,
@@ -65,6 +69,7 @@ from backend.src.schemas import (
     PreloadedReferenceOverlayInfo,
     ReferenceLayerItem,
     ReferenceLayersResponse,
+    RenameConversionRequest,
     IllustratorRegionMatchRequest,
     IllustratorShapeMatchRequest,
     IllustratorShapeMatchResponse,
@@ -75,6 +80,7 @@ from backend.src.schemas import (
 
 
 router = APIRouter(prefix="/api", tags=["import"])
+logger = logging.getLogger(__name__)
 
 
 def _keyword_config_path(request: Request) -> Path:
@@ -343,6 +349,10 @@ async def preview_illustrator(
     name = _validate_ai_upload(request, file, payload)
 
     cached, preview = await run_in_threadpool(_parse_and_preview, request, payload, name)
+    return _preview_response(cached, preview)
+
+
+def _preview_response(cached: CachedConversion, preview: dict) -> IllustratorPreviewResponse:
     # No pin yet. Export and the frame take the zone from the locate hit
     # (``working_crs`` on /geocode). This seed is only the no-pin fallback.
     suggested = resolve_working_crs(139.7671, 35.6812, None)
@@ -363,6 +373,54 @@ async def preview_illustrator(
 def _parse_and_preview(request: Request, payload: bytes, name: str):
     cached = _illustrator_store(request).put(parse_ai(payload, name))
     return cached, build_preview(cached)
+
+
+def _project_payload(cached: CachedConversion, project: ArtworkProject) -> ArtworkProjectPayload:
+    stage, blockers = derive_artwork_stage(
+        has_floors=cached.floors is not None,
+        floors_total=project.floors_total,
+        floors_placed=project.floors_placed,
+        delivered_at=project.delivered_at,
+        content_changed_at=project.content_changed_at,
+    )
+    return ArtworkProjectPayload(
+        name=project.name,
+        updated_at=project.updated_at,
+        content_changed_at=project.content_changed_at,
+        delivered_at=project.delivered_at,
+        floors_total=project.floors_total,
+        floors_placed=project.floors_placed,
+        stage=stage,
+        blockers=blockers,
+    )
+
+
+@router.get(
+    "/convert/illustrator/{conversion_id}", response_model=IllustratorConversionResponse
+)
+def get_illustrator_conversion(
+    conversion_id: str, request: Request
+) -> IllustratorConversionResponse:
+    """Reopen a stored conversion: its preview, floor assignment and project."""
+    store = _illustrator_store(request)
+    cached = store.get(conversion_id)
+    return IllustratorConversionResponse(
+        conversion_id=cached.conversion_id,
+        preview=_preview_response(cached, build_preview(cached)),
+        floors=cached.floors,
+        project=_project_payload(cached, store.project(cached)),
+    )
+
+
+@router.patch(
+    "/convert/illustrator/{conversion_id}", response_model=ArtworkProjectPayload
+)
+def rename_illustrator_conversion(
+    conversion_id: str, request: Request, payload: RenameConversionRequest
+) -> ArtworkProjectPayload:
+    store = _illustrator_store(request)
+    project = store.rename(conversion_id, payload.name)
+    return _project_payload(store.get(conversion_id), project)
 
 
 _PLACEHOLDER_TRANSFORM = SimilarityTransform(
@@ -531,7 +589,7 @@ def export_illustrator(
     if not (payload.formats.geopackage or payload.formats.shapefile or payload.formats.qgis):
         raise ValueError("Select at least one output format.")
 
-    cached = _illustrator_store(request).get(conversion_id)
+    cached, snapshot = _illustrator_store(request).open_for_export(conversion_id)
     if cached.floors:
         stored = {floor["label"] for floor in cached.floors}
         requested = {floor.label for floor in payload.floors}
@@ -584,6 +642,13 @@ def export_illustrator(
             qgis=payload.formats.qgis,
         ),
     )
+    try:
+        _illustrator_store(request).mark_delivered(
+            conversion_id, floors_placed=len(floors), snapshot=snapshot
+        )
+    except Exception:
+        # The archive is already built; losing the delivery mark must not lose the download.
+        logger.exception("Could not record delivery of conversion %s", conversion_id)
     ascii_name = filename.encode("ascii", "ignore").decode() or "output.zip"
     return Response(
         content=zip_bytes,
