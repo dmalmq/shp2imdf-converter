@@ -12,11 +12,14 @@ import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { EmptyState } from "../shared/EmptyState";
 import { FeatureTypeIcon } from "../shared/FeatureTypeIcon";
 import { Badge, Checkbox } from "../ui";
+import { buildLevelOptions } from "./floorGroups";
 import { featureName, type ReviewFeature } from "./types";
 
 
 type Props = {
   features: ReviewFeature[];
+  levelOptions?: Array<{ id: string; label: string }>;
+  issuesByFeature?: Map<string, Array<{ message: string }>>;
   selectedFeatureIds: string[];
   onSelectFeature: (id: string, multi?: boolean) => void;
   onSelectionChange?: (ids: string[]) => void;
@@ -29,12 +32,15 @@ function categoryValue(feature: ReviewFeature): string {
 }
 
 
-function levelValue(feature: ReviewFeature): string {
+function levelValue(feature: ReviewFeature, levelLabels: Map<string, string>): string {
   if (feature.feature_type === "level") {
-    return feature.id;
+    return "";
   }
   const levelId = feature.properties.level_id;
-  return typeof levelId === "string" ? levelId : "";
+  if (typeof levelId !== "string" || !levelId) {
+    return "";
+  }
+  return levelLabels.get(levelId) ?? levelId.slice(0, 8);
 }
 
 
@@ -44,8 +50,19 @@ function statusValue(feature: ReviewFeature): string {
 }
 
 
-export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSelectionChange }: Props) {
+export function TablePanel({
+  features,
+  levelOptions,
+  issuesByFeature,
+  selectedFeatureIds,
+  onSelectFeature,
+  onSelectionChange
+}: Props) {
   const { t } = useUiLanguage();
+  const levelLabels = useMemo(
+    () => new Map((levelOptions ?? buildLevelOptions(features)).map((option) => [option.id, option.label])),
+    [levelOptions, features]
+  );
   const selectedSet = useMemo(() => new Set(selectedFeatureIds), [selectedFeatureIds]);
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
 
@@ -224,10 +241,7 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
     {
       id: "level",
       header: t("Level", "レベル"),
-      cell: ({ row }) => {
-        const value = levelValue(row.original);
-        return value ? <span className="font-mono text-xs">{value.slice(0, 8)}</span> : "-";
-      }
+      cell: ({ row }) => levelValue(row.original, levelLabels) || "-"
     },
     {
       id: "status",
@@ -249,9 +263,23 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
           </Badge>
         );
       }
+    },
+    {
+      id: "issue",
+      header: t("Issue", "問題"),
+      cell: ({ row }) => {
+        const message = issuesByFeature?.get(row.original.id)?.[0]?.message;
+        return message ? (
+          <span className="text-xs text-muted-foreground" title={message}>
+            {message}
+          </span>
+        ) : (
+          "-"
+        );
+      }
     }
     ],
-    [t, selectedSet, allVisibleSelected, someVisibleSelected, visibleIds.length, onRowSelect, onSelectAll]
+    [t, levelLabels, issuesByFeature, selectedSet, allVisibleSelected, someVisibleSelected, visibleIds.length, onRowSelect, onSelectAll]
   );
 
   const table = useReactTable({
@@ -290,15 +318,16 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
         {/* Fixed widths: with only a window of rows mounted, letting the browser
             size columns from their content would make them jump as you scroll. */}
-        <table className="w-full min-w-[46rem] table-fixed border-collapse text-sm">
+        <table className="w-full min-w-[56rem] table-fixed border-collapse text-sm">
           <colgroup>
             <col style={{ width: "3rem" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "20%" }} />
             <col style={{ width: "12%" }} />
-            <col style={{ width: "26%" }} />
-            <col style={{ width: "15%" }} />
-            <col style={{ width: "18%" }} />
-            <col style={{ width: "15%" }} />
-            <col style={{ width: "12%" }} />
+            <col style={{ width: "14%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "24%" }} />
           </colgroup>
           <thead className="sticky top-0 z-[1] bg-muted text-left font-mono text-[10px] uppercase leading-[13px] tracking-[0.06em] text-muted-foreground">
             {table.getHeaderGroups().map((headerGroup) => (
@@ -316,7 +345,7 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
           <tbody>
             {padTop > 0 ? (
               <tr aria-hidden="true">
-                <td colSpan={7} style={{ height: padTop }} />
+                <td colSpan={8} style={{ height: padTop }} />
               </tr>
             ) : null}
             {shownRows.map((row) => {
@@ -340,7 +369,7 @@ export function TablePanel({ features, selectedFeatureIds, onSelectFeature, onSe
             })}
             {padBottom > 0 ? (
               <tr aria-hidden="true">
-                <td colSpan={7} style={{ height: padBottom }} />
+                <td colSpan={8} style={{ height: padBottom }} />
               </tr>
             ) : null}
           </tbody>

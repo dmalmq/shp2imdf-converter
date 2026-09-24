@@ -1455,6 +1455,8 @@ export function ReviewPage() {
                 />
                 <TablePanel
                   features={filteredFeatures}
+                  levelOptions={levelOptions}
+                  issuesByFeature={issuesByFeature}
                   selectedFeatureIds={selectedFeatureIds}
                   onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
                   onSelectionChange={(ids) => setSelectedFeatureIds(ids)}

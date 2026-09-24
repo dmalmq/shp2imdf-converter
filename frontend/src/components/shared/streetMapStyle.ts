@@ -17,6 +17,7 @@ export const STREET_MAP_STYLE: StyleSpecification = {
       type: "raster",
       tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
       tileSize: 256,
+      maxzoom: 19,
       attribution: "&copy; OpenStreetMap contributors"
     }
   },
