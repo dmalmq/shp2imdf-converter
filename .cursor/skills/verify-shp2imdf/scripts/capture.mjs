@@ -5,9 +5,11 @@
  *   node .cursor/skills/verify-shp2imdf/scripts/capture.mjs [--label baseline]
  *     [--frontend-port 5310] [--backend-port 8310] [--out <dir>] [--cleanup]
  * Output defaults to artifacts/captures/<label>/ with manifest.json listing
- * { screen, theme, lang, path } per image, path relative to the manifest.
+ * { screen, theme, lang, path } per image, path relative to the manifest. A
+ * rerun replaces only a folder carrying the script's .capture-output marker.
  * Servers are attached or launched as `control.mjs launch` does; --cleanup
- * stops afterwards only the ones this pair's state file records as started.
+ * stops afterwards, even when launch fails, only the ones this pair's state
+ * file records as started.
  */
 
 import { spawnSync } from "node:child_process";
@@ -33,6 +35,7 @@ import {
 const THEMES = ["light", "dark"];
 const LANGS = ["en", "ja"];
 const VIEWPORT = { width: 1440, height: 960 };
+const OUT_MARKER = ".capture-output";
 
 // Accessible names in both languages, since the toggles are pressed from
 // whichever language the previous capture left the page in.
@@ -173,9 +176,14 @@ async function captureShapefileFlow(page, shoot) {
   await page.locator(".maplibregl-canvas").first().waitFor({ timeout: 30000 });
   await shoot("review", { wait: 2500 });
 
+  // The toast is pushed only after the response is applied and features are
+  // reloaded; waiting for the busy label to vanish can pass before the
+  // request has even started.
+  await dismissToasts(page);
   await page.getByRole("button", { name: "Validate", exact: true }).click();
-  await page.getByRole("button", { name: "Validate", exact: true }).waitFor({ timeout: 60000 });
-  await page.waitForFunction(() => !document.body.innerText.includes("Validating..."), null, { timeout: 60000 });
+  const outcome = page.getByRole("status").filter({ hasText: /^(Validation complete|Validation failed)/ });
+  await outcome.first().waitFor({ timeout: 60000 });
+  if (/^Validation failed/.test(await outcome.first().innerText())) throw new Error("validation failed on review");
   await shoot("review-validated", { wait: 1500 });
 
   await page.getByRole("button", { name: "Export", exact: true }).click();
@@ -203,17 +211,35 @@ async function captureIllustratorFlow(page, shoot, artwork) {
   await shoot("illustrator-export", { wait: 800 });
 }
 
+// --out can name any folder, so a rerun only clears one this script made.
+function prepareOutDir(dir) {
+  if (fs.existsSync(dir)) {
+    const entries = fs.readdirSync(dir);
+    if (entries.length > 0 && !entries.includes(OUT_MARKER)) {
+      throw new Error(`refusing to clear ${dir}: it is not empty and has no ${OUT_MARKER}, so capture.mjs did not create it`);
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, OUT_MARKER), "written by capture.mjs; the folder is replaced on the next run\n", "utf8");
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   configurePorts(options.ports);
-  cmdFixtures();
-  await cmdLaunch();
-  if (!(await cmdDoctor())) throw new Error("doctor failed; refusing to capture");
+  prepareOutDir(options.out);
+  try {
+    cmdFixtures();
+    await cmdLaunch();
+    if (!(await cmdDoctor())) throw new Error("doctor failed; refusing to capture");
+    await capture(options);
+  } finally {
+    if (options.cleanup) cmdCleanup();
+  }
+}
 
-  fs.rmSync(options.out, { recursive: true, force: true });
-  fs.mkdirSync(options.out, { recursive: true });
+async function capture(options) {
   const artwork = writeArtworkFixture(options.out);
-
   const manifest = [];
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: true });
@@ -238,7 +264,6 @@ async function main() {
     await browser.close();
     fs.rmSync(artwork, { force: true });
     fs.writeFileSync(path.join(options.out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-    if (options.cleanup) cmdCleanup();
   }
   const screens = new Set(manifest.map((entry) => entry.screen));
   console.log(`${screens.size} screens, ${manifest.length} images → ${options.out}`);

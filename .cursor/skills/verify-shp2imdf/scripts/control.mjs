@@ -274,7 +274,8 @@ function taskkill(pid) {
 
 async function cmdLaunch() {
   cmdFixtures();
-  const state = readState();
+  // Timestamps from the previous launch/cleanup would read as this run's.
+  const { cleanedAt: _cleaned, launchedAt: _launched, ...state } = readState();
   const backend = await probe(`${BACKEND_URL}${HEALTH_PATH}`);
   const frontend = await probe(FRONTEND_URL);
 
@@ -301,6 +302,7 @@ async function cmdLaunch() {
       { CORS_ALLOWED_ORIGINS: FRONTEND_URL }
     );
     state.backendPid = pid;
+    state.backendMatch = ["uvicorn", "backend.main:app", `--port ${BACKEND_PORT}`];
     state.startedBackend = true;
     state.backendLog = logFile;
     writeState(state);
@@ -322,6 +324,7 @@ async function cmdLaunch() {
     const viteArgs = viteConfig ? [viteJs, "--config", viteConfig] : [viteJs];
     const pid = spawnLogged(process.execPath, viteArgs, path.join(repoRoot, "frontend"), logFile);
     state.frontendPid = pid;
+    state.frontendMatch = viteConfig ? [viteJs, viteConfig] : [viteJs];
     state.startedFrontend = true;
     state.frontendLog = logFile;
     writeState(state);
@@ -387,17 +390,46 @@ function cmdStatus() {
   console.log(JSON.stringify({ repoRoot, ...readState() }, null, 2));
 }
 
+function processCommandLine(pid) {
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}").CommandLine`],
+    { encoding: "utf8", windowsHide: true }
+  );
+  return (result.stdout || "").trim();
+}
+
+function normalisedCommand(text) {
+  return text.replace(/\//g, "\\").replace(/["']/g, "").toLowerCase();
+}
+
+// Windows reuses PIDs, so after a crash the recorded one can belong to someone
+// else's process. Kill it only if its command line still carries what launch ran.
+function stopOwned(role, pid, match) {
+  const commandLine = processCommandLine(pid);
+  if (!commandLine) {
+    console.log(`cleanup: ${role} pid=${pid} is no longer running`);
+    return;
+  }
+  const haystack = normalisedCommand(commandLine);
+  const missing = (match || []).filter((needle) => !haystack.includes(normalisedCommand(needle)));
+  if (!match || missing.length) {
+    console.log(`cleanup: skipping ${role} pid=${pid}; its command line is not the one launched: ${commandLine}`);
+    return;
+  }
+  console.log(`stopping ${role} pid=${pid}`);
+  taskkill(pid);
+}
+
 function cmdCleanup() {
   const state = readState();
   if (state.startedFrontend && state.frontendPid) {
-    console.log(`stopping frontend pid=${state.frontendPid}`);
-    taskkill(state.frontendPid);
+    stopOwned("frontend", state.frontendPid, state.frontendMatch);
   } else {
     console.log("cleanup: not stopping frontend (not started by this run)");
   }
   if (state.startedBackend && state.backendPid) {
-    console.log(`stopping backend pid=${state.backendPid}`);
-    taskkill(state.backendPid);
+    stopOwned("backend", state.backendPid, state.backendMatch);
   } else {
     console.log("cleanup: not stopping backend (not started by this run)");
   }

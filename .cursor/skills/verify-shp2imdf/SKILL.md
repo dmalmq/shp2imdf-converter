@@ -104,7 +104,7 @@ Proof standards:
 node .cursor/skills/verify-shp2imdf/scripts/capture.mjs --label baseline [--frontend-port 5420 --backend-port 8420] [--cleanup]
 ```
 
-Screenshots every screen in light/dark × EN/日本語 for before/after review: Upload (empty, queued), each wizard section with Project & Venue filled, Summary, Review (map, after Validate, export dialog), and the Illustrator route (bring in, name floors from a generated three-page `.ai`, place, export tab). Launches or attaches like `launch`; `--cleanup` then stops only what the pair's state file owns. Output replaces `artifacts/captures/<label>/` (gitignored, `--out` overrides): `<screen>.<theme>.<lang>.png` plus `manifest.json`, an array of `{ screen, theme, lang, path }` with `path` relative to the manifest. Theme and language are switched with the app's own toggles (theme falls back to the `.dark` class); toasts are dismissed before each shot. It creates a real import session and an Illustrator conversion, and never saves a placement.
+Screenshots every screen in light/dark × EN/日本語 for before/after review: Upload (empty, queued), each wizard section with Project & Venue filled, Summary, Review (map, after Validate, export dialog), and the Illustrator route (bring in, name floors from a generated three-page `.ai`, place, export tab). Launches or attaches like `launch`; `--cleanup` then stops only what the pair's state file owns, also when launch fails. Output replaces `artifacts/captures/<label>/` (gitignored, `--out` overrides), but only a folder that is new, empty or carries the script's `.capture-output` marker; anything else is refused: `<screen>.<theme>.<lang>.png` plus `manifest.json`, an array of `{ screen, theme, lang, path }` with `path` relative to the manifest. Theme and language are switched with the app's own toggles (theme falls back to the `.dark` class); toasts are dismissed before each shot. It creates a real import session and an Illustrator conversion, and never saves a placement.
 
 ## Cleanup
 
@@ -112,7 +112,7 @@ Screenshots every screen in light/dark × EN/日本語 for before/after review: 
 node .cursor/skills/verify-shp2imdf/scripts/control.mjs cleanup
 ```
 
-Kills only processes listed in `.run/state.json` with `startedBackend` / `startedFrontend` true (Windows `taskkill /T /F` on that PID). Leaves an attached colleague instance running. Closes browsers the `drive` command started (those are already closed in a `finally` after each drive). Does **not** delete `artifacts/verify-shp2imdf/`.
+Kills only processes listed in `.run/state.json` with `startedBackend` / `startedFrontend` true (Windows `taskkill /T /F` on that PID), and only after checking that the PID's command line still carries what launch ran (uvicorn with its `--port`, or the Vite script and config); a reused PID is skipped and reported. Leaves an attached colleague instance running. Closes browsers the `drive` command started (those are already closed in a `finally` after each drive). Does **not** delete `artifacts/verify-shp2imdf/`.
 
 After a failed iteration, run cleanup before the next launch so a half-started Vite does not hold 5310.
 
