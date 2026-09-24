@@ -15,7 +15,9 @@ paths with no IMDF semantics.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import shutil
 import time
 from dataclasses import dataclass
@@ -28,6 +30,14 @@ _META_NAME = "conversion.json"
 _GPKG_NAME = "artwork.gpkg"
 _FLOORS_NAME = "floors.json"
 _LAST_USED_NAME = "last_used"
+
+logger = logging.getLogger(__name__)
+
+# ``put`` names entries with ``uuid4().hex``. Ids arrive from the URL, so anything
+# else is rejected before it can name a path.
+_CONVERSION_ID_PATTERN = re.compile(r"[0-9a-f]{32}")
+
+_UNAVAILABLE = "That conversion is no longer available. Convert the file again."
 
 
 class ConversionExpiredError(Exception):
@@ -94,13 +104,20 @@ class ConversionStore:
         return cached
 
     def get(self, conversion_id: str) -> CachedConversion:
-        directory = self.root / conversion_id
+        directory = self._directory_for(conversion_id)
         meta_path = directory / _META_NAME
         if not meta_path.is_file():
-            raise ConversionExpiredError(
-                "That conversion is no longer available. Convert the file again."
-            )
-        cached = self._load(meta_path)
+            raise ConversionExpiredError(_UNAVAILABLE)
+        try:
+            cached = self._load(meta_path)
+        except OSError as exc:
+            # A lock (antivirus, another reader) is not corruption: keep the entry.
+            logger.warning("Conversion %s could not be read: %s", conversion_id, exc)
+            raise ConversionExpiredError(_UNAVAILABLE) from exc
+        except (ValueError, KeyError) as exc:
+            logger.warning("Conversion %s is corrupt and was removed: %s", conversion_id, exc)
+            self._discard(directory)
+            raise ConversionExpiredError(_UNAVAILABLE) from exc
         if self._is_expired(cached):
             self._discard(directory)
             raise ConversionExpiredError("That conversion has expired. Convert the file again.")
@@ -112,7 +129,10 @@ class ConversionStore:
         for meta_path in self.root.glob(f"*/{_META_NAME}"):
             try:
                 cached = self._load(meta_path)
-            except (OSError, ValueError, KeyError):
+            except OSError as exc:
+                logger.warning("Skipping unreadable conversion %s: %s", meta_path.parent.name, exc)
+                continue
+            except (ValueError, KeyError):
                 self._discard(meta_path.parent)
                 removed += 1
                 continue
@@ -128,6 +148,14 @@ class ConversionStore:
             json.dumps(floors, ensure_ascii=False), encoding="utf-8"
         )
         return self.get(conversion_id)
+
+    def _directory_for(self, conversion_id: str) -> Path:
+        if not isinstance(conversion_id, str) or not _CONVERSION_ID_PATTERN.fullmatch(conversion_id):
+            raise ConversionExpiredError(_UNAVAILABLE)
+        directory = self.root / conversion_id
+        if directory.resolve().parent != self.root.resolve():
+            raise ConversionExpiredError(_UNAVAILABLE)
+        return directory
 
     def _load(self, meta_path: Path) -> CachedConversion:
         payload = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -163,9 +191,7 @@ class ConversionStore:
             marker.touch()
             os.utime(marker, (now, now))
         except FileNotFoundError as exc:
-            raise ConversionExpiredError(
-                "That conversion is no longer available. Convert the file again."
-            ) from exc
+            raise ConversionExpiredError(_UNAVAILABLE) from exc
         cached.last_used_at = now
 
     def _enforce_cap(self) -> None:
@@ -173,7 +199,9 @@ class ConversionStore:
         for meta_path in self.root.glob(f"*/{_META_NAME}"):
             try:
                 entries.append(self._load(meta_path))
-            except (OSError, ValueError, KeyError):
+            except OSError as exc:
+                logger.warning("Skipping unreadable conversion %s: %s", meta_path.parent.name, exc)
+            except (ValueError, KeyError):
                 self._discard(meta_path.parent)
         surplus = len(entries) - self.max_entries
         if surplus <= 0:
@@ -181,6 +209,13 @@ class ConversionStore:
         for cached in sorted(entries, key=lambda item: item.last_used_at)[:surplus]:
             self._discard(cached.directory)
 
-    @staticmethod
-    def _discard(directory: Path) -> None:
-        shutil.rmtree(directory, ignore_errors=True)
+    def _discard(self, directory: Path) -> None:
+        # Only ever delete an entry directory: a direct child of the store root.
+        try:
+            target = Path(directory).resolve()
+            root = self.root.resolve()
+        except OSError:
+            return
+        if target.parent != root or target == root:
+            return
+        shutil.rmtree(target, ignore_errors=True)

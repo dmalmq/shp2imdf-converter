@@ -116,7 +116,7 @@ def _cached_shapes(
             )
             written.append({"table": "Buildings__lines", "ai_layer": "Buildings", "role": "line"})
     return CachedConversion(
-        conversion_id="synthetic",
+        conversion_id="5717e71c" * 4,
         directory=tmp_path,
         stem="synthetic",
         written_layers=written,

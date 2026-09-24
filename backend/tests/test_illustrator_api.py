@@ -449,3 +449,151 @@ def test_floors_json_round_trips_pages_with_a_null_box(tmp_path) -> None:
     floors = [{"label": "1F", "box": None, "pages": [1, 2], "layer_names": None}]
     assert store.assign(cached.conversion_id, floors).floors == floors
     assert store.get(cached.conversion_id).floors == floors
+
+
+def _plant(directory, meta: str):
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "conversion.json").write_text(meta, encoding="utf-8")
+    (directory / "keep.txt").write_text("keep", encoding="utf-8")
+    return directory
+
+
+_EXPIRED_META = (
+    '{"conversion_id": "x", "stem": "s", "written_layers": [], "layer_order": [],'
+    ' "report": {}, "created_at": 0}'
+)
+
+# Encoded forms that survive routing and arrive at the handler as the id. Hosts
+# are .invalid so a regression can never open an SMB connection to a real one.
+_TRAVERSING_IDS = [
+    "%2E%2E",
+    "%2E",
+    "..%5Cvictim",
+    "%2E%2E%5Cvictim",
+    "%5C%5Cattacker.invalid%5Cshare",
+    "C:%5CWindows",
+    "ABCDEF0123456789ABCDEF0123456789",
+    "0123456789abcdef0123456789abcdef0",
+]
+
+_ID_ROUTES = ["assign", "export", "shape-matches", "region-matches", "survey-snap"]
+
+
+def _route_body(route: str) -> dict:
+    transform = _body([0.0, 0.0, 200.0, 200.0])["floors"][0]["transform"]
+    if route == "assign":
+        return _assign_body()
+    if route == "export":
+        return _body([0.0, 0.0, 200.0, 200.0])
+    if route == "shape-matches":
+        return {
+            "floor_label": "1F",
+            "artwork": {"source_table": "Buildings", "source_row": 0},
+            "current_transform": transform,
+            "scale_locked": False,
+            "reference": {"type": "FeatureCollection", "features": []},
+        }
+    if route == "region-matches":
+        return {
+            "floor_label": "2F",
+            "region": [0.0, 0.0, 100.0, 100.0],
+            "current_transform": transform,
+            "scale_locked": False,
+            "reference_floor": {
+                "label": "1F",
+                "transform": transform,
+                "region": [0.0, 0.0, 100.0, 100.0],
+            },
+        }
+    return {
+        "current_transform": transform,
+        "scale_locked": False,
+        "reference": {"type": "FeatureCollection", "features": []},
+    }
+
+
+@pytest.mark.georef
+@pytest.mark.parametrize("route", _ID_ROUTES)
+def test_route_bodies_are_valid_so_the_id_is_what_is_rejected(test_client, route: str) -> None:
+    response = test_client.post(
+        f"/api/convert/illustrator/{'0' * 32}/{route}", json=_route_body(route)
+    )
+    assert response.status_code == 404, response.text
+    assert response.json()["code"] == "CONVERSION_EXPIRED"
+
+
+@pytest.mark.georef
+@pytest.mark.parametrize("encoded_id", _TRAVERSING_IDS)
+@pytest.mark.parametrize("route", _ID_ROUTES)
+def test_traversing_conversion_ids_are_404_and_delete_nothing(
+    test_client, tmp_path, encoded_id: str, route: str
+) -> None:
+    temp_dir = tmp_path / "tmp"
+    parent = _plant(temp_dir, _EXPIRED_META)
+    victim = _plant(temp_dir / "victim", _EXPIRED_META)
+    test_client.app.state.illustrator_store.ttl_seconds = -1
+
+    response = test_client.post(
+        f"/api/convert/illustrator/{encoded_id}/{route}", json=_route_body(route)
+    )
+
+    assert response.status_code == 404, response.text
+    assert response.json()["code"] == "CONVERSION_EXPIRED"
+    assert (parent / "keep.txt").is_file()
+    assert (victim / "keep.txt").is_file()
+    assert (temp_dir / "illustrator").is_dir()
+    assert not (parent / "floors.json").exists()
+
+
+@pytest.mark.georef
+@pytest.mark.parametrize(
+    "encoded_id",
+    ["%5C%5Cattacker.invalid%5Cshare", "%5C%5Chost.invalid%5Cx", "C:%5CWindows", "%2E%2E"],
+)
+@pytest.mark.parametrize("route", _ID_ROUTES)
+def test_a_hostile_id_never_reaches_the_filesystem(
+    test_client, monkeypatch, encoded_id: str, route: str
+) -> None:
+    import os
+
+    markers = (".invalid", "Windows", "..")
+    seen: list[str] = []
+
+    def spy(name, real):
+        def wrapper(path, *args, **kwargs):
+            text = str(path)
+            if text.startswith(("\\\\", "//")) or any(marker in text for marker in markers):
+                seen.append(f"{name}({text})")
+            return real(path, *args, **kwargs)
+
+        return wrapper
+
+    for owner, name in [(os, "stat"), (os, "lstat"), (os.path, "realpath")]:
+        monkeypatch.setattr(owner, name, spy(name, getattr(owner, name)))
+
+    response = test_client.post(
+        f"/api/convert/illustrator/{encoded_id}/{route}", json=_route_body(route)
+    )
+
+    assert response.status_code == 404, response.text
+    assert response.json()["code"] == "CONVERSION_EXPIRED"
+    assert seen == []
+
+
+@pytest.mark.georef
+def test_a_traversing_id_onto_a_corrupt_entry_is_404_not_500(test_client, tmp_path) -> None:
+    _plant(tmp_path / "tmp", "not json")
+    response = test_client.post("/api/convert/illustrator/%2E%2E/assign", json=_assign_body())
+    assert response.status_code == 404, response.text
+    assert response.json()["code"] == "CONVERSION_EXPIRED"
+
+
+@pytest.mark.georef
+def test_valid_ids_still_assign_after_rejected_ones(test_client) -> None:
+    for encoded_id in _TRAVERSING_IDS:
+        test_client.post(f"/api/convert/illustrator/{encoded_id}/assign", json=_assign_body())
+    payload = _preview(test_client).json()
+    response = test_client.post(
+        f"/api/convert/illustrator/{payload['conversion_id']}/assign", json=_assign_body()
+    )
+    assert response.status_code == 200, response.text

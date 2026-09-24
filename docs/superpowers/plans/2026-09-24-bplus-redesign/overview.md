@@ -85,6 +85,8 @@ Verification uses the repo's own driver, `.cursor/skills/verify-shp2imdf/scripts
 14. [Illustrator route in B+](phase-14-illustrator.md)
 15. [Japanese copy and dark pass](phase-15-polish.md)
 
+Phases 5 and 6 share one design, including the storage-safety PR that precedes them: [design-05-06.md](design-05-06.md).
+
 Phases 1, 2 and 3 have no dependency on each other and run in parallel. Phase 4 needs 2.
 Phases 5 and 6 are the structural core; 7 needs both. 8–11 need 4 and 5. 12 needs 4 and the
 stage pages it searches. 13 needs 6. 14 needs 4, 5 and 3. 15 is last.
