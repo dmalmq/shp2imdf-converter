@@ -5,7 +5,7 @@ description: Drive the SHP → IMDF Converter web UI (Vite :5310 + FastAPI :8310
 
 # Verify SHP → IMDF Converter
 
-Primary surface: the browser app at `http://localhost:5310` (title `SHP to IMDF Converter`, header `IMDF Converter`). Backend API is `http://localhost:8310`. Vite proxies `/api` to the backend, so drive the UI on 5310, not 8310. Vite's default host is `localhost`; on this Windows PC that is often `[::1]` only — Node's IPv4-first lookup of `localhost` would miss it, so the helper sets `dns.setDefaultResultOrder('verbatim')`. Do not assume `http://127.0.0.1:5310` is the same instance.
+Primary surface: the browser app at `http://localhost:5310` (title `SHP to IMDF Converter`, header wordmark `shp2imdf`). Backend API is `http://localhost:8310`. Vite proxies `/api` to the backend, so drive the UI on 5310, not 8310. Vite's default host is `localhost`; on this Windows PC that is often `[::1]` only — Node's IPv4-first lookup of `localhost` would miss it, so the helper sets `dns.setDefaultResultOrder('verbatim')`. Do not assume `http://127.0.0.1:5310` is the same instance.
 
 Also exists, not the primary surface: REST under `/api/*` (health, import, session wizard, features, export, illustrator convert/placements). Unit tests (`pytest`, Vitest) and `audit-ui.mjs` / `audit-review.mjs` are not a substitute for this skill — they do not keep proof artifacts and `audit-*.mjs` assume a already-running UI.
 
@@ -67,7 +67,7 @@ Stable handles (do not use click coordinates):
 
 | User control | Handle |
 |---|---|
-| App identity | text `IMDF Converter`; document title `SHP to IMDF Converter` |
+| App identity | top-bar wordmark `shp2imdf`; document title `SHP to IMDF Converter` |
 | Language | button `日本語` or `EN` (title `Switch UI language`) |
 | Theme | button `Switch theme` (toggles `.dark` on `<html>`) |
 | Steps | buttons `Import`, `Configure`, `Review & Export` |
@@ -93,7 +93,7 @@ Proof standards:
 
 - Exercise the real UI path (file picker, Import, wizard, review). Do not PATCH zustand or call `/api/import` as a stand-in for `import-shapefiles`.
 - Capture the action and the result: screenshot + ARIA snapshot after the state change, plus `report.md` with URL, feature id, and entry point.
-- Identity must be visible (`IMDF Converter` or the wizard/review chrome).
+- Identity must be visible (the `shp2imdf` top bar).
 - Side effects: a successful import navigates to `/wizard` (standard) or `/review` (IMDF-schema / `.imdf` reopen). Confirm the URL, not only a toast.
 - Import **does** create a real in-memory session and can evict the oldest of `MAX_SESSIONS` (default 5). That is a production behavior — record it; do not pretend it is a dry-run.
 - Do not save, overwrite, or delete named Illustrator placements (`data/placements.db`). Opening `/illustrator` is safe; clicking Save on a named placement is not.
