@@ -68,7 +68,7 @@ const config: Config = {
         sm: "calc(var(--radius) - 4px)"
       },
       fontFamily: {
-        sans: ["Geist Variable", "IBM Plex Sans JP", "system-ui", "sans-serif"],
+        sans: ["IBM Plex Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", "system-ui", "sans-serif"],
         mono: ["Geist Mono Variable", "ui-monospace", "monospace"],
         display: ["Fraunces", "IBM Plex Sans JP", "Georgia", "serif"]
       },
