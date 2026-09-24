@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import logging
 from pathlib import Path
 import os
+import shutil
+import threading
+import time
 import zipfile
 
 from fastapi import FastAPI, Request
@@ -31,6 +35,10 @@ from backend.src.reference_overlay import ReferenceOverlayStore
 from backend.src.schemas import ErrorResponse
 from backend.src.session import SessionManager, build_session_backend
 from backend.src.session_lock import SessionLockMiddleware
+
+logger = logging.getLogger(__name__)
+
+_CLEANUP_INTERVAL_SECONDS = 3600
 
 
 def _load_session_manager() -> SessionManager:
@@ -60,11 +68,39 @@ def _load_reference_overlay() -> ReferenceOverlayStore:
 async def _session_cleanup_loop(app: FastAPI, stop: asyncio.Event) -> None:
     while True:
         try:
-            await asyncio.wait_for(stop.wait(), timeout=3600)
+            await asyncio.wait_for(stop.wait(), timeout=_CLEANUP_INTERVAL_SECONDS)
             break
         except TimeoutError:
-            app.state.session_manager.prune_expired()
-            app.state.illustrator_store.prune()
+            pass
+        for prune in (app.state.session_manager.prune_expired, app.state.illustrator_store.prune):
+            try:
+                await asyncio.to_thread(prune)
+            except Exception:
+                logger.exception("Periodic cleanup failed; retrying next interval")
+
+
+def _prune_orphan_uploads(uploads_dir: Path, manager: SessionManager) -> None:
+    """Delete upload dirs no live session owns, once they are older than the session TTL."""
+    try:
+        live = {
+            Path(summary.upload_artifact_dir).resolve()
+            for summary in manager.backend.list_summaries()
+            if summary.upload_artifact_dir
+        }
+        cutoff = time.time() - manager.ttl.total_seconds()
+        removed = 0
+        for entry in uploads_dir.iterdir():
+            try:
+                if not entry.is_dir() or entry.resolve() in live or entry.stat().st_mtime >= cutoff:
+                    continue
+            except OSError:
+                continue
+            shutil.rmtree(entry, ignore_errors=True)
+            removed += 1
+        if removed:
+            logger.info("Removed %d orphaned upload directories from %s", removed, uploads_dir)
+    except Exception:
+        logger.exception("Orphaned upload cleanup failed")
 
 
 @asynccontextmanager
@@ -73,6 +109,13 @@ async def lifespan(app: FastAPI):
     app.state.max_upload_bytes = _load_max_upload_bytes()
     app.state.session_uploads_dir = Path(os.getenv("SESSION_UPLOADS_DIR", "./data/session_uploads"))
     app.state.session_uploads_dir.mkdir(parents=True, exist_ok=True)
+    # A daemon thread: thousands of leftover dirs must not hold up startup or shutdown.
+    threading.Thread(
+        target=_prune_orphan_uploads,
+        args=(app.state.session_uploads_dir, app.state.session_manager),
+        name="orphan-upload-cleanup",
+        daemon=True,
+    ).start()
     app.state.filename_keywords_path = Path(__file__).parent / "config" / "filename_keywords.json"
     app.state.unit_categories_path = Path(__file__).parent / "config" / "unit_categories.json"
     app.state.company_mappings_path = Path(__file__).parent / "config" / "company_mappings.json"
