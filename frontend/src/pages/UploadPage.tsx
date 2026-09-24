@@ -15,6 +15,7 @@ import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
 import { Button, Card, Badge, Checkbox, DisabledHint } from "../components/ui";
 import { usePrimaryAction } from "../components/shell/ShellContext";
+import { projectPath } from "../components/shell/stages";
 import { cn } from "@/lib/utils";
 
 /**
@@ -201,10 +202,8 @@ function toQueuedUploadFile(file: File): QueuedUploadFile | null {
 
 export function UploadPage() {
   const navigate = useNavigate();
-  const setSessionId = useAppStore((state) => state.setSessionId);
-  const setImportProfile = useAppStore((state) => state.setImportProfile);
-  const setCurrentScreen = useAppStore((state) => state.setCurrentScreen);
-  const setFiles = useAppStore((state) => state.setFiles);
+  const switchProject = useAppStore((state) => state.switchProject);
+  const projectLoaded = useAppStore((state) => state.projectLoaded);
   const setCleanupSummary = useAppStore((state) => state.setCleanupSummary);
   const setSessionExpiredMessage = useAppStore((state) => state.setSessionExpiredMessage);
   const pushToast = useToast();
@@ -390,15 +389,14 @@ export function UploadPage() {
     try {
       const payload = await importImdf(file);
       setSessionExpiredMessage(null);
-      setSessionId(payload.session_id);
-      setImportProfile("standard");
-      setCurrentScreen("review");
+      switchProject(payload.session_id);
+      projectLoaded(payload.session_id, { importProfile: "standard", files: [], reviewReached: true });
       pushToast({
         title: t("IMDF archive opened", "IMDFアーカイブを開きました"),
         description: t(`${payload.feature_count} features loaded.`, `${payload.feature_count} 件のフィーチャーを読み込みました。`),
         variant: "success"
       });
-      navigate("/review");
+      navigate(projectPath(payload.session_id, "check"), { replace: true });
     } catch (caught) {
       const message = handleApiError(caught, t("Failed to open IMDF archive", "IMDFアーカイブを開けませんでした"), {
         title: t("Open failed", "オープン失敗")
@@ -437,12 +435,15 @@ export function UploadPage() {
           ? await importImdfShapefiles(selectedFiles, setProgress, preferFilenameFloor)
           : await importShapefiles(selectedFiles, setProgress);
       setSessionExpiredMessage(null);
-      setSessionId(payload.session_id);
-      setImportProfile(payload.import_profile);
-      setFiles(payload.files);
+      const imdfShapefiles = payload.import_profile === "imdf_shapefile";
+      switchProject(payload.session_id);
+      projectLoaded(payload.session_id, {
+        importProfile: payload.import_profile,
+        files: payload.files,
+        reviewReached: imdfShapefiles
+      });
       setCleanupSummary(payload.cleanup_summary);
       setLastCleanup(payload.cleanup_summary);
-      setCurrentScreen(payload.import_profile === "imdf_shapefile" ? "review" : "wizard");
 
       pushToast({
         title: t("Import complete", "インポート完了"),
@@ -461,7 +462,7 @@ export function UploadPage() {
         });
       }
 
-      navigate(payload.import_profile === "imdf_shapefile" ? "/review" : "/wizard");
+      navigate(projectPath(payload.session_id, imdfShapefiles ? "check" : "set-up"), { replace: true });
     } catch (caught) {
       const message = handleApiError(caught, t("Import failed", "インポートに失敗しました"), {
         title: t("Import failed", "インポート失敗")

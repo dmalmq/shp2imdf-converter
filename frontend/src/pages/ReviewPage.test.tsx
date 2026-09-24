@@ -478,7 +478,7 @@ test("selecting a table row selects it for the rest of the screen", async () => 
 
 function renderInShell() {
   return render(
-    <MemoryRouter initialEntries={["/review"]}>
+    <MemoryRouter initialEntries={["/p/session-123/check"]}>
       <ToastProvider>
         <AppShell>
           <ReviewPage />

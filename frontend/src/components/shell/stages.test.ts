@@ -2,7 +2,11 @@ import {
   artworkStages,
   datasetStem,
   flowForPath,
+  landingStage,
+  parseProjectPath,
+  projectPath,
   shapefileStages,
+  stageReachable,
   stationName,
   type ShapefileInput,
   type Stage
@@ -16,7 +20,7 @@ const targets = (stages: Stage[]) =>
 
 const base: ShapefileInput = {
   pathname: "/",
-  hasSession: false,
+  sessionId: null,
   importProfile: "standard",
   reviewReached: false
 };
@@ -39,22 +43,22 @@ describe("shapefile flow", () => {
   });
 
   test("the wizard is Set up, with Bring in behind it", () => {
-    const stages = shapefileStages({ ...base, pathname: "/wizard", hasSession: true });
+    const stages = shapefileStages({ ...base, pathname: "/p/s1/set-up", sessionId: "s1" });
     expect(statuses(stages)).toEqual(["done", "current", "todo", "todo"]);
-    expect(targets(stages)).toEqual(["/", null, null, null]);
+    expect(targets(stages)).toEqual(["/p/s1/bring-in", null, null, null]);
   });
 
   test("Check opens from the wizard once Review has been reached", () => {
-    const stages = shapefileStages({ ...base, pathname: "/wizard", hasSession: true, reviewReached: true });
+    const stages = shapefileStages({ ...base, pathname: "/p/s1/set-up", sessionId: "s1", reviewReached: true });
     expect(statuses(stages)).toEqual(["done", "current", "todo", "todo"]);
-    expect(targets(stages)).toEqual(["/", null, "/review", null]);
+    expect(targets(stages)).toEqual(["/p/s1/bring-in", null, "/p/s1/check", "/p/s1/deliver"]);
   });
 
   test("Check is blocked from the wizard while Generate cannot run", () => {
     const stages = shapefileStages({
       ...base,
-      pathname: "/wizard",
-      hasSession: true,
+      pathname: "/p/s1/set-up",
+      sessionId: "s1",
       page: { nextBlockedReason: { en: "Finish sections", ja: "未完了" } }
     });
     expect(statuses(stages)).toEqual(["done", "current", "blocked", "todo"]);
@@ -63,13 +67,13 @@ describe("shapefile flow", () => {
   test("Review is Check; Deliver goes to the page's export dialog", () => {
     const stages = shapefileStages({
       ...base,
-      pathname: "/review",
-      hasSession: true,
+      pathname: "/p/s1/check",
+      sessionId: "s1",
       reviewReached: true,
       page: { targets: ["deliver"], checkErrors: 3 }
     });
     expect(statuses(stages)).toEqual(["done", "done", "current", "todo"]);
-    expect(targets(stages)).toEqual(["/", "/wizard", null, "page"]);
+    expect(targets(stages)).toEqual(["/p/s1/bring-in", "/p/s1/set-up", null, "page"]);
     expect(stages[2].detail).toEqual({ en: "3 to fix", ja: "要修正 3 件" });
     expect(stages[2].detailTone).toBe("danger");
   });
@@ -77,8 +81,8 @@ describe("shapefile flow", () => {
   test("Check says so when validation found nothing", () => {
     const stages = shapefileStages({
       ...base,
-      pathname: "/review",
-      hasSession: true,
+      pathname: "/p/s1/check",
+      sessionId: "s1",
       reviewReached: true,
       page: { checkErrors: 0 }
     });
@@ -89,8 +93,8 @@ describe("shapefile flow", () => {
   test("an open export dialog makes Deliver current", () => {
     const stages = shapefileStages({
       ...base,
-      pathname: "/review",
-      hasSession: true,
+      pathname: "/p/s1/check",
+      sessionId: "s1",
       reviewReached: true,
       page: { current: "deliver", targets: ["deliver"] }
     });
@@ -101,8 +105,8 @@ describe("shapefile flow", () => {
   test("IMDF shapefile imports skip Set up, so it is never a link", () => {
     const stages = shapefileStages({
       ...base,
-      pathname: "/review",
-      hasSession: true,
+      pathname: "/p/s1/check",
+      sessionId: "s1",
       importProfile: "imdf_shapefile",
       reviewReached: true
     });
@@ -112,15 +116,15 @@ describe("shapefile flow", () => {
   });
 
   test("back on Bring in with a session, the later stages stay reachable", () => {
-    const stages = shapefileStages({ ...base, hasSession: true, reviewReached: true });
+    const stages = shapefileStages({ ...base, sessionId: "s1", reviewReached: true });
     expect(statuses(stages)).toEqual(["current", "done", "todo", "todo"]);
-    expect(targets(stages)).toEqual([null, "/wizard", "/review", null]);
+    expect(targets(stages)).toEqual([null, "/p/s1/set-up", "/p/s1/check", "/p/s1/deliver"]);
   });
 
   test("with a session that has not reached Review, Check is not a link", () => {
-    const stages = shapefileStages({ ...base, hasSession: true });
+    const stages = shapefileStages({ ...base, sessionId: "s1" });
     expect(statuses(stages)).toEqual(["current", "todo", "todo", "todo"]);
-    expect(targets(stages)).toEqual([null, "/wizard", null, null]);
+    expect(targets(stages)).toEqual([null, "/p/s1/set-up", null, null]);
   });
 });
 
@@ -150,7 +154,51 @@ describe("artwork flow", () => {
 test("the Illustrator route is the artwork flow; every other route is shapefiles", () => {
   expect(flowForPath("/illustrator")).toBe("artwork");
   expect(flowForPath("/")).toBe("shapefiles");
-  expect(flowForPath("/review")).toBe("shapefiles");
+  expect(flowForPath("/p/s1/check")).toBe("shapefiles");
+});
+
+describe("project URLs", () => {
+  test("round-trip the id and stage", () => {
+    expect(projectPath("abc", "set-up")).toBe("/p/abc/set-up");
+    expect(parseProjectPath("/p/abc/set-up")).toEqual({ sessionId: "abc", stage: "set-up" });
+    expect(parseProjectPath("/p/abc")).toEqual({ sessionId: "abc", stage: null });
+    expect(parseProjectPath("/p/abc/")).toEqual({ sessionId: "abc", stage: null });
+    expect(parseProjectPath("/")).toBeNull();
+    expect(parseProjectPath("/illustrator")).toBeNull();
+  });
+
+  test("the stage in the URL is the current stage", () => {
+    const at = (stage: string) =>
+      statuses(shapefileStages({ ...base, pathname: `/p/s1/${stage}`, sessionId: "s1", reviewReached: true }));
+    expect(at("bring-in")).toEqual(["current", "done", "todo", "todo"]);
+    expect(at("set-up")).toEqual(["done", "current", "todo", "todo"]);
+    expect(at("check")).toEqual(["done", "done", "current", "todo"]);
+    expect(at("deliver")).toEqual(["done", "done", "done", "current"]);
+  });
+
+  const projects = [
+    { importProfile: "standard", reviewReached: false },
+    { importProfile: "standard", reviewReached: true },
+    { importProfile: "imdf_shapefile", reviewReached: false },
+    { importProfile: "imdf_shapefile", reviewReached: true }
+  ] as const;
+
+  test.each(projects)("the landing stage is reachable, so a redirect to it cannot loop (%o)", (project) => {
+    expect(stageReachable(landingStage(project), project)).toBe(true);
+  });
+
+  test("Check and Deliver wait for a draft; Set up is closed to IMDF shapefiles", () => {
+    const fresh = { importProfile: "standard", reviewReached: false } as const;
+    expect(stageReachable("bring-in", fresh)).toBe(true);
+    expect(stageReachable("set-up", fresh)).toBe(true);
+    expect(stageReachable("check", fresh)).toBe(false);
+    expect(stageReachable("deliver", fresh)).toBe(false);
+    expect(landingStage(fresh)).toBe("set-up");
+
+    const imdf = { importProfile: "imdf_shapefile", reviewReached: false } as const;
+    expect(stageReachable("set-up", imdf)).toBe(false);
+    expect(landingStage(imdf)).toBe("check");
+  });
 });
 
 describe("station name", () => {

@@ -48,7 +48,8 @@ import { useToast } from "../components/shared/ToastProvider";
 import { type ReviewFeature, featureLayerKey, featureName, layerKeyBaseType, orderedLayerKeys } from "../components/review/types";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
-import { useAppStore } from "../store/useAppStore";
+import { projectPath } from "../components/shell/stages";
+import { useAppStore, useSessionAction } from "../store/useAppStore";
 import {
   Button,
   Checkbox,
@@ -260,24 +261,29 @@ function buildShapefileDefaultsFromWizard(wizardState: WizardState | null): {
 const BULK_NO_LEVEL = "__none__";
 
 
-export function ReviewPage() {
+type ReviewPageProps = {
+  /** Deliver opens the export dialog; Deliver gets its own page in phase 11. */
+  stage?: "check" | "deliver";
+};
+
+export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
   const navigate = useNavigate();
   const sessionId = useAppStore((state) => state.sessionId);
   const importProfile = useAppStore((state) => state.importProfile);
-  const setImportProfile = useAppStore((state) => state.setImportProfile);
+  const setImportProfile = useSessionAction(sessionId, (state) => state.setImportProfile);
   const files = useAppStore((state) => state.files);
-  const setFiles = useAppStore((state) => state.setFiles);
+  const setFiles = useSessionAction(sessionId, (state) => state.setFiles);
   const wizardState = useAppStore((state) => state.wizardState);
   const selectedFeatureIds = useAppStore((state) => state.selectedFeatureIds);
-  const setSelectedFeatureIds = useAppStore((state) => state.setSelectedFeatureIds);
+  const setSelectedFeatureIds = useSessionAction(sessionId, (state) => state.setSelectedFeatureIds);
   const toggleSelectedFeatureId = useAppStore((state) => state.toggleSelectedFeatureId);
   const clearSelectedFeatureIds = useAppStore((state) => state.clearSelectedFeatureIds);
   const filters = useAppStore((state) => state.filters);
   const setFilters = useAppStore((state) => state.setFilters);
-  const setValidationResults = useAppStore((state) => state.setValidationResults);
+  const setValidationResults = useSessionAction(sessionId, (state) => state.setValidationResults);
   const layerVisibility = useAppStore((state) => state.layerVisibility);
   const setLayerVisibility = useAppStore((state) => state.setLayerVisibility);
-  const pushEditHistory = useAppStore((state) => state.pushEditHistory);
+  const pushEditHistory = useSessionAction(sessionId, (state) => state.pushEditHistory);
   const popEditHistory = useAppStore((state) => state.popEditHistory);
 
   const handleApiError = useApiErrorHandler();
@@ -286,6 +292,7 @@ export function ReviewPage() {
 
   const [features, setFeatures] = useState<ReviewFeature[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mapFloorFilter, setMapFloorFilter] = useState<string | null>(null);
   const [bulkLevel, setBulkLevel] = useState("");
@@ -367,6 +374,7 @@ export function ReviewPage() {
       return [];
     } finally {
       setLoading(false);
+      setLoadedOnce(true);
     }
   };
 
@@ -923,10 +931,10 @@ export function ReviewPage() {
       setExportFormat("imdf");
     }
   }, [exportBlocked]);
-  const openExportDialog = async () => {
+  const openExportDialog = async (): Promise<boolean> => {
     const validationResult = await runValidation();
     if (!validationResult) {
-      return;
+      return false;
     }
     const defaults = buildShapefileDefaultsFromWizard(wizardState);
     const sourceCategoryField = defaults.sourceCategoryField.trim();
@@ -940,7 +948,56 @@ export function ReviewPage() {
     setShapefileExportName("");
     setExportOptionsError(null);
     setExportDialogOpen(true);
+    return true;
   };
+
+  // Until Deliver has a page of its own, the export dialog is the Deliver
+  // stage, and the URL and the dialog follow each other. Opening it from
+  // Check adds a history entry, so Back closes it; arriving at /deliver
+  // directly has nothing behind it, so closing replaces the entry instead.
+  const pushedDeliver = useRef(false);
+  const deliverOpened = useRef(false);
+  const previousStage = useRef(stage);
+  const previousDialogOpen = useRef(exportDialogOpen);
+
+  useEffect(() => {
+    if (stage !== "deliver") {
+      deliverOpened.current = false;
+      return;
+    }
+    if (deliverOpened.current || !loadedOnce) return;
+    deliverOpened.current = true;
+    if (exportDialogOpen) return;
+    void openExportDialog().then((opened) => {
+      if (!opened && sessionId) navigate(projectPath(sessionId, "check"), { replace: true });
+    });
+  }, [stage, loadedOnce]);
+
+  useEffect(() => {
+    const was = previousStage.current;
+    previousStage.current = stage;
+    if (was === "deliver" && stage === "check") {
+      pushedDeliver.current = false;
+      setExportDialogOpen(false);
+    }
+  }, [stage]);
+
+  useEffect(() => {
+    const wasOpen = previousDialogOpen.current;
+    previousDialogOpen.current = exportDialogOpen;
+    if (!sessionId || wasOpen === exportDialogOpen) return;
+    if (exportDialogOpen && stage === "check") {
+      pushedDeliver.current = true;
+      navigate(projectPath(sessionId, "deliver"));
+    } else if (!exportDialogOpen && stage === "deliver") {
+      if (pushedDeliver.current) {
+        pushedDeliver.current = false;
+        navigate(-1);
+      } else {
+        navigate(projectPath(sessionId, "check"), { replace: true });
+      }
+    }
+  }, [exportDialogOpen]);
 
   const downloadExport = async () => {
     if (!sessionId) {
