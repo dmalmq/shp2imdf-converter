@@ -100,6 +100,7 @@ beforeEach(() => {
     .mockResolvedValue({ blob: new Blob(["zip"]), filename: "tokyo.zip" });
   URL.createObjectURL = vi.fn(() => "blob:tokyo");
   URL.revokeObjectURL = vi.fn();
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 });
 
 async function placeAndRotate() {
