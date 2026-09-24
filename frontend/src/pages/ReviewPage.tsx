@@ -1,5 +1,5 @@
-import { ChevronRight, Globe, Moon, PanelLeft, Sun, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ChevronRight, PanelLeft, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -72,7 +72,7 @@ import {
   TabsTrigger,
   Textarea
 } from "../components/ui";
-import { StepIndicator } from "../components/shell/StepIndicator";
+import { usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
 import { cn } from "@/lib/utils";
 
 
@@ -268,8 +268,6 @@ export function ReviewPage() {
   const files = useAppStore((state) => state.files);
   const setFiles = useAppStore((state) => state.setFiles);
   const wizardState = useAppStore((state) => state.wizardState);
-  const theme = useAppStore((state) => state.theme);
-  const setTheme = useAppStore((state) => state.setTheme);
   const selectedFeatureIds = useAppStore((state) => state.selectedFeatureIds);
   const setSelectedFeatureIds = useAppStore((state) => state.setSelectedFeatureIds);
   const toggleSelectedFeatureId = useAppStore((state) => state.toggleSelectedFeatureId);
@@ -283,7 +281,7 @@ export function ReviewPage() {
   const popEditHistory = useAppStore((state) => state.popEditHistory);
 
   const handleApiError = useApiErrorHandler();
-  const { uiLanguage, setUiLanguage, t } = useUiLanguage();
+  const { t } = useUiLanguage();
   const pushToast = useToast();
 
   const [features, setFeatures] = useState<ReviewFeature[]>([]);
@@ -1182,60 +1180,29 @@ export function ReviewPage() {
     validation
   ]);
 
+  const exportButtonRef = useRef<HTMLButtonElement>(null);
+  const exportBusy = exporting || validating || loading;
+  usePrimaryAction({
+    label: exporting ? t("Exporting...", "エクスポート中...") : t("Export", "エクスポート"),
+    run: () => void openExportDialog(),
+    disabledReason: exportBusy ? t("Wait for the current task to finish", "処理の完了をお待ちください") : null,
+    busy: exportBusy,
+    blockers: validation?.summary.error_count || null,
+    anchor: exportButtonRef
+  });
+  usePageShell({
+    current: exportDialogOpen && validation !== null ? "deliver" : null,
+    targets: ["deliver"],
+    go: { deliver: () => void openExportDialog() },
+    checkErrors: validation ? validation.summary.error_count : null
+  });
+
   // ─── Layout ───────────────────────────────────────────────────────────
 
   const sidebarWidth = sidebarCollapsed ? 0 : 340;
 
   return (
-    <div className="flex h-screen flex-col bg-background">
-      {/* Top bar — mirrors AppShell but inline since review opts out of shell */}
-      {/* Review opts out of AppShell for its full-bleed layout, so it has to
-          carry the shell's own controls — the theme toggle was simply missing
-          here, which left dark mode unreachable once you reached Review. */}
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-background px-4">
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setSidebarCollapsed((prev) => !prev)}
-            aria-label={sidebarCollapsed ? t("Show sidebar", "サイドバーを表示") : t("Hide sidebar", "サイドバーを非表示")}
-            title={sidebarCollapsed ? t("Show sidebar", "サイドバーを表示") : t("Hide sidebar", "サイドバーを非表示")}
-          >
-            <PanelLeft />
-          </Button>
-          <span className="text-[13px] font-semibold leading-[18px] tracking-tight text-foreground">
-            IMDF Converter
-          </span>
-        </div>
-
-        <StepIndicator />
-
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            aria-label={t("Switch theme", "テーマを切り替え")}
-            title={
-              theme === "dark"
-                ? t("Switch to light", "ライトに切り替え")
-                : t("Switch to dark", "ダークに切り替え")
-            }
-          >
-            {theme === "dark" ? <Sun /> : <Moon />}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setUiLanguage(uiLanguage === "en" ? "ja" : "en")}
-            title={t("Switch UI language", "表示言語を切り替え")}
-          >
-            <Globe className="h-3.5 w-3.5" />
-            {uiLanguage === "en" ? "日本語" : "EN"}
-          </Button>
-        </div>
-      </header>
-
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
       {error ? (
         <div className="border-b border-destructive/20 bg-destructive/10 px-4 py-2 text-xs text-destructive">
           {error}
@@ -1419,31 +1386,43 @@ export function ReviewPage() {
         {/* ── Main area: map or table ── */}
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-3 py-1.5">
-            <div
-              role="group"
-              aria-label={t("View", "表示")}
-              className="inline-flex gap-0.5 rounded-md bg-muted p-1"
-            >
-              {([
-                ["map", t("Map", "地図")],
-                ["table", t("Table", "表")]
-              ] as const).map(([view, label]) => (
-                <button
-                  key={view}
-                  type="button"
-                  aria-pressed={mainView === view}
-                  onClick={() => setMainView(view)}
-                  className={cn(
-                    "rounded-sm px-3 py-1 text-[13px] font-medium leading-[18px] transition-colors",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    mainView === view
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setSidebarCollapsed((prev) => !prev)}
+                aria-label={sidebarCollapsed ? t("Show sidebar", "サイドバーを表示") : t("Hide sidebar", "サイドバーを非表示")}
+                title={sidebarCollapsed ? t("Show sidebar", "サイドバーを表示") : t("Hide sidebar", "サイドバーを非表示")}
+              >
+                <PanelLeft />
+              </Button>
+              <div
+                role="group"
+                aria-label={t("View", "表示")}
+                className="inline-flex gap-0.5 rounded-md bg-muted p-1"
+              >
+                {([
+                  ["map", t("Map", "地図")],
+                  ["table", t("Table", "表")]
+                ] as const).map(([view, label]) => (
+                  <button
+                    key={view}
+                    type="button"
+                    aria-pressed={mainView === view}
+                    onClick={() => setMainView(view)}
+                    className={cn(
+                      "rounded-sm px-3 py-1 text-[13px] font-medium leading-[18px] transition-colors",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      mainView === view
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <span className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
@@ -1579,6 +1558,7 @@ export function ReviewPage() {
         onAutoFix={() => void runAutofix(false)}
         onFixOverlaps={() => void resolveSafeOverlaps()}
         onExport={() => void openExportDialog()}
+        exportButtonRef={exportButtonRef}
       />
 
       {/* Export dialog */}

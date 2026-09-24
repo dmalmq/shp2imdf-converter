@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { useDropzone } from "react-dropzone";
 import { useNavigate } from "react-router-dom";
@@ -14,6 +14,7 @@ import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
 import { Button, Card, Badge, Checkbox, DisabledHint } from "../components/ui";
+import { usePrimaryAction } from "../components/shell/ShellContext";
 import { cn } from "@/lib/utils";
 
 /**
@@ -473,6 +474,24 @@ export function UploadPage() {
 
   const hasFiles = stemRows.length > 0 || geoPackageRows.length > 0 || archiveRows.length > 0;
 
+  const importLabel = loading
+    ? t(`Importing… ${progress}%`, `インポート中… ${progress}%`)
+    : importMode === "imdf_shapefile"
+      ? t("Import to Review", "レビューへインポート")
+      : t("Import & Continue", "インポートして次へ");
+  const importBlockedReason =
+    selectedFileCount === 0 && !loading
+      ? t("Add at least one shapefile to import", "インポートするシェープファイルを1つ以上追加してください")
+      : null;
+  const importButtonRef = useRef<HTMLDivElement>(null);
+  usePrimaryAction({
+    label: importLabel,
+    run: () => void runImportAndContinue(),
+    disabledReason: importBlockedReason,
+    busy: loading,
+    anchor: importButtonRef
+  });
+
   const importButton = (
     <Button
       variant="default"
@@ -488,11 +507,7 @@ export function UploadPage() {
         />
       ) : null}
       <span className="relative">
-        {loading
-          ? t(`Importing… ${progress}%`, `インポート中… ${progress}%`)
-          : importMode === "imdf_shapefile"
-            ? t("Import to Review", "レビューへインポート")
-            : t("Import & Continue", "インポートして次へ")}
+        {importLabel}
       </span>
     </Button>
   );
@@ -727,17 +742,8 @@ export function UploadPage() {
         ) : null}
 
         {/* Import button — says why it is unavailable rather than only greying out */}
-        <div className="mt-6">
-          <DisabledHint
-            hint={
-              selectedFileCount === 0 && !loading
-                ? t(
-                    "Add at least one shapefile to import",
-                    "インポートするシェープファイルを1つ以上追加してください"
-                  )
-                : null
-            }
-          >
+        <div ref={importButtonRef} className="mt-6">
+          <DisabledHint hint={importBlockedReason}>
             {importButton}
           </DisabledHint>
         </div>

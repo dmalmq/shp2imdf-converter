@@ -50,7 +50,8 @@ import {
   type SurveyPose,
   type SurveySnapTarget
 } from "../lib/placementPose";
-import { stationQueryFromFilename } from "../lib/siteName";
+import { siteNameFromFilename, stationQueryFromFilename } from "../lib/siteName";
+import { usePageShell } from "../components/shell/ShellContext";
 import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
 import { useAppStore } from "../store/useAppStore";
 import {
@@ -423,6 +424,15 @@ export function IllustratorPage() {
     preview?.artwork_bounds ?? ([0, 0, 100, 100] as [number, number, number, number]);
 
   const siteName = stationQueryFromFilename(preview?.report?.source_name ?? "");
+
+  const sourceName = preview?.report?.source_name ?? "";
+  const placing = Boolean(preview) && assignment !== null;
+  usePageShell({
+    station: siteNameFromFilename(sourceName) || sourceName.replace(/\.[^.]+$/, "") || null,
+    current: placing && placementTab === "export" ? "deliver" : null,
+    targets: placing ? [placementTab === "export" ? "place" : "deliver"] : [],
+    go: { place: () => setPlacementTab("fit"), deliver: () => setPlacementTab("export") }
+  });
 
   const floorLayers: FloorLayer[] = useMemo(() => {
     if (!preview) return [];
