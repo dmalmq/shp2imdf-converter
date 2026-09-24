@@ -79,6 +79,8 @@ def test_startup_prunes_only_old_orphaned_upload_dirs(monkeypatch, tmp_path: Pat
     monkeypatch.setenv("SESSION_UPLOADS_DIR", str(uploads))
     monkeypatch.setenv("SESSION_DATA_DIR", str(sessions_dir))
     monkeypatch.setenv("SESSION_TTL_HOURS", "24")
+    monkeypatch.setenv("TEMP_DATA_DIR", str(tmp_path / "tmp"))
+    monkeypatch.setenv("PLACEMENTS_DB", str(tmp_path / "placements.db"))
     with TestClient(main.app):
         deadline = time.monotonic() + 5
         while old_orphan.exists() and time.monotonic() < deadline:
