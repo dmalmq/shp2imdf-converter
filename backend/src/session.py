@@ -3,14 +3,35 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 import copy
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import json
+import logging
+import os
 from pathlib import Path
+import re
 import shutil
+import threading
 from uuid import uuid4
 
 from backend.src.schemas import CleanupSummary, ImportedFile, SessionRecord
+
+logger = logging.getLogger(__name__)
+
+_SESSION_ID_PATTERN = re.compile(r"[A-Za-z0-9-]+")
+
+
+@dataclass
+class SessionSummary:
+    session_id: str
+    last_accessed: datetime
+    upload_artifact_dir: str | None = None
+
+    @classmethod
+    def of(cls, session: SessionRecord) -> SessionSummary:
+        return cls(session.session_id, session.last_accessed, session.upload_artifact_dir)
 
 
 class SessionBackend(ABC):
@@ -32,9 +53,15 @@ class SessionBackend(ABC):
     def list_all(self) -> list[SessionRecord]:
         pass
 
+    def touch(self, session: SessionRecord) -> None:
+        self.save(session)
+
+    def list_summaries(self) -> list[SessionSummary]:
+        return [SessionSummary.of(session) for session in self.list_all()]
+
 
 class MemorySessionBackend(SessionBackend):
-    """In-memory session backend used by default."""
+    """In-memory session backend; sessions are lost on restart."""
 
     def __init__(self) -> None:
         self._sessions: dict[str, SessionRecord] = {}
@@ -53,56 +80,132 @@ class MemorySessionBackend(SessionBackend):
 
 
 class FileSystemSessionBackend(SessionBackend):
-    """Filesystem-backed session store for shared workstation usage."""
+    """Write-through filesystem store with an in-memory LRU cache.
 
-    def __init__(self, data_dir: str | Path) -> None:
+    Each session is ``<id>.json`` plus a small ``<id>.meta.json`` so pruning and
+    eviction never have to parse the multi-MB records.
+    """
+
+    def __init__(self, data_dir: str | Path, cache_size: int = 16) -> None:
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_size = cache_size
+        self._lock = threading.RLock()
+        self._cache: OrderedDict[str, SessionRecord] = OrderedDict()
+        self._index: dict[str, SessionSummary] = self._load_index()
 
     def _path_for(self, session_id: str) -> Path:
         return self.data_dir / f"{session_id}.json"
 
-    def save(self, session: SessionRecord) -> None:
-        path = self._path_for(session.session_id)
-        path.write_text(session.model_dump_json(indent=2), encoding="utf-8")
+    def _meta_path_for(self, session_id: str) -> Path:
+        return self.data_dir / f"{session_id}.meta.json"
 
-    def get(self, session_id: str) -> SessionRecord | None:
+    def _load_index(self) -> dict[str, SessionSummary]:
+        index: dict[str, SessionSummary] = {}
+        for file in self.data_dir.glob("*.json"):
+            if file.name.endswith(".meta.json"):
+                continue
+            session_id = file.stem
+            meta_path = self._meta_path_for(session_id)
+            try:
+                if meta_path.exists():
+                    payload = json.loads(meta_path.read_text(encoding="utf-8"))
+                    index[session_id] = SessionSummary(
+                        session_id=session_id,
+                        last_accessed=datetime.fromisoformat(payload["last_accessed"]),
+                        upload_artifact_dir=payload.get("upload_artifact_dir"),
+                    )
+                else:
+                    session = self._read(session_id)
+                    if session is not None:
+                        index[session_id] = SessionSummary.of(session)
+                        self._write_meta(index[session_id])
+            except (OSError, ValueError, KeyError):
+                logger.exception("Skipping unreadable session file %s", file)
+        return index
+
+    def _read(self, session_id: str) -> SessionRecord | None:
+        # Ids come straight from the URL; never let one name a path outside data_dir.
+        if not _SESSION_ID_PATTERN.fullmatch(session_id):
+            return None
         path = self._path_for(session_id)
         if not path.exists():
             return None
         payload = json.loads(path.read_text(encoding="utf-8"))
         return SessionRecord.model_validate(payload)
 
+    def _write_atomic(self, path: Path, text: str) -> None:
+        tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    def _write_meta(self, summary: SessionSummary) -> None:
+        payload = {
+            "session_id": summary.session_id,
+            "last_accessed": summary.last_accessed.isoformat(),
+            "upload_artifact_dir": summary.upload_artifact_dir,
+        }
+        self._write_atomic(self._meta_path_for(summary.session_id), json.dumps(payload))
+
+    def _remember(self, session: SessionRecord) -> None:
+        self._cache[session.session_id] = session
+        self._cache.move_to_end(session.session_id)
+        while len(self._cache) > self.cache_size:
+            self._cache.popitem(last=False)
+
+    def save(self, session: SessionRecord) -> None:
+        summary = SessionSummary.of(session)
+        self._write_atomic(self._path_for(session.session_id), session.model_dump_json())
+        self._write_meta(summary)
+        with self._lock:
+            self._index[session.session_id] = summary
+            self._remember(session)
+
+    def get(self, session_id: str) -> SessionRecord | None:
+        with self._lock:
+            cached = self._cache.get(session_id)
+            if cached is not None:
+                self._cache.move_to_end(session_id)
+                return cached
+        session = self._read(session_id)
+        if session is None:
+            return None
+        with self._lock:
+            summary = self._index.get(session_id)
+            # A touch after the last save lives only in the index.
+            if summary is not None and summary.last_accessed > session.last_accessed:
+                session.last_accessed = summary.last_accessed
+            self._index[session_id] = SessionSummary.of(session)
+            self._remember(session)
+        return session
+
+    def touch(self, session: SessionRecord) -> None:
+        with self._lock:
+            self._index[session.session_id] = SessionSummary.of(session)
+
     def delete(self, session_id: str) -> None:
-        path = self._path_for(session_id)
-        if path.exists():
-            path.unlink()
+        with self._lock:
+            self._cache.pop(session_id, None)
+            self._index.pop(session_id, None)
+        if not _SESSION_ID_PATTERN.fullmatch(session_id):
+            return
+        self._path_for(session_id).unlink(missing_ok=True)
+        self._meta_path_for(session_id).unlink(missing_ok=True)
 
     def list_all(self) -> list[SessionRecord]:
-        sessions: list[SessionRecord] = []
-        for file in self.data_dir.glob("*.json"):
-            payload = json.loads(file.read_text(encoding="utf-8"))
-            sessions.append(SessionRecord.model_validate(payload))
-        return sessions
+        with self._lock:
+            session_ids = list(self._index)
+        return [session for session_id in session_ids if (session := self.get(session_id)) is not None]
 
-
-class RedisSessionBackend(SessionBackend):
-    """Stub backend to make backend selection explicit."""
-
-    def __init__(self) -> None:
-        raise RuntimeError("Redis backend is not configured in Phase 1.")
-
-    def save(self, session: SessionRecord) -> None:  # pragma: no cover
-        raise NotImplementedError
-
-    def get(self, session_id: str) -> SessionRecord | None:  # pragma: no cover
-        raise NotImplementedError
-
-    def delete(self, session_id: str) -> None:  # pragma: no cover
-        raise NotImplementedError
-
-    def list_all(self) -> list[SessionRecord]:  # pragma: no cover
-        raise NotImplementedError
+    def list_summaries(self) -> list[SessionSummary]:
+        with self._lock:
+            return [
+                SessionSummary(item.session_id, item.last_accessed, item.upload_artifact_dir)
+                for item in self._index.values()
+            ]
 
 
 class SessionManager:
@@ -112,7 +215,7 @@ class SessionManager:
         self,
         backend: SessionBackend,
         ttl_hours: int = 24,
-        max_sessions: int = 5,
+        max_sessions: int = 50,
     ) -> None:
         self.backend = backend
         self.ttl = timedelta(hours=ttl_hours)
@@ -154,15 +257,15 @@ class SessionManager:
             return None
         if touch:
             session.last_accessed = datetime.now(UTC)
-            self.backend.save(session)
+            self.backend.touch(session)
         return session
 
     def prune_expired(self) -> int:
         now = datetime.now(UTC)
         removed = 0
-        for session in self.backend.list_all():
-            if now - session.last_accessed >= self.ttl:
-                self._delete_session_record(session)
+        for summary in self.backend.list_summaries():
+            if now - summary.last_accessed >= self.ttl:
+                self._delete_session_record(summary)
                 removed += 1
         return removed
 
@@ -172,13 +275,13 @@ class SessionManager:
         return session
 
     def _evict_if_needed(self) -> None:
-        sessions = self.backend.list_all()
+        sessions = self.backend.list_summaries()
         if len(sessions) < self.max_sessions:
             return
         oldest = sorted(sessions, key=lambda item: item.last_accessed)[0]
         self._delete_session_record(oldest)
 
-    def _delete_session_record(self, session: SessionRecord) -> None:
+    def _delete_session_record(self, session: SessionSummary) -> None:
         self._remove_upload_artifacts(session.upload_artifact_dir)
         self.backend.delete(session.session_id)
 
@@ -200,6 +303,4 @@ def build_session_backend(
         return MemorySessionBackend()
     if normalized == "filesystem":
         return FileSystemSessionBackend(session_data_dir)
-    if normalized == "redis":
-        return RedisSessionBackend()
-    return MemorySessionBackend()
+    raise ValueError(f"Unknown SESSION_BACKEND {backend_name!r}; expected 'filesystem' or 'memory'")
