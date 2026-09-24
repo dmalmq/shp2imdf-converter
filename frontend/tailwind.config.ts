@@ -26,7 +26,7 @@ const config: Config = {
           muted: "hsl(var(--signal-muted))"
         },
         success: "hsl(var(--success))",
-        warning: "hsl(var(--warning))",
+        warning: { DEFAULT: "hsl(var(--warning))", foreground: "hsl(var(--warning-foreground))" },
         // Reference overlays are data, not brand: distinguishable from each other,
         // subordinate to `signal`.
         layer: {

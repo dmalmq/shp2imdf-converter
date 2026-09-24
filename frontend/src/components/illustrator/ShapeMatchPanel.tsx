@@ -242,7 +242,7 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
       )}
 
       {selectedReference?.truncated ? (
-        <p className="text-[11px] leading-4 text-warning">
+        <p className="text-[11px] leading-4 text-warning-foreground">
           {t(
             "This layer was trimmed for display, so some candidates may be absent.",
             "このレイヤーは表示用に一部省略されているため、候補が含まれない場合があります。"

@@ -487,7 +487,7 @@ export function ReferenceLayerList({
           {error}
         </p>
       ) : null}
-      {notice ? <p className="text-xs leading-4 text-warning">{notice}</p> : null}
+      {notice ? <p className="text-xs leading-4 text-warning-foreground">{notice}</p> : null}
     </div>
   );
 }

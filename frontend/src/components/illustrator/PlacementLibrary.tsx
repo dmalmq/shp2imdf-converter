@@ -105,7 +105,7 @@ export function PlacementLibrary({ state, dispatch, artworkBounds }: Props) {
         </Button>
       </div>
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
-      {warning ? <p className="text-xs text-warning">{warning}</p> : null}
+      {warning ? <p className="text-xs text-warning-foreground">{warning}</p> : null}
       <ul className="space-y-1">
         {placements.map((placement) => (
           <li key={placement.id} className="flex items-center justify-between text-xs">

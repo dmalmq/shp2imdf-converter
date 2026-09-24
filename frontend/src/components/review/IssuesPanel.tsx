@@ -71,7 +71,7 @@ export function IssuesPanel({
           </span>
         ) : null}
         {warningCount > 0 ? (
-          <span className="rounded-full bg-warning px-1.5 py-0.5 text-[10px] font-medium leading-none text-white">
+          <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-warning-foreground">
             {warningCount}
           </span>
         ) : null}
@@ -94,13 +94,13 @@ export function IssuesPanel({
                 onClick={() => onSelectIssue(isActive ? null : index)}
               >
                 <p className="font-medium text-foreground">
-                  <span className={item.severity === "error" ? "text-destructive" : "text-warning"}>
+                  <span className={item.severity === "error" ? "text-destructive" : "text-warning-foreground"}>
                     [{item.severity}]
                   </span>{" "}
                   {item.check}
                 </p>
                 <p className="text-muted-foreground">{item.message}</p>
-                {item.fix_description ? <p className="text-warning">{item.fix_description}</p> : null}
+                {item.fix_description ? <p className="text-warning-foreground">{item.fix_description}</p> : null}
                 {item.auto_fixable ? (
                   <Button
                     variant="outline"

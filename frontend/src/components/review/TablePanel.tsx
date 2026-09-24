@@ -255,7 +255,7 @@ export function TablePanel({
               status === "error"
                 ? "border-destructive/40 text-destructive"
                 : status === "warning"
-                  ? "border-warning/40 text-warning"
+                  ? "border-warning/40 text-warning-foreground"
                   : "text-muted-foreground"
             }
           >
