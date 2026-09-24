@@ -55,7 +55,7 @@ const VENUE_CATEGORIES = [
 const NO_RESTRICTION = "__none__";
 
 
-export function createDefaultProject(): ProjectWizardState {
+function createDefaultProject(): ProjectWizardState {
   return {
     project_name: "",
     venue_name: "",

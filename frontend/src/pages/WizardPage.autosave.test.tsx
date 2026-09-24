@@ -1,5 +1,5 @@
 import React from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import {
@@ -169,6 +169,13 @@ function openSection(name: string) {
 
 const sleep = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
 
+// Unmounting the page flushes any edit it still holds, and that save lands a
+// tick later. Let it land here, so it cannot spend the next test's mocks.
+afterEach(async () => {
+  cleanup();
+  await sleep(50);
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   useAppStore.setState({
@@ -210,13 +217,15 @@ test("venue info typed and left for another section at once reaches the backend"
 test("a burst of typing is saved once, after the typing stops", async () => {
   await renderWizard(COMPLETE_PROJECT);
 
+  // Keystrokes 40 ms apart: a gap would have to stretch twentyfold on a busy
+  // machine before the debounce could fire mid-burst.
   for (const value of ["T", "To", "Tok", "Toky", "Tokyo"]) {
     type(/Venue Name/, value);
-    await sleep(AUTOSAVE_DELAY_MS / 5);
+    await sleep(40);
   }
   expect(patchProjectMock).not.toHaveBeenCalled();
 
-  await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(1), { timeout: AUTOSAVE_DELAY_MS * 4 });
   await sleep(AUTOSAVE_DELAY_MS * 2);
   expect(patchProjectMock).toHaveBeenCalledTimes(1);
   expect(patchProjectMock.mock.calls[0][1].venue_name).toBe("Tokyo");
@@ -386,7 +395,66 @@ test("closing the tab asks first while an edit is unsaved, and sends it", async 
   expect(unload()).toBe(true);
   await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(1));
   expect(patchProjectMock.mock.calls[0][1].venue_name).toBe("Tokyo Yaesu");
+  expect(patchProjectMock.mock.calls[0][2]).toEqual({ keepalive: true });
 
   await waitFor(() => expect(useAppStore.getState().wizardDrafts.project).toBeNull());
   expect(unload()).toBe(false);
+
+  type(/Venue Name/, "Tokyo Yaesu North");
+  openSection("Buildings");
+  await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(2));
+  expect(patchProjectMock.mock.calls[1][2]).toEqual({ keepalive: false });
+});
+
+function unloadPrevented() {
+  const event = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+
+async function failFirstProjectSave() {
+  patchProjectMock.mockRejectedValueOnce(new Error("backend unavailable"));
+  await renderWizard(COMPLETE_PROJECT);
+  type(/Venue Name/, "Tokyo Sta.");
+  openSection("Buildings");
+  expect(await screen.findByText(/Could not save/)).toBeInTheDocument();
+  expect(patchProjectMock).toHaveBeenCalledTimes(1);
+}
+
+test("a failed save is resent by the next section switch", async () => {
+  await failFirstProjectSave();
+
+  openSection("Footprint");
+  await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(2));
+  expect(patchProjectMock.mock.calls[1][1].venue_name).toBe("Tokyo Sta.");
+  expect(await screen.findByText(/^Saved/)).toBeInTheDocument();
+});
+
+test("a failed save still counts as unsaved when the tab closes", async () => {
+  patchProjectMock.mockRejectedValue(new Error("backend unavailable"));
+  await failFirstProjectSave();
+
+  expect(unloadPrevented()).toBe(true);
+});
+
+test("Generate sends a failed save first, and stops if it fails again", async () => {
+  vi.mocked(generateSessionDraft).mockResolvedValue({} as never);
+  patchProjectMock.mockRejectedValueOnce(new Error("backend unavailable"));
+  patchProjectMock.mockRejectedValueOnce(new Error("still unavailable"));
+  await renderWizard(COMPLETE_PROJECT);
+  type(/Venue Name/, "Tokyo Sta.");
+  openSection("Summary & Generate");
+  expect(await screen.findByText(/Could not save/)).toBeInTheDocument();
+
+  const generate = screen.getByRole("button", { name: "Generate & open Review" });
+  fireEvent.click(generate);
+  await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(2));
+  await sleep(100);
+  expect(generateSessionDraft).not.toHaveBeenCalled();
+  expect(screen.getByText(/Could not save/)).toBeInTheDocument();
+
+  fireEvent.click(generate);
+  await waitFor(() => expect(generateSessionDraft).toHaveBeenCalledTimes(1));
+  expect(patchProjectMock).toHaveBeenCalledTimes(3);
+  expect(server.project?.venue_name).toBe("Tokyo Sta.");
 });

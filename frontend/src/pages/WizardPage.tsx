@@ -450,19 +450,34 @@ export function WizardPage() {
 
   // Every save reports through the footer. A failure keeps its own retry, so
   // the operator can resend exactly what failed without re-editing anything.
-  const persist = async (task: () => Promise<void>, fallback: string, title: string): Promise<void> => {
-    const attempt = async () => {
+  // An autosave passes its own `retry`, which resends through the autosave
+  // so the hook knows the failed edit was stored; re-running the task alone
+  // would leave the hook counting it as unsaved.
+  const persist = (
+    task: () => Promise<void>,
+    fallback: string,
+    title: string,
+    retry?: () => void
+  ): Promise<boolean> => {
+    const attempt = async (): Promise<boolean> => {
       try {
         setWizardSaveStatus("saving");
         await serialize(task);
         setWizardSaveStatus("saved");
+        return true;
       } catch (error) {
         const message = handleApiError(error, fallback, { title });
-        setWizardSaveStatus("error", message, () => void attempt());
+        setWizardSaveStatus("error", message, retry ?? (() => void attempt()));
+        return false;
       }
     };
-    await attempt();
+    return attempt();
   };
+
+  // True only while the beforeunload handler flushes, so just that last save
+  // asks the browser to outlive the page. keepalive requests share a small
+  // in-flight budget, which ordinary autosaves have no reason to spend.
+  const unloading = useRef(false);
 
   const patchFile = (stem: string, payload: UpdateFileRequest) =>
     persist(
@@ -481,17 +496,20 @@ export function WizardPage() {
       t("Failed to save classification", "分類保存失敗")
     );
 
-  const saveProject = (payload: ProjectWizardState) =>
-    persist(
+  const saveProject = (payload: ProjectWizardState, retry: () => void) => {
+    const keepalive = unloading.current;
+    return persist(
       async () => {
         if (!sessionId) return;
-        const response = await patchWizardProject(sessionId, payload);
+        const response = await patchWizardProject(sessionId, payload, { keepalive });
         setWizardState(response.wizard);
         releaseDraft("project", response.wizard.project);
       },
       t("Failed to save project info", "プロジェクト情報の保存に失敗しました"),
-      t("Failed to save project", "保存失敗")
+      t("Failed to save project", "保存失敗"),
+      retry
     );
+  };
 
   const searchProjectAddress = async (query: string, language: string): Promise<GeocodeResultItem[]> => {
     if (!sessionId) return [];
@@ -526,17 +544,20 @@ export function WizardPage() {
     }
   };
 
-  const saveBuildings = (payload: BuildingWizardState[]) =>
-    persist(
+  const saveBuildings = (payload: BuildingWizardState[], retry: () => void) => {
+    const keepalive = unloading.current;
+    return persist(
       async () => {
         if (!sessionId) return;
-        const response = await patchWizardBuildings(sessionId, payload);
+        const response = await patchWizardBuildings(sessionId, payload, { keepalive });
         setWizardState(response.wizard);
         releaseDraft("buildings", response.wizard.buildings);
       },
       t("Failed to save building assignments", "建物割り当ての保存に失敗しました"),
-      t("Failed to save buildings", "建物保存失敗")
+      t("Failed to save buildings", "建物保存失敗"),
+      retry
     );
+  };
 
   const saveMappings = (payload: {
     unit?: UnitMappingState;
@@ -555,25 +576,36 @@ export function WizardPage() {
       t("Failed to save mappings", "保存失敗")
     );
 
-  const saveFootprint = (payload: FootprintWizardState) =>
-    persist(
+  const saveFootprint = (payload: FootprintWizardState, retry: () => void) => {
+    const keepalive = unloading.current;
+    return persist(
       async () => {
         if (!sessionId) return;
-        const response = await patchWizardFootprint(sessionId, payload);
+        const response = await patchWizardFootprint(sessionId, payload, { keepalive });
         setWizardState(response.wizard);
         releaseDraft("footprint", response.wizard.footprint);
       },
       t("Failed to save footprint options", "Footprint 設定の保存に失敗しました"),
-      t("Failed to save footprint", "Footprint 保存失敗")
+      t("Failed to save footprint", "Footprint 保存失敗"),
+      retry
     );
+  };
 
-  const projectAutosave = useAutosave(projectDraft, (value) => saveProject(normalizeProjectForSave(value)), {
-    canSave: !projectHeld
-  });
-  const buildingsAutosave = useAutosave(buildingsDraft, (value) => saveBuildings(normalizeBuildingsForSave(value)), {
-    canSave: !buildingsHeld
-  });
-  const footprintAutosave = useAutosave(footprintDraft, saveFootprint, { canSave: true });
+  const projectAutosave = useAutosave(
+    projectDraft,
+    (value) => saveProject(normalizeProjectForSave(value), () => projectAutosave.flush()),
+    { canSave: !projectHeld }
+  );
+  const buildingsAutosave = useAutosave(
+    buildingsDraft,
+    (value) => saveBuildings(normalizeBuildingsForSave(value), () => buildingsAutosave.flush()),
+    { canSave: !buildingsHeld }
+  );
+  const footprintAutosave = useAutosave(
+    footprintDraft,
+    (value) => saveFootprint(value, () => footprintAutosave.flush()),
+    { canSave: true }
+  );
 
   const autosaves = [projectAutosave, buildingsAutosave, footprintAutosave];
   const flushDrafts = () => autosaves.forEach((autosave) => autosave.flush());
@@ -589,7 +621,12 @@ export function WizardPage() {
   // that prompt to reach the server.
   const unloadGuard = useRef<() => boolean>(() => false);
   unloadGuard.current = () => {
-    flushDrafts();
+    unloading.current = true;
+    try {
+      flushDrafts();
+    } finally {
+      unloading.current = false;
+    }
     return projectHeld || buildingsHeld || autosaves.some((autosave) => autosave.unsaved());
   };
   useEffect(() => {
@@ -635,6 +672,10 @@ export function WizardPage() {
 
   const confirmSummary = async () => {
     if (!sessionId || !canGenerate) return;
+    // Generation reads the server's copy, so every edit has to be there first.
+    // A save that fails again leaves its error and Retry in the footer.
+    const stored = await Promise.all(autosaves.map((autosave) => autosave.settle()));
+    if (stored.includes(false)) return;
     try {
       setWizardSaveStatus("saving");
       await serialize(async () => {

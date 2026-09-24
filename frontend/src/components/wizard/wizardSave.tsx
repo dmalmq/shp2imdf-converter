@@ -72,22 +72,28 @@ export function useWizardFooterState() {
  * stays on screen and is sent as soon as it becomes valid. Saves run one at a
  * time; an edit made while one is in flight is sent when it returns.
  *
+ * `save` resolves to whether the server stored the value. A failed value goes
+ * back to waiting, unless a newer edit already is, so it still counts as
+ * unsaved and the next flush resends it. It is not retried on its own: a
+ * backend that is down would otherwise be hammered in a loop.
+ *
  * `flush` sends any waiting edit immediately. The page calls it before
  * switching section and before the tab unloads, and it runs on unmount, so
- * leaving never drops an edit still inside the debounce window.
- * `unsaved` says whether an edit is waiting or in flight.
+ * leaving never drops an edit still inside the debounce window. `settle`
+ * flushes and waits until nothing is in flight, resolving false if an edit is
+ * still unsaved. `unsaved` says whether an edit is waiting or in flight.
  */
 export function useAutosave<T>(
   draft: T | null,
-  save: (value: T) => Promise<unknown>,
+  save: (value: T) => Promise<boolean>,
   { canSave, delayMs = AUTOSAVE_DELAY_MS }: { canSave: boolean; delayMs?: number }
-): { flush: () => void; unsaved: () => boolean } {
+): { flush: () => void; settle: () => Promise<boolean>; unsaved: () => boolean } {
   const saveRef = useRef(save);
   saveRef.current = save;
   const pending = useRef<T | null>(null);
   const lastSent = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inFlight = useRef(false);
+  const inFlight = useRef<Promise<void> | null>(null);
 
   const flush = useCallback(() => {
     if (timer.current) {
@@ -98,12 +104,29 @@ export function useAutosave<T>(
     const value = pending.current;
     pending.current = null;
     lastSent.current = JSON.stringify(value);
-    inFlight.current = true;
-    void saveRef.current(value).finally(() => {
-      inFlight.current = false;
-      flush();
-    });
+    inFlight.current = saveRef.current(value).then(
+      (stored) => {
+        inFlight.current = null;
+        if (stored) {
+          flush();
+          return;
+        }
+        lastSent.current = null;
+        if (pending.current === null) pending.current = value;
+      },
+      () => {
+        inFlight.current = null;
+        lastSent.current = null;
+        if (pending.current === null) pending.current = value;
+      }
+    );
   }, []);
+
+  const settle = useCallback(async () => {
+    flush();
+    while (inFlight.current) await inFlight.current;
+    return pending.current === null;
+  }, [flush]);
 
   useEffect(() => {
     if (draft === null) {
@@ -128,9 +151,9 @@ export function useAutosave<T>(
 
   useEffect(() => flush, [flush]);
 
-  const unsaved = useCallback(() => inFlight.current || pending.current !== null, []);
+  const unsaved = useCallback(() => inFlight.current !== null || pending.current !== null, []);
 
-  return { flush, unsaved };
+  return { flush, settle, unsaved };
 }
 
 function isBlank(value: unknown): boolean {
