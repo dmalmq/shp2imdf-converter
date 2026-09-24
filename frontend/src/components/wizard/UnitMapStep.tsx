@@ -152,7 +152,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
               {mapping.preview.map((row) => (
                 <tr
                   key={row.code}
-                  className={`border-t border-border ${row.unresolved ? "bg-warning/10" : "bg-card"}`}
+                  className={`border-t border-border ${row.unresolved ? "bg-warning-surface" : "bg-card"}`}
                 >
                   <td className="px-2 py-2 font-mono text-xs">{row.code}</td>
                   <td className="px-2 py-2">{row.count}</td>

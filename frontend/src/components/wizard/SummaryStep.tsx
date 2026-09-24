@@ -128,7 +128,7 @@ export function SummaryStep({ files, cleanupSummary, wizard, disabled, onConfirm
       </Card>
 
       {wizard && wizard.warnings.length > 0 ? (
-        <div className="rounded-lg border border-warning/30 bg-warning/10 p-4">
+        <div className="rounded-lg border border-warning/30 bg-warning-surface p-4">
           <h3 className="text-sm font-semibold leading-5 text-warning-foreground">{t("Warnings", "警告")}</h3>
           <ul className="mt-1.5 flex flex-col gap-1 text-[13px] leading-[18px] text-warning-foreground">
             {wizard.warnings.map((warning) => (

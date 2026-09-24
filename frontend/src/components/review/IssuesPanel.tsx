@@ -71,7 +71,7 @@ export function IssuesPanel({
           </span>
         ) : null}
         {warningCount > 0 ? (
-          <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-warning-foreground">
+          <span className="rounded-full bg-warning-surface px-1.5 py-0.5 text-[10px] font-medium leading-none text-warning-foreground">
             {warningCount}
           </span>
         ) : null}

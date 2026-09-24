@@ -1633,7 +1633,7 @@ export function ReviewPage() {
             </div>
 
             {hasGeoPackageSources ? (
-              <p className="rounded-md border border-warning/20 bg-warning/10 px-3 py-2 text-xs leading-4 text-warning-foreground">
+              <p className="rounded-md border border-warning/20 bg-warning-surface px-3 py-2 text-xs leading-4 text-warning-foreground">
                 {t(
                   "This session includes GeoPackage sources, so only IMDF export is available.",
                   "このセッションには GeoPackage ソースが含まれるため、IMDF 書き出しのみ利用できます。"
@@ -1664,7 +1664,7 @@ export function ReviewPage() {
             {!needsShapefileSources(exportFormat) &&
             validation &&
             validation.summary.error_count > 0 ? (
-              <p className="rounded-md border border-warning/20 bg-warning/10 px-3 py-2 text-xs leading-4 text-warning-foreground">
+              <p className="rounded-md border border-warning/20 bg-warning-surface px-3 py-2 text-xs leading-4 text-warning-foreground">
                 {t(
                   `There are ${validation.summary.error_count} validation error(s). The exported IMDF may not pass Apple's validation.`,
                   `${validation.summary.error_count} 件の検証エラーがあります。エクスポートされた IMDF は Apple の検証を通過しない可能性があります。`
@@ -1850,7 +1850,7 @@ export function ReviewPage() {
             ) : null}
 
             {validation && validation.warnings.length > 0 ? (
-              <div className="flex max-h-36 flex-col gap-1 overflow-auto rounded-md border border-warning/20 bg-warning/10 p-3 text-xs leading-4 text-warning-foreground">
+              <div className="flex max-h-36 flex-col gap-1 overflow-auto rounded-md border border-warning/20 bg-warning-surface p-3 text-xs leading-4 text-warning-foreground">
                 {validation.warnings.slice(0, 10).map((warning, index) => (
                   <p key={`${warning.check}-${index}`}>{warning.message}</p>
                 ))}

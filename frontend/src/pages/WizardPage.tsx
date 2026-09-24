@@ -877,7 +877,7 @@ export function WizardPage() {
 
           {/* Learning suggestion banner */}
           {learningSuggestion ? (
-            <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-[13px] leading-[18px] text-warning-foreground">
+            <div className="rounded-lg border border-warning/30 bg-warning-surface p-3 text-[13px] leading-[18px] text-warning-foreground">
               <p>{learningSuggestion.message}</p>
               <div className="mt-2 flex gap-2">
                 <Button variant="default" size="sm" onClick={() => void applyLearningSuggestion()}>
