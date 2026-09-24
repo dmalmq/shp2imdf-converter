@@ -18,6 +18,7 @@ import {
   validateSession
 } from "../api/client";
 import { ToastProvider } from "../components/shared/ToastProvider";
+import { AppShell } from "../components/shell/AppShell";
 import { useAppStore } from "../store/useAppStore";
 import { ReviewPage } from "./ReviewPage";
 
@@ -473,4 +474,44 @@ test("selecting a table row selects it for the rest of the screen", async () => 
   await waitFor(() =>
     expect(useAppStore.getState().selectedFeatureIds).toEqual(["unit-1"])
   );
+});
+
+function renderInShell() {
+  return render(
+    <MemoryRouter initialEntries={["/review"]}>
+      <ToastProvider>
+        <AppShell>
+          <ReviewPage />
+        </AppShell>
+      </ToastProvider>
+    </MemoryRouter>
+  );
+}
+
+test("review sits under the one app header instead of drawing its own", async () => {
+  renderInShell();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Export" })).toBeEnabled());
+
+  const [banner, ...others] = screen.getAllByRole("banner");
+  expect(others).toHaveLength(0);
+  expect(within(banner).getByText("shp2imdf")).toBeInTheDocument();
+  expect(within(banner).getByRole("link", { name: "Projects" })).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "Switch theme" })).toHaveLength(1);
+  expect(screen.getAllByRole("group", { name: "Display language" })).toHaveLength(1);
+  // The validation bar's Export is on screen, so the top bar does not repeat it.
+  expect(screen.getAllByRole("button", { name: "Export" })).toHaveLength(1);
+
+  const track = screen.getByRole("navigation", { name: "Stages" });
+  expect(within(track).getByText("3 · Check").closest("[aria-current]")).toHaveAttribute("aria-current", "step");
+});
+
+test("the Deliver stage opens the export dialog", async () => {
+  renderInShell();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Export" })).toBeEnabled());
+
+  const track = screen.getByRole("navigation", { name: "Stages" });
+  fireEvent.click(within(track).getByRole("button", { name: /4 · Deliver/ }));
+
+  expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  expect(validateSessionMock).toHaveBeenCalledWith("session-123");
 });

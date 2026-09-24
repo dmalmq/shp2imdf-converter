@@ -23,7 +23,7 @@ let FRONTEND_URL = `http://localhost:${FRONTEND_PORT}`;
 let BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
 const HEALTH_PATH = "/api/health";
 const APP_TITLE = "SHP to IMDF Converter";
-const APP_HEADER = "IMDF Converter";
+const APP_HEADER = "shp2imdf";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const skillRoot = path.resolve(here, "..");
@@ -500,7 +500,7 @@ function writeEvidence(featureId, page, extra) {
 
 async function gotoEnglishHome(page) {
   await page.goto(FRONTEND_URL, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("text=IMDF Converter", { timeout: 30000 });
+  await page.getByRole("banner").getByText(APP_HEADER, { exact: true }).waitFor({ timeout: 30000 });
   const enToggle = page.getByRole("button", { name: "EN", exact: true });
   if (await enToggle.count()) {
     await enToggle.click();
@@ -521,7 +521,7 @@ async function queueTokyoStation(page) {
 
 async function importTokyoStation(page) {
   await queueTokyoStation(page);
-  await page.getByRole("button", { name: "Import & Continue" }).click();
+  await page.getByRole("button", { name: "Import & Continue" }).first().click();
   await page.waitForURL("**/wizard", { timeout: 60000 });
   await page.getByLabel(/Venue Name/).waitFor({ timeout: 30000 });
 }

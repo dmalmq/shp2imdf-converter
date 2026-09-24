@@ -43,6 +43,8 @@ import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore, type WizardDrafts } from "../store/useAppStore";
 import { Button, DisabledHint } from "../components/ui";
+import { useInShell, usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
+import { formatClock } from "../lib/clock";
 import { WizardFooterProvider, sameAsSaved, useAutosave, useWizardFooterState } from "../components/wizard/wizardSave";
 
 const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail", "kiosk", "section"]);
@@ -155,17 +157,20 @@ function toLevelItemsFromFiles(
     }));
 }
 
-function formatClock(timestamp: number): string {
-  const date = new Date(timestamp);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
+/** Enter on a focused control belongs to that control, not the page's shortcut. */
 function isFormTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
   }
   const tag = target.tagName.toLowerCase();
-  return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
+  return (
+    tag === "input" ||
+    tag === "textarea" ||
+    tag === "select" ||
+    tag === "button" ||
+    tag === "a" ||
+    target.isContentEditable
+  );
 }
 
 function WizardStepSkeleton() {
@@ -847,6 +852,23 @@ export function WizardPage() {
     }
   }, [activeSection]);
 
+  const inShell = useInShell();
+  const footerButtonRef = useRef<HTMLDivElement>(null);
+  const incompleteSections = sections.filter((section) => section.id !== "summary" && !section.valid).length;
+  usePrimaryAction(
+    footerAction
+      ? {
+          label: footerAction.label,
+          run: () => footerAction.run(),
+          disabledReason: footerAction.enabled ? null : (footerAction.blockedReason ?? null),
+          busy: wizardSaveStatus === "saving",
+          blockers: footerAction.enabled ? null : incompleteSections,
+          anchor: footerButtonRef
+        }
+      : null
+  );
+  usePageShell({ saveHeld: projectHeld || buildingsHeld });
+
   // ─── Render ─────────────────────────────────────────────────────────
 
   return (
@@ -921,7 +943,7 @@ export function WizardPage() {
                   "Buildings not saved yet: each assigned file must be a known file, assigned once, to save.",
                   "建物は未保存です。保存するには、割り当てファイルを既存のファイル名で重複なく指定してください。"
                 )
-              ) : wizardSaveStatus === "saved" && wizardSavedAt !== null ? (
+              ) : wizardSaveStatus === "saved" && wizardSavedAt !== null && !inShell ? (
                 <>
                   {t("Saved", "保存済み")} · <span className="font-mono">{formatClock(wizardSavedAt)}</span>
                 </>
@@ -931,17 +953,19 @@ export function WizardPage() {
             </span>
 
             {footerAction ? (
-              <DisabledHint
-                className="w-auto"
-                hint={footerAction.enabled ? null : (footerAction.blockedReason ?? null)}
-              >
-                <Button
-                  disabled={!footerAction.enabled || wizardSaveStatus === "saving"}
-                  onClick={() => footerAction.run()}
+              <div ref={footerButtonRef}>
+                <DisabledHint
+                  className="w-auto"
+                  hint={footerAction.enabled ? null : (footerAction.blockedReason ?? null)}
                 >
-                  {footerAction.label}
-                </Button>
-              </DisabledHint>
+                  <Button
+                    disabled={!footerAction.enabled || wizardSaveStatus === "saving"}
+                    onClick={() => footerAction.run()}
+                  >
+                    {footerAction.label}
+                  </Button>
+                </DisabledHint>
+              </div>
             ) : null}
           </div>
         </div>

@@ -14,6 +14,7 @@ type Props = {
   onAutoFix: () => void;
   onFixOverlaps: () => void;
   onExport: () => void;
+  exportButtonRef?: React.Ref<HTMLButtonElement>;
 };
 
 
@@ -27,7 +28,8 @@ export function ValidationBar({
   onValidate,
   onAutoFix,
   onFixOverlaps,
-  onExport
+  onExport,
+  exportButtonRef
 }: Props) {
   const { t } = useUiLanguage();
 
@@ -91,6 +93,7 @@ export function ValidationBar({
           {validating ? t("Validating...", "検証中...") : t("Validate", "検証")}
         </Button>
         <Button
+          ref={exportButtonRef}
           variant="default"
           size="sm"
           onClick={onExport}

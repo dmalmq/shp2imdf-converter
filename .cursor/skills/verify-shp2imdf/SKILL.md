@@ -5,7 +5,7 @@ description: Drive the SHP → IMDF Converter web UI (Vite :5310 + FastAPI :8310
 
 # Verify SHP → IMDF Converter
 
-Primary surface: the browser app at `http://localhost:5310` (title `SHP to IMDF Converter`, header `IMDF Converter`). Backend API is `http://localhost:8310`. Vite proxies `/api` to the backend, so drive the UI on 5310, not 8310. Vite's default host is `localhost`; on this Windows PC that is often `[::1]` only — Node's IPv4-first lookup of `localhost` would miss it, so the helper sets `dns.setDefaultResultOrder('verbatim')`. Do not assume `http://127.0.0.1:5310` is the same instance.
+Primary surface: the browser app at `http://localhost:5310` (title `SHP to IMDF Converter`, header wordmark `shp2imdf`). Backend API is `http://localhost:8310`. Vite proxies `/api` to the backend, so drive the UI on 5310, not 8310. Vite's default host is `localhost`; on this Windows PC that is often `[::1]` only — Node's IPv4-first lookup of `localhost` would miss it, so the helper sets `dns.setDefaultResultOrder('verbatim')`. Do not assume `http://127.0.0.1:5310` is the same instance.
 
 Also exists, not the primary surface: REST under `/api/*` (health, import, session wizard, features, export, illustrator convert/placements). Unit tests (`pytest`, Vitest) and `audit-ui.mjs` / `audit-review.mjs` are not a substitute for this skill — they do not keep proof artifacts and `audit-*.mjs` assume a already-running UI.
 
@@ -67,17 +67,19 @@ Stable handles (do not use click coordinates):
 
 | User control | Handle |
 |---|---|
-| App identity | text `IMDF Converter`; document title `SHP to IMDF Converter` |
-| Language | button `日本語` or `EN` (title `Switch UI language`) |
+| App identity | top-bar wordmark `shp2imdf`; document title `SHP to IMDF Converter` |
+| Language | group `Display language` (`[data-language-switch]`) holding buttons `EN` and `日本語`; the current one has `aria-pressed="true"` |
 | Theme | button `Switch theme` (toggles `.dark` on `<html>`) |
-| Steps | buttons `Import`, `Configure`, `Review & Export` |
+| Breadcrumb | nav `Breadcrumb`: link `Projects` / station / current stage |
+| Stages | nav `Stages` under the top bar: `1 · Bring in`, `2 · Set up`, `3 · Check`, `4 · Deliver` (Illustrator: `Bring in artwork`, `Name floors`, `Place on map`, `Deliver`); the current one has `aria-current="step"`, reachable ones are buttons |
+| Top-bar action | the stage's primary action (e.g. `Import & Continue`) appears in the banner only while the page's own button for it is off screen; use `.first()` when clicking by name |
 | Import profile | buttons `Standard`, `IMDF schema` |
 | Shapefile file input | `input[type=file]:not(#imdf-file-input)` |
 | Import | button `Import & Continue` (standard) or `Import to Review` (IMDF schema) |
 | Open archive | card `Open IMDF archive` / `#imdf-file-input` |
 | Illustrator entry | card `Illustrator artwork`; then `Choose file` / `#illustrator-georef-input` |
 | Wizard sections | `Sections` nav buttons, e.g. `Venue Info`, `Summary & Generate`; the h1 names the section |
-| Venue | textbox named `Venue Name*`; `Locality*` (autosaves, footer shows `Saved · HH:MM`) |
+| Venue | textbox named `Venue Name*`; `Locality*` (autosaves; the top bar shows `Saved · HH:MM`, or `Not saved yet` while a required field is missing) |
 | Generate | button `Generate & open Review` |
 | Review | buttons `Validate`, `Export`, `Download .imdf` |
 
@@ -93,7 +95,7 @@ Proof standards:
 
 - Exercise the real UI path (file picker, Import, wizard, review). Do not PATCH zustand or call `/api/import` as a stand-in for `import-shapefiles`.
 - Capture the action and the result: screenshot + ARIA snapshot after the state change, plus `report.md` with URL, feature id, and entry point.
-- Identity must be visible (`IMDF Converter` or the wizard/review chrome).
+- Identity must be visible (the `shp2imdf` top bar).
 - Side effects: a successful import navigates to `/wizard` (standard) or `/review` (IMDF-schema / `.imdf` reopen). Confirm the URL, not only a toast.
 - Import **does** create a real in-memory session and can evict the oldest of `MAX_SESSIONS` (default 5). That is a production behavior — record it; do not pretend it is a dry-run.
 - Do not save, overwrite, or delete named Illustrator placements (`data/placements.db`). Opening `/illustrator` is safe; clicking Save on a named placement is not.

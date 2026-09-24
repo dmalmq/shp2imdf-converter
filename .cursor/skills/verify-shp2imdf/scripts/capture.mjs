@@ -40,7 +40,7 @@ const OUT_MARKER = ".capture-output";
 // Accessible names in both languages, since the toggles are pressed from
 // whichever language the previous capture left the page in.
 const THEME_TOGGLE = 'button[aria-label="Switch theme"], button[aria-label="テーマを切り替え"]';
-const LANG_TOGGLE = 'button[title="Switch UI language"], button[title="表示言語を切り替え"]';
+const LANG_TOGGLE = '[data-language-switch] button[aria-pressed="false"], button[title="Switch UI language"], button[title="表示言語を切り替え"]';
 
 const WIZARD_SECTIONS = [
   { screen: "wizard-venue-info", nav: ["Project & Venue", "Venue Info"] },
@@ -159,7 +159,7 @@ async function captureShapefileFlow(page, shoot) {
   await shoot("upload");
   await queueTokyoStation(page);
   await shoot("upload-queued");
-  await page.getByRole("button", { name: "Import & Continue" }).click();
+  await page.getByRole("button", { name: "Import & Continue" }).first().click();
   await page.waitForURL("**/wizard", { timeout: 60000 });
   await page.getByLabel(/Venue Name/).waitFor({ timeout: 30000 });
   await fillVenue(page);
