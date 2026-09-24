@@ -310,7 +310,16 @@ class AutofixResponse(BaseModel):
     revalidation: ValidationResponse
 
 
-SESSION_RECORD_SCHEMA_VERSION = 1
+SESSION_RECORD_SCHEMA_VERSION = 2
+
+
+class DeliveryRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    at: datetime
+    rev: int
+    format: str
+    blockers: int | None = None
 
 
 class SessionRecord(BaseModel):
@@ -331,6 +340,13 @@ class SessionRecord(BaseModel):
     upload_artifact_dir: str | None = None
     wizard: WizardState = Field(default_factory=WizardState)
     validation: ValidationResponse | None = None
+    # Bumped once by each request that changes what would be delivered; reads,
+    # touches, validation and exports leave it alone.
+    content_rev: int = 0
+    content_changed_at: datetime | None = None
+    # The content_rev the stored validation describes; any other value means stale.
+    validation_rev: int | None = None
+    delivered: DeliveryRecord | None = None
 
     @classmethod
     def from_stored(cls, payload: Any, dropped: list[str] | None = None) -> SessionRecord:
@@ -346,6 +362,9 @@ class SessionRecord(BaseModel):
         record = _drop_unknown_fields(cls, payload, "", dropped if dropped is not None else [])
         if isinstance(record, dict):
             record["schema_version"] = SESSION_RECORD_SCHEMA_VERSION
+            # Version 1 had no content clock; its last save is the best estimate.
+            if record.get("content_changed_at") is None:
+                record["content_changed_at"] = record.get("last_accessed")
         return cls.model_validate(record)
 
 

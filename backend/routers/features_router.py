@@ -27,6 +27,7 @@ from backend.src.feature_types import (
     spec_for,
 )
 from backend.src.importer import rebuild_normalized_feature_collection
+from backend.src.projects import current_validation, mark_changed, mark_validated
 from backend.src.schemas import (
     BulkPatchFeaturesRequest,
     BulkPatchFeaturesResponse,
@@ -266,7 +267,7 @@ def _choose_safe_overlap_resolution(
 def _revalidate_session(session: Any) -> ValidationResponse:
     validation = validate_feature_collection(session.feature_collection)
     session.feature_collection = annotate_feature_collection_with_validation(session.feature_collection, validation)
-    session.validation = validation
+    mark_validated(session, validation)
     return validation
 
 
@@ -303,7 +304,10 @@ def detect_all(session_id: str, request: Request) -> DetectResponse:
     session = get_session_or_raise(session_id, request)
 
     keyword_map = _merged_keyword_map(request, session.learned_keywords)
+    before = session.files
     session.files = detect_files(session.files, keyword_map, preserve_manual_levels=True)
+    if session.files != before:
+        mark_changed(session)
     _refresh_source_views(session)
     manager.save_session(session)
 
@@ -363,6 +367,7 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
             )
 
     _refresh_source_views(session)
+    mark_changed(session)
     manager.save_session(session)
 
     final_file = next((item for item in session.files if item.stem == stem), updated)
@@ -394,6 +399,8 @@ def patch_features_bulk(
         kept = [item for item in features if str(item.get("id")) not in feature_ids]
         deleted = len(features) - len(kept)
         session.feature_collection["features"] = kept
+        if deleted:
+            mark_changed(session)
         manager.save_session(session)
         return BulkPatchFeaturesResponse(updated_count=0, deleted_count=deleted)
 
@@ -427,6 +434,7 @@ def patch_features_bulk(
         kept = [item for item in features if str(item.get("id")) not in feature_ids]
         kept.append(template)
         session.feature_collection["features"] = kept
+        mark_changed(session)
         manager.save_session(session)
         return BulkPatchFeaturesResponse(updated_count=1, deleted_count=len(selected), merged_feature_id=template["id"])
 
@@ -447,6 +455,8 @@ def patch_features_bulk(
         updated += 1
         next_features.append(copied)
     session.feature_collection["features"] = next_features
+    if updated:
+        mark_changed(session)
     manager.save_session(session)
     return BulkPatchFeaturesResponse(updated_count=updated, deleted_count=0)
 
@@ -471,6 +481,8 @@ def resolve_unit_overlap(
     resolved = bool(updated_count or deleted_count)
     features, removed = prune_empty_geometry_features(features)
     session.feature_collection["features"] = features
+    if resolved or removed:
+        mark_changed(session)
     validation = _revalidate_session(session)
     manager.save_session(session)
     return ResolveUnitOverlapsResponse(
@@ -491,7 +503,7 @@ def resolve_unit_overlaps_safe(session_id: str, request: Request) -> ResolveUnit
     if not isinstance(features, list):
         raise ValueError("Session feature collection is malformed")
 
-    validation = session.validation or validate_feature_collection(session.feature_collection)
+    validation = current_validation(session) or validate_feature_collection(session.feature_collection)
     seen_pairs: set[tuple[str, str]] = set()
     overlap_pairs: list[tuple[str, str]] = []
     for issue in validation.warnings:
@@ -538,6 +550,8 @@ def resolve_unit_overlaps_safe(session_id: str, request: Request) -> ResolveUnit
     features, removed = prune_empty_geometry_features(features)
     deleted_count += len(removed)
     session.feature_collection["features"] = features
+    if resolved_pairs or removed:
+        mark_changed(session)
     revalidation = _revalidate_session(session)
     manager.save_session(session)
     return ResolveUnitOverlapsResponse(
@@ -597,6 +611,7 @@ def patch_feature(
 
     features[index] = updated
     session.feature_collection["features"] = features
+    mark_changed(session)
     manager.save_session(session)
     return FeatureResponse.model_validate(updated)
 
@@ -615,5 +630,6 @@ def delete_feature(session_id: str, feature_id: str, request: Request) -> dict[s
 
     deleted = features.pop(index)
     session.feature_collection["features"] = features
+    mark_changed(session)
     manager.save_session(session)
     return {"session_id": session_id, "deleted_id": deleted.get("id")}

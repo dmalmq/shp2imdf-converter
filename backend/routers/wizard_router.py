@@ -24,6 +24,7 @@ from backend.src.mapper import (
     normalize_company_mappings_payload,
     normalize_unit_category_overrides,
 )
+from backend.src.projects import reset_generation
 from backend.src.schemas import (
     AddressAutofillResponse,
     AddressSearchResponse,
@@ -545,7 +546,7 @@ def patch_wizard_project(session_id: str, payload: ProjectWizardRequest, request
         ]
     else:
         session.wizard.warnings = []
-    session.wizard.generation_status = "not_started"
+    reset_generation(session)
 
     manager.save_session(session)
     return ProjectWizardResponse(
@@ -581,7 +582,7 @@ def patch_wizard_levels(session_id: str, payload: LevelsWizardRequest, request: 
         updated.level_category = item.category or "unspecified"
         updated_files.append(updated)
     session.files = updated_files
-    session.wizard.generation_status = "not_started"
+    reset_generation(session)
 
     manager.save_session(session)
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
@@ -622,7 +623,7 @@ def patch_wizard_buildings(
 
     session.wizard.buildings = building_rows
     session.wizard.building_address_features = address_features
-    session.wizard.generation_status = "not_started"
+    reset_generation(session)
 
     manager.save_session(session)
     return BuildingsWizardResponse(
@@ -656,7 +657,7 @@ def patch_wizard_mappings(
         session.wizard.company_mappings.update(overrides)
 
     _refresh_unit_preview(session, request)
-    session.wizard.generation_status = "not_started"
+    reset_generation(session)
     manager.save_session(session)
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
 
@@ -671,7 +672,7 @@ def patch_wizard_footprint(
     session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
     session.wizard.footprint = payload
-    session.wizard.generation_status = "not_started"
+    reset_generation(session)
     manager.save_session(session)
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
 
@@ -779,7 +780,7 @@ def _apply_company_mappings(session_id: str, request: Request, payload_raw: byte
     session.wizard.company_mappings = mappings
     session.wizard.company_default_category = default_category
     _, unresolved_count = _refresh_unit_preview(session, request)
-    session.wizard.generation_status = "not_started"
+    reset_generation(session)
 
     manager.save_session(session)
     return CompanyMappingsUploadResponse(

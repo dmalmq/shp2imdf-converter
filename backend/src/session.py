@@ -17,11 +17,13 @@ import shutil
 import threading
 from uuid import uuid4
 
+from backend.src.projects import ProjectFields, derive_session_project
 from backend.src.schemas import SESSION_RECORD_SCHEMA_VERSION, CleanupSummary, ImportedFile, SessionRecord
 
 logger = logging.getLogger(__name__)
 
 _SESSION_ID_PATTERN = re.compile(r"[A-Za-z0-9-]+")
+META_VERSION = 2
 
 
 @dataclass
@@ -29,10 +31,18 @@ class SessionSummary:
     session_id: str
     last_accessed: datetime
     upload_artifact_dir: str | None = None
+    # None when only a version-1 meta file has been read: the project is unknown
+    # until the record is next loaded or saved.
+    project: ProjectFields | None = None
 
     @classmethod
     def of(cls, session: SessionRecord) -> SessionSummary:
-        return cls(session.session_id, session.last_accessed, session.upload_artifact_dir)
+        return cls(
+            session.session_id,
+            session.last_accessed,
+            session.upload_artifact_dir,
+            derive_session_project(session),
+        )
 
 
 class SessionBackend(ABC):
@@ -114,10 +124,16 @@ class FileSystemSessionBackend(SessionBackend):
             try:
                 if meta_path.exists():
                     payload = json.loads(meta_path.read_text(encoding="utf-8"))
+                    meta_version = payload.get("meta_version")
                     index[session_id] = SessionSummary(
                         session_id=session_id,
                         last_accessed=datetime.fromisoformat(payload["last_accessed"]),
                         upload_artifact_dir=payload.get("upload_artifact_dir"),
+                        project=(
+                            ProjectFields.from_meta(payload)
+                            if isinstance(meta_version, int) and meta_version >= 2
+                            else None
+                        ),
                     )
                 else:
                     session = self._read(session_id)
@@ -172,6 +188,8 @@ class FileSystemSessionBackend(SessionBackend):
             "last_accessed": summary.last_accessed.isoformat(),
             "upload_artifact_dir": summary.upload_artifact_dir,
         }
+        if summary.project is not None:
+            payload = {"meta_version": META_VERSION, **payload, **summary.project.to_meta()}
         self._write_atomic(self._meta_path_for(summary.session_id), json.dumps(payload))
 
     def _remember(self, session: SessionRecord) -> None:
@@ -233,7 +251,7 @@ class FileSystemSessionBackend(SessionBackend):
     def list_summaries(self) -> list[SessionSummary]:
         with self._lock:
             return [
-                SessionSummary(item.session_id, item.last_accessed, item.upload_artifact_dir)
+                SessionSummary(item.session_id, item.last_accessed, item.upload_artifact_dir, item.project)
                 for item in self._index.values()
             ]
 
@@ -275,6 +293,7 @@ class SessionManager:
             import_profile=import_profile,
             created_at=now,
             last_accessed=now,
+            content_changed_at=now,
             files=files,
             cleanup_summary=cleanup_summary,
             feature_collection=copy.deepcopy(feature_collection),
