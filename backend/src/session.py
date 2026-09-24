@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 import copy
+import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import json
@@ -16,7 +17,7 @@ import shutil
 import threading
 from uuid import uuid4
 
-from backend.src.schemas import CleanupSummary, ImportedFile, SessionRecord
+from backend.src.schemas import SESSION_RECORD_SCHEMA_VERSION, CleanupSummary, ImportedFile, SessionRecord
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,9 @@ class FileSystemSessionBackend(SessionBackend):
         self.cache_size = cache_size
         self._lock = threading.RLock()
         self._cache: OrderedDict[str, SessionRecord] = OrderedDict()
+        # Records that lost unknown keys on load, by fingerprint of what was loaded.
+        # Saving one unchanged would erase those keys from disk, so it is skipped.
+        self._lossy: dict[str, str] = {}
         self._index: dict[str, SessionSummary] = self._load_index()
 
     def _path_for(self, session_id: str) -> Path:
@@ -131,12 +135,28 @@ class FileSystemSessionBackend(SessionBackend):
         path = self._path_for(session_id)
         if not path.exists():
             return None
+        dropped: list[str] = []
         try:
-            return SessionRecord.from_stored(json.loads(path.read_text(encoding="utf-8")))
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            session = SessionRecord.from_stored(payload, dropped)
         except ValueError:
             # Left on disk untouched: a newer or repaired build may still read it.
             logger.exception("Session record %s is unreadable; treating it as not found", path)
             return None
+        stored_version = payload.get("schema_version") if isinstance(payload, dict) else None
+        newer = isinstance(stored_version, int) and stored_version > SESSION_RECORD_SCHEMA_VERSION
+        if dropped or newer:
+            logger.warning(
+                "Session %s was stored with schema_version %s (this build reads %s); "
+                "ignoring unknown fields %s. The file keeps them until the session changes.",
+                session_id,
+                stored_version,
+                SESSION_RECORD_SCHEMA_VERSION,
+                dropped,
+            )
+            with self._lock:
+                self._lossy[session_id] = _fingerprint(session)
+        return session
 
     def _write_atomic(self, path: Path, text: str) -> None:
         tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
@@ -162,7 +182,12 @@ class FileSystemSessionBackend(SessionBackend):
 
     def save(self, session: SessionRecord) -> None:
         summary = SessionSummary.of(session)
-        self._write_atomic(self._path_for(session.session_id), session.model_dump_json())
+        with self._lock:
+            loaded = self._lossy.get(session.session_id)
+        if loaded is None or loaded != _fingerprint(session):
+            self._write_atomic(self._path_for(session.session_id), session.model_dump_json())
+            with self._lock:
+                self._lossy.pop(session.session_id, None)
         self._write_meta(summary)
         with self._lock:
             self._index[session.session_id] = summary
@@ -194,6 +219,7 @@ class FileSystemSessionBackend(SessionBackend):
         with self._lock:
             self._cache.pop(session_id, None)
             self._index.pop(session_id, None)
+            self._lossy.pop(session_id, None)
         if not _SESSION_ID_PATTERN.fullmatch(session_id):
             return
         self._path_for(session_id).unlink(missing_ok=True)
@@ -210,6 +236,11 @@ class FileSystemSessionBackend(SessionBackend):
                 SessionSummary(item.session_id, item.last_accessed, item.upload_artifact_dir)
                 for item in self._index.values()
             ]
+
+
+def _fingerprint(session: SessionRecord) -> str:
+    text = session.model_dump_json(exclude={"last_accessed"})
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 class SessionManager:

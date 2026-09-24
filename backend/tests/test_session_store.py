@@ -192,20 +192,109 @@ def test_records_carry_a_schema_version(tmp_path: Path) -> None:
     assert restarted.get_session(session.session_id).schema_version == SESSION_RECORD_SCHEMA_VERSION
 
 
-@pytest.mark.phase1
-def test_a_record_from_a_newer_schema_is_relabelled_as_this_one(tmp_path: Path) -> None:
-    session_id = _write_record_from_a_newer_version(tmp_path)
-    path = tmp_path / f"{session_id}.json"
+def _mark_newer(path: Path) -> None:
     record = json.loads(path.read_text(encoding="utf-8"))
     record["schema_version"] = SESSION_RECORD_SCHEMA_VERSION + 1
     path.write_text(json.dumps(record), encoding="utf-8")
 
+
+@pytest.mark.phase1
+def test_an_unchanged_save_keeps_the_newer_record_byte_identical(tmp_path: Path) -> None:
+    session_id = _write_record_from_a_newer_version(tmp_path)
+    path = tmp_path / f"{session_id}.json"
+    _mark_newer(path)
+    before = path.read_bytes()
+
     restarted = SessionManager(backend=FileSystemSessionBackend(tmp_path), ttl_hours=24)
     restarted.save_session(restarted.get_session(session_id))
 
+    assert path.read_bytes() == before
+
+
+@pytest.mark.phase1
+def test_a_changed_save_writes_this_versions_shape(tmp_path: Path) -> None:
+    session_id = _write_record_from_a_newer_version(tmp_path)
+    path = tmp_path / f"{session_id}.json"
+    _mark_newer(path)
+
+    restarted = SessionManager(backend=FileSystemSessionBackend(tmp_path), ttl_hours=24)
+    session = restarted.get_session(session_id)
+    session.warnings.append("changed")
+    restarted.save_session(session)
+
     rewritten = json.loads(path.read_text(encoding="utf-8"))
     assert rewritten["schema_version"] == SESSION_RECORD_SCHEMA_VERSION
+    assert rewritten["warnings"] == ["changed"]
     assert "project_id" not in rewritten
+
+
+@pytest.mark.phase1
+def test_a_lossy_load_warns_once_naming_the_session_and_keys(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    session_id = _write_record_from_a_newer_version(tmp_path)
+    _mark_newer(tmp_path / f"{session_id}.json")
+
+    restarted = SessionManager(backend=FileSystemSessionBackend(tmp_path), ttl_hours=24)
+    with caplog.at_level("WARNING", logger="backend.src.session"):
+        restarted.get_session(session_id)
+        restarted.get_session(session_id)
+
+    warnings = [record.getMessage() for record in caplog.records if record.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert session_id in warnings[0]
+    for key in ("project_id", "wizard.footprint.future_knob", "validation.errors[0].future_hint"):
+        assert key in warnings[0]
+    assert str(SESSION_RECORD_SCHEMA_VERSION + 1) in warnings[0]
+
+
+@pytest.mark.phase1
+def test_a_newer_version_alone_is_warned_about(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    manager = SessionManager(backend=FileSystemSessionBackend(tmp_path), ttl_hours=24)
+    session = _create(manager)
+    _mark_newer(tmp_path / f"{session.session_id}.json")
+
+    restarted = SessionManager(backend=FileSystemSessionBackend(tmp_path), ttl_hours=24)
+    with caplog.at_level("WARNING", logger="backend.src.session"):
+        restarted.get_session(session.session_id)
+
+    assert any(session.session_id in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.phase1
+def test_viewing_a_record_over_http_leaves_the_file_byte_identical(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from backend.main import app
+
+    sessions = tmp_path / "sessions"
+    monkeypatch.setenv("SESSION_DATA_DIR", str(sessions))
+    monkeypatch.setenv("SESSION_UPLOADS_DIR", str(tmp_path / "session_uploads"))
+    monkeypatch.setenv("TEMP_DATA_DIR", str(tmp_path / "tmp"))
+    monkeypatch.setenv("PLACEMENTS_DB", str(tmp_path / "placements.db"))
+
+    with TestClient(app) as client:
+        session = _create(client.app.state.session_manager)
+        assert client.get(f"/api/session/{session.session_id}/wizard").status_code == 200
+
+    path = sessions / f"{session.session_id}.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["project_id"] = "added-by-a-later-version"
+    record["wizard"]["footprint"]["future_knob"] = 1.5
+    record["schema_version"] = SESSION_RECORD_SCHEMA_VERSION + 1
+    path.write_text(json.dumps(record), encoding="utf-8")
+    before = path.read_bytes()
+
+    with TestClient(app) as client:
+        for route in ("wizard", "files", "features", "wizard"):
+            response = client.get(f"/api/session/{session.session_id}/{route}")
+            assert response.status_code == 200, response.text
+
+    assert path.read_bytes() == before
 
 
 @pytest.mark.phase1

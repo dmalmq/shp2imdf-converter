@@ -15,6 +15,7 @@ paths with no IMDF semantics.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -29,6 +30,8 @@ _META_NAME = "conversion.json"
 _GPKG_NAME = "artwork.gpkg"
 _FLOORS_NAME = "floors.json"
 _LAST_USED_NAME = "last_used"
+
+logger = logging.getLogger(__name__)
 
 # ``put`` names entries with ``uuid4().hex``. Ids arrive from the URL, so anything
 # else is rejected before it can name a path.
@@ -107,7 +110,12 @@ class ConversionStore:
             raise ConversionExpiredError(_UNAVAILABLE)
         try:
             cached = self._load(meta_path)
-        except (OSError, ValueError, KeyError) as exc:
+        except OSError as exc:
+            # A lock (antivirus, another reader) is not corruption: keep the entry.
+            logger.warning("Conversion %s could not be read: %s", conversion_id, exc)
+            raise ConversionExpiredError(_UNAVAILABLE) from exc
+        except (ValueError, KeyError) as exc:
+            logger.warning("Conversion %s is corrupt and was removed: %s", conversion_id, exc)
             self._discard(directory)
             raise ConversionExpiredError(_UNAVAILABLE) from exc
         if self._is_expired(cached):
@@ -121,7 +129,10 @@ class ConversionStore:
         for meta_path in self.root.glob(f"*/{_META_NAME}"):
             try:
                 cached = self._load(meta_path)
-            except (OSError, ValueError, KeyError):
+            except OSError as exc:
+                logger.warning("Skipping unreadable conversion %s: %s", meta_path.parent.name, exc)
+                continue
+            except (ValueError, KeyError):
                 self._discard(meta_path.parent)
                 removed += 1
                 continue
@@ -188,7 +199,9 @@ class ConversionStore:
         for meta_path in self.root.glob(f"*/{_META_NAME}"):
             try:
                 entries.append(self._load(meta_path))
-            except (OSError, ValueError, KeyError):
+            except OSError as exc:
+                logger.warning("Skipping unreadable conversion %s: %s", meta_path.parent.name, exc)
+            except (ValueError, KeyError):
                 self._discard(meta_path.parent)
         surplus = len(entries) - self.max_entries
         if surplus <= 0:

@@ -204,11 +204,11 @@ INVALID_IDS = [
     "/etc",
     "C:\\Windows",
     "C:/Windows",
-    "\\\\attacker\\share",
-    "\\\\127.0.0.1\\x",
-    "//attacker/share",
+    "\\\\attacker.invalid\\share",
+    "\\\\host.invalid\\x",
+    "//attacker.invalid/share",
     "%2e%2e",
-    "%5C%5Cattacker%5Cshare",
+    "%5C%5Cattacker.invalid%5Cshare",
     "0123456789ABCDEF0123456789ABCDEF",
     "0123456789abcDEF0123456789abcdef",
     "0123456789abcdef0123456789abcdeg",
@@ -307,6 +307,37 @@ def test_a_corrupt_entry_is_not_found_and_removed(store: ConversionStore) -> Non
         store.get(cached.conversion_id)
     assert not cached.directory.exists()
     assert store.root.is_dir()
+
+
+def _locked_meta(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_read_text = Path.read_text
+
+    def read_text(self: Path, *args, **kwargs):
+        if self.name == "conversion.json":
+            raise PermissionError(32, "The process cannot access the file", str(self))
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+
+@pytest.mark.georef
+def test_a_locked_entry_is_unavailable_but_kept(
+    store: ConversionStore, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+    with monkeypatch.context() as patch:
+        _locked_meta(patch)
+        with caplog.at_level("WARNING", logger="backend.src.illustrator_store"):
+            with pytest.raises(ConversionExpiredError):
+                store.get(cached.conversion_id)
+            with pytest.raises(ConversionExpiredError):
+                store.assign(cached.conversion_id, FLOORS)
+            store.prune()
+            store.put(parse_ai(_build_minimal_ai_pdf(), "other.ai"))
+
+    assert (cached.directory / "conversion.json").is_file()
+    assert any(cached.conversion_id in record.getMessage() for record in caplog.records)
+    assert store.get(cached.conversion_id).stem == "sample"
 
 
 @pytest.mark.georef

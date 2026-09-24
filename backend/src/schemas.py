@@ -333,7 +333,7 @@ class SessionRecord(BaseModel):
     validation: ValidationResponse | None = None
 
     @classmethod
-    def from_stored(cls, payload: Any) -> SessionRecord:
+    def from_stored(cls, payload: Any, dropped: list[str] | None = None) -> SessionRecord:
         """Load a persisted record, ignoring fields this version does not know.
 
         The nested models double as request bodies and keep ``extra="forbid"``
@@ -341,17 +341,18 @@ class SessionRecord(BaseModel):
         rollback, so unknown keys are dropped here rather than relaxed there.
         What remains is this version's shape, and is labelled as such so a
         later version re-running its migration sees what was dropped.
+        The dotted paths of dropped keys are appended to ``dropped``.
         """
-        record = _drop_unknown_fields(cls, payload)
+        record = _drop_unknown_fields(cls, payload, "", dropped if dropped is not None else [])
         if isinstance(record, dict):
             record["schema_version"] = SESSION_RECORD_SCHEMA_VERSION
         return cls.model_validate(record)
 
 
-def _drop_unknown_fields(annotation: Any, value: Any) -> Any:
+def _drop_unknown_fields(annotation: Any, value: Any, path: str, dropped: list[str]) -> Any:
     origin = get_origin(annotation)
     if origin is Annotated:
-        return _drop_unknown_fields(get_args(annotation)[0], value)
+        return _drop_unknown_fields(get_args(annotation)[0], value, path, dropped)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         if not isinstance(value, dict):
             return value
@@ -362,26 +363,37 @@ def _drop_unknown_fields(annotation: Any, value: Any) -> Any:
         result: dict[Any, Any] = {}
         for key, item in value.items():
             field = by_key.get(key)
+            child = f"{path}.{key}" if path else str(key)
             if field is not None:
-                result[key] = _drop_unknown_fields(field.annotation, item)
+                result[key] = _drop_unknown_fields(field.annotation, item, child, dropped)
             elif keep_extra:
                 result[key] = item
+            else:
+                dropped.append(child)
         return result
     if origin in (Union, UnionType):
         if value is None:
             return value
         members = [arg for arg in get_args(annotation) if arg is not type(None)]
-        return _drop_unknown_fields(members[0], value) if len(members) == 1 else value
+        if len(members) != 1:
+            return value
+        return _drop_unknown_fields(members[0], value, path, dropped)
     if origin in (list, tuple, set, frozenset) and isinstance(value, list):
         args = get_args(annotation)
         if not args or (origin is tuple and not (len(args) == 2 and args[1] is Ellipsis)):
             return value
-        return [_drop_unknown_fields(args[0], item) for item in value]
+        return [
+            _drop_unknown_fields(args[0], item, f"{path}[{index}]", dropped)
+            for index, item in enumerate(value)
+        ]
     if origin is dict and isinstance(value, dict):
         args = get_args(annotation)
         if len(args) != 2:
             return value
-        return {key: _drop_unknown_fields(args[1], item) for key, item in value.items()}
+        return {
+            key: _drop_unknown_fields(args[1], item, f"{path}.{key}", dropped)
+            for key, item in value.items()
+        }
     return value
 
 

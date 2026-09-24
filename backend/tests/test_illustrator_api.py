@@ -463,23 +463,68 @@ _EXPIRED_META = (
     ' "report": {}, "created_at": 0}'
 )
 
-# Encoded forms that survive routing and arrive at the handler as the id.
+# Encoded forms that survive routing and arrive at the handler as the id. Hosts
+# are .invalid so a regression can never open an SMB connection to a real one.
 _TRAVERSING_IDS = [
     "%2E%2E",
     "%2E",
     "..%5Cvictim",
     "%2E%2E%5Cvictim",
-    "%5C%5Cattacker%5Cshare",
-    "%5C%5C127.0.0.1%5Cx",
+    "%5C%5Cattacker.invalid%5Cshare",
     "C:%5CWindows",
     "ABCDEF0123456789ABCDEF0123456789",
     "0123456789abcdef0123456789abcdef0",
 ]
 
+_ID_ROUTES = ["assign", "export", "shape-matches", "region-matches", "survey-snap"]
+
+
+def _route_body(route: str) -> dict:
+    transform = _body([0.0, 0.0, 200.0, 200.0])["floors"][0]["transform"]
+    if route == "assign":
+        return _assign_body()
+    if route == "export":
+        return _body([0.0, 0.0, 200.0, 200.0])
+    if route == "shape-matches":
+        return {
+            "floor_label": "1F",
+            "artwork": {"source_table": "Buildings", "source_row": 0},
+            "current_transform": transform,
+            "scale_locked": False,
+            "reference": {"type": "FeatureCollection", "features": []},
+        }
+    if route == "region-matches":
+        return {
+            "floor_label": "2F",
+            "region": [0.0, 0.0, 100.0, 100.0],
+            "current_transform": transform,
+            "scale_locked": False,
+            "reference_floor": {
+                "label": "1F",
+                "transform": transform,
+                "region": [0.0, 0.0, 100.0, 100.0],
+            },
+        }
+    return {
+        "current_transform": transform,
+        "scale_locked": False,
+        "reference": {"type": "FeatureCollection", "features": []},
+    }
+
+
+@pytest.mark.georef
+@pytest.mark.parametrize("route", _ID_ROUTES)
+def test_route_bodies_are_valid_so_the_id_is_what_is_rejected(test_client, route: str) -> None:
+    response = test_client.post(
+        f"/api/convert/illustrator/{'0' * 32}/{route}", json=_route_body(route)
+    )
+    assert response.status_code == 404, response.text
+    assert response.json()["code"] == "CONVERSION_EXPIRED"
+
 
 @pytest.mark.georef
 @pytest.mark.parametrize("encoded_id", _TRAVERSING_IDS)
-@pytest.mark.parametrize("route", ["assign", "export"])
+@pytest.mark.parametrize("route", _ID_ROUTES)
 def test_traversing_conversion_ids_are_404_and_delete_nothing(
     test_client, tmp_path, encoded_id: str, route: str
 ) -> None:
@@ -488,8 +533,9 @@ def test_traversing_conversion_ids_are_404_and_delete_nothing(
     victim = _plant(temp_dir / "victim", _EXPIRED_META)
     test_client.app.state.illustrator_store.ttl_seconds = -1
 
-    body = _assign_body() if route == "assign" else _body([0.0, 0.0, 200.0, 200.0])
-    response = test_client.post(f"/api/convert/illustrator/{encoded_id}/{route}", json=body)
+    response = test_client.post(
+        f"/api/convert/illustrator/{encoded_id}/{route}", json=_route_body(route)
+    )
 
     assert response.status_code == 404, response.text
     assert response.json()["code"] == "CONVERSION_EXPIRED"
@@ -501,15 +547,16 @@ def test_traversing_conversion_ids_are_404_and_delete_nothing(
 
 @pytest.mark.georef
 @pytest.mark.parametrize(
-    "encoded_id", ["%5C%5Cattacker%5Cshare", "%5C%5C127.0.0.1%5Cx", "C:%5CWindows", "%2E%2E"]
+    "encoded_id",
+    ["%5C%5Cattacker.invalid%5Cshare", "%5C%5Chost.invalid%5Cx", "C:%5CWindows", "%2E%2E"],
 )
-@pytest.mark.parametrize("route", ["assign", "export"])
+@pytest.mark.parametrize("route", _ID_ROUTES)
 def test_a_hostile_id_never_reaches_the_filesystem(
     test_client, monkeypatch, encoded_id: str, route: str
 ) -> None:
     import os
 
-    markers = ("attacker", "127.0.0.1", "Windows", "..")
+    markers = (".invalid", "Windows", "..")
     seen: list[str] = []
 
     def spy(name, real):
@@ -524,8 +571,9 @@ def test_a_hostile_id_never_reaches_the_filesystem(
     for owner, name in [(os, "stat"), (os, "lstat"), (os.path, "realpath")]:
         monkeypatch.setattr(owner, name, spy(name, getattr(owner, name)))
 
-    body = _assign_body() if route == "assign" else _body([0.0, 0.0, 200.0, 200.0])
-    response = test_client.post(f"/api/convert/illustrator/{encoded_id}/{route}", json=body)
+    response = test_client.post(
+        f"/api/convert/illustrator/{encoded_id}/{route}", json=_route_body(route)
+    )
 
     assert response.status_code == 404, response.text
     assert response.json()["code"] == "CONVERSION_EXPIRED"
