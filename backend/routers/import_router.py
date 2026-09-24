@@ -13,6 +13,7 @@ import zipfile
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 
 from backend.routers.common import session_manager
 from backend.src.detector import sync_feature_types
@@ -180,6 +181,10 @@ async def import_imdf(
     if len(payload) > max_upload_bytes:
         raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
 
+    return await run_in_threadpool(_create_imdf_session, request, payload, max_upload_bytes)
+
+
+def _create_imdf_session(request: Request, payload: bytes, max_upload_bytes: int) -> ImportImdfResponse:
     feature_collection = read_imdf_zip(payload, max_uncompressed_bytes=max_upload_bytes)
     feature_count = len(feature_collection["features"])
 
@@ -210,7 +215,7 @@ async def convert_illustrator(
     payload = await file.read()
     name = _validate_ai_upload(request, file, payload)
 
-    zip_bytes, filename, report = convert_ai_to_geopackage_bundle(payload, name)
+    zip_bytes, filename, report = await run_in_threadpool(convert_ai_to_geopackage_bundle, payload, name)
     # HTTP headers must be latin-1; keep a plain ASCII fallback and carry the
     # real (possibly Japanese) name via RFC 5987 filename*.
     ascii_name = filename.encode("ascii", "ignore").decode() or "output.zip"
@@ -301,7 +306,7 @@ async def upload_reference_layers(
             raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
         blobs.append((upload.filename or "reference.bin", payload))
 
-    layers = read_reference_layers(blobs, focus=_parse_focus_bounds(focus_bounds))
+    layers = await run_in_threadpool(read_reference_layers, blobs, focus=_parse_focus_bounds(focus_bounds))
     return _reference_layers_response(layers)
 
 
@@ -337,8 +342,7 @@ async def preview_illustrator(
     payload = await file.read()
     name = _validate_ai_upload(request, file, payload)
 
-    cached = _illustrator_store(request).put(parse_ai(payload, name))
-    preview = build_preview(cached)
+    cached, preview = await run_in_threadpool(_parse_and_preview, request, payload, name)
     # No pin yet. Export and the frame take the zone from the locate hit
     # (``working_crs`` on /geocode). This seed is only the no-pin fallback.
     suggested = resolve_working_crs(139.7671, 35.6812, None)
@@ -354,6 +358,11 @@ async def preview_illustrator(
         suggested_crs=suggested,
         suggested_crs_label=zone_label(suggested),
     )
+
+
+def _parse_and_preview(request: Request, payload: bytes, name: str):
+    cached = _illustrator_store(request).put(parse_ai(payload, name))
+    return cached, build_preview(cached)
 
 
 _PLACEHOLDER_TRANSFORM = SimilarityTransform(
@@ -588,7 +597,7 @@ def export_illustrator(
 
 
 @router.get("/geocode", response_model=GeocodeSearchResponse)
-async def geocode(
+def geocode(
     request: Request,
     query: str,
     language: str = "ja",
@@ -630,14 +639,14 @@ def _placement_item(placement) -> PlacementItem:
 
 
 @router.get("/placements", response_model=PlacementListResponse)
-async def list_placements(request: Request) -> PlacementListResponse:
+def list_placements(request: Request) -> PlacementListResponse:
     return PlacementListResponse(
         placements=[_placement_item(p) for p in _placement_store(request).list_all()]
     )
 
 
 @router.post("/placements", response_model=PlacementItem, status_code=201)
-async def create_placement(request: Request, payload: PlacementRequest) -> PlacementItem:
+def create_placement(request: Request, payload: PlacementRequest) -> PlacementItem:
     return _placement_item(
         _placement_store(request).create(
             payload.name,
@@ -648,7 +657,7 @@ async def create_placement(request: Request, payload: PlacementRequest) -> Place
 
 
 @router.put("/placements/{placement_id}", response_model=PlacementItem)
-async def update_placement(
+def update_placement(
     placement_id: int, request: Request, payload: PlacementRequest
 ) -> PlacementItem:
     return _placement_item(
@@ -662,7 +671,7 @@ async def update_placement(
 
 
 @router.delete("/placements/{placement_id}", status_code=204)
-async def delete_placement(placement_id: int, request: Request) -> Response:
+def delete_placement(placement_id: int, request: Request) -> Response:
     _placement_store(request).delete(placement_id)
     return Response(status_code=204)
 
@@ -673,6 +682,10 @@ async def import_files(
     files: Annotated[list[UploadFile], File(description="Shapefile components, GeoPackages, or a zip file")],
 ) -> ImportResponse:
     raw_blobs = await _read_uploaded_blobs(request, files)
+    return await run_in_threadpool(_create_import_session, request, raw_blobs)
+
+
+def _create_import_session(request: Request, raw_blobs: list[tuple[str, bytes]]) -> ImportResponse:
     manager = session_manager(request)
     artifacts = import_file_blobs(raw_blobs, filename_keywords_path=_keyword_config_path(request))
     source_feature_collection = sync_feature_types(artifacts.source_feature_collection, artifacts.files)
@@ -707,6 +720,14 @@ async def import_imdf_shapefiles(
     prefer_filename_floor: Annotated[bool, Query()] = False,
 ) -> ImportResponse:
     raw_blobs = await _read_uploaded_blobs(request, files)
+    return await run_in_threadpool(_create_imdf_shapefile_session, request, raw_blobs, prefer_filename_floor)
+
+
+def _create_imdf_shapefile_session(
+    request: Request,
+    raw_blobs: list[tuple[str, bytes]],
+    prefer_filename_floor: bool,
+) -> ImportResponse:
     manager = session_manager(request)
     artifacts = import_imdf_shapefile_blobs(
         raw_blobs,
