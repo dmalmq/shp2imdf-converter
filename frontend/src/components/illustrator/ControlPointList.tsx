@@ -1,7 +1,7 @@
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
   currentResiduals,
-  MIN_CONTROL_POINTS,
+  minControlPoints,
   type AdjustmentMode,
   type PlacementAction,
   type PlacementState
@@ -29,7 +29,9 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
   const fit = currentResiduals(state);
   const pinnedBlocked = Boolean(activeFloor?.pinned);
   const groupBlocked = !pinnedBlocked && mode === "group" && !activeFloor?.linked;
-  const enoughPoints = controlPoints.length >= MIN_CONTROL_POINTS;
+  const required = minControlPoints(state);
+  const enoughPoints = controlPoints.length >= required;
+  const missing = required - controlPoints.length;
   const largestResidualIndex = fit
     ? fit.perPoint.reduce(
         (largest, residual, index, values) => (residual > values[largest] ? index : largest),
@@ -40,12 +42,12 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
   const scopeGuide =
     mode === "group"
       ? t(
-          `Align from ${floorLabel}. Add at least 3 matching points spread around the plan. The fit moves every linked floor together.`,
-          `「${floorLabel}」を基準に位置合わせします。図面全体に分散した対応点を3点以上追加してください。リンクされたすべてのフロアが一緒に移動します。`
+          `Align from ${floorLabel}. Add at least ${required} matching points spread around the plan. The fit moves every linked floor together.`,
+          `「${floorLabel}」を基準に位置合わせします。図面全体に分散した対応点を${required}点以上追加してください。リンクされたすべてのフロアが一緒に移動します。`
         )
       : t(
-          `Add at least 3 matching points to fit only ${floorLabel}.`,
-          `「${floorLabel}」だけを合わせるには、対応点を3点以上追加してください。`
+          `Add at least ${required} matching points to fit only ${floorLabel}.`,
+          `「${floorLabel}」だけを合わせるには、対応点を${required}点以上追加してください。`
         );
 
   const nextStep =
@@ -56,7 +58,7 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
             "Choose the second point far from #1.",
             "#1から離れた2点目を選択してください。"
           )
-        : controlPoints.length === 2
+        : controlPoints.length === 2 && !enoughPoints
           ? t(
               "Choose the third point away from the line between #1 and #2.",
               "#1と#2を結ぶ線から離れた3点目を選択してください。"
@@ -112,10 +114,8 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
         `すべてのフロアを合わせるには「${floorLabel}」を再リンクしてください`
       )
     : t(
-        `Add ${MIN_CONTROL_POINTS - controlPoints.length} more matching ${
-          MIN_CONTROL_POINTS - controlPoints.length === 1 ? "point" : "points"
-        } to enable`,
-        `あと${MIN_CONTROL_POINTS - controlPoints.length}点追加すると有効になります`
+        `Add ${missing} more matching ${missing === 1 ? "point" : "points"} to enable`,
+        `あと${missing}点追加すると有効になります`
       );
 
   return (
@@ -149,14 +149,14 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
       <div className="flex flex-col gap-1">
         <p className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-foreground">
           {t(
-            `${controlPoints.length} / ${MIN_CONTROL_POINTS} minimum`,
-            `最低${MIN_CONTROL_POINTS}点中${controlPoints.length}点`
+            `${controlPoints.length} / ${required} minimum`,
+            `最低${required}点中${controlPoints.length}点`
           )}
         </p>
-        {/* Three segments, one per required pair — the count and the progress
-            say the same thing, so the bar carries no text of its own. */}
+        {/* One segment per required pair — the count and the progress say the
+            same thing, so the bar carries no text of its own. */}
         <div className="flex gap-1" aria-hidden="true">
-          {Array.from({ length: MIN_CONTROL_POINTS }, (_, index) => (
+          {Array.from({ length: required }, (_, index) => (
             <span
               key={index}
               className={`h-1 flex-1 rounded-full ${

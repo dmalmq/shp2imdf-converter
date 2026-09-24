@@ -1,5 +1,6 @@
 import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 
 import {
   DEFAULT_METRES_PER_POINT,
@@ -32,7 +33,12 @@ function controlPoints(count: number): ControlPoint[] {
   });
 }
 
-function placementState(count = 0, activeLinked = true, activePinned = false): PlacementState {
+function placementState(
+  count = 0,
+  activeLinked = true,
+  activePinned = false,
+  scaleLocked = false
+): PlacementState {
   return {
     frame: {
       rotationDeg: 0,
@@ -40,7 +46,7 @@ function placementState(count = 0, activeLinked = true, activePinned = false): P
       workingCrs: "EPSG:6677"
     },
     activeFloorLabel: "1F",
-    scaleLocked: false,
+    scaleLocked,
     floors: ["1F", "2F"].map((label) => ({
       label,
       linked: label === "1F" ? activeLinked && !activePinned : true,
@@ -61,6 +67,7 @@ function renderList({
   mode = "individual",
   activeLinked = true,
   activePinned = false,
+  scaleLocked = false,
   pickStage = null,
   dispatch = () => {}
 }: {
@@ -68,12 +75,13 @@ function renderList({
   mode?: AdjustmentMode;
   activeLinked?: boolean;
   activePinned?: boolean;
+  scaleLocked?: boolean;
   pickStage?: "artwork" | "map" | null;
   dispatch?: (action: PlacementAction) => void;
 } = {}) {
   render(
     <ControlPointList
-      state={placementState(count, activeLinked, activePinned)}
+      state={placementState(count, activeLinked, activePinned, scaleLocked)}
       dispatch={dispatch}
       pickStage={pickStage}
       mode={mode}
@@ -130,9 +138,68 @@ test("retains the two picking prompts and names the idle action Add matching pai
   ).toBeInTheDocument();
 });
 
-test("disables fitting below three points", () => {
+test("disables fitting below three points while the scale is free", async () => {
   renderList({ count: 2 });
-  expect(screen.getByRole("button", { name: "Fit this floor" })).toBeDisabled();
+  const button = screen.getByRole("button", { name: "Fit this floor" });
+  expect(button).toBeDisabled();
+  expect(screen.queryByText(/Current RMSE:/)).toBeNull();
+  fireEvent.focus(button.parentElement!);
+  expect(
+    (await screen.findAllByText("Add 1 more matching point to enable")).length
+  ).toBeGreaterThan(0);
+});
+
+test("a locked scale enables the fit and shows residuals at two points", () => {
+  const seen: PlacementAction[] = [];
+  renderList({ count: 2, scaleLocked: true, dispatch: (action) => seen.push(action) });
+  expect(screen.getByText("2 / 2 minimum")).toBeInTheDocument();
+  expect(
+    screen.getByText("Ready to fit. Add more pairs if the reference is noisy.")
+  ).toBeInTheDocument();
+  expect(screen.getByText("Add at least 2 matching points to fit only 1F.")).toBeInTheDocument();
+  expect(screen.getByText(/Current RMSE:/)).toBeInTheDocument();
+  expect(screen.getByText(/#1 .* m/)).toBeInTheDocument();
+  expect(screen.getByText(/#2 .* m/)).toBeInTheDocument();
+  const button = screen.getByRole("button", { name: "Fit this floor" });
+  expect(button).toBeEnabled();
+  fireEvent.click(button);
+  expect(seen).toEqual([{ type: "fitControlPoints", mode: "individual" }]);
+});
+
+test("toggling the scale lock with two points flips fit availability", () => {
+  function Harness() {
+    const [locked, setLocked] = useState(true);
+    return (
+      <>
+        <button type="button" onClick={() => setLocked((value) => !value)}>
+          toggle lock
+        </button>
+        <ControlPointList
+          state={placementState(2, true, false, locked)}
+          dispatch={() => {}}
+          pickStage={null}
+          mode="individual"
+          onTogglePicking={() => {}}
+        />
+      </>
+    );
+  }
+  render(<Harness />);
+  const fit = () => screen.getByRole("button", { name: "Fit this floor" });
+  expect(fit()).toBeEnabled();
+  expect(screen.getByText(/Current RMSE:/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "toggle lock" }));
+  expect(fit()).toBeDisabled();
+  expect(screen.getByText("2 / 3 minimum")).toBeInTheDocument();
+  expect(
+    screen.getByText("Choose the third point away from the line between #1 and #2.")
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/Current RMSE:/)).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "toggle lock" }));
+  expect(fit()).toBeEnabled();
+  expect(screen.getByText(/Current RMSE:/)).toBeInTheDocument();
 });
 
 test.each([

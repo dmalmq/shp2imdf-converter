@@ -20,8 +20,15 @@ export const DEFAULT_DRAWING_SCALE = 1000;
 /** Ground metres per PDF point at {@link DEFAULT_DRAWING_SCALE}. */
 export const DEFAULT_METRES_PER_POINT = metresPerPointForScale(DEFAULT_DRAWING_SCALE);
 
-/** Product-level minimum for accepting a similarity fit. */
-export const MIN_CONTROL_POINTS = 3;
+/**
+ * Matching pairs needed before a fit is offered and residuals mean anything.
+ * A similarity fit solves x, y, rotation and scale; with the scale locked only
+ * three unknowns remain, so two pairs already over-determine it and leave a
+ * real residual. Unlocked, two pairs fit exactly and the residual is always 0.
+ */
+export function minControlPoints(state: Pick<PlacementState, "scaleLocked">): 2 | 3 {
+  return state.scaleLocked ? 2 : 3;
+}
 
 export type ControlPoint = {
   id: string;
@@ -474,7 +481,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
       if (
         !active ||
         active.pinned ||
-        active.controlPoints.length < MIN_CONTROL_POINTS ||
+        active.controlPoints.length < minControlPoints(state) ||
         (action.mode === "group" && !active.linked)
       ) {
         return state;
@@ -714,7 +721,7 @@ export function currentResiduals(
   state: PlacementState
 ): { perPoint: number[]; rmse: number } | null {
   const active = activeFloor(state);
-  if (!active || active.controlPoints.length < MIN_CONTROL_POINTS) return null;
+  if (!active || active.controlPoints.length < minControlPoints(state)) return null;
   const [lon0, lat0] = active.mapAnchor;
   const enu = active.controlPoints.map((p) => lngLatToEnu(p.map[0], p.map[1], lon0, lat0));
   return residuals(

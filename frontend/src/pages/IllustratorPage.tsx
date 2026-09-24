@@ -55,7 +55,7 @@ import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
 import { useAppStore } from "../store/useAppStore";
 import {
   DEFAULT_METRES_PER_POINT,
-  MIN_CONTROL_POINTS,
+  minControlPoints,
   initialPlacementHistory,
   pinFocusBounds,
   placementHistoryReducer,
@@ -1247,7 +1247,7 @@ export function IllustratorPage() {
             });
             const count = active.controlPoints.length + 1;
             setPickSession(
-              count < MIN_CONTROL_POINTS
+              count < minControlPoints(state)
                 ? { ...pickSession, stage: "artwork", pendingArtwork: null }
                 : null
             );

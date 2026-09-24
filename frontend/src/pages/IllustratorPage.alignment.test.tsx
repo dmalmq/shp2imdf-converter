@@ -40,6 +40,9 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
       <button type="button" onClick={() => dispatch({ type: "fitControlPoints", mode })}>
         Fit control points
       </button>
+      <button type="button" onClick={() => dispatch({ type: "unlockScale" })}>
+        Unlock scale
+      </button>
       <output data-testid="sidebar-stage">{pickStage ?? "closed"}</output>
       <output data-testid="active-floor">{state.activeFloorLabel}</output>
       <output data-testid="point-counts">
@@ -179,8 +182,28 @@ function completePair() {
   fireEvent.click(screen.getByRole("button", { name: "Pick map" }));
 }
 
-test("collects three pairs before closing and fits only from the sidebar", async () => {
+test("with the scale locked, collects two pairs before closing and fits only from the sidebar", async () => {
   await enterPlacementView();
+
+  fireEvent.click(screen.getByRole("button", { name: "Add matching pair" }));
+  expect(screen.getByTestId("map-stage")).toHaveTextContent("artwork");
+
+  completePair();
+  expect(screen.getByTestId("map-stage")).toHaveTextContent("artwork");
+  expect(screen.getByTestId("point-counts")).toHaveTextContent("1F:1,2F:0,3F:0");
+
+  completePair();
+  expect(screen.getByTestId("map-stage")).toHaveTextContent("closed");
+  expect(screen.getByTestId("point-counts")).toHaveTextContent("1F:2,2F:0,3F:0");
+  expect(screen.getByTestId("frame-rotation")).toHaveTextContent("0");
+
+  fireEvent.click(screen.getByRole("button", { name: "Fit control points" }));
+  await waitFor(() => expect(Number(screen.getByTestId("frame-rotation").textContent)).not.toBe(0));
+});
+
+test("with the scale free, collects three pairs before closing and fits only from the sidebar", async () => {
+  await enterPlacementView();
+  fireEvent.click(screen.getByRole("button", { name: "Unlock scale" }));
 
   fireEvent.click(screen.getByRole("button", { name: "Add matching pair" }));
   expect(screen.getByTestId("map-stage")).toHaveTextContent("artwork");
