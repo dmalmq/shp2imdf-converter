@@ -522,7 +522,7 @@ async function queueTokyoStation(page) {
 async function importTokyoStation(page) {
   await queueTokyoStation(page);
   await page.getByRole("button", { name: "Import & Continue" }).first().click();
-  await page.waitForURL("**/wizard", { timeout: 60000 });
+  await page.waitForURL("**/p/*/set-up", { timeout: 60000 });
   await page.getByLabel(/Venue Name/).waitFor({ timeout: 30000 });
 }
 
@@ -541,7 +541,7 @@ async function generateReview(page) {
     throw new Error("Generate & open Review is disabled — venue/classification/levels/unit mapping incomplete");
   }
   await generate.click();
-  await page.waitForURL("**/review", { timeout: 60000 });
+  await page.waitForURL("**/p/*/check", { timeout: 60000 });
   await page.getByRole("button", { name: "Export", exact: true }).waitFor({ timeout: 30000 });
 }
 
@@ -550,7 +550,7 @@ async function driveImportShapefiles() {
     await importTokyoStation(page);
     await writeEvidence("import-shapefiles", page, {
       entry: "Import dropzone + Import & Continue",
-      notes: `header ${APP_HEADER}; landed on /wizard`,
+      notes: `header ${APP_HEADER}; landed on /p/<id>/set-up`,
       body: "Expected: Standard import of tokyo_station fixtures navigates to the wizard Venue Info section."
     });
     const text = await page.locator("body").innerText();
