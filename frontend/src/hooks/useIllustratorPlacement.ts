@@ -179,13 +179,28 @@ export function toFloorPayloads(
   });
 }
 
-/** Rebuild state from a saved floor set; anchors and frame come from the save. */
+function sameFrame(a: TransformPayload, b: TransformPayload): boolean {
+  return a.rotation_deg === b.rotation_deg && a.metres_per_point === b.metres_per_point;
+}
+
+/**
+ * Rebuild state from a saved floor set. The frame is the rotation/scale most
+ * floors share; those floors restore linked, the rest unlinked with their own.
+ */
 export function floorPayloadsToState(
   floors: { label: string; transform: TransformPayload }[],
   current: PlacementState
 ): PlacementState {
   const active = floors[0]?.label ?? null;
-  const frameTransform = floors.find((f) => f.label === active)?.transform;
+  let frameTransform: TransformPayload | undefined;
+  let frameCount = 0;
+  for (const candidate of floors) {
+    const count = floors.filter((f) => sameFrame(f.transform, candidate.transform)).length;
+    if (count > frameCount) {
+      frameTransform = candidate.transform;
+      frameCount = count;
+    }
+  }
   const byLabel = new Map(floors.map((f) => [f.label, f.transform]));
   return {
     frame: {
@@ -198,17 +213,18 @@ export function floorPayloadsToState(
     floors: current.floors.map((f) => {
       if (f.pinned) return f;
       const saved = byLabel.get(f.label);
-      return saved
-        ? {
-            ...f,
-            linked: true,
-            mapAnchor: [saved.map_anchor[0], saved.map_anchor[1]] as [number, number],
-            artworkMatch: false,
-            rotationDeg: undefined,
-            metresPerPoint: undefined,
-            controlPoints: []
-          }
-        : f;
+      if (!saved) return f;
+      const linked = !frameTransform || sameFrame(saved, frameTransform);
+      return {
+        ...f,
+        linked,
+        artworkAnchor: [saved.artwork_anchor[0], saved.artwork_anchor[1]] as [number, number],
+        mapAnchor: [saved.map_anchor[0], saved.map_anchor[1]] as [number, number],
+        artworkMatch: false,
+        rotationDeg: linked ? undefined : saved.rotation_deg,
+        metresPerPoint: linked ? undefined : saved.metres_per_point,
+        controlPoints: []
+      };
     })
   };
 }

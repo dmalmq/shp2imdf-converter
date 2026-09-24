@@ -6,6 +6,7 @@ import {
   listPlacements,
   type PlacementItem
 } from "../../api/client";
+import { isApiClientError, toErrorMessage } from "../../api/errors";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
   toFloorPayloads,
@@ -63,8 +64,12 @@ export function PlacementLibrary({ state, dispatch, artworkBounds }: Props) {
       });
       setName("");
       await refresh();
-    } catch {
-      setError(t("That name is already taken.", "その名前は既に使用されています。"));
+    } catch (caught) {
+      setError(
+        isApiClientError(caught) && caught.code === "PLACEMENT_NAME_TAKEN"
+          ? t("That name is already taken.", "その名前は既に使用されています。")
+          : toErrorMessage(caught, t("Could not save the placement.", "配置を保存できません。"))
+      );
     }
   };
 

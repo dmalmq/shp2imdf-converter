@@ -422,6 +422,89 @@ test("floorPayloadsToState rebuilds linked floors and the frame", () => {
   expect(state.floors[0].artworkAnchor).toEqual([85, 80]);
 });
 
+function fourFloors(): PlacementState {
+  const bounds: Record<string, [number, number, number, number]> = {
+    "1F": [0, 0, 170, 160],
+    "2F": [200, 0, 370, 160],
+    "3F": [400, 0, 570, 160],
+    "4F": [600, 0, 770, 160]
+  };
+  return {
+    ...BASE,
+    floors: Object.entries(bounds).map(([label, b]) => ({
+      label,
+      linked: true,
+      pinned: false,
+      artworkAnchor: [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2],
+      mapAnchor: ANCHOR,
+      controlPoints: [],
+      artworkBounds: b
+    }))
+  };
+}
+
+function expectSameExport(after: PlacementState, before: PlacementState) {
+  const expected = toFloorPayloads(before);
+  const actual = toFloorPayloads(after);
+  expect(actual.map((f) => f.label)).toEqual(expected.map((f) => f.label));
+  actual.forEach((f, index) => {
+    const want = expected[index].transform;
+    expect(f.transform.artwork_anchor[0]).toBeCloseTo(want.artwork_anchor[0], 9);
+    expect(f.transform.artwork_anchor[1]).toBeCloseTo(want.artwork_anchor[1], 9);
+    expect(f.transform.map_anchor[0]).toBeCloseTo(want.map_anchor[0], 12);
+    expect(f.transform.map_anchor[1]).toBeCloseTo(want.map_anchor[1], 12);
+    expect(f.transform.rotation_deg).toBeCloseTo(want.rotation_deg, 9);
+    expect(f.transform.metres_per_point).toBeCloseTo(want.metres_per_point, 12);
+    expect(f.transform.working_crs).toBe(want.working_crs);
+  });
+}
+
+test("a saved placement round-trips every floor's export transform", () => {
+  let state = placementReducer(fourFloors(), { type: "rotateFrame", rotationDeg: 12 });
+  state = placementReducer(state, { type: "positionBuilding", mapAnchor: [139.71, 35.7] });
+  state = placementReducer(state, { type: "setActiveFloor", label: "2F" });
+  state = placementReducer(state, {
+    type: "applySimilarity",
+    mode: "individual",
+    transform: {
+      artworkAnchor: [310, 40],
+      mapAnchor: [139.7105, 35.7002],
+      rotationDeg: -30,
+      metresPerPoint: 0.2,
+      workingCrs: "EPSG:6677"
+    }
+  });
+  state = placementReducer(state, { type: "rotateFloor", label: "3F", rotationDeg: 40 });
+  state = placementReducer(state, { type: "setActiveFloor", label: "1F" });
+
+  const restored = floorPayloadsToState(toFloorPayloads(state), fourFloors());
+
+  expectSameExport(restored, state);
+  expect(restored.floors.map((f) => f.linked)).toEqual([true, false, false, true]);
+  expect(restored.frame.rotationDeg).toBeCloseTo(12, 9);
+});
+
+test("a saved placement whose first floor was fitted alone keeps the others linked", () => {
+  let state = placementReducer(fourFloors(), { type: "rotateFrame", rotationDeg: 5 });
+  state = placementReducer(state, {
+    type: "applySimilarity",
+    mode: "individual",
+    transform: {
+      artworkAnchor: [60, 120],
+      mapAnchor: [139.7004, 35.6911],
+      rotationDeg: 33,
+      metresPerPoint: 0.18,
+      workingCrs: "EPSG:6677"
+    }
+  });
+
+  const restored = floorPayloadsToState(toFloorPayloads(state), fourFloors());
+
+  expectSameExport(restored, state);
+  expect(restored.floors.map((f) => f.linked)).toEqual([false, true, true, true]);
+  expect(restored.frame.rotationDeg).toBeCloseTo(5, 9);
+});
+
 test("control points act on the active floor", () => {
   let state = placementReducer(BASE, { type: "setActiveFloor", label: "2F" });
   state = placementReducer(state, {

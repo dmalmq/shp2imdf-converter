@@ -879,24 +879,27 @@ export function IllustratorPage() {
     }
   };
 
+  const install = (response: IllustratorPreviewResponse, file: File) => {
+    setPreview(response);
+    setAssignment(null);
+    setRecenterTo(null);
+    setReferenceLayers([]);
+    setSurveyNotice(null);
+    setSurveyPose("idle");
+    setLocateSettled(false);
+    snappedRef.current = null;
+    surveySnapGen.current += 1;
+    setLastFile(file);
+    setOutputCrs(response.suggested_crs);
+    // New conversions start locked at 1:1000; assignment reset does the same.
+    dispatch({ type: "resetPlacement", state: initialStateFromAssignment(response, []) });
+  };
+
   const convert = async (file: File) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await previewIllustrator(file);
-      setPreview(response);
-      setAssignment(null);
-      setRecenterTo(null);
-      setReferenceLayers([]);
-      setSurveyNotice(null);
-      setSurveyPose("idle");
-      setLocateSettled(false);
-      snappedRef.current = null;
-      surveySnapGen.current += 1;
-      setLastFile(file);
-      setOutputCrs(response.suggested_crs);
-      // New conversions start locked at 1:1000; assignment reset does the same.
-      dispatch({ type: "resetPlacement", state: initialStateFromAssignment(response, []) });
+      install(await previewIllustrator(file), file);
     } catch (error) {
       setError(
         describeFailure(
@@ -912,15 +915,56 @@ export function IllustratorPage() {
     }
   };
 
+  /**
+   * Re-cache an expired conversion from the file the browser still holds and
+   * re-apply the floor assignment, so placement state and undo history survive.
+   * Null when the file no longer fits that assignment; the page is then reset
+   * to the assignment step for the fresh conversion.
+   */
+  const renewConversion = async (
+    current: IllustratorPreviewResponse,
+    file: File,
+    regions: AssignedRegion[]
+  ): Promise<IllustratorPreviewResponse | null> => {
+    const fresh = await previewIllustrator(file);
+    if (fresh.artwork_bounds.some((value, index) => value !== current.artwork_bounds[index])) {
+      install(fresh, file);
+      return null;
+    }
+    try {
+      await assignFloors(fresh.conversion_id, regions);
+    } catch (error) {
+      if (isBackendUnreachableError(error)) throw error;
+      install(fresh, file);
+      return null;
+    }
+    setPreview(fresh);
+    return fresh;
+  };
+
   const download = async () => {
     if (!preview) return;
     setError(null);
+    const body = { floors: toFloorPayloads(state), output_crs: outputCrs, formats };
     try {
-      const result = await exportIllustrator(preview.conversion_id, {
-        floors: toFloorPayloads(state),
-        output_crs: outputCrs,
-        formats
-      });
+      let result: Awaited<ReturnType<typeof exportIllustrator>>;
+      try {
+        result = await exportIllustrator(preview.conversion_id, body);
+      } catch (error) {
+        const expired = isApiClientError(error) && error.code === "CONVERSION_EXPIRED";
+        if (!expired || !lastFile || !assignment) throw error;
+        const renewed = await renewConversion(preview, lastFile, assignment);
+        if (!renewed) {
+          setError(
+            t(
+              "The conversion expired and the file no longer matches its floor assignment. Assign the floors again.",
+              "変換の有効期限が切れ、ファイルがフロア割り当てと一致しなくなりました。フロアをもう一度割り当ててください。"
+            )
+          );
+          return;
+        }
+        result = await exportIllustrator(renewed.conversion_id, body);
+      }
       const url = URL.createObjectURL(result.blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -930,8 +974,6 @@ export function IllustratorPage() {
       anchor.remove();
       URL.revokeObjectURL(url);
     } catch (error) {
-      // Only the API knows whether the cached conversion really expired; the
-      // browser still holds the file, so that case can silently re-convert.
       const expired = isApiClientError(error) && error.code === "CONVERSION_EXPIRED";
       setError(
         expired
@@ -944,10 +986,6 @@ export function IllustratorPage() {
               t("Could not export the files.", "ファイルを書き出せませんでした。")
             )
       );
-      // Retrying against a backend that is down fails again and replaces this
-      // message with a complaint about the file, which is how a stopped server
-      // ends up looking like a corrupt .ai.
-      if (expired && lastFile) void convert(lastFile);
     }
   };
 

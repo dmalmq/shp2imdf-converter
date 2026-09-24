@@ -3,7 +3,9 @@
 Parsing a station-sized ``.ai`` costs seconds, and the georeferencing flow needs
 the same geometry twice: once to preview, once to export. Each entry is a
 directory holding the untransformed GeoPackage plus the metadata needed to
-rebuild the bundle, expired by age and capped by count.
+rebuild the bundle, expired after an idle period and capped by count, least
+recently used first. Last use is the mtime of a marker file, so touching an
+entry never rewrites its metadata.
 
 Deliberately not built on ``SessionManager``: that store is shaped around IMDF
 ``SessionRecord`` objects, and a conversion is an unrelated bag of coloured
@@ -13,6 +15,7 @@ paths with no IMDF semantics.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import time
 from dataclasses import dataclass
@@ -24,6 +27,7 @@ from backend.src.illustrator_importer import _ConversionResult
 _META_NAME = "conversion.json"
 _GPKG_NAME = "artwork.gpkg"
 _FLOORS_NAME = "floors.json"
+_LAST_USED_NAME = "last_used"
 
 
 class ConversionExpiredError(Exception):
@@ -40,6 +44,7 @@ class CachedConversion:
     report: dict
     created_at: float
     floors: list[dict] | None = None
+    last_used_at: float = 0.0
 
     @property
     def gpkg_path(self) -> Path:
@@ -84,6 +89,7 @@ class ConversionStore:
             ),
             encoding="utf-8",
         )
+        self._touch(cached)
         self._enforce_cap()
         return cached
 
@@ -98,6 +104,7 @@ class ConversionStore:
         if self._is_expired(cached):
             self._discard(directory)
             raise ConversionExpiredError("That conversion has expired. Convert the file again.")
+        self._touch(cached)
         return cached
 
     def prune(self) -> int:
@@ -128,6 +135,11 @@ class ConversionStore:
         floors = None
         if floors_path.is_file():
             floors = json.loads(floors_path.read_text(encoding="utf-8"))
+        created_at = float(payload["created_at"])
+        try:
+            last_used_at = (meta_path.parent / _LAST_USED_NAME).stat().st_mtime
+        except OSError:
+            last_used_at = created_at
         return CachedConversion(
             conversion_id=payload["conversion_id"],
             directory=meta_path.parent,
@@ -135,12 +147,26 @@ class ConversionStore:
             written_layers=payload["written_layers"],
             layer_order=payload["layer_order"],
             report=payload["report"],
-            created_at=float(payload["created_at"]),
+            created_at=created_at,
             floors=floors,
+            last_used_at=last_used_at,
         )
 
     def _is_expired(self, cached: CachedConversion) -> bool:
-        return (time.time() - cached.created_at) > self.ttl_seconds
+        return (time.time() - cached.last_used_at) > self.ttl_seconds
+
+    @staticmethod
+    def _touch(cached: CachedConversion) -> None:
+        now = time.time()
+        marker = cached.directory / _LAST_USED_NAME
+        try:
+            marker.touch()
+            os.utime(marker, (now, now))
+        except FileNotFoundError as exc:
+            raise ConversionExpiredError(
+                "That conversion is no longer available. Convert the file again."
+            ) from exc
+        cached.last_used_at = now
 
     def _enforce_cap(self) -> None:
         entries = []
@@ -152,7 +178,7 @@ class ConversionStore:
         surplus = len(entries) - self.max_entries
         if surplus <= 0:
             return
-        for cached in sorted(entries, key=lambda item: item.created_at)[:surplus]:
+        for cached in sorted(entries, key=lambda item: item.last_used_at)[:surplus]:
             self._discard(cached.directory)
 
     @staticmethod
