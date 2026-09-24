@@ -258,3 +258,43 @@ test("blocks fitting while the active floor is frozen in place", () => {
   expect(screen.getByRole("button", { name: "Fit this floor" })).toBeDisabled();
   expect(screen.getByText("Unpin 1F before fitting it with control points.")).toBeInTheDocument();
 });
+
+test.each([
+  [
+    "plan",
+    (points: ControlPoint[]) => [points[0], { ...points[1], artwork: points[0].artwork }],
+    "These points are in the same place on the plan. Pick corners further apart."
+  ],
+  [
+    "map",
+    (points: ControlPoint[]) => [points[0], { ...points[1], map: points[0].map }],
+    "These points are in the same place on the map. Pick targets further apart."
+  ]
+] as const)(
+  "two pairs in the same place on the %s explain themselves and do not offer a fit",
+  (_side, collapse, message) => {
+    const seen: PlacementAction[] = [];
+    const base = placementState(2, true, false, true);
+    const state: PlacementState = {
+      ...base,
+      floors: base.floors.map((floor) =>
+        floor.label === "1F" ? { ...floor, controlPoints: collapse(floor.controlPoints) } : floor
+      )
+    };
+    render(
+      <ControlPointList
+        state={state}
+        dispatch={(action) => seen.push(action)}
+        pickStage={null}
+        mode="individual"
+        onTogglePicking={() => {}}
+      />
+    );
+    expect(screen.getByText(message)).toBeInTheDocument();
+    expect(screen.queryByText(/Ready to fit/)).toBeNull();
+    const button = screen.getByRole("button", { name: "Fit this floor" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(seen).toEqual([]);
+  }
+);

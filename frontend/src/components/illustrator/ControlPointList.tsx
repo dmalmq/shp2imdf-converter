@@ -1,5 +1,6 @@
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
+  controlPointProblem,
   currentResiduals,
   minControlPoints,
   type AdjustmentMode,
@@ -32,6 +33,19 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
   const required = minControlPoints(state);
   const enoughPoints = controlPoints.length >= required;
   const missing = required - controlPoints.length;
+  const problem = controlPointProblem(state);
+  const problemMessage =
+    problem === "artworkCoincident"
+      ? t(
+          "These points are in the same place on the plan. Pick corners further apart.",
+          "図面上の対応点が同じ位置にあります。離れた角を選んでください。"
+        )
+      : problem === "mapCoincident"
+        ? t(
+            "These points are in the same place on the map. Pick targets further apart.",
+            "地図上の対応点が同じ位置にあります。離れた地点を選んでください。"
+          )
+        : null;
   const largestResidualIndex = fit
     ? fit.perPoint.reduce(
         (largest, residual, index, values) => (residual > values[largest] ? index : largest),
@@ -94,7 +108,7 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
   const fitButton = (
     <Button
       className="w-full"
-      disabled={groupBlocked || pinnedBlocked || !enoughPoints}
+      disabled={groupBlocked || pinnedBlocked || !enoughPoints || Boolean(problem)}
       onClick={() => dispatch({ type: "fitControlPoints", mode })}
     >
       {fitLabel}
@@ -113,10 +127,12 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
         `Relink ${floorLabel} to fit all floors`,
         `すべてのフロアを合わせるには「${floorLabel}」を再リンクしてください`
       )
-    : t(
+    : !enoughPoints
+    ? t(
         `Add ${missing} more matching ${missing === 1 ? "point" : "points"} to enable`,
         `あと${missing}点追加すると有効になります`
-      );
+      )
+    : problemMessage;
 
   return (
     <div className="flex flex-col gap-3">
@@ -165,7 +181,11 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
             />
           ))}
         </div>
-        <p className="text-xs leading-4 text-muted-foreground">{nextStep}</p>
+        {problemMessage ? (
+          <p className="text-xs leading-4 text-destructive">{problemMessage}</p>
+        ) : (
+          <p className="text-xs leading-4 text-muted-foreground">{nextStep}</p>
+        )}
       </div>
 
       {pinnedBlocked ? (
@@ -250,7 +270,9 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
         </p>
       ) : null}
 
-      <DisabledHint hint={pinnedBlocked || groupBlocked || !enoughPoints ? fitBlockedReason : null}>
+      <DisabledHint
+        hint={pinnedBlocked || groupBlocked || !enoughPoints || problem ? fitBlockedReason : null}
+      >
         {fitButton}
       </DisabledHint>
     </div>

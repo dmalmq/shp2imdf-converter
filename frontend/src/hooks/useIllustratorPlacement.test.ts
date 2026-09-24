@@ -1,6 +1,7 @@
 import {
   DEFAULT_DRAWING_SCALE,
   DEFAULT_METRES_PER_POINT,
+  controlPointProblem,
   currentResiduals,
   floorPayloadsToState,
   initialPlacementHistory,
@@ -628,6 +629,52 @@ test("unlocking the scale with two pairs withdraws the fit until relocked", () =
   expect(placementReducer(relocked, { type: "fitControlPoints", mode: "group" })).not.toBe(
     relocked
   );
+});
+
+function lockedPairState(
+  artwork: [[number, number], [number, number]],
+  map: [[number, number], [number, number]]
+): PlacementState {
+  const locked = placementReducer(BASE, { type: "lockScale" });
+  return [0, 1].reduce(
+    (state, index) =>
+      placementReducer(state, {
+        type: "addControlPoint",
+        point: { id: String(index), artwork: artwork[index], map: map[index] }
+      }),
+    locked
+  );
+}
+
+test.each([
+  ["artwork", [[10, 10], [10, 10]], [ANCHOR, enuToLngLat(0, 20, ANCHOR[0], ANCHOR[1])], "artworkCoincident"],
+  ["map", [[0, 0], [100, 0]], [ANCHOR, ANCHOR], "mapCoincident"]
+] as const)(
+  "two pairs whose %s points coincide leave the placement unchanged instead of throwing",
+  (_side, artwork, map, problem) => {
+    const state = lockedPairState(
+      artwork as unknown as [[number, number], [number, number]],
+      map as unknown as [[number, number], [number, number]]
+    );
+    expect(controlPointProblem(state)).toBe(problem);
+    expect(() => currentResiduals(state)).not.toThrow();
+    for (const mode of ["group", "individual"] as const) {
+      expect(() => placementReducer(state, { type: "fitControlPoints", mode })).not.toThrow();
+      expect(placementReducer(state, { type: "fitControlPoints", mode })).toBe(state);
+    }
+  }
+);
+
+test("near-coincident pairs still fit and are not flagged", () => {
+  const state = lockedPairState(
+    [
+      [10, 10],
+      [10.001, 10]
+    ],
+    [ANCHOR, enuToLngLat(0, 0.001, ANCHOR[0], ANCHOR[1])]
+  );
+  expect(controlPointProblem(state)).toBeNull();
+  expect(placementReducer(state, { type: "fitControlPoints", mode: "group" })).not.toBe(state);
 });
 
 test("a three-point group fit recovers the shared frame and keeps every floor linked", () => {
