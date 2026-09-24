@@ -49,7 +49,9 @@
     --secondary: 40 33.3% 89.4%;
     --secondary-foreground: 195 11.8% 13.3%;
 
-    --muted: 41.5 39.4% 93.5%;
+    /* The chip and line tone, so tab tracks and recessed panels stay visible
+       on paper. Page containers use --background. */
+    --muted: 40 33.3% 89.4%;
     /* One step darker than B's #6F6B62, which measured 4.3:1 on the pine
        tint behind a selected option. #6A665D clears 4.6:1 on every tint. */
     --muted-foreground: 41.5 6.5% 39%;
@@ -118,7 +120,8 @@
     --secondary: 33.3 10.1% 17.5%;
     --secondary-foreground: 40 34.9% 91.6%;
 
-    --muted: 36 9.8% 10%;
+    /* raised */
+    --muted: 33.3 10.1% 17.5%;
     --muted-foreground: 38.2 11% 60.8%;
 
     --accent: 164.4 30.3% 17.5%;

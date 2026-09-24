@@ -1187,7 +1187,7 @@ export function ReviewPage() {
   const sidebarWidth = sidebarCollapsed ? 0 : 340;
 
   return (
-    <div className="flex h-screen flex-col bg-muted">
+    <div className="flex h-screen flex-col bg-background">
       {/* Top bar — mirrors AppShell but inline since review opts out of shell */}
       {/* Review opts out of AppShell for its full-bleed layout, so it has to
           carry the shell's own controls — the theme toggle was simply missing

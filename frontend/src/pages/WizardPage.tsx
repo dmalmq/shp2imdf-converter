@@ -892,7 +892,7 @@ export function WizardPage() {
 
           {/* Every section saves as you edit, so the footer reports rather than
               asks. The one button it can carry is Summary's Generate. */}
-          <div className="sticky bottom-0 z-10 -mb-5 flex items-center justify-between gap-3 border-t border-border bg-muted py-3">
+          <div className="sticky bottom-0 z-10 -mb-5 flex items-center justify-between gap-3 border-t border-border bg-background py-3">
             <span
               className="flex items-center gap-2 text-xs leading-4 text-muted-foreground"
               role={wizardSaveStatus === "error" ? "alert" : undefined}

@@ -44,7 +44,7 @@ export function AppShell({ children }: Props) {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="flex h-screen flex-col bg-muted">
+      <div className="flex h-screen flex-col bg-background">
         {/* ─── Top navigation bar ─── */}
         <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center justify-between border-b border-border bg-background px-4">
           {/* Left: app name, and on the Illustrator route the flow it belongs to */}
