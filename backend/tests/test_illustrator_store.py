@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-import time
 
 import pytest
 
@@ -16,6 +14,21 @@ from backend.tests.test_illustrator_import import _build_minimal_ai_pdf
 @pytest.fixture()
 def store(tmp_path: Path) -> ConversionStore:
     return ConversionStore(root=tmp_path, ttl_seconds=3600, max_entries=3)
+
+
+class _FakeClock:
+    def __init__(self, start: float = 1_000_000.0) -> None:
+        self.now = start
+
+    def time(self) -> float:
+        return self.now
+
+
+@pytest.fixture()
+def clock(monkeypatch: pytest.MonkeyPatch) -> _FakeClock:
+    fake = _FakeClock()
+    monkeypatch.setattr("backend.src.illustrator_store.time", fake)
+    return fake
 
 
 @pytest.mark.georef
@@ -105,17 +118,66 @@ def test_assign_to_an_unknown_id_raises(store: ConversionStore) -> None:
 
 
 @pytest.mark.georef
-def test_prune_removes_the_floors_file_too(tmp_path: Path) -> None:
+def test_prune_removes_the_floors_file_too(tmp_path: Path, clock: _FakeClock) -> None:
     store = ConversionStore(root=tmp_path, ttl_seconds=3600, max_entries=10)
     cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
     store.assign(cached.conversion_id, FLOORS)
     assert (cached.directory / "floors.json").exists()
 
-    # Age the entry past the TTL deterministically, then prune.
-    meta_path = cached.directory / "conversion.json"
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    meta["created_at"] = time.time() - 7200
-    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    clock.now += 7200
 
     assert store.prune() == 1
     assert not cached.directory.exists()
+
+
+@pytest.mark.georef
+def test_get_keeps_a_conversion_alive_past_its_creation_ttl(
+    tmp_path: Path, clock: _FakeClock
+) -> None:
+    store = ConversionStore(root=tmp_path, ttl_seconds=100, max_entries=3)
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+    clock.now += 80
+    store.get(cached.conversion_id)
+    clock.now += 80
+    assert store.get(cached.conversion_id).stem == "sample"
+    assert store.prune() == 0
+
+
+@pytest.mark.georef
+def test_assign_keeps_a_conversion_alive(tmp_path: Path, clock: _FakeClock) -> None:
+    store = ConversionStore(root=tmp_path, ttl_seconds=100, max_entries=3)
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+    clock.now += 80
+    store.assign(cached.conversion_id, FLOORS)
+    clock.now += 80
+    assert store.get(cached.conversion_id).floors == FLOORS
+
+
+@pytest.mark.georef
+def test_an_idle_conversion_still_expires(tmp_path: Path, clock: _FakeClock) -> None:
+    store = ConversionStore(root=tmp_path, ttl_seconds=100, max_entries=3)
+    cached = store.put(parse_ai(_build_minimal_ai_pdf(), "sample.ai"))
+    clock.now += 80
+    store.get(cached.conversion_id)
+    clock.now += 101
+    with pytest.raises(ConversionExpiredError):
+        store.get(cached.conversion_id)
+
+
+@pytest.mark.georef
+def test_the_cap_evicts_the_least_recently_used_entry(
+    tmp_path: Path, clock: _FakeClock
+) -> None:
+    store = ConversionStore(root=tmp_path, ttl_seconds=3600, max_entries=3)
+    payload = _build_minimal_ai_pdf()
+    entries = []
+    for name in ("one.ai", "two.ai", "three.ai"):
+        entries.append(store.put(parse_ai(payload, name)))
+        clock.now += 1
+    store.get(entries[0].conversion_id)
+    clock.now += 1
+    store.put(parse_ai(payload, "four.ai"))
+
+    assert store.get(entries[0].conversion_id).stem == "one"
+    with pytest.raises(ConversionExpiredError):
+        store.get(entries[1].conversion_id)
