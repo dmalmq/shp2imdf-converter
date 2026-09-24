@@ -19,6 +19,7 @@ from backend.src.illustrator_store import (
     ConversionStore,
     migrate_legacy_conversions,
 )
+from backend.tests.test_illustrator_api import _TRAVERSING_IDS, _assign_body, _body, _preview
 from backend.tests.test_illustrator_import import _build_minimal_ai_pdf
 
 pytestmark = pytest.mark.georef
@@ -301,3 +302,91 @@ def test_startup_moves_the_temp_store_into_the_data_dir(monkeypatch, tmp_path: P
         assert store.get(cached.conversion_id).gpkg_path.is_file()
 
     assert not legacy.exists()
+
+
+# --- endpoints --------------------------------------------------------------
+
+
+def test_get_conversion_returns_preview_floors_and_project(test_client) -> None:
+    preview = _preview(test_client).json()
+    conversion_id = preview["conversion_id"]
+
+    first = test_client.get(f"/api/convert/illustrator/{conversion_id}")
+    assert first.status_code == 200, first.text
+    data = first.json()
+    assert data["preview"] == preview
+    assert data["floors"] is None
+    assert data["project"]["name"] == "sample"
+    assert (data["project"]["stage"], data["project"]["blockers"]) == ("name-floors", None)
+
+    assert test_client.post(
+        f"/api/convert/illustrator/{conversion_id}/assign", json=_assign_body()
+    ).status_code == 200
+    data = test_client.get(f"/api/convert/illustrator/{conversion_id}").json()
+    assert [floor["label"] for floor in data["floors"]] == ["1F", "2F"]
+    assert data["floors"][0]["box"] == _assign_body()["floors"][0]["box"]
+    assert data["project"]["floors_total"] == 2
+    assert (data["project"]["stage"], data["project"]["blockers"]) == ("place", 2)
+
+
+@pytest.mark.parametrize("encoded_id", [*_TRAVERSING_IDS, "0" * 32])
+def test_get_and_patch_an_unknown_or_invalid_id_are_404(test_client, encoded_id: str) -> None:
+    for response in (
+        test_client.get(f"/api/convert/illustrator/{encoded_id}"),
+        test_client.patch(f"/api/convert/illustrator/{encoded_id}", json={"name": "x"}),
+    ):
+        assert response.status_code == 404, response.text
+        assert response.json()["code"] == "CONVERSION_EXPIRED"
+
+
+def test_patch_renames_the_project(test_client) -> None:
+    conversion_id = _preview(test_client).json()["conversion_id"]
+    response = test_client.patch(
+        f"/api/convert/illustrator/{conversion_id}", json={"name": "  東京駅 B1  "}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["name"] == "東京駅 B1"
+    assert test_client.get(f"/api/convert/illustrator/{conversion_id}").json()["project"][
+        "name"
+    ] == "東京駅 B1"
+
+    for bad in ("   ", "x" * 121):
+        rejected = test_client.patch(f"/api/convert/illustrator/{conversion_id}", json={"name": bad})
+        assert rejected.status_code == 400, rejected.text
+    assert test_client.patch(
+        f"/api/convert/illustrator/{conversion_id}", json={"name": "a", "extra": 1}
+    ).status_code == 422
+
+
+def test_export_sets_delivered_at(test_client) -> None:
+    preview = _preview(test_client).json()
+    conversion_id = preview["conversion_id"]
+    assert test_client.post(
+        f"/api/convert/illustrator/{conversion_id}/assign", json=_assign_body()
+    ).status_code == 200
+    body = _body(preview["artwork_bounds"])
+    body["floors"] = [
+        {"label": label, "transform": body["floors"][0]["transform"]} for label in ("1F", "2F")
+    ]
+    before = test_client.get(f"/api/convert/illustrator/{conversion_id}").json()["project"]
+    assert before["delivered_at"] is None
+
+    response = test_client.post(f"/api/convert/illustrator/{conversion_id}/export", json=body)
+    assert response.status_code == 200, response.text
+
+    after = test_client.get(f"/api/convert/illustrator/{conversion_id}").json()["project"]
+    assert after["delivered_at"] is not None
+    assert (after["floors_total"], after["floors_placed"]) == (2, 2)
+    assert (after["stage"], after["blockers"]) == ("deliver", 0)
+
+
+def test_a_failed_export_does_not_mark_delivery(test_client) -> None:
+    preview = _preview(test_client).json()
+    conversion_id = preview["conversion_id"]
+    body = _body(preview["artwork_bounds"])
+    body["formats"] = {"geopackage": False, "shapefile": False, "qgis": False}
+    assert test_client.post(
+        f"/api/convert/illustrator/{conversion_id}/export", json=body
+    ).status_code == 400
+    project = test_client.get(f"/api/convert/illustrator/{conversion_id}").json()["project"]
+    assert project["delivered_at"] is None

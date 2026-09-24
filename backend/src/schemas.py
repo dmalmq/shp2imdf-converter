@@ -770,6 +770,35 @@ class AssignFloorsRequest(BaseModel):
     floors: list[FloorRegionPayload] = Field(min_length=1)
 
 
+class ArtworkProjectPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    updated_at: str | None = None
+    delivered_at: str | None = None
+    floors_total: int
+    floors_placed: int
+    stage: Literal["name-floors", "place", "deliver"]
+    blockers: int | None = None
+
+
+class IllustratorConversionResponse(BaseModel):
+    """Everything the artwork page needs to reopen a conversion without re-uploading."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    conversion_id: str
+    preview: IllustratorPreviewResponse
+    floors: list[FloorRegionPayload] | None = None
+    project: ArtworkProjectPayload
+
+
+class RenameConversionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(max_length=1000)
+
+
 class AssignLayerCount(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
