@@ -11,7 +11,7 @@ from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, mapping,
 from uuid import UUID
 
 from backend.src.schemas import AutofixApplied, AutofixPrompt, ValidationResponse
-from backend.src.validator import prune_empty_geometry_features
+from backend.src.validator import SLIVER_EXEMPT_CATEGORIES, prune_empty_geometry_features
 
 
 # Checks that require explicit user confirmation before being applied.
@@ -44,6 +44,23 @@ def _looks_like_uuid(value: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def _is_sliver_exempt(row: dict[str, Any] | None) -> bool:
+    props = row.get("properties") if row else None
+    category = props.get("category") if isinstance(props, dict) else None
+    return isinstance(category, str) and category.strip().lower() in SLIVER_EXEMPT_CATEGORIES
+
+
+def _drop_references(rows: list[dict[str, Any]], deleted: set[str]) -> None:
+    for row in rows:
+        props = row.get("properties") if isinstance(row, dict) else None
+        if not isinstance(props, dict):
+            continue
+        for key in ("unit_ids", "feature_ids"):
+            refs = props.get(key)
+            if isinstance(refs, list) and any(ref in deleted for ref in refs):
+                props[key] = [ref for ref in refs if ref not in deleted]
 
 
 def apply_autofix(
@@ -165,6 +182,7 @@ def apply_autofix(
     # Prompted fixes.
     duplicate_pairs: set[tuple[str, str]] = set()
     interior_ring_ids: list[str] = []
+    sliver_ids: list[str] = []
     for issue in issues:
         if issue.check not in PROMPTED_CHECKS:
             continue
@@ -173,6 +191,13 @@ def apply_autofix(
             duplicate_pairs.add(pair)
         elif issue.check == "polygon_has_interior_rings" and issue.feature_id:
             interior_ring_ids.append(issue.feature_id)
+        elif (
+            issue.check == "unit_sliver"
+            and issue.feature_id in by_id
+            and issue.feature_id not in sliver_ids
+            and not _is_sliver_exempt(by_id[issue.feature_id])
+        ):
+            sliver_ids.append(issue.feature_id)
 
     for left, right in sorted(duplicate_pairs):
         prompts.append(
@@ -195,15 +220,21 @@ def apply_autofix(
             )
         )
 
+    for feature_id in sliver_ids:
+        prompts.append(
+            AutofixPrompt(
+                feature_id=feature_id,
+                check="unit_sliver",
+                action="delete_sliver",
+                description="Delete sliver unit.",
+            )
+        )
+
     if apply_prompted:
-        to_delete: set[str] = set()
+        to_delete: set[str] = set(sliver_ids)
         for left, right in duplicate_pairs:
             # Keep the lexicographically smaller id for deterministic behavior.
             to_delete.add(max(left, right))
-
-        for issue in issues:
-            if issue.check == "unit_sliver" and issue.feature_id:
-                to_delete.add(issue.feature_id)
 
         for feature_id in interior_ring_ids:
             row = by_id.get(feature_id)
@@ -247,6 +278,7 @@ def apply_autofix(
                     )
                     continue
                 kept.append(row)
+            _drop_references(kept, to_delete)
             updated["features"] = kept
 
     # Safety net: remove any feature left without usable geometry — both
@@ -261,6 +293,7 @@ def apply_autofix(
                 description="Removed feature with empty/missing geometry.",
             )
         )
+    _drop_references(survivors, set(removed_empty))
     updated["features"] = survivors
 
     return updated, fixes_applied, prompts

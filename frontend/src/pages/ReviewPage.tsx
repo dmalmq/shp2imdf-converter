@@ -755,6 +755,7 @@ export function ReviewPage() {
     setError(null);
     try {
       const response = await autofixSession(sessionId, applyPrompted);
+      let totalFixed = response.total_fixed;
       if (!applyPrompted && response.total_requiring_confirmation > 0) {
         const confirmed = window.confirm(
           t(
@@ -764,6 +765,7 @@ export function ReviewPage() {
         );
         if (confirmed) {
           const confirmedResponse = await autofixSession(sessionId, true);
+          totalFixed += confirmedResponse.total_fixed;
           applyPostValidationState(confirmedResponse.revalidation);
         } else {
           applyPostValidationState(response.revalidation);
@@ -774,7 +776,7 @@ export function ReviewPage() {
       await loadFeatures();
       pushToast({
         title: t("Auto-fix completed", "自動修正が完了しました"),
-        description: t(`${response.total_fixed} issue(s) fixed automatically.`, `${response.total_fixed} 件を自動修正しました。`),
+        description: t(`${totalFixed} issue(s) fixed automatically.`, `${totalFixed} 件を自動修正しました。`),
         variant: "success"
       });
     } catch (caught) {

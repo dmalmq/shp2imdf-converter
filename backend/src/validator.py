@@ -8,6 +8,7 @@ import re
 from typing import Any
 from uuid import UUID
 
+from pyproj import Geod
 from shapely import make_valid, prepare
 from shapely.errors import GEOSException
 from shapely.geometry import LineString, MultiPolygon, Polygon, shape
@@ -31,6 +32,21 @@ POINT_TYPES = {"amenity", "anchor"}
 NULL_GEOM_TYPES = {"address", "building", "occupant"}
 OPTIONAL_GEOM_TYPES = {"relationship"}
 LEVEL_LINKED_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section"}
+# Structural unit categories are legitimately tiny (a 0.6 m column, a wall
+# segment), so their area says nothing about whether they are artifacts.
+SLIVER_EXEMPT_CATEGORIES = {"column", "structure", "brick", "concrete", "drywall", "glass", "wood"}
+SLIVER_AREA_SQ_M = 0.5
+
+_WGS84 = Geod(ellps="WGS84")
+
+
+def area_sq_m(geom: BaseGeometry) -> float:
+    """Geodesic area in square metres of a WGS84 lon/lat geometry."""
+    try:
+        area, _ = _WGS84.geometry_area_perimeter(geom)
+    except Exception:
+        return 0.0
+    return abs(area)
 
 
 def feature_requires_geometry(ftype: str) -> bool:
@@ -509,13 +525,13 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
                 units_by_level[props["level_id"]].append((fid, geom))
             if geom and geom.area < 1e-10:
                 add_issue("warning", "sliver_polygon_warning", "Unit appears to be a sliver polygon.", feature_id=fid)
-            if geom:
-                area_sq_m = geom.area * (111_320 ** 2)
-                if area_sq_m < 0.5:
+            if geom and not (isinstance(category, str) and category.strip().lower() in SLIVER_EXEMPT_CATEGORIES):
+                unit_area = area_sq_m(geom)
+                if unit_area < SLIVER_AREA_SQ_M:
                     add_issue(
                         "warning",
                         "unit_sliver",
-                        f"Unit area is very small ({area_sq_m:.4f} m²) — likely a geometry artifact.",
+                        f"Unit area is very small ({unit_area:.4f} m²) — likely a geometry artifact.",
                         feature_id=fid,
                         auto_fixable=True,
                         fix_description="Delete sliver unit.",
@@ -743,7 +759,7 @@ def validate_feature_collection(feature_collection: dict[str, Any]) -> Validatio
         key = (ftype, level_id if isinstance(level_id, str) else None, geoms_by_id[fid].wkb_hex)
         existing = geometry_hashes.get(key)
         if existing:
-            add_issue("warning", "duplicate_geometry_warning", "Feature geometry duplicates another feature.", feature_id=fid, related_feature_id=existing, fix_description="Delete one duplicate feature.")
+            add_issue("warning", "duplicate_geometry_warning", "Feature geometry duplicates another feature.", feature_id=fid, related_feature_id=existing, auto_fixable=True, fix_description="Delete one duplicate feature.")
         else:
             geometry_hashes[key] = fid
 
