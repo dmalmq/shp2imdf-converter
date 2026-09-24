@@ -9,6 +9,7 @@ import {
   fetchSessionFiles,
   fetchWizardState,
   generateSessionDraft,
+  importShapefiles,
   patchWizardProject,
   validateSession,
   type ImportedFile,
@@ -27,6 +28,7 @@ vi.mock("../api/client", async (importOriginal) => ({
   fetchSessionFiles: vi.fn(),
   fetchWizardState: vi.fn(),
   generateSessionDraft: vi.fn(),
+  importShapefiles: vi.fn(),
   getIsoSubdivisions: vi.fn(() => Promise.resolve({ country: "JP", subdivisions: [] })),
   patchWizardBuildings: vi.fn(),
   patchWizardFootprint: vi.fn(),
@@ -133,8 +135,15 @@ function wizardFor(fixture: Fixture): WizardState {
 
 // "tokyo" is still in Set up, "shinjuku" has a generated draft, "ikebukuro"
 // has a draft but was opened in Set up since (which resets the status), "ueno"
-// is an IMDF-shapefile import (no Set up), "empty" has nothing in it yet.
+// is an IMDF-shapefile import (no Set up), "empty" has nothing in it yet, and
+// "kanda" is fresh but has a floor-outline file classified as level.
 const PROJECTS: Record<string, Fixture> = {
+  kanda: {
+    profile: "standard",
+    generation: "not_started",
+    venue: "Kanda",
+    files: [file("Kanda_1_Space"), { ...file("Kanda_1_Floor"), detected_type: "level" }]
+  },
   tokyo: { profile: "standard", generation: "not_started", venue: "Tokyo Station", files: [file("Tokyo_B1_Space")] },
   shinjuku: { profile: "standard", generation: "generated", venue: "Shinjuku", files: [file("Shinjuku_1_Space")] },
   ikebukuro: {
@@ -192,10 +201,11 @@ function Probe() {
   return null;
 }
 
-function renderAt(path: string) {
+function renderAt(path: string | string[]) {
+  const entries = Array.isArray(path) ? path : [path];
   return render(
     <QueryClientProvider client={new QueryClient()}>
-      <MemoryRouter initialEntries={[path]}>
+      <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
         <App />
         <Probe />
       </MemoryRouter>
@@ -217,17 +227,20 @@ beforeEach(() => {
   vi.mocked(fetchSessionFeatures).mockImplementation(async (id) => {
     const fixture = lookup(id);
     const drafted = fixture.drafted || fixture.generation !== "not_started";
+    // Before generation, features carry their file's detected type, which
+    // can be "level"; only generation adds footprints.
+    const sourceLevels = fixture.files.some((item) => item.detected_type === "level");
+    const level = {
+      type: "Feature",
+      id: `${id}-level`,
+      feature_type: "level",
+      geometry: null,
+      properties: { name: { en: "Ground" }, short_name: { en: "G" }, ordinal: 0 }
+    };
+    const footprint = { type: "Feature", id: `${id}-footprint`, feature_type: "footprint", geometry: null, properties: {} };
     return {
       type: "FeatureCollection",
-      features: drafted ? [
-        {
-          type: "Feature",
-          id: `${id}-level`,
-          feature_type: "level",
-          geometry: null,
-          properties: { name: { en: "Ground" }, short_name: { en: "G" }, ordinal: 0 }
-        }
-      ] : []
+      features: drafted ? [level, footprint] : sourceLevels ? [level] : []
     };
   });
   vi.mocked(generateSessionDraft).mockResolvedValue({
@@ -295,6 +308,8 @@ describe("redirects", () => {
     ["/p/ueno", "/p/ueno/check"],
     ["/p/ikebukuro", "/p/ikebukuro/check"],
     ["/p/ikebukuro/deliver", "/p/ikebukuro/deliver"],
+    ["/p/kanda", "/p/kanda/set-up"],
+    ["/p/kanda/check", "/p/kanda/set-up"],
     ["/p/tokyo/check", "/p/tokyo/set-up"],
     ["/p/tokyo/deliver", "/p/tokyo/set-up"],
     ["/p/tokyo/not-a-stage", "/p/tokyo/set-up"],
@@ -422,6 +437,79 @@ describe("switching project in the same tab", () => {
     act(() => navigate(-1));
     await screen.findByDisplayValue("Tokyo Station");
     expect(pathname).toBe("/p/tokyo/set-up");
+    expect(useAppStore.getState().files.map((item) => item.stem)).toEqual(["Tokyo_B1_Space"]);
+  });
+
+  test("a late SESSION_NOT_FOUND for the project left behind does not open the dialog", async () => {
+    let rejectSave: (error: unknown) => void = () => {};
+    vi.mocked(patchWizardProject).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSave = reject;
+        })
+    );
+    renderAt("/p/tokyo/set-up");
+    const venue = await screen.findByLabelText(/Venue Name/);
+    fireEvent.change(venue, { target: { value: "Tokyo Station East" } });
+    act(() => navigate("/p/shinjuku/set-up"));
+    await waitFor(() => expect(patchWizardProject).toHaveBeenCalledTimes(1));
+    await screen.findByDisplayValue("Shinjuku");
+
+    await act(async () => rejectSave(gone("tokyo")));
+    await sleep(50);
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(useAppStore.getState().sessionExpiredMessage).toBeNull();
+    expect(useAppStore.getState().sessionId).toBe("shinjuku");
+  });
+});
+
+describe("history", () => {
+  test("closing an export dialog opened from Check, also after Forward, leaves no extra entry", async () => {
+    renderAt(["/p/shinjuku/set-up", "/p/shinjuku/check"]);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Export" })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    await screen.findByRole("dialog");
+    expect(pathname).toBe("/p/shinjuku/deliver");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(pathname).toBe("/p/shinjuku/check"));
+
+    act(() => navigate(1));
+    await screen.findByRole("dialog");
+    expect(pathname).toBe("/p/shinjuku/deliver");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(pathname).toBe("/p/shinjuku/check"));
+
+    act(() => navigate(-1));
+    await screen.findByLabelText(/Venue Name/);
+    expect(pathname).toBe("/p/shinjuku/set-up");
+  });
+
+  test("Bring in says it starts a new project, and Back returns to the old one", async () => {
+    vi.mocked(importShapefiles).mockResolvedValue({
+      session_id: "kanda",
+      import_profile: "standard",
+      files: PROJECTS.kanda.files,
+      cleanup_summary: {} as never,
+      warnings: []
+    });
+    const { container } = renderAt("/p/tokyo/bring-in");
+    expect(await screen.findByText(/Bringing in files starts a new project/)).toBeInTheDocument();
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const shp = new File(["shape"], "Kanda_1_Space.shp", { type: "application/octet-stream" });
+    fireEvent.change(input, { target: { files: { 0: shp, length: 1, item: () => shp } } });
+    const importButton = screen.getAllByRole("button", { name: "Import & Continue" })[0];
+    await waitFor(() => expect(importButton).toBeEnabled());
+    fireEvent.click(importButton);
+
+    await waitFor(() => expect(pathname).toBe("/p/kanda/set-up"));
+    await screen.findByDisplayValue("Kanda");
+
+    act(() => navigate(-1));
+    await waitFor(() => expect(pathname).toBe("/p/tokyo/bring-in"));
+    await waitFor(() => expect(useAppStore.getState().loadedSessionId).toBe("tokyo"));
     expect(useAppStore.getState().files.map((item) => item.stem)).toEqual(["Tokyo_B1_Space"]);
   });
 });

@@ -1,6 +1,6 @@
 import { ChevronRight, PanelLeft, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import {
   autofillWizardAddressFromGeometry,
@@ -268,6 +268,7 @@ type ReviewPageProps = {
 
 export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
   const navigate = useNavigate();
+  const location = useLocation();
   const sessionId = useAppStore((state) => state.sessionId);
   const importProfile = useAppStore((state) => state.importProfile);
   const setImportProfile = useSessionAction(sessionId, (state) => state.setImportProfile);
@@ -276,17 +277,17 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
   const wizardState = useAppStore((state) => state.wizardState);
   const selectedFeatureIds = useAppStore((state) => state.selectedFeatureIds);
   const setSelectedFeatureIds = useSessionAction(sessionId, (state) => state.setSelectedFeatureIds);
-  const toggleSelectedFeatureId = useAppStore((state) => state.toggleSelectedFeatureId);
-  const clearSelectedFeatureIds = useAppStore((state) => state.clearSelectedFeatureIds);
+  const toggleSelectedFeatureId = useSessionAction(sessionId, (state) => state.toggleSelectedFeatureId);
+  const clearSelectedFeatureIds = useSessionAction(sessionId, (state) => state.clearSelectedFeatureIds);
   const filters = useAppStore((state) => state.filters);
-  const setFilters = useAppStore((state) => state.setFilters);
+  const setFilters = useSessionAction(sessionId, (state) => state.setFilters);
   const setValidationResults = useSessionAction(sessionId, (state) => state.setValidationResults);
   const layerVisibility = useAppStore((state) => state.layerVisibility);
-  const setLayerVisibility = useAppStore((state) => state.setLayerVisibility);
+  const setLayerVisibility = useSessionAction(sessionId, (state) => state.setLayerVisibility);
   const pushEditHistory = useSessionAction(sessionId, (state) => state.pushEditHistory);
   const popEditHistory = useAppStore((state) => state.popEditHistory);
 
-  const handleApiError = useApiErrorHandler();
+  const handleApiError = useApiErrorHandler(sessionId);
   const { t } = useUiLanguage();
   const pushToast = useToast();
 
@@ -953,9 +954,16 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
 
   // Until Deliver has a page of its own, the export dialog is the Deliver
   // stage, and the URL and the dialog follow each other. Opening it from
-  // Check adds a history entry, so Back closes it; arriving at /deliver
-  // directly has nothing behind it, so closing replaces the entry instead.
-  const pushedDeliver = useRef(false);
+  // Check pushes /deliver marked as coming from Check, so closing it goes
+  // back to that entry, also after Forward returns to it. Arriving at
+  // /deliver any other way has no Check entry behind it, so closing
+  // replaces the entry instead.
+  const cameFromCheck = Boolean((location.state as { fromCheck?: boolean } | null)?.fromCheck);
+  const leaveDeliver = () => {
+    if (!sessionId) return;
+    if (cameFromCheck) navigate(-1);
+    else navigate(projectPath(sessionId, "check"), { replace: true });
+  };
   const deliverOpened = useRef(false);
   const previousStage = useRef(stage);
   const previousDialogOpen = useRef(exportDialogOpen);
@@ -969,17 +977,14 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
     deliverOpened.current = true;
     if (exportDialogOpen) return;
     void openExportDialog().then((opened) => {
-      if (!opened && sessionId) navigate(projectPath(sessionId, "check"), { replace: true });
+      if (!opened) leaveDeliver();
     });
   }, [stage, loadedOnce]);
 
   useEffect(() => {
     const was = previousStage.current;
     previousStage.current = stage;
-    if (was === "deliver" && stage === "check") {
-      pushedDeliver.current = false;
-      setExportDialogOpen(false);
-    }
+    if (was === "deliver" && stage === "check") setExportDialogOpen(false);
   }, [stage]);
 
   useEffect(() => {
@@ -987,15 +992,9 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
     previousDialogOpen.current = exportDialogOpen;
     if (!sessionId || wasOpen === exportDialogOpen) return;
     if (exportDialogOpen && stage === "check") {
-      pushedDeliver.current = true;
-      navigate(projectPath(sessionId, "deliver"));
+      navigate(projectPath(sessionId, "deliver"), { state: { fromCheck: true } });
     } else if (!exportDialogOpen && stage === "deliver") {
-      if (pushedDeliver.current) {
-        pushedDeliver.current = false;
-        navigate(-1);
-      } else {
-        navigate(projectPath(sessionId, "check"), { replace: true });
-      }
+      leaveDeliver();
     }
   }, [exportDialogOpen]);
 

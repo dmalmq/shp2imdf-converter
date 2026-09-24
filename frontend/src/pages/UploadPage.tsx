@@ -200,7 +200,12 @@ function toQueuedUploadFile(file: File): QueuedUploadFile | null {
 }
 
 
-export function UploadPage() {
+type UploadPageProps = {
+  /** Shown from a project's Bring in: importing here does not add to that project. */
+  fromProject?: boolean;
+};
+
+export function UploadPage({ fromProject = false }: UploadPageProps = {}) {
   const navigate = useNavigate();
   const switchProject = useAppStore((state) => state.switchProject);
   const projectLoaded = useAppStore((state) => state.projectLoaded);
@@ -396,7 +401,7 @@ export function UploadPage() {
         description: t(`${payload.feature_count} features loaded.`, `${payload.feature_count} 件のフィーチャーを読み込みました。`),
         variant: "success"
       });
-      navigate(projectPath(payload.session_id, "check"), { replace: true });
+      navigate(projectPath(payload.session_id, "check"));
     } catch (caught) {
       const message = handleApiError(caught, t("Failed to open IMDF archive", "IMDFアーカイブを開けませんでした"), {
         title: t("Open failed", "オープン失敗")
@@ -462,7 +467,7 @@ export function UploadPage() {
         });
       }
 
-      navigate(projectPath(payload.session_id, imdfShapefiles ? "check" : "set-up"), { replace: true });
+      navigate(projectPath(payload.session_id, imdfShapefiles ? "check" : "set-up"));
     } catch (caught) {
       const message = handleApiError(caught, t("Import failed", "インポートに失敗しました"), {
         title: t("Import failed", "インポート失敗")
@@ -526,6 +531,14 @@ export function UploadPage() {
               "元データを分類・マッピングし、レビューして書き出します。"
             )}
           </p>
+          {fromProject ? (
+            <p role="note" className="text-sm font-medium leading-5 text-foreground">
+              {t(
+                "Bringing in files starts a new project. This one stays as it is.",
+                "ファイルを取り込むと新しいプロジェクトになります。このプロジェクトはそのまま残ります。"
+              )}
+            </p>
+          ) : null}
         </div>
 
         <Card className="p-6">

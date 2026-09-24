@@ -209,8 +209,8 @@ export function WizardPage() {
   const wizardSaveRetry = useAppStore((state) => state.wizardSaveRetry);
   const learningSuggestion = useAppStore((state) => state.learningSuggestion);
   const setLearningSuggestion = useSessionAction(sessionId, (state) => state.setLearningSuggestion);
-  const setSessionExpiredMessage = useAppStore((state) => state.setSessionExpiredMessage);
-  const handleApiError = useApiErrorHandler();
+  const setSessionExpiredMessage = useSessionAction(sessionId, (state) => state.setSessionExpiredMessage);
+  const handleApiError = useApiErrorHandler(sessionId);
   const pushToast = useToast();
   const { t, isJapanese } = useUiLanguage();
 

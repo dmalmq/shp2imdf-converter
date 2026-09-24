@@ -23,10 +23,16 @@ import { WizardPage } from "./WizardPage";
  * levels, and every wizard write resets `generation_status`, but the drafted
  * features stay; without this, a reload on Check after a look at Set up
  * would be sent back to Set up.
+ *
+ * Source features carry their file's detected type before any generation,
+ * and "level" is one of those, so a level is no proof. Footprints come only
+ * from the generator: the detector and the classification list never assign
+ * that type. Goes once the server keeps the stage (generation no longer reset
+ * by wizard resends).
  */
 async function hasDraft(sessionId: string): Promise<boolean> {
   const response = await fetchSessionFeatures(sessionId);
-  return (response.features as Array<{ feature_type?: unknown }>).some((item) => item.feature_type === "level");
+  return (response.features as Array<{ feature_type?: unknown }>).some((item) => item.feature_type === "footprint");
 }
 
 /**
@@ -125,7 +131,7 @@ export function ProjectStage() {
   if (!isShapefileStage(stage) || !stageReachable(stage, project)) {
     return <Navigate replace to={projectPath(sessionId, landingStage(project))} />;
   }
-  if (stage === "bring-in") return <UploadPage />;
+  if (stage === "bring-in") return <UploadPage fromProject />;
   if (stage === "set-up") return <WizardPage />;
   // Check and Deliver are one page, so moving between them keeps it mounted.
   return <ReviewPage stage={stage} />;
