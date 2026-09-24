@@ -68,9 +68,51 @@ test("saves the name as a language label and the category as a spec code", () =>
   fireEvent.change(screen.getByLabelText("City"), { target: { value: "新宿区" } });
   fireEvent.click(screen.getByText("Save facility details"));
 
-  expect(onSave).toHaveBeenCalledWith("venue-1", { name: { ja: "JR新宿駅" }, category: "A001" });
-  expect(onSave).toHaveBeenCalledWith("building-1", { name: { ja: "JR新宿駅" } });
+  expect(onSave).toHaveBeenCalledWith("venue-1", { name: { en: "JR新宿駅" }, category: "A001" });
+  expect(onSave).toHaveBeenCalledWith("building-1", { name: { en: "JR新宿駅" } });
   expect(onSave).toHaveBeenCalledWith("address-1", { locality: "新宿区" });
+});
+
+test("renaming keeps the venue's other languages", () => {
+  const onSave = vi.fn();
+  render(
+    <VenueDetailsPanel
+      venue={feature("venue-1", "venue", { name: { ja: "新宿駅", en: "Shinjuku Station" }, category: "A001" })}
+      building={feature("building-1", "building", { name: { ja: "新宿駅" } })}
+      address={null}
+      language="ja"
+      onSave={onSave}
+      onRequestAutofill={vi.fn()}
+    />
+  );
+  fireEvent.click(screen.getByText("Facility details"));
+  expect(screen.getByLabelText("Facility name")).toHaveValue("新宿駅");
+
+  fireEvent.change(screen.getByLabelText("Facility name"), { target: { value: "JR新宿駅" } });
+  fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "" } });
+  fireEvent.click(screen.getByText("Save facility details"));
+
+  expect(onSave).toHaveBeenCalledWith("venue-1", { name: { ja: "JR新宿駅", en: "Shinjuku Station" } });
+  expect(onSave).toHaveBeenCalledWith("building-1", { name: null });
+});
+
+test("a Japanese-only venue name is edited in Japanese when the project language is unset", () => {
+  const onSave = vi.fn();
+  render(
+    <VenueDetailsPanel
+      venue={feature("venue-1", "venue", { name: { ja: "新宿駅" }, category: "A001" })}
+      building={null}
+      address={null}
+      language="en"
+      onSave={onSave}
+      onRequestAutofill={vi.fn()}
+    />
+  );
+  fireEvent.click(screen.getByText("Facility details"));
+  fireEvent.change(screen.getByLabelText("Facility name"), { target: { value: "JR新宿駅" } });
+  fireEvent.click(screen.getByText("Save facility details"));
+
+  expect(onSave).toHaveBeenCalledWith("venue-1", { name: { ja: "JR新宿駅" } });
 });
 
 test("autofill fills the address fields without saving", async () => {

@@ -14,6 +14,7 @@ import {
   SelectValue
 } from "../ui";
 import { cn } from "@/lib/utils";
+import { labelLanguage, labelText, setLabelText } from "./labels";
 import type { ReviewFeature } from "./types";
 
 /** Radix Select has no empty-string value, so "not set" needs a sentinel. */
@@ -92,31 +93,25 @@ type Draft = {
   postalCode: string;
 };
 
-function labelText(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const found = Object.values(value as Record<string, unknown>).find((item) => typeof item === "string");
-    return typeof found === "string" ? found : "";
-  }
-  return "";
-}
-
 function text(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function seedDraft(venue: ReviewFeature | null, building: ReviewFeature | null, address: ReviewFeature | null): Draft {
+function seedDraft(
+  venue: ReviewFeature | null,
+  building: ReviewFeature | null,
+  address: ReviewFeature | null,
+  language: string
+): Draft {
   const venueProps = venue?.properties ?? {};
   const addressProps = address?.properties ?? {};
   return {
-    venueName: labelText(venueProps.name),
+    venueName: labelText(venueProps.name, language),
     category: text(venueProps.category) === "unspecified" ? "" : text(venueProps.category).toUpperCase(),
     hours: text(venueProps.hours),
     phone: text(venueProps.phone),
     website: text(venueProps.website),
-    buildingName: labelText(building?.properties?.name),
+    buildingName: labelText(building?.properties?.name, language),
     address: text(addressProps.address),
     locality: text(addressProps.locality),
     province: text(addressProps.province),
@@ -127,7 +122,10 @@ function seedDraft(venue: ReviewFeature | null, building: ReviewFeature | null, 
 
 export function VenueDetailsPanel({ venue, building, address, language, onSave, onRequestAutofill }: Props) {
   const { t } = useUiLanguage();
-  const seeded = useMemo(() => seedDraft(venue, building, address), [venue, building, address]);
+  const seeded = useMemo(
+    () => seedDraft(venue, building, address, language),
+    [venue, building, address, language]
+  );
   const [draft, setDraft] = useState<Draft>(seeded);
   const [autofilling, setAutofilling] = useState(false);
   const [expanded, setExpanded] = useState(
@@ -142,8 +140,18 @@ export function VenueDetailsPanel({ venue, building, address, language, onSave, 
     return null;
   }
 
-  const field = (key: keyof Draft, label: string, placeholder?: string) => (
-    <Field key={key} label={label}>
+  const languageHint = (value: unknown) => {
+    const editLanguage = labelLanguage(value, language);
+    return editLanguage !== language
+      ? t(
+          `Editing the "${editLanguage}" label (no "${language}" label yet)`,
+          `「${editLanguage}」の名称を編集中（「${language}」は未設定）`
+        )
+      : undefined;
+  };
+
+  const field = (key: keyof Draft, label: string, placeholder?: string, hint?: string) => (
+    <Field key={key} label={label} hint={hint}>
       {(id) => (
         <Input
           id={id}
@@ -160,7 +168,11 @@ export function VenueDetailsPanel({ venue, building, address, language, onSave, 
     if (draft.venueName !== seeded.venueName || draft.category !== seeded.category) {
       const properties: Record<string, unknown> = {};
       if (draft.venueName !== seeded.venueName) {
-        properties.name = { [language]: draft.venueName };
+        properties.name = setLabelText(
+          venue.properties.name,
+          labelLanguage(venue.properties.name, language),
+          draft.venueName
+        );
       }
       if (draft.category !== seeded.category) {
         properties.category = draft.category || "unspecified";
@@ -175,7 +187,13 @@ export function VenueDetailsPanel({ venue, building, address, language, onSave, 
       onSave(venue.id, venueContact);
     }
     if (building && draft.buildingName !== seeded.buildingName) {
-      onSave(building.id, { name: { [language]: draft.buildingName } });
+      onSave(building.id, {
+        name: setLabelText(
+          building.properties.name,
+          labelLanguage(building.properties.name, language),
+          draft.buildingName
+        )
+      });
     }
     if (address) {
       const addressProps: Record<string, unknown> = {};
@@ -229,7 +247,12 @@ export function VenueDetailsPanel({ venue, building, address, language, onSave, 
       </button>
       {expanded ? (
         <div className="flex flex-col gap-3 px-3 pb-3">
-          {field("venueName", t("Facility name", "施設の名称"), t("e.g. JR Shinjuku Station", "例: JR新宿駅"))}
+          {field(
+            "venueName",
+            t("Facility name", "施設の名称"),
+            t("e.g. JR Shinjuku Station", "例: JR新宿駅"),
+            languageHint(venue.properties.name)
+          )}
           <Field label={t("Facility category", "施設のカテゴリー")}>
             {(id) => (
               <Select
@@ -252,7 +275,14 @@ export function VenueDetailsPanel({ venue, building, address, language, onSave, 
               </Select>
             )}
           </Field>
-          {building ? field("buildingName", t("Building name", "建物躯体の名称")) : null}
+          {building
+            ? field(
+                "buildingName",
+                t("Building name", "建物躯体の名称"),
+                undefined,
+                languageHint(building.properties.name)
+              )
+            : null}
           {address ? (
             <>
               {field("postalCode", t("Postal code", "郵便番号"))}

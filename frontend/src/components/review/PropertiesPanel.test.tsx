@@ -120,3 +120,60 @@ test("switching type to geofence replaces an invalid category with the target de
     "underconstruction"
   ]);
 });
+
+function renderNamed(
+  name: Record<string, string>,
+  language: string,
+  onSave: (featureId: string, properties: Record<string, unknown>, featureType?: string) => void
+) {
+  return render(
+    <PropertiesPanel
+      feature={{ ...polygonUnit, id: "unit-gate-1", properties: { category: "road", name } }}
+      language={language}
+      levelOptions={[]}
+      addressOptions={[]}
+      featureTypes={CATALOG}
+      onSave={onSave}
+      onDelete={vi.fn()}
+    />
+  );
+}
+
+test("editing a Japanese-only name keeps it Japanese instead of relabelling it en", () => {
+  const onSave = vi.fn();
+  renderNamed({ ja: "改札" }, "en", onSave);
+  const input = screen.getByLabelText("name") as HTMLInputElement;
+  expect(input.value).toBe("改札");
+  expect(screen.getByText(/"ja" label/)).toBeInTheDocument();
+
+  fireEvent.change(input, { target: { value: "改札口" } });
+  fireEvent.click(screen.getByText("Save changes"));
+
+  expect(onSave).toHaveBeenCalledWith("unit-gate-1", expect.objectContaining({ name: { ja: "改札口" } }), undefined);
+});
+
+test("editing the active language keeps the other languages", () => {
+  const onSave = vi.fn();
+  renderNamed({ ja: "改札", en: "Ticket gate" }, "en", onSave);
+  const input = screen.getByLabelText("name") as HTMLInputElement;
+  expect(input.value).toBe("Ticket gate");
+
+  fireEvent.change(input, { target: { value: "Gate" } });
+  fireEvent.click(screen.getByText("Save changes"));
+
+  expect(onSave).toHaveBeenCalledWith(
+    "unit-gate-1",
+    expect.objectContaining({ name: { ja: "改札", en: "Gate" } }),
+    undefined
+  );
+});
+
+test("clearing the active language removes only that key", () => {
+  const onSave = vi.fn();
+  renderNamed({ ja: "改札", en: "Ticket gate" }, "en", onSave);
+
+  fireEvent.change(screen.getByLabelText("name"), { target: { value: "" } });
+  fireEvent.click(screen.getByText("Save changes"));
+
+  expect(onSave).toHaveBeenCalledWith("unit-gate-1", expect.objectContaining({ name: { ja: "改札" } }), undefined);
+});

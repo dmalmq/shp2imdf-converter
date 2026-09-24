@@ -19,6 +19,7 @@ import {
   compatibleFeatureTypes,
   geometryKindOf
 } from "./featureTypeOptions";
+import { labelLanguage, labelText, setLabelText } from "./labels";
 import { type ReviewFeature, featureName } from "./types";
 
 
@@ -52,21 +53,6 @@ type Props = {
   onSave: (featureId: string, properties: Record<string, unknown>, featureType?: string) => void;
   onDelete: (featureId: string) => void;
 };
-
-
-function asLabelText(value: unknown): string {
-  if (!value) {
-    return "";
-  }
-  if (typeof value === "string") {
-    return value;
-  }
-  if (typeof value === "object" && !Array.isArray(value)) {
-    const candidate = Object.values(value as Record<string, unknown>).find((item) => typeof item === "string");
-    return typeof candidate === "string" ? candidate : "";
-  }
-  return "";
-}
 
 
 function toStringValue(value: unknown): string {
@@ -143,16 +129,28 @@ export function PropertiesPanel({
     const value = form[key];
 
     if (key === "name" || key === "alt_name") {
+      const editLanguage = labelLanguage(feature.properties[key], language);
       return (
-        <Field key={key} label={key}>
+        <Field
+          key={key}
+          label={key}
+          hint={
+            editLanguage !== language
+              ? t(
+                  `Editing the "${editLanguage}" label (no "${language}" label yet)`,
+                  `「${editLanguage}」の名称を編集中（「${language}」は未設定）`
+                )
+              : undefined
+          }
+        >
           {(id) => (
             <Input
               id={id}
-              value={asLabelText(value)}
+              value={labelText(value, editLanguage)}
               onChange={(event) =>
                 setForm((prev) => ({
                   ...prev,
-                  [key]: event.target.value ? { [language]: event.target.value } : null
+                  [key]: setLabelText(prev[key], editLanguage, event.target.value)
                 }))
               }
             />
@@ -362,7 +360,7 @@ export function PropertiesPanel({
       <p className="text-xs leading-4 text-muted-foreground">
         {t("Name preview", "名称プレビュー")}:{" "}
         <span className="font-medium text-foreground">
-          {featureName({ ...feature, properties: form }) || "-"}
+          {featureName({ ...feature, properties: form }, language) || "-"}
         </span>
       </p>
 
