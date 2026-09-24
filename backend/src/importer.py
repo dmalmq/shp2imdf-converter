@@ -9,7 +9,7 @@ import json
 from dataclasses import dataclass
 from io import BytesIO
 import math
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import tempfile
 from typing import Any, Sequence
@@ -158,6 +158,42 @@ def zip_member_name(info: zipfile.ZipInfo) -> str:
         return info.filename
 
 
+def _distinguishing_folder_prefixes(folders: set[tuple[str, ...]]) -> dict[tuple[str, ...], str]:
+    depth = max(len(folder) for folder in folders)
+    for size in range(1, depth + 1):
+        tails = {folder: (("",) * size + folder)[-size:] for folder in folders}
+        if len(set(tails.values())) == len(folders):
+            break
+    varying = [index for index in range(size) if len({tail[index] for tail in tails.values()}) > 1]
+    return {
+        folder: "_".join(tail[index] for index in varying if tail[index])
+        for folder, tail in tails.items()
+    }
+
+
+def flatten_member_paths(paths: Sequence[str]) -> list[str]:
+    """Flat file names for upload members.
+
+    Names stay bare unless a stem occurs in several folders; each of those
+    gets its nearest distinguishing folder as prefix (``1F/Space`` becomes
+    ``1F_Space``) so floors never overwrite or borrow each other's sidecars.
+    """
+    split = [PurePosixPath(path.replace("\\", "/")) for path in paths]
+    folders_by_stem: dict[str, set[tuple[str, ...]]] = defaultdict(set)
+    for path in split:
+        folders_by_stem[path.stem.lower()].add(path.parent.parts)
+    prefixes: dict[tuple[str, tuple[str, ...]], str] = {}
+    for stem, folders in folders_by_stem.items():
+        if len(folders) > 1:
+            for folder, prefix in _distinguishing_folder_prefixes(folders).items():
+                prefixes[(stem, folder)] = prefix
+    flat: list[str] = []
+    for path in split:
+        prefix = prefixes.get((path.stem.lower(), path.parent.parts), "")
+        flat.append(f"{prefix}_{path.name}" if prefix else path.name)
+    return flat
+
+
 def _expand_archives(
     file_blobs: Sequence[tuple[str, bytes]],
     *,
@@ -171,19 +207,20 @@ def _expand_archives(
                 for info in archive.infolist():
                     if info.is_dir():
                         continue
-                    member = Path(zip_member_name(info)).name
+                    member = zip_member_name(info)
                     suffix = Path(member).suffix.lower()
                     stem = Path(member).stem.lower()
                     if suffix == ".dbf" and stem in skipped:
                         continue
-                    expanded.append((member, archive.read(info.filename)))
+                    expanded.append((f"{Path(name).stem}/{member}", archive.read(info.filename)))
             continue
         suffix = Path(name).suffix.lower()
         stem = Path(name).stem.lower()
         if suffix == ".dbf" and stem in skipped:
             continue
-        expanded.append((Path(name).name, content))
-    return expanded
+        expanded.append((name, content))
+    flat_names = flatten_member_paths([name for name, _ in expanded])
+    return [(flat_name, content) for flat_name, (_, content) in zip(flat_names, expanded)]
 
 
 def _group_shapefile_components(file_blobs: Sequence[tuple[str, bytes]]) -> dict[str, dict[str, bytes]]:
@@ -1007,5 +1044,5 @@ def read_directory_as_blobs(directory: str | Path) -> list[tuple[str, bytes]]:
     blobs: list[tuple[str, bytes]] = []
     for file in root.rglob("*"):
         if file.is_file():
-            blobs.append((file.name, file.read_bytes()))
+            blobs.append((file.relative_to(root).as_posix(), file.read_bytes()))
     return blobs
