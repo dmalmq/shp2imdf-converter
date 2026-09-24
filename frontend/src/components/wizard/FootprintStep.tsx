@@ -32,7 +32,7 @@ export function polygonsToSvgPaths(
     .map((ring) => {
       const points = ring.map(
         ([x, y]) =>
-          `${((x - minX) * scale + SVG_PAD).toFixed(1)} m,${(SVG_SIZE - ((y - minY) * scale + SVG_PAD)).toFixed(1)} m`
+          `${((x - minX) * scale + SVG_PAD).toFixed(1)},${(SVG_SIZE - ((y - minY) * scale + SVG_PAD)).toFixed(1)}`
       );
       return `M${points.join("L")}Z`;
     })
