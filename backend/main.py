@@ -28,6 +28,7 @@ from backend.src.qgis_export import QgisExportError, QgisUnavailableError
 from backend.src.reference_overlay import ReferenceOverlayStore
 from backend.src.schemas import ErrorResponse
 from backend.src.session import SessionManager, build_session_backend
+from backend.src.session_lock import SessionLockMiddleware
 
 
 class ApiError(Exception):
@@ -110,6 +111,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SHP to IMDF Converter API", lifespan=lifespan)
+app.add_middleware(SessionLockMiddleware)
 
 cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5310")
 app.add_middleware(
