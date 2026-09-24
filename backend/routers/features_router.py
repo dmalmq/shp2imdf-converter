@@ -11,6 +11,8 @@ from shapely import make_valid
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, mapping, shape
 from shapely.ops import unary_union
 
+from backend.routers.common import get_session_or_raise, session_manager
+from backend.src.errors import NotFoundError
 from backend.src.detector import (
     detect_files,
     infer_learning_suggestion,
@@ -39,7 +41,6 @@ from backend.src.schemas import (
     UpdateFileRequest,
     UpdateFileResponse,
 )
-from backend.src.session import SessionManager
 from backend.src.validator import (
     annotate_feature_collection_with_validation,
     prune_empty_geometry_features,
@@ -50,20 +51,9 @@ from backend.src.validator import (
 router = APIRouter(prefix="/api/session/{session_id}", tags=["features"])
 
 
-def _session_manager(request: Request) -> SessionManager:
-    return request.app.state.session_manager
-
-
 def _merged_keyword_map(request: Request, session_learned_keywords: dict[str, str]) -> dict[str, set[str]]:
     base = load_keyword_map(request.app.state.filename_keywords_path)
     return merge_learned_keywords(base_keywords=base, learned_keywords=session_learned_keywords)
-
-
-def _get_session_or_raise(session_id: str, request: Request):
-    session = _session_manager(request).get_session(session_id=session_id)
-    if session is None:
-        raise KeyError("Session not found")
-    return session
 
 
 def _find_feature_index(features: list[dict[str, Any]], feature_id: str) -> int | None:
@@ -293,13 +283,13 @@ def _refresh_source_views(session: Any) -> None:
 
 @router.get("/features", response_model=FeatureCollectionResponse)
 def get_features(session_id: str, request: Request) -> FeatureCollectionResponse:
-    session = _get_session_or_raise(session_id, request)
+    session = get_session_or_raise(session_id, request)
     return FeatureCollectionResponse.model_validate(session.feature_collection)
 
 
 @router.get("/files")
 def get_files(session_id: str, request: Request) -> dict:
-    session = _get_session_or_raise(session_id, request)
+    session = get_session_or_raise(session_id, request)
     return {
         "session_id": session_id,
         "import_profile": session.import_profile,
@@ -309,8 +299,8 @@ def get_files(session_id: str, request: Request) -> dict:
 
 @router.post("/detect", response_model=DetectResponse)
 def detect_all(session_id: str, request: Request) -> DetectResponse:
-    manager = _session_manager(request)
-    session = _get_session_or_raise(session_id, request)
+    manager = session_manager(request)
+    session = get_session_or_raise(session_id, request)
 
     keyword_map = _merged_keyword_map(request, session.learned_keywords)
     session.files = detect_files(session.files, keyword_map, preserve_manual_levels=True)
@@ -322,12 +312,12 @@ def detect_all(session_id: str, request: Request) -> DetectResponse:
 
 @router.patch("/files/{stem}", response_model=UpdateFileResponse)
 def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: Request) -> UpdateFileResponse:
-    manager = _session_manager(request)
-    session = _get_session_or_raise(session_id, request)
+    manager = session_manager(request)
+    session = get_session_or_raise(session_id, request)
 
     file_index = next((index for index, item in enumerate(session.files) if item.stem == stem), None)
     if file_index is None:
-        raise KeyError("File stem not found")
+        raise NotFoundError("File stem not found")
 
     current: ImportedFile = session.files[file_index]
     updated = current.model_copy(deep=True)
@@ -390,8 +380,8 @@ def patch_features_bulk(
     payload: BulkPatchFeaturesRequest,
     request: Request,
 ) -> BulkPatchFeaturesResponse:
-    manager = _session_manager(request)
-    session = _get_session_or_raise(session_id, request)
+    manager = session_manager(request)
+    session = get_session_or_raise(session_id, request)
     features = session.feature_collection.get("features", [])
     if not isinstance(features, list):
         raise ValueError("Session feature collection is malformed")
@@ -467,8 +457,8 @@ def resolve_unit_overlap(
     payload: ResolveUnitOverlapRequest,
     request: Request,
 ) -> ResolveUnitOverlapsResponse:
-    manager = _session_manager(request)
-    session = _get_session_or_raise(session_id, request)
+    manager = session_manager(request)
+    session = get_session_or_raise(session_id, request)
     features = session.feature_collection.get("features", [])
     if not isinstance(features, list):
         raise ValueError("Session feature collection is malformed")
@@ -495,8 +485,8 @@ def resolve_unit_overlap(
 
 @router.post("/overlaps/fix-safe", response_model=ResolveUnitOverlapsResponse)
 def resolve_unit_overlaps_safe(session_id: str, request: Request) -> ResolveUnitOverlapsResponse:
-    manager = _session_manager(request)
-    session = _get_session_or_raise(session_id, request)
+    manager = session_manager(request)
+    session = get_session_or_raise(session_id, request)
     features = session.feature_collection.get("features", [])
     if not isinstance(features, list):
         raise ValueError("Session feature collection is malformed")
@@ -562,14 +552,14 @@ def resolve_unit_overlaps_safe(session_id: str, request: Request) -> ResolveUnit
 
 @router.get("/features/{feature_id}", response_model=FeatureResponse)
 def get_feature(session_id: str, feature_id: str, request: Request) -> FeatureResponse:
-    session = _get_session_or_raise(session_id, request)
+    session = get_session_or_raise(session_id, request)
     features = session.feature_collection.get("features", [])
     if not isinstance(features, list):
         raise ValueError("Session feature collection is malformed")
 
     index = _find_feature_index(features, feature_id)
     if index is None:
-        raise KeyError("Feature not found")
+        raise NotFoundError("Feature not found")
     return FeatureResponse.model_validate(features[index])
 
 
@@ -580,15 +570,15 @@ def patch_feature(
     payload: PatchFeatureRequest,
     request: Request,
 ) -> FeatureResponse:
-    manager = _session_manager(request)
-    session = _get_session_or_raise(session_id, request)
+    manager = session_manager(request)
+    session = get_session_or_raise(session_id, request)
     features = session.feature_collection.get("features", [])
     if not isinstance(features, list):
         raise ValueError("Session feature collection is malformed")
 
     index = _find_feature_index(features, feature_id)
     if index is None:
-        raise KeyError("Feature not found")
+        raise NotFoundError("Feature not found")
 
     updated = copy.deepcopy(features[index])
     changed_fields = payload.model_fields_set
@@ -613,15 +603,15 @@ def patch_feature(
 
 @router.delete("/features/{feature_id}")
 def delete_feature(session_id: str, feature_id: str, request: Request) -> dict[str, Any]:
-    manager = _session_manager(request)
-    session = _get_session_or_raise(session_id, request)
+    manager = session_manager(request)
+    session = get_session_or_raise(session_id, request)
     features = session.feature_collection.get("features", [])
     if not isinstance(features, list):
         raise ValueError("Session feature collection is malformed")
 
     index = _find_feature_index(features, feature_id)
     if index is None:
-        raise KeyError("Feature not found")
+        raise NotFoundError("Feature not found")
 
     deleted = features.pop(index)
     session.feature_collection["features"] = features

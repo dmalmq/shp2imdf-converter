@@ -6,6 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 import os
+import zipfile
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -19,6 +20,7 @@ from backend.routers.generate_router import router as generate_router
 from backend.routers.import_router import router as import_router
 from backend.routers.reference_router import router as reference_router
 from backend.routers.wizard_router import router as wizard_router
+from backend.src.errors import ApiError
 from backend.src.geocoding import GeocodingError, build_geocoder
 from backend.src.illustrator_export import FloorExportError
 from backend.src.illustrator_importer import IllustratorConversionError
@@ -29,16 +31,6 @@ from backend.src.reference_overlay import ReferenceOverlayStore
 from backend.src.schemas import ErrorResponse
 from backend.src.session import SessionManager, build_session_backend
 from backend.src.session_lock import SessionLockMiddleware
-
-
-class ApiError(Exception):
-    """Typed application error for consistent API responses."""
-
-    def __init__(self, detail: str, code: str, status_code: int) -> None:
-        self.detail = detail
-        self.code = code
-        self.status_code = status_code
-        super().__init__(detail)
 
 
 def _load_session_manager() -> SessionManager:
@@ -141,16 +133,15 @@ async def api_error_handler(_: Request, exc: ApiError) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content=payload.model_dump())
 
 
-@app.exception_handler(KeyError)
-async def key_error_handler(_: Request, exc: KeyError) -> JSONResponse:
-    detail = str(exc).strip("'")
-    payload = ErrorResponse(detail=detail, code="SESSION_NOT_FOUND")
-    return JSONResponse(status_code=404, content=payload.model_dump())
-
-
 @app.exception_handler(ValueError)
 async def value_error_handler(_: Request, exc: ValueError) -> JSONResponse:
     payload = ErrorResponse(detail=str(exc), code="BAD_REQUEST")
+    return JSONResponse(status_code=400, content=payload.model_dump())
+
+
+@app.exception_handler(zipfile.BadZipFile)
+async def bad_zip_handler(_: Request, __: zipfile.BadZipFile) -> JSONResponse:
+    payload = ErrorResponse(detail="The uploaded file is not a valid ZIP archive.", code="BAD_REQUEST")
     return JSONResponse(status_code=400, content=payload.model_dump())
 
 
