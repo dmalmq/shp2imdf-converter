@@ -10,6 +10,7 @@ import { isFeatureOnFloor } from "./floorGroups";
 import { useAppStore } from "../../store/useAppStore";
 import { MAP_BACKGROUND, STREET_MAP_STYLE } from "../shared/streetMapStyle";
 import { featureColorMatchExpr, featureColorMatchTail } from "../shared/featureColors";
+import { WARNING_MAP_COLORS } from "../shared/warningColors";
 import { buildUnitFillColorExpr, buildUnitLineColorExpr, buildUnitOpacityExpr } from "../shared/unitCategoryColors";
 
 
@@ -112,7 +113,7 @@ const WARNING_OUTLINE_LAYER: LayerProps = {
   id: "review-warning-outline",
   type: "line",
   paint: {
-    "line-color": "#ca8a04",
+    "line-color": WARNING_MAP_COLORS.stroke,
     "line-width": 2,
     "line-dasharray": [2, 1]
   }
@@ -135,7 +136,7 @@ const WARNING_POINT_LAYER: LayerProps = {
   type: "circle",
   filter: ["==", ["geometry-type"], "Point"],
   paint: {
-    "circle-color": "#ca8a04",
+    "circle-color": WARNING_MAP_COLORS.stroke,
     "circle-radius": 6,
     "circle-stroke-color": "#ffffff",
     "circle-stroke-width": 1.5

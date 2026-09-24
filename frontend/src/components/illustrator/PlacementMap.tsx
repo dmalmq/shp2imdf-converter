@@ -58,6 +58,7 @@ import {
 import { TransformHandles } from "./TransformHandles";
 import { Contrast, Layers, Maximize2 } from "lucide-react";
 import { OVERLAY_COLORS } from "./overlayColors";
+import { WARNING_MAP_COLORS } from "../shared/warningColors";
 import {
   ARTWORK_SLOT_LAYER_ID,
   ARTWORK_SLOT_SOURCE_ID,
@@ -895,13 +896,13 @@ export function PlacementMap({
             id="placement-shape-match-reference-fill"
             type="fill"
             filter={["==", ["get", "kind"], "reference"]}
-            paint={{ "fill-color": "#f59e0b", "fill-opacity": 0.2 }}
+            paint={{ "fill-color": WARNING_MAP_COLORS.stroke, "fill-opacity": 0.2 }}
           />
           <Layer
             id="placement-shape-match-reference-line"
             type="line"
             filter={["==", ["get", "kind"], "reference"]}
-            paint={{ "line-color": "#f59e0b", "line-width": 3 }}
+            paint={{ "line-color": WARNING_MAP_COLORS.stroke, "line-width": 3 }}
           />
           <Layer
             id="placement-shape-match-reference-label"
@@ -915,8 +916,8 @@ export function PlacementMap({
               "text-ignore-placement": true
             }}
             paint={{
-              "text-color": "#92400e",
-              "text-halo-color": "#fffbeb",
+              "text-color": WARNING_MAP_COLORS.text,
+              "text-halo-color": WARNING_MAP_COLORS.halo,
               "text-halo-width": 3
             }}
           />
