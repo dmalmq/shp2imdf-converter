@@ -119,7 +119,7 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
 }));
 
 vi.mock("../components/illustrator/PlacementMap", () => ({
-  ARTWORK_TINT: "#ea580c",
+  ARTWORK_TINT: "#7a3b7e",
   PlacementMap: ({
     state,
     dispatch,

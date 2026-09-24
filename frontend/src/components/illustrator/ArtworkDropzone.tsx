@@ -57,7 +57,7 @@ export function ArtworkDropzone({ loading, error, onFile }: Props) {
         className={cn(
           "flex w-full flex-col items-center justify-center gap-3 rounded-xl border-[1.5px] border-dashed",
           "border-border bg-card px-6 py-14 transition-colors",
-          isDragActive && "border-signal bg-signal-muted",
+          isDragActive && "border-artwork bg-artwork-muted",
           loading && "opacity-70"
         )}
       >

@@ -9,6 +9,8 @@
 @import "@fontsource/ibm-plex-sans-jp/latin-400.css";
 @import "@fontsource/ibm-plex-sans-jp/latin-500.css";
 @import "@fontsource/ibm-plex-sans-jp/latin-600.css";
+/* Display headings only, and only the one weight they use. */
+@import "@fontsource/fraunces/latin-600.css";
 
 @tailwind base;
 @tailwind components;
@@ -17,94 +19,136 @@
 @layer base {
   /* ── Design tokens ───────────────────────────────────────────────
      HSL channel triplets, not hex, so Tailwind opacity modifiers work
-     (`bg-signal/10`, `fill-foreground/[0.06]`). Mirrors the Figma
-     "Color" collection 1:1 — the variable names are the same, and each
-     Figma variable carries `var(--name)` as its Dev Mode code syntax. */
+     (`bg-artwork/10`, `fill-foreground/[0.06]`). Values are Concept B+
+     from the Figma file: page 110:2 for light, frame 122:2 for dark.
+
+     Pine (primary, success), rust and plum each carry two colours in
+     dark mode: a deeper fill that keeps a white label legible, and a
+     lifted `-text` colour that is legible on the dark surfaces. In light
+     mode the two match. tailwind.config.ts points `text-*` at the
+     `-text` colour and every other utility at the fill. */
   :root {
     color-scheme: light;
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
+    /* paper */
+    --background: 41.5 39.4% 93.5%;
+    /* ink */
+    --foreground: 195 11.8% 13.3%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
+    --card: 42.9 100% 98.6%;
+    --card-foreground: 195 11.8% 13.3%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
+    --popover: 42.9 100% 98.6%;
+    --popover-foreground: 195 11.8% 13.3%;
 
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
+    /* pine: go */
+    --primary: 168 52.8% 24.1%;
+    --primary-foreground: 42.9 100% 98.6%;
+    --primary-text: 168 52.8% 24.1%;
 
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
+    --secondary: 40 33.3% 89.4%;
+    --secondary-foreground: 195 11.8% 13.3%;
 
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
+    --muted: 41.5 39.4% 93.5%;
+    /* One step darker than B's #6F6B62, which measured 4.3:1 on the pine
+       tint behind a selected option. #6A665D clears 4.6:1 on every tint. */
+    --muted-foreground: 41.5 6.5% 39%;
 
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
+    /* pine tint */
+    --accent: 150 25.9% 89.4%;
+    --accent-foreground: 195 11.8% 13.3%;
 
-    --destructive: 0 72.2% 50.6%;
-    --destructive-foreground: 0 0% 98%;
+    /* rust: must fix */
+    --destructive: 10.1 59.3% 43.3%;
+    --destructive-foreground: 42.9 100% 98.6%;
+    --destructive-text: 10.1 59.3% 43.3%;
+    /* A shade lighter than B's #F6DFD6, on which rust text measured 4.46:1. */
+    --destructive-muted: 16.6 64.4% 91.2%;
 
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
+    --border: 39.1 25.3% 82.2%;
+    --input: 39.1 25.3% 82.2%;
+    --ring: 168 52.8% 24.1%;
 
-    /* Reserved for the placed artwork and its active floor. Nothing else. */
-    --signal: 20 90% 48%;
-    --signal-foreground: 0 0% 100%;
-    --signal-muted: 33 100% 96.5%;
+    /* sky: info and reference */
+    --info: 208.4 49.2% 36.3%;
+    --info-foreground: 42.9 100% 98.6%;
+    --info-muted: 208.4 42.2% 91.2%;
 
-    --success: 142 76% 36%;
+    /* plum: the user's artwork and its active floor. Nothing else. */
+    --artwork: 296.4 36.2% 36.3%;
+    --artwork-foreground: 42.9 100% 98.6%;
+    --artwork-text: 296.4 36.2% 36.3%;
+    --artwork-muted: 304.3 33.3% 91.8%;
+
+    --success: 168 52.8% 24.1%;
+    --success-text: 168 52.8% 24.1%;
     --warning: 40.6 96.1% 40.4%;
     --warning-foreground: 31.8 81% 28.8%;
+    --warning-surface: 43.4 66.2% 86.1%;
 
-    /* Reference overlays — data colours, subordinate to signal. */
+    /* Reference overlays — data colours, subordinate to artwork. */
     --layer-1: 221 83% 53%;
     --layer-2: 192 91% 36%;
     --layer-3: 85 85% 35%;
     --layer-4: 33 5% 32%;
 
-    --radius: 0.5rem;
+    /* Cards 10px (lg), controls 8px (md), the largest panels 14px (xl). */
+    --radius: 0.625rem;
   }
 
   .dark {
     color-scheme: dark;
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
+    /* ground */
+    --background: 36 9.8% 10%;
+    --foreground: 40 34.9% 91.6%;
 
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
+    /* surface */
+    --card: 34.3 10.4% 13.1%;
+    --card-foreground: 40 34.9% 91.6%;
 
-    --popover: 240 5.9% 10%;
-    --popover-foreground: 0 0% 98%;
+    /* panel */
+    --popover: 34.3 8.6% 15.9%;
+    --popover-foreground: 40 34.9% 91.6%;
 
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
+    --primary: 166.3 46.2% 33.5%;
+    --primary-foreground: 0 0% 100%;
+    --primary-text: 162.9 40% 58.8%;
 
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
+    /* raised */
+    --secondary: 33.3 10.1% 17.5%;
+    --secondary-foreground: 40 34.9% 91.6%;
 
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
+    --muted: 36 9.8% 10%;
+    --muted-foreground: 38.2 11% 60.8%;
 
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
+    --accent: 164.4 30.3% 17.5%;
+    --accent-foreground: 40 34.9% 91.6%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
+    --destructive: 10.6 54.4% 44.7%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive-text: 11.2 78.3% 69.2%;
+    --destructive-muted: 10.6 37% 18%;
 
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
+    --border: 32.7 9.9% 21.8%;
+    --input: 32.7 9.9% 21.8%;
+    --ring: 162.9 40% 58.8%;
 
-    --signal: 25 95% 53%;
-    --signal-foreground: 0 0% 100%;
-    --signal-muted: 13 81% 15%;
+    --info: 209.2 58.8% 73.3%;
+    --info-foreground: 36 9.8% 10%;
+    --info-muted: 209 34.1% 17.8%;
 
-    --success: 142 71% 45%;
+    /* Not in the Figma palette: derived on plum's hue so the text clears
+       4.5:1 on surface, raised and its own tint, and a white label clears
+       it on the fill. */
+    --artwork: 296.8 35.2% 42.4%;
+    --artwork-foreground: 0 0% 100%;
+    --artwork-text: 296.8 37.3% 70%;
+    --artwork-muted: 297.1 24.1% 17.1%;
+
+    --success: 166.3 46.2% 33.5%;
+    --success-text: 162.9 40% 58.8%;
     --warning: 47.9 95.8% 53.1%;
     --warning-foreground: 50.4 97.8% 63.5%;
+    --warning-surface: 39.4 43.2% 15.9%;
 
     --layer-1: 213 94% 68%;
     --layer-2: 188 86% 53%;
@@ -133,7 +177,7 @@ body {
   margin: 0;
   font-family: "Geist Variable", "IBM Plex Sans JP", "Hiragino Kaku Gothic ProN",
     "Yu Gothic UI", Meiryo, system-ui, sans-serif;
-  background: hsl(var(--muted));
+  background: hsl(var(--background));
   color: hsl(var(--foreground));
 }
 

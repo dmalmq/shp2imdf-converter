@@ -176,7 +176,7 @@ export function ControlPointList({ state, dispatch, pickStage, mode, onTogglePic
             <span
               key={index}
               className={`h-1 flex-1 rounded-full ${
-                index < controlPoints.length ? "bg-signal" : "bg-border"
+                index < controlPoints.length ? "bg-artwork" : "bg-border"
               }`}
             />
           ))}

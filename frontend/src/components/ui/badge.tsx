@@ -15,7 +15,7 @@ const badgeVariants = cva(
         warning: "bg-warning/15 text-warning-foreground",
         destructive: "bg-destructive text-destructive-foreground",
         // Reserved for the placed artwork and its active floor.
-        placed: "bg-signal text-signal-foreground"
+        placed: "bg-artwork text-artwork-foreground"
       }
     },
     defaultVariants: { variant: "secondary" }

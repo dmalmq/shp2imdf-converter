@@ -11,8 +11,8 @@
  * inside a WebGL style. Keep them in step with the `Map objects` page in Figma.
  */
 export const OVERLAY_COLORS = {
-  /** The point you place on the artwork. */
-  artwork: "#2563eb",
+  /** The point you place on the artwork: plum, like the artwork itself. */
+  artwork: "#7a3b7e",
   /** The point on the map it has to land on. */
   reference: "#f59e0b",
   /** The error between the two — the only red thing on the map. */
