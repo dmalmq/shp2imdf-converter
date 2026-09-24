@@ -177,7 +177,7 @@ export function PageAssignmentPanel({
           are the same problem to the reader — stacked separately they competed. */}
       {failedPages.length > 0 || sizesDiffer ? (
         <div className="flex items-start gap-2 rounded-lg border border-warning bg-signal-muted p-3">
-          <AlertTriangle className="mt-px h-4 w-4 shrink-0 text-warning" />
+          <AlertTriangle className="mt-px h-4 w-4 shrink-0 text-warning-foreground" />
           <div className="flex flex-col gap-1">
             {failedPages.length > 0 ? (
               <p data-testid="page-alignment-warning" className="text-[13px] leading-[18px] text-foreground">

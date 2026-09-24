@@ -131,7 +131,7 @@ export function UnitMapStep({ files, mapping, saving, onSave, onAssignCategory, 
         <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2 text-[13px] leading-[18px]">
           <span>{t("Code Resolution Preview", "コード解決プレビュー")}</span>
           <span
-            className={`font-mono text-[11px] leading-[14px] tracking-[0.02em] ${unresolved ? "text-warning" : "text-muted-foreground"}`}
+            className={`font-mono text-[11px] leading-[14px] tracking-[0.02em] ${unresolved ? "text-warning-foreground" : "text-muted-foreground"}`}
           >
             {t(
               `${mapping.preview.length} codes, ${unresolved} unresolved`,

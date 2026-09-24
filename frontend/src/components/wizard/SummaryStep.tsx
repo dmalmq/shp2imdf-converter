@@ -128,8 +128,8 @@ export function SummaryStep({ files, cleanupSummary, wizard, disabled, onConfirm
 
       {wizard && wizard.warnings.length > 0 ? (
         <div className="rounded-lg border border-warning/30 bg-warning/10 p-4">
-          <h3 className="text-sm font-semibold leading-5 text-warning">{t("Warnings", "警告")}</h3>
-          <ul className="mt-1.5 flex flex-col gap-1 text-[13px] leading-[18px] text-warning">
+          <h3 className="text-sm font-semibold leading-5 text-warning-foreground">{t("Warnings", "警告")}</h3>
+          <ul className="mt-1.5 flex flex-col gap-1 text-[13px] leading-[18px] text-warning-foreground">
             {wizard.warnings.map((warning) => (
               <li key={warning}>{warning}</li>
             ))}
@@ -181,7 +181,7 @@ function SummaryRow({ label, value, warn }: { label: string; value: string; warn
       <dt className="text-[13px] leading-[18px] text-muted-foreground">{label}</dt>
       <dd
         className={`min-w-0 truncate text-right font-mono text-[11px] leading-[14px] tracking-[0.02em] ${
-          warn ? "text-warning" : "text-foreground"
+          warn ? "text-warning-foreground" : "text-foreground"
         }`}
         title={value}
       >

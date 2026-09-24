@@ -56,7 +56,8 @@
     --signal-muted: 33 100% 96.5%;
 
     --success: 142 76% 36%;
-    --warning: 32 95% 44%;
+    --warning: 40.6 96.1% 40.4%;
+    --warning-foreground: 31.8 81% 28.8%;
 
     /* Reference overlays — data colours, subordinate to signal. */
     --layer-1: 221 83% 53%;
@@ -102,7 +103,8 @@
     --signal-muted: 13 81% 15%;
 
     --success: 142 71% 45%;
-    --warning: 38 92% 50%;
+    --warning: 47.9 95.8% 53.1%;
+    --warning-foreground: 50.4 97.8% 63.5%;
 
     --layer-1: 213 94% 68%;
     --layer-2: 188 86% 53%;
