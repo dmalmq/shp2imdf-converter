@@ -36,7 +36,13 @@ from backend.src.illustrator_store import ConversionStore
 from backend.src.illustrator_survey_snap import match_survey_consensus
 from backend.src.imdf_reader import read_imdf_zip
 from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
-from backend.src.importer import ReferenceLayer, import_file_blobs, read_reference_layers, zip_member_name
+from backend.src.importer import (
+    ReferenceLayer,
+    flatten_member_paths,
+    import_file_blobs,
+    read_reference_layers,
+    zip_member_name,
+)
 from backend.src.placements import PlacementStore
 from backend.src.reference_overlay import PRELOADED_LABEL, ReferenceOverlayStore
 from backend.src.schemas import (
@@ -140,7 +146,7 @@ def _expand_upload(upload: UploadFile, payload: bytes) -> list[tuple[str, bytes]
             for info in archive.infolist():
                 if info.is_dir():
                     continue
-                blobs.append((Path(zip_member_name(info)).name, archive.read(info)))
+                blobs.append((f"{Path(upload.filename).stem}/{zip_member_name(info)}", archive.read(info)))
         return blobs
     return [(upload.filename or "upload.bin", payload)]
 
@@ -164,7 +170,8 @@ async def _read_uploaded_blobs(request: Request, files: list[UploadFile]) -> lis
         if expanded_total > max_upload_bytes:
             raise ValueError("Expanded upload exceeds configured limit (MAX_UPLOAD_MB).")
         raw_blobs.extend(expanded)
-    return raw_blobs
+    flat_names = flatten_member_paths([name for name, _ in raw_blobs])
+    return [(flat_name, content) for flat_name, (_, content) in zip(flat_names, raw_blobs)]
 
 
 @router.post("/import/imdf", response_model=ImportImdfResponse, status_code=201)
