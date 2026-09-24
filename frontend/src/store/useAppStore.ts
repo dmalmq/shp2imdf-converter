@@ -1,6 +1,28 @@
 import { create } from "zustand";
 
-import type { CleanupSummary, ImportedFile, LearningSuggestion, WizardState } from "../api/client";
+import type {
+  BuildingWizardState,
+  CleanupSummary,
+  FootprintWizardState,
+  ImportedFile,
+  LearningSuggestion,
+  ProjectWizardState,
+  WizardState
+} from "../api/client";
+
+/**
+ * Wizard form edits the server does not have yet: waiting out the autosave
+ * delay, or held because the server would refuse them. A section with no
+ * draft shows the saved state. Kept here rather than in the page so leaving
+ * /wizard and coming back within the session does not drop a held draft.
+ */
+export type WizardDrafts = {
+  project: ProjectWizardState | null;
+  buildings: BuildingWizardState[] | null;
+  footprint: FootprintWizardState | null;
+};
+
+const NO_DRAFTS: WizardDrafts = { project: null, buildings: null, footprint: null };
 
 type Screen = "upload" | "wizard" | "review";
 /** The Illustrator route has its own three stages, unrelated to the wizard's. */
@@ -50,6 +72,8 @@ type AppState = {
   wizardSavedAt: number | null;
   /** Re-runs the save that just failed; cleared by the next status change. */
   wizardSaveRetry: (() => void) | null;
+  wizardDrafts: WizardDrafts;
+  setWizardDraft: <K extends keyof WizardDrafts>(section: K, draft: WizardDrafts[K]) => void;
   learningSuggestion: LearningSuggestion | null;
   setUiLanguage: (language: UiLanguage) => void;
   setTheme: (theme: Theme) => void;
@@ -128,6 +152,7 @@ const INITIAL_STATE = {
   wizardSaveError: null as string | null,
   wizardSavedAt: null as number | null,
   wizardSaveRetry: null as (() => void) | null,
+  wizardDrafts: NO_DRAFTS,
   learningSuggestion: null as LearningSuggestion | null
 };
 
@@ -145,7 +170,8 @@ export const useAppStore = create<AppState>((set) => ({
     }
     set({ theme });
   },
-  setSessionId: (sessionId) => set({ sessionId }),
+  setSessionId: (sessionId) =>
+    set((state) => (state.sessionId === sessionId ? {} : { sessionId, wizardDrafts: NO_DRAFTS })),
   setImportProfile: (importProfile) => set({ importProfile }),
   setSessionExpiredMessage: (sessionExpiredMessage) => set({ sessionExpiredMessage }),
   clearSession: () =>
@@ -215,5 +241,7 @@ export const useAppStore = create<AppState>((set) => ({
       wizardSaveRetry,
       wizardSavedAt: wizardSaveStatus === "saved" ? Date.now() : state.wizardSavedAt
     })),
+  setWizardDraft: (section, draft) =>
+    set((state) => ({ wizardDrafts: { ...state.wizardDrafts, [section]: draft } })),
   setLearningSuggestion: (learningSuggestion) => set({ learningSuggestion })
 }));

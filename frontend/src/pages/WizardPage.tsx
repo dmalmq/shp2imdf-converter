@@ -41,9 +41,9 @@ import { SummaryStep } from "../components/wizard/SummaryStep";
 import { UnitMapStep } from "../components/wizard/UnitMapStep";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
-import { useAppStore } from "../store/useAppStore";
+import { useAppStore, type WizardDrafts } from "../store/useAppStore";
 import { Button, DisabledHint } from "../components/ui";
-import { WizardFooterProvider, useAutosave, useWizardFooterState } from "../components/wizard/wizardSave";
+import { WizardFooterProvider, sameAsSaved, useAutosave, useWizardFooterState } from "../components/wizard/wizardSave";
 
 const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail", "kiosk", "section"]);
 
@@ -210,13 +210,13 @@ export function WizardPage() {
 
   const [activeSection, setActiveSection] = useState("project");
   const { action: footerAction, setAction: setFooterAction } = useWizardFooterState();
-  // The form sections' edits, held here rather than in the steps so they
-  // outlive a section switch: a draft the backend cannot take yet (a venue
+  // The form sections' edits live in the store rather than in the steps so
+  // they outlive a section switch: a draft the backend cannot take yet (a venue
   // without its required fields) is still on screen when the operator returns.
-  // Null until first edited; the saved state shows until then.
-  const [projectDraft, setProjectDraft] = useState<ProjectWizardState | null>(null);
-  const [buildingsDraft, setBuildingsDraft] = useState<BuildingWizardState[] | null>(null);
-  const [footprintDraft, setFootprintDraft] = useState<FootprintWizardState | null>(null);
+  const { project: projectDraft, buildings: buildingsDraft, footprint: footprintDraft } = useAppStore(
+    (state) => state.wizardDrafts
+  );
+  const setWizardDraft = useAppStore((state) => state.setWizardDraft);
   const [loading, setLoading] = useState(false);
   const [features, setFeatures] = useState<
     {
@@ -405,7 +405,9 @@ export function WizardPage() {
   // Every wizard PATCH answers with the whole wizard state, which replaces the
   // store's copy. Two in flight at once can land out of order, and the older
   // answer then undoes the newer save. Leaving a section sends its save and the
-  // level sync together, so this is the ordinary case, not a corner.
+  // level sync together, so this is the ordinary case, not a corner. A read
+  // that follows a write (the refresh after a mappings upload) joins the queue
+  // with it, or an older PATCH answer can land after the fresher read.
   const writeQueue = useRef<Promise<unknown>>(Promise.resolve());
   const serialize = <T,>(task: () => Promise<T>): Promise<T> => {
     const run = writeQueue.current.then(task, task);
@@ -413,33 +415,37 @@ export function WizardPage() {
     return run;
   };
 
-  const syncLevels = () =>
-    serialize(async () => {
-      if (!sessionId) return;
-      const response = await patchWizardLevels(sessionId, toLevelItemsFromFiles(files));
-      setWizardState(response.wizard);
-    });
-
-  const runDetectAll = async () => {
+  const pushLevels = async () => {
     if (!sessionId) return;
-    try {
-      setWizardSaveStatus("saving");
-      const response = await detectAllFiles(sessionId);
-      setFiles(response.files);
-      await refreshFeatures();
-      setLearningSuggestion(null);
-      setWizardSaveStatus("saved");
-      pushToast({
-        title: t("Detection complete", "検出完了"),
-        description: t("File types were refreshed.", "ファイル種別を更新しました。"),
-        variant: "success"
-      });
-    } catch (error) {
-      const message = handleApiError(error, t("Detect all failed", "一括検出に失敗しました"), {
-        title: t("Detection failed", "検出失敗")
-      });
-      setWizardSaveStatus("error", message);
-    }
+    const response = await patchWizardLevels(sessionId, toLevelItemsFromFiles(files));
+    setWizardState(response.wizard);
+  };
+  const syncLevels = () => serialize(pushLevels);
+
+  const runDetectAll = () =>
+    persist(
+      async () => {
+        if (!sessionId) return;
+        const response = await detectAllFiles(sessionId);
+        setFiles(response.files);
+        await refreshFeatures();
+        setLearningSuggestion(null);
+        pushToast({
+          title: t("Detection complete", "検出完了"),
+          description: t("File types were refreshed.", "ファイル種別を更新しました。"),
+          variant: "success"
+        });
+      },
+      t("Detect all failed", "一括検出に失敗しました"),
+      t("Detection failed", "検出失敗")
+    );
+
+  // Once the server holds what a draft says, the draft goes, so whatever the
+  // server has next is what the form shows. A draft edited again while its
+  // save was in flight no longer matches, and stays for the trailing save.
+  const releaseDraft = <K extends keyof WizardDrafts>(section: K, saved: WizardDrafts[K]) => {
+    const draft = useAppStore.getState().wizardDrafts[section];
+    if (draft !== null && sameAsSaved(draft, saved)) setWizardDraft(section, null);
   };
 
   // Every save reports through the footer. A failure keeps its own retry, so
@@ -481,6 +487,7 @@ export function WizardPage() {
         if (!sessionId) return;
         const response = await patchWizardProject(sessionId, payload);
         setWizardState(response.wizard);
+        releaseDraft("project", response.wizard.project);
       },
       t("Failed to save project info", "プロジェクト情報の保存に失敗しました"),
       t("Failed to save project", "保存失敗")
@@ -525,6 +532,7 @@ export function WizardPage() {
         if (!sessionId) return;
         const response = await patchWizardBuildings(sessionId, payload);
         setWizardState(response.wizard);
+        releaseDraft("buildings", response.wizard.buildings);
       },
       t("Failed to save building assignments", "建物割り当ての保存に失敗しました"),
       t("Failed to save buildings", "建物保存失敗")
@@ -553,6 +561,7 @@ export function WizardPage() {
         if (!sessionId) return;
         const response = await patchWizardFootprint(sessionId, payload);
         setWizardState(response.wizard);
+        releaseDraft("footprint", response.wizard.footprint);
       },
       t("Failed to save footprint options", "Footprint 設定の保存に失敗しました"),
       t("Failed to save footprint", "Footprint 保存失敗")
@@ -566,12 +575,32 @@ export function WizardPage() {
   });
   const footprintAutosave = useAutosave(footprintDraft, saveFootprint, { canSave: true });
 
+  const autosaves = [projectAutosave, buildingsAutosave, footprintAutosave];
+  const flushDrafts = () => autosaves.forEach((autosave) => autosave.flush());
+
   const selectSection = (id: string) => {
-    projectAutosave.flush();
-    buildingsAutosave.flush();
-    footprintAutosave.flush();
+    flushDrafts();
     setActiveSection(id);
   };
+
+  // Closing or reloading the tab ends the session's in-memory drafts and can
+  // cut off a save still being sent, so the browser is asked to confirm while
+  // anything is unsaved. Flushing first gives a debounced edit the length of
+  // that prompt to reach the server.
+  const unloadGuard = useRef<() => boolean>(() => false);
+  unloadGuard.current = () => {
+    flushDrafts();
+    return projectHeld || buildingsHeld || autosaves.some((autosave) => autosave.unsaved());
+  };
+  useEffect(() => {
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!unloadGuard.current()) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
 
   const applyLearningSuggestion = async () => {
     if (!sessionId || !learningSuggestion) return;
@@ -588,33 +617,31 @@ export function WizardPage() {
     setLearningSuggestion(null);
   };
 
-  const uploadMappingsFile = async (file: File) => {
-    if (!sessionId) return;
-    try {
-      setWizardSaveStatus("saving");
-      await uploadCompanyMappings(sessionId, file);
-      await refreshWizard();
-      setWizardSaveStatus("saved");
-      pushToast({
-        title: t("Mappings uploaded", "マッピングをアップロードしました"),
-        description: t("Company mappings were applied.", "会社コード対応を適用しました。"),
-        variant: "success"
-      });
-    } catch (error) {
-      const message = handleApiError(error, t("Failed to upload company mappings", "会社コード対応のアップロードに失敗しました"), {
-        title: t("Upload failed", "アップロード失敗")
-      });
-      setWizardSaveStatus("error", message);
-    }
-  };
+  const uploadMappingsFile = (file: File) =>
+    persist(
+      async () => {
+        if (!sessionId) return;
+        await uploadCompanyMappings(sessionId, file);
+        await refreshWizard();
+        pushToast({
+          title: t("Mappings uploaded", "マッピングをアップロードしました"),
+          description: t("Company mappings were applied.", "会社コード対応を適用しました。"),
+          variant: "success"
+        });
+      },
+      t("Failed to upload company mappings", "会社コード対応のアップロードに失敗しました"),
+      t("Upload failed", "アップロード失敗")
+    );
 
   const confirmSummary = async () => {
     if (!sessionId || !canGenerate) return;
     try {
       setWizardSaveStatus("saving");
-      await syncLevels();
-      await generateSessionDraft(sessionId);
-      await refreshFeatures();
+      await serialize(async () => {
+        await pushLevels();
+        await generateSessionDraft(sessionId);
+        await refreshFeatures();
+      });
       setCurrentScreen("review");
       setWizardSaveStatus("saved");
       pushToast({
@@ -652,7 +679,7 @@ export function WizardPage() {
         return (
           <ProjectInfoStep
             project={project}
-            onChange={setProjectDraft}
+            onChange={(next) => setWizardDraft("project", next)}
             onSearchAddress={(query, language) => searchProjectAddress(query, language)}
             onAutofillFromGeometry={(language) => autofillProjectAddressFromGeometry(language)}
           />
@@ -665,7 +692,7 @@ export function WizardPage() {
             allFileStems={allFileStems}
             venueName={project?.venue_name ?? ""}
             venueAddress={project?.address ?? null}
-            onChange={setBuildingsDraft}
+            onChange={(next) => setWizardDraft("buildings", next)}
           />
         );
 
@@ -673,7 +700,7 @@ export function WizardPage() {
         return (
           <FootprintStep
             footprint={footprint}
-            onChange={setFootprintDraft}
+            onChange={(next) => setWizardDraft("footprint", next)}
           />
         );
 

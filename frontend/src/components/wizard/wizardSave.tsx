@@ -63,20 +63,25 @@ export function useWizardFooterState() {
  * Sends a section's draft to the server shortly after the operator stops
  * editing it.
  *
- * `draft` is null until the section is first edited, so opening a section
- * never writes. A draft the server would reject (`canSave` false) is held, not
- * sent: it stays on screen and is sent as soon as it becomes valid. Saves run
- * one at a time, so an older response can never land after a newer one.
+ * `draft` is null while the section has nothing unsaved, so opening a section
+ * never writes. The page drops a draft once the server has stored it (see
+ * `sameAsSaved`), which is what lets later server state show through instead
+ * of being masked, and later re-sent, by a copy of an old edit.
+ *
+ * A draft the server would reject (`canSave` false) is held, not sent: it
+ * stays on screen and is sent as soon as it becomes valid. Saves run one at a
+ * time; an edit made while one is in flight is sent when it returns.
  *
  * `flush` sends any waiting edit immediately. The page calls it before
- * switching section, and it runs on unmount, so leaving a section never drops
- * an edit still inside the debounce window.
+ * switching section and before the tab unloads, and it runs on unmount, so
+ * leaving never drops an edit still inside the debounce window.
+ * `unsaved` says whether an edit is waiting or in flight.
  */
 export function useAutosave<T>(
   draft: T | null,
   save: (value: T) => Promise<unknown>,
   { canSave, delayMs = AUTOSAVE_DELAY_MS }: { canSave: boolean; delayMs?: number }
-): { flush: () => void } {
+): { flush: () => void; unsaved: () => boolean } {
   const saveRef = useRef(save);
   saveRef.current = save;
   const pending = useRef<T | null>(null);
@@ -101,7 +106,15 @@ export function useAutosave<T>(
   }, []);
 
   useEffect(() => {
-    if (draft === null) return;
+    if (draft === null) {
+      // Nothing unsaved: the next edit must be sent even if it happens to
+      // match what was sent last, because the server may have moved since.
+      lastSent.current = null;
+      pending.current = null;
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = null;
+      return;
+    }
     if (!canSave || JSON.stringify(draft) === lastSent.current) {
       pending.current = null;
       if (timer.current) clearTimeout(timer.current);
@@ -115,5 +128,40 @@ export function useAutosave<T>(
 
   useEffect(() => flush, [flush]);
 
-  return { flush };
+  const unsaved = useCallback(() => inFlight.current || pending.current !== null, []);
+
+  return { flush, unsaved };
+}
+
+function isBlank(value: unknown): boolean {
+  return value === null || value === undefined || value === "";
+}
+
+/**
+ * Whether a draft holds nothing the server's copy lacks, so it can be dropped.
+ *
+ * The forms hold "" where the server stores null, and the server mints a new
+ * `address_feature_id` on every buildings save, so neither counts as a
+ * difference. Anything else does, trailing spaces included: dropping a draft
+ * swaps the input to the server's trimmed value, and doing that mid-word would
+ * eat the space just typed.
+ */
+export function sameAsSaved(draft: unknown, saved: unknown): boolean {
+  if (isBlank(draft) && isBlank(saved)) return true;
+  if (Array.isArray(draft) || Array.isArray(saved)) {
+    return (
+      Array.isArray(draft) &&
+      Array.isArray(saved) &&
+      draft.length === saved.length &&
+      draft.every((item, index) => sameAsSaved(item, saved[index]))
+    );
+  }
+  if (draft && saved && typeof draft === "object" && typeof saved === "object") {
+    const a = draft as Record<string, unknown>;
+    const b = saved as Record<string, unknown>;
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    keys.delete("address_feature_id");
+    return [...keys].every((key) => sameAsSaved(a[key], b[key]));
+  }
+  return draft === saved;
 }

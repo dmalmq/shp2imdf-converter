@@ -611,6 +611,9 @@ export async function patchWizardProject(
 ): Promise<ProjectWizardResponse> {
   const response = await fetch(`/api/session/${sessionId}/wizard/project`, {
     method: "PATCH",
+    // Autosave flushes on beforeunload (here, buildings and footprint); without
+    // keepalive the browser cancels that last request as the tab closes.
+    keepalive: true,
     headers: {
       "Content-Type": "application/json"
     },
@@ -673,6 +676,7 @@ export async function patchWizardBuildings(
 ): Promise<BuildingsWizardResponse> {
   const response = await fetch(`/api/session/${sessionId}/wizard/buildings`, {
     method: "PATCH",
+    keepalive: true,
     headers: {
       "Content-Type": "application/json"
     },
@@ -701,6 +705,7 @@ export async function patchWizardFootprint(
 ): Promise<WizardStateResponse> {
   const response = await fetch(`/api/session/${sessionId}/wizard/footprint`, {
     method: "PATCH",
+    keepalive: true,
     headers: {
       "Content-Type": "application/json"
     },

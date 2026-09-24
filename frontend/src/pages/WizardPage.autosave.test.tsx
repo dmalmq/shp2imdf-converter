@@ -7,8 +7,10 @@ import {
   fetchSessionFiles,
   fetchWizardState,
   generateSessionDraft,
+  patchWizardBuildings,
   patchWizardLevels,
   patchWizardProject,
+  uploadCompanyMappings,
   type ImportedFile,
   type ProjectWizardState,
   type WizardState
@@ -139,17 +141,22 @@ function acceptProjectSaves() {
   });
 }
 
-async function renderWizard(project: ProjectWizardState | null) {
-  server = wizard(project);
-  vi.mocked(fetchWizardState).mockImplementation(async () => ({ session_id: "session-1", wizard: server }));
-  render(
+async function mountWizard() {
+  const view = render(
     <MemoryRouter>
       <ToastProvider>
         <WizardPage />
       </ToastProvider>
     </MemoryRouter>
   );
-  return screen.findByLabelText(/Venue Name/);
+  await screen.findByLabelText(/Venue Name/);
+  return view;
+}
+
+async function renderWizard(project: ProjectWizardState | null) {
+  server = wizard(project);
+  vi.mocked(fetchWizardState).mockImplementation(async () => ({ session_id: "session-1", wizard: server }));
+  return mountWizard();
 }
 
 function type(label: RegExp, value: string) {
@@ -169,7 +176,8 @@ beforeEach(() => {
     files: [],
     wizardState: null,
     wizardSaveStatus: "idle",
-    wizardSaveError: null
+    wizardSaveError: null,
+    wizardDrafts: { project: null, buildings: null, footprint: null }
   });
   vi.mocked(fetchSessionFiles).mockResolvedValue({ files: [FILE] } as never);
   vi.mocked(fetchSessionFeatures).mockResolvedValue({ features: [] } as never);
@@ -256,4 +264,129 @@ test("Summary still generates the draft", async () => {
 
   await waitFor(() => expect(generateSessionDraft).toHaveBeenCalledWith("session-1"));
   expect(patchProjectMock).not.toHaveBeenCalled();
+});
+
+function uploadMappings() {
+  const input = document.querySelector('input[type="file"][accept="application/json"]') as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [new File(["{}"], "mappings.json", { type: "application/json" })] } });
+}
+
+function renamedBuildings(state: WizardState, name: string): WizardState {
+  return { ...state, buildings: state.buildings.map((building) => ({ ...building, name })) };
+}
+
+test("a saved draft gives way to newer server state and is never sent back", async () => {
+  const patchBuildingsMock = vi.mocked(patchWizardBuildings);
+  patchBuildingsMock.mockImplementation(async (_session, buildings) => {
+    server = { ...server, buildings };
+    return { session_id: "session-1", wizard: server, address_features: [] };
+  });
+  // Someone else's write, which the page learns of when it next reads the wizard.
+  vi.mocked(uploadCompanyMappings).mockImplementation(async () => {
+    server = renamedBuildings(server, "Main Hall");
+    return {} as never;
+  });
+  await renderWizard(COMPLETE_PROJECT);
+
+  openSection("Buildings");
+  type(/Building Name/, "North Hall");
+  await waitFor(() => expect(patchBuildingsMock).toHaveBeenCalledTimes(1));
+
+  openSection("Attribute Mapping");
+  uploadMappings();
+  await waitFor(() => expect(fetchWizardState).toHaveBeenCalledTimes(2));
+  await sleep(50);
+
+  openSection("Project & Venue");
+  openSection("Buildings");
+  expect(await screen.findByLabelText(/Building Name/)).toHaveValue("Main Hall");
+  await sleep(AUTOSAVE_DELAY_MS * 1.5);
+  expect(patchBuildingsMock).toHaveBeenCalledTimes(1);
+});
+
+test("the refresh after a mappings upload is not overwritten by an earlier save's answer", async () => {
+  patchProjectMock.mockImplementation(async (_session, payload) => {
+    server = { ...server, project: payload };
+    const handled = server;
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    return { session_id: "session-1", wizard: handled, address_feature: {} };
+  });
+  vi.mocked(uploadCompanyMappings).mockImplementation(async () => {
+    server = {
+      ...server,
+      mappings: { ...server.mappings, unit: { ...server.mappings.unit, code_column: "UPLOADED" } }
+    };
+    return {} as never;
+  });
+  await renderWizard(COMPLETE_PROJECT);
+  const seen: (string | null | undefined)[] = [];
+  const unsubscribe = useAppStore.subscribe((state) => {
+    const column = state.wizardState?.mappings.unit.code_column;
+    if (seen[seen.length - 1] !== column) seen.push(column);
+  });
+
+  type(/Venue Name/, "Tokyo Sta.");
+  openSection("Attribute Mapping");
+  uploadMappings();
+
+  await waitFor(() => expect(fetchWizardState).toHaveBeenCalledTimes(2));
+  await sleep(150);
+  unsubscribe();
+  // Once the store has the uploaded mappings, no later answer may take them away.
+  expect(seen.slice(seen.indexOf("UPLOADED"))).toEqual(["UPLOADED"]);
+  expect(useAppStore.getState().wizardState?.project?.venue_name).toBe("Tokyo Sta.");
+});
+
+test("an edit made while a save is in flight is sent after it, and stays on screen", async () => {
+  patchProjectMock.mockImplementation(async (_session, payload) => {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    server = { ...server, project: payload };
+    return { session_id: "session-1", wizard: server, address_feature: {} };
+  });
+  await renderWizard(COMPLETE_PROJECT);
+
+  type(/Venue Name/, "Tokyo A");
+  await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(1));
+  type(/Venue Name/, "Tokyo AB");
+  await sleep(250);
+  expect(screen.getByLabelText(/Venue Name/)).toHaveValue("Tokyo AB");
+
+  await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(2), { timeout: 3000 });
+  expect(patchProjectMock.mock.calls[1][1].venue_name).toBe("Tokyo AB");
+  await waitFor(() => expect(useAppStore.getState().wizardDrafts.project).toBeNull());
+  expect(screen.getByLabelText(/Venue Name/)).toHaveValue("Tokyo AB");
+});
+
+test("leaving the wizard sends a pending edit and keeps a held one for the session", async () => {
+  const first = await renderWizard(COMPLETE_PROJECT);
+  type(/Venue Name/, "Tokyo Station Marunouchi");
+  first.unmount();
+  await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(1));
+  expect(patchProjectMock.mock.calls[0][1].venue_name).toBe("Tokyo Station Marunouchi");
+
+  const second = await mountWizard();
+  type(/Locality/, "");
+  second.unmount();
+  await mountWizard();
+  expect(screen.getByLabelText(/Locality/)).toHaveValue("");
+  expect(screen.getByText(/required to save/)).toBeInTheDocument();
+  expect(patchProjectMock).toHaveBeenCalledTimes(1);
+});
+
+test("closing the tab asks first while an edit is unsaved, and sends it", async () => {
+  await renderWizard(COMPLETE_PROJECT);
+  const unload = () => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  expect(unload()).toBe(false);
+
+  type(/Venue Name/, "Tokyo Yaesu");
+  expect(unload()).toBe(true);
+  await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(1));
+  expect(patchProjectMock.mock.calls[0][1].venue_name).toBe("Tokyo Yaesu");
+
+  await waitFor(() => expect(useAppStore.getState().wizardDrafts.project).toBeNull());
+  expect(unload()).toBe(false);
 });
