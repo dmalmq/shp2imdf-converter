@@ -22,7 +22,7 @@ type Props = {
 const SVG_SIZE = 320;
 const SVG_PAD = 16;
 
-function polygonsToSvgPaths(
+export function polygonsToSvgPaths(
   rings: number[][][],
   minX: number,
   minY: number,
