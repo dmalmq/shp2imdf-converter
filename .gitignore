@@ -20,6 +20,7 @@ test-results/
 data/session_uploads/
 data/sessions/
 data/tmp/
+data/illustrator/
 backend/data/session_uploads/
 backend/data/sessions/
 data/placements.db
