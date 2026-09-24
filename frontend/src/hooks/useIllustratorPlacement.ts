@@ -9,6 +9,7 @@ import {
   lngLatToEnu,
   metresPerPointForScale,
   residuals,
+  SimilarityError,
   toEnuMatrix,
   transformGeoJson,
   type SimilarityTransform
@@ -20,8 +21,15 @@ export const DEFAULT_DRAWING_SCALE = 1000;
 /** Ground metres per PDF point at {@link DEFAULT_DRAWING_SCALE}. */
 export const DEFAULT_METRES_PER_POINT = metresPerPointForScale(DEFAULT_DRAWING_SCALE);
 
-/** Product-level minimum for accepting a similarity fit. */
-export const MIN_CONTROL_POINTS = 3;
+/**
+ * Matching pairs needed before a fit is offered and residuals mean anything.
+ * A similarity fit solves x, y, rotation and scale; with the scale locked only
+ * three unknowns remain, so two pairs already over-determine it and leave a
+ * real residual. Unlocked, two pairs fit exactly and the residual is always 0.
+ */
+export function minControlPoints(state: Pick<PlacementState, "scaleLocked">): 2 | 3 {
+  return state.scaleLocked ? 2 : 3;
+}
 
 export type ControlPoint = {
   id: string;
@@ -474,7 +482,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
       if (
         !active ||
         active.pinned ||
-        active.controlPoints.length < MIN_CONTROL_POINTS ||
+        active.controlPoints.length < minControlPoints(state) ||
         (action.mode === "group" && !active.linked)
       ) {
         return state;
@@ -485,12 +493,19 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
       const lockedMetres = state.scaleLocked
         ? resolvedTransform(state, active).metresPerPoint
         : undefined;
-      const fitted = fitHelmert(
-        active.controlPoints.map((p) => p.artwork),
-        enu,
-        state.frame.workingCrs,
-        lockedMetres
-      );
+      if (controlPointProblem(state)) return state;
+      let fitted: SimilarityTransform;
+      try {
+        fitted = fitHelmert(
+          active.controlPoints.map((p) => p.artwork),
+          enu,
+          state.frame.workingCrs,
+          lockedMetres
+        );
+      } catch (error) {
+        if (error instanceof SimilarityError) return state;
+        throw error;
+      }
       if (frameFit) {
         // The frame takes the fitted rotation and scale; the active floor's
         // anchor is set to where ITS artwork anchor lands under the fit (not
@@ -709,12 +724,33 @@ export function placementHistoryReducer(
   };
 }
 
+/**
+ * Why the active floor's pairs cannot be fitted even though there are enough
+ * of them: every artwork point, or every map point, is the same point, so
+ * there is no direction to recover a rotation from. Near-coincident pairs are
+ * not flagged; their residuals already show the problem.
+ */
+export function controlPointProblem(
+  state: PlacementState
+): "artworkCoincident" | "mapCoincident" | null {
+  const points = activeFloor(state)?.controlPoints ?? [];
+  if (points.length < 2) return null;
+  const [first, ...rest] = points;
+  if (rest.every((p) => p.artwork[0] === first.artwork[0] && p.artwork[1] === first.artwork[1])) {
+    return "artworkCoincident";
+  }
+  if (rest.every((p) => p.map[0] === first.map[0] && p.map[1] === first.map[1])) {
+    return "mapCoincident";
+  }
+  return null;
+}
+
 /** Residuals of the active floor's control points, or null below the minimum. */
 export function currentResiduals(
   state: PlacementState
 ): { perPoint: number[]; rmse: number } | null {
   const active = activeFloor(state);
-  if (!active || active.controlPoints.length < MIN_CONTROL_POINTS) return null;
+  if (!active || active.controlPoints.length < minControlPoints(state)) return null;
   const [lon0, lat0] = active.mapAnchor;
   const enu = active.controlPoints.map((p) => lngLatToEnu(p.map[0], p.map[1], lon0, lat0));
   return residuals(

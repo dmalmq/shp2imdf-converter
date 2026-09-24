@@ -1,9 +1,11 @@
 import {
   DEFAULT_DRAWING_SCALE,
   DEFAULT_METRES_PER_POINT,
+  controlPointProblem,
   currentResiduals,
   floorPayloadsToState,
   initialPlacementHistory,
+  minControlPoints,
   pinFocusBounds,
   placedBoundsWgs84,
   placementHistoryReducer,
@@ -575,11 +577,104 @@ function controlPointState(count: 2 | 3, thirdOffset: [number, number] = [-50, 0
   );
 }
 
-test("two control points cannot fit either scope and have no residual summary", () => {
+test("two control points cannot fit either scope while the scale is free", () => {
   const state = controlPointState(2);
   expect(currentResiduals(state)).toBeNull();
   expect(placementReducer(state, { type: "fitControlPoints", mode: "group" })).toBe(state);
   expect(placementReducer(state, { type: "fitControlPoints", mode: "individual" })).toBe(state);
+});
+
+test("the minimum is two pairs with the scale locked and three without", () => {
+  expect(minControlPoints({ scaleLocked: true })).toBe(2);
+  expect(minControlPoints({ scaleLocked: false })).toBe(3);
+});
+
+function lockedTwoPointState(metresEast: number): PlacementState {
+  const locked = placementReducer(BASE, { type: "lockScale" });
+  const north = enuToLngLat(0, metresEast, ANCHOR[0], ANCHOR[1]);
+  return [
+    { id: "a", artwork: [0, 0] as [number, number], map: ANCHOR },
+    { id: "b", artwork: [100, 0] as [number, number], map: north }
+  ].reduce((state, point) => placementReducer(state, { type: "addControlPoint", point }), locked);
+}
+
+test("with the scale locked, two pairs fit rotation and position and keep the scale", () => {
+  const before = lockedTwoPointState(100 * BASE.frame.metresPerPoint);
+  expect(currentResiduals(before)).not.toBeNull();
+  const state = placementReducer(before, { type: "fitControlPoints", mode: "group" });
+  expect(state).not.toBe(before);
+  expect(state.frame.rotationDeg).toBeCloseTo(90, 6);
+  expect(state.frame.metresPerPoint).toBe(BASE.frame.metresPerPoint);
+  expect(currentResiduals(state)!.rmse).toBeLessThan(0.01);
+});
+
+test("with the scale locked, two pairs that disagree with the scale leave a residual", () => {
+  const state = placementReducer(lockedTwoPointState(50), {
+    type: "fitControlPoints",
+    mode: "individual"
+  });
+  const fit = currentResiduals(state)!;
+  expect(fit.perPoint).toHaveLength(2);
+  // 100 pt at the locked scale is 17.64 m against a 50 m target: 16.18 m each side.
+  expect(fit.rmse).toBeCloseTo((50 - 100 * BASE.frame.metresPerPoint) / 2, 3);
+});
+
+test("unlocking the scale with two pairs withdraws the fit until relocked", () => {
+  const locked = lockedTwoPointState(50);
+  const unlocked = placementReducer(locked, { type: "unlockScale" });
+  expect(currentResiduals(unlocked)).toBeNull();
+  expect(placementReducer(unlocked, { type: "fitControlPoints", mode: "group" })).toBe(unlocked);
+  const relocked = placementReducer(unlocked, { type: "lockScale" });
+  expect(currentResiduals(relocked)).not.toBeNull();
+  expect(placementReducer(relocked, { type: "fitControlPoints", mode: "group" })).not.toBe(
+    relocked
+  );
+});
+
+function lockedPairState(
+  artwork: [[number, number], [number, number]],
+  map: [[number, number], [number, number]]
+): PlacementState {
+  const locked = placementReducer(BASE, { type: "lockScale" });
+  return [0, 1].reduce(
+    (state, index) =>
+      placementReducer(state, {
+        type: "addControlPoint",
+        point: { id: String(index), artwork: artwork[index], map: map[index] }
+      }),
+    locked
+  );
+}
+
+test.each([
+  ["artwork", [[10, 10], [10, 10]], [ANCHOR, enuToLngLat(0, 20, ANCHOR[0], ANCHOR[1])], "artworkCoincident"],
+  ["map", [[0, 0], [100, 0]], [ANCHOR, ANCHOR], "mapCoincident"]
+] as const)(
+  "two pairs whose %s points coincide leave the placement unchanged instead of throwing",
+  (_side, artwork, map, problem) => {
+    const state = lockedPairState(
+      artwork as unknown as [[number, number], [number, number]],
+      map as unknown as [[number, number], [number, number]]
+    );
+    expect(controlPointProblem(state)).toBe(problem);
+    expect(() => currentResiduals(state)).not.toThrow();
+    for (const mode of ["group", "individual"] as const) {
+      expect(() => placementReducer(state, { type: "fitControlPoints", mode })).not.toThrow();
+      expect(placementReducer(state, { type: "fitControlPoints", mode })).toBe(state);
+    }
+  }
+);
+
+test("near-coincident pairs still fit and are not flagged", () => {
+  const state = lockedPairState(
+    [
+      [10, 10],
+      [10.001, 10]
+    ],
+    [ANCHOR, enuToLngLat(0, 0.001, ANCHOR[0], ANCHOR[1])]
+  );
+  expect(controlPointProblem(state)).toBeNull();
+  expect(placementReducer(state, { type: "fitControlPoints", mode: "group" })).not.toBe(state);
 });
 
 test("a three-point group fit recovers the shared frame and keeps every floor linked", () => {
