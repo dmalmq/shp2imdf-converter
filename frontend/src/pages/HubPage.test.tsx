@@ -60,12 +60,11 @@ const SHINJUKU = projectSummary({
   last_opened: "2026-09-12T03:00:00Z"
 });
 const IKEBUKURO = projectSummary({
-  id: "conv-1",
-  flow: "artwork",
+  id: "ikebukuro",
   name: "池袋駅",
-  import_profile: null,
-  stage: "place",
-  blockers: 3,
+  import_profile: "imdf_shapefile",
+  stage: "bring-in",
+  blockers: null,
   can_wait: null,
   last_opened: "2026-09-02T03:00:00Z"
 });
@@ -80,9 +79,10 @@ function cards(): HTMLElement[] {
   return [...screen.getByRole("list", { name: "Projects" }).children] as HTMLElement[];
 }
 
-test("lists projects most recently opened first, with each one's stage and status", async () => {
+test("lists shapefile projects most recently opened first, with each one's stage and status", async () => {
   vi.mocked(fetchProjects).mockResolvedValue(listing([TOKYO, IKEBUKURO, SHINJUKU]));
   renderHub();
+  expect(fetchProjects).toHaveBeenCalledWith("shapefiles");
 
   await screen.findByText("3 projects on this PC · most recently opened first");
   expect(cards().map((card) => within(card).getByRole("heading").textContent)).toEqual(["新宿駅", "池袋駅", "東京駅"]);
@@ -90,8 +90,9 @@ test("lists projects most recently opened first, with each one's stage and statu
   const [shinjuku, ikebukuro, tokyo] = cards();
   expect(shinjuku).toHaveTextContent("Delivered 12 Sep");
   expect(within(shinjuku).getByRole("button", { name: "Open 新宿駅" })).toBeInTheDocument();
-  expect(ikebukuro).toHaveTextContent("Stage 3 of 4 · Place on map");
-  expect(ikebukuro).toHaveTextContent("3 floors still to place");
+  expect(ikebukuro).toHaveTextContent("Stage 1 of 4 · Bring in");
+  expect(ikebukuro).toHaveTextContent("IMDF shapefiles → ODC 2026");
+  expect(ikebukuro).toHaveTextContent("Not checked yet");
   expect(tokyo).toHaveTextContent("3 things to fix before you can deliver");
   expect(within(tokyo).getByRole("listitem", { current: "step" })).toHaveTextContent("Check");
   expect(screen.getByText("Projects are kept for 30 days after they were last opened.")).toBeInTheDocument();
@@ -100,7 +101,7 @@ test("lists projects most recently opened first, with each one's stage and statu
 test.each([
   ["東京駅", "Continue 東京駅", "/p/tokyo/check"],
   ["新宿駅", "Open 新宿駅", "/p/shinjuku/deliver"],
-  ["池袋駅", "Continue 池袋駅", "/illustrator"]
+  ["池袋駅", "Continue 池袋駅", "/p/ikebukuro"]
 ])("%s goes to %s's route", async (_name, button, path) => {
   vi.mocked(fetchProjects).mockResolvedValue(listing([TOKYO, IKEBUKURO, SHINJUKU]));
   renderHub();

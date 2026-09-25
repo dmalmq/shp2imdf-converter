@@ -117,7 +117,6 @@ export function StageTrack({ stages, onSelect }: Props) {
 
 const BAR_TONE = {
   danger: "bg-destructive",
-  warning: "bg-warning-foreground",
   default: "bg-primary/40"
 } as const;
 

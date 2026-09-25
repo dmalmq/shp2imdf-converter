@@ -419,8 +419,11 @@ export type ProjectListResponse = {
 };
 
 /** Read-only: listing never counts as opening a project. */
-export async function fetchProjects(limit = 500): Promise<ProjectListResponse> {
-  const response = await fetch(`/api/projects?limit=${limit}`);
+export async function fetchProjects(
+  flow: ProjectSummary["flow"],
+  limit = 500
+): Promise<ProjectListResponse> {
+  const response = await fetch(`/api/projects?flow=${flow}&limit=${limit}`);
   return handleJson<ProjectListResponse>(response);
 }
 

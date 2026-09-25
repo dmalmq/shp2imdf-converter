@@ -23,8 +23,8 @@ export type Stage = {
   label: Bilingual;
   status: StageStatus;
   detail?: Bilingual;
-  /** "danger" when the detail counts things that must be fixed; "warning" for work still to do. */
-  detailTone?: "default" | "danger" | "warning";
+  /** "danger" when the detail counts things that must be fixed. */
+  detailTone?: "default" | "danger";
   target?: StageTarget;
 };
 

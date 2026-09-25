@@ -1,30 +1,25 @@
 import type { ProjectLimits, ProjectSummary } from "../api/client";
-import {
-  FLOW_STAGES,
-  projectPath,
-  type Flow,
-  type Stage,
-  type StageId
-} from "../components/shell/stages";
+import { FLOW_STAGES, projectPath, type ShapefileStageId, type Stage } from "../components/shell/stages";
 
 /** What the project's card says under its track. */
 export type HubStatus =
   | { kind: "delivered"; at: string }
   | { kind: "to-fix"; count: number }
-  | { kind: "to-place"; count: number }
   | { kind: "ready"; canWait: number }
   | { kind: "unchecked" };
 
-/** A hub card, derived from one `ProjectSummary`. */
+/**
+ * A hub card, derived from one shapefile `ProjectSummary`. Artwork projects
+ * are not listed until they can be reopened by URL (phase 14).
+ */
 export type HubProject = {
   id: string;
-  flow: Flow;
   /** Null when the server has no name yet; the card falls back. */
   name: string | null;
   imdfShapefiles: boolean;
-  /** 1-based position of the current stage in its flow's four. */
+  /** 1-based position of the current stage in the four. */
   stageNumber: number;
-  /** The flow's four stages; every one is done once delivered and unchanged. */
+  /** The four stages; every one is done once delivered and unchanged. */
   track: Stage[];
   status: HubStatus;
   /** When it was delivered, if it has changed since. */
@@ -37,34 +32,24 @@ export type HubProject = {
 
 export const ARTWORK_PATH = "/illustrator";
 
-function currentStageId(summary: ProjectSummary): StageId {
-  if (summary.flow === "artwork") {
-    return summary.stage === "place" || summary.stage === "deliver" ? summary.stage : "name-floors";
-  }
+function currentStageId(summary: ProjectSummary): ShapefileStageId {
   return summary.stage === "set-up" || summary.stage === "check" || summary.stage === "deliver"
     ? summary.stage
     : "bring-in";
 }
 
 /**
- * Where Continue goes. A shapefile project that has only been brought in has
- * nothing left to do on Bring in (importing there starts a new project), so
- * it opens at `/p/:id`, which lands on the first stage it can use. Artwork has
- * one route until conversions are addressable.
+ * Where Continue goes. A project that has only been brought in has nothing
+ * left to do on Bring in (importing there starts a new project), so it opens
+ * at `/p/:id`, which lands on the first stage it can use.
  */
-export function projectHref(flow: Flow, id: string, stage: StageId): string {
-  if (flow === "artwork") return ARTWORK_PATH;
-  if (stage === "set-up" || stage === "check" || stage === "deliver") return projectPath(id, stage);
-  return `/p/${encodeURIComponent(id)}`;
+export function projectHref(id: string, stage: ShapefileStageId): string {
+  return stage === "bring-in" ? `/p/${encodeURIComponent(id)}` : projectPath(id, stage);
 }
 
 function statusOf(summary: ProjectSummary, finished: boolean): HubStatus {
   if (finished && summary.delivered_at) return { kind: "delivered", at: summary.delivered_at };
-  if (summary.blockers !== null && summary.blockers > 0) {
-    return summary.flow === "artwork"
-      ? { kind: "to-place", count: summary.blockers }
-      : { kind: "to-fix", count: summary.blockers };
-  }
+  if (summary.blockers !== null && summary.blockers > 0) return { kind: "to-fix", count: summary.blockers };
   if (summary.blockers === 0) return { kind: "ready", canWait: summary.can_wait ?? 0 };
   return { kind: "unchecked" };
 }
@@ -73,16 +58,12 @@ export function toHubProject(summary: ProjectSummary): HubProject {
   const stageId = currentStageId(summary);
   const finished = summary.delivered_at !== null && !summary.changed_since_delivery;
   const status = statusOf(summary, finished);
-  const stages = FLOW_STAGES[summary.flow];
-  const current = Math.max(
-    stages.findIndex((stage) => stage.id === stageId),
-    0
-  );
-  const tone = status.kind === "to-fix" ? "danger" : status.kind === "to-place" ? "warning" : "default";
+  const stages = FLOW_STAGES.shapefiles;
+  const current = stages.findIndex((stage) => stage.id === stageId);
+  const tone = status.kind === "to-fix" ? "danger" : "default";
 
   return {
     id: summary.id,
-    flow: summary.flow,
     name: summary.name?.trim() || null,
     imdfShapefiles: summary.import_profile === "imdf_shapefile",
     stageNumber: current + 1,
@@ -94,7 +75,7 @@ export function toHubProject(summary: ProjectSummary): HubProject {
     status,
     deliveredBeforeChanges: summary.changed_since_delivery ? summary.delivered_at : null,
     lastOpened: summary.last_opened,
-    href: projectHref(summary.flow, summary.id, stageId),
+    href: projectHref(summary.id, stageId),
     action: finished ? "open" : "continue"
   };
 }

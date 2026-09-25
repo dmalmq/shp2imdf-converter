@@ -50,7 +50,7 @@ export function HubPage() {
   useEffect(() => {
     let active = true;
     setListing({ state: "loading" });
-    fetchProjects().then(
+    fetchProjects("shapefiles").then(
       (response) => {
         if (active) setListing({ state: "loaded", response });
       },
@@ -117,17 +117,9 @@ const FILTERS: ReadonlyArray<{ id: HubFilter; en: string; ja: string }> = [
 ];
 
 function keptFor(response: ProjectListResponse, t: T): string {
-  const phrase = (limits: ProjectListResponse["limits"]["sessions"]) => {
-    const { unit, value } = lifetime(limits);
-    return unit === "days" ? t(`${value} days`, `${value} 日間`) : t(`${value} hours`, `${value} 時間`);
-  };
-  const sessions = phrase(response.limits.sessions);
-  const artwork = phrase(response.limits.artwork);
-  const base = t(
-    `Projects are kept for ${sessions} after they were last opened.`,
-    `プロジェクトは最後に開いてから ${sessions}保存されます。`
-  );
-  return sessions === artwork ? base : `${base} ${t(`Artwork: ${artwork}.`, `図面: ${artwork}。`)}`;
+  const { unit, value } = lifetime(response.limits.sessions);
+  const span = unit === "days" ? t(`${value} days`, `${value} 日間`) : t(`${value} hours`, `${value} 時間`);
+  return t(`Projects are kept for ${span} after they were last opened.`, `プロジェクトは最後に開いてから ${span}保存されます。`);
 }
 
 function ProjectList({ response }: { response: ProjectListResponse }) {
@@ -192,7 +184,7 @@ function ProjectList({ response }: { response: ProjectListResponse }) {
       {shown.length > 0 ? (
         <ul className="flex flex-col gap-[18px]" aria-label={t("Projects", "プロジェクト")}>
           {shown.map((project, index) => (
-            <ProjectCard key={`${project.flow}:${project.id}`} project={project} latest={index === 0 && filter === "all"} />
+            <ProjectCard key={project.id} project={project} latest={index === 0 && filter === "all"} />
           ))}
         </ul>
       ) : (
@@ -206,7 +198,6 @@ function ProjectList({ response }: { response: ProjectListResponse }) {
 }
 
 function flowPill(project: HubProject, t: T): string {
-  if (project.flow === "artwork") return t("Artwork → Shapefiles", "図面 → シェープファイル");
   if (project.imdfShapefiles) return t("IMDF shapefiles → ODC 2026", "IMDF シェープファイル → ODC 2026");
   return t("Shapefiles → IMDF", "シェープファイル → IMDF");
 }
@@ -233,13 +224,6 @@ function StatusLine({ project }: { project: HubProject }) {
     text = t(
       `${status.count} ${status.count === 1 ? "thing" : "things"} to fix before you can deliver`,
       `書き出し前に修正が必要な項目 ${status.count} 件`
-    );
-  } else if (status.kind === "to-place") {
-    tone = "text-warning-foreground";
-    dot = "bg-warning-foreground";
-    text = t(
-      `${status.count} ${status.count === 1 ? "floor" : "floors"} still to place`,
-      `未配置のフロア ${status.count} 件`
     );
   } else if (status.kind === "ready") {
     tone = "text-primary";

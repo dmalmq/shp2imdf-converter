@@ -9,7 +9,7 @@ test("most recently opened first, ties broken by id", () => {
   const list = hubProjects([
     summary({ id: "old", last_opened: "2026-08-18T03:00:00Z" }),
     summary({ id: "b", last_opened: "2026-09-12T03:00:00Z" }),
-    summary({ id: "new", flow: "artwork", stage: "place", last_opened: "2026-09-24T03:00:00Z" }),
+    summary({ id: "new", stage: "set-up", last_opened: "2026-09-24T03:00:00Z" }),
     summary({ id: "a", last_opened: "2026-09-12T03:00:00Z" })
   ]);
   expect(list.map((project) => project.id)).toEqual(["new", "a", "b", "old"]);
@@ -25,10 +25,6 @@ test.each([
   expect(toHubProject(summary({ stage })).href).toBe(href);
 });
 
-test.each(["name-floors", "place", "deliver", null] as const)("an artwork project at %s opens the artwork route", (stage) => {
-  expect(toHubProject(summary({ flow: "artwork", stage, can_wait: null })).href).toBe("/illustrator");
-});
-
 test("ids are escaped in the route", () => {
   expect(toHubProject(summary({ id: "a/b", stage: "check" })).href).toBe("/p/a%2Fb/check");
 });
@@ -40,14 +36,6 @@ test("a shapefile project at Check with errors has a rust current stage and thin
   expect(project.stageNumber).toBe(3);
   expect(project.status).toEqual({ kind: "to-fix", count: 3 });
   expect(project.action).toBe("continue");
-});
-
-test("artwork still to place is a warning at Place on map", () => {
-  const project = toHubProject(summary({ flow: "artwork", stage: "place", blockers: 3, can_wait: null }));
-  expect(project.track.map((stage) => stage.id)).toEqual(["bring-in-artwork", "name-floors", "place", "deliver"]);
-  expect(statuses(project)).toEqual(["done", "done", "current", "todo"]);
-  expect(project.track[2].detailTone).toBe("warning");
-  expect(project.status).toEqual({ kind: "to-place", count: 3 });
 });
 
 test("delivered and unchanged: every stage done, and Open", () => {
