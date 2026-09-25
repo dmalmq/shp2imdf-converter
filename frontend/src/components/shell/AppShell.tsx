@@ -127,7 +127,6 @@ function ShellFrame({ children }: Props) {
         {primary ? <PrimaryActionButton action={primary} /> : null}
       </header>
 
-      {/* The hub lists every project's track; none of them is the one on screen. */}
       {onHub ? null : <StageTrack stages={stages} onSelect={selectStage} />}
 
       {/* min-h-0 lets a bounded child own the remaining height; overflow-auto

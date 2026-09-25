@@ -6,7 +6,7 @@ import { fetchProjects, importImdf, type ProjectListResponse, type ProjectSummar
 import { ApiClientError } from "../api/errors";
 import { ToastProvider } from "../components/shared/ToastProvider";
 import type { DroppedFiles } from "../lib/hub";
-import { projectSummary } from "../lib/hub.fixtures";
+import { projectSummary, zipFile } from "../lib/hub.fixtures";
 import { useAppStore } from "../store/useAppStore";
 import { HubPage } from "./HubPage";
 
@@ -182,11 +182,19 @@ describe("the drop zone", () => {
   test("an IMDF archive is opened through the IMDF import and lands on Check", async () => {
     vi.mocked(importImdf).mockResolvedValue({ session_id: "reopened", feature_count: 12 });
     renderHub();
-    const archive = new File(["PK\u0001\u0002....manifest.json....venue.geojson"], "export.zip");
+    const archive = zipFile("export.zip", ["manifest.json", "venue.geojson"]);
     drop([archive]);
     expect(await screen.findByTestId("landed")).toHaveTextContent("/p/reopened/check");
     expect(importImdf).toHaveBeenCalledWith(archive);
     expect(useAppStore.getState().sessionId).toBe("reopened");
+  });
+
+  test("files that fit no route are named in a notice, and the rest go on", async () => {
+    renderHub();
+    drop([new File(["x"], "a.shp"), new File(["x"], "notes.txt")]);
+    expect(await screen.findByTestId("landed")).toHaveTextContent("/p/new with a.shp");
+    expect(screen.getByText("Some files were left out")).toBeInTheDocument();
+    expect(screen.getByText("Not used: notes.txt")).toBeInTheDocument();
   });
 
   test("a mixed drop is refused with a reason and goes nowhere", async () => {

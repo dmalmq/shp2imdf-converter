@@ -8,7 +8,7 @@ import { toErrorMessage } from "../api/errors";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
 import { StageBars } from "../components/shell/StageTrack";
-import { NEW_PROJECT_PATH, projectPath } from "../components/shell/stages";
+import { FLOW_STAGES, NEW_PROJECT_PATH, projectPath, type ShapefileStageId } from "../components/shell/stages";
 import { Button } from "../components/ui/button";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
@@ -55,13 +55,18 @@ export function HubPage() {
         if (active) setListing({ state: "loaded", response });
       },
       (error: unknown) => {
-        if (active) setListing({ state: "failed", message: toErrorMessage(error, "The project list did not load") });
+        if (active) {
+          setListing({
+            state: "failed",
+            message: toErrorMessage(error, t("The project list did not load.", "プロジェクト一覧を読み込めませんでした。"))
+          });
+        }
       }
     );
     return () => {
       active = false;
     };
-  }, [attempt]);
+  }, [attempt, t]);
 
   return (
     <div className="flex items-start gap-10 px-14 py-10">
@@ -345,12 +350,12 @@ function RouteCard({
   );
 }
 
-const HOW: ReadonlyArray<{ en: string; ja: string }> = [
-  { en: "Bring in — read the per‑floor files", ja: "取り込み — フロアごとのファイルを読み込む" },
-  { en: "Set up — describe the station and its floors", ja: "設定 — 駅とフロアの情報を入力する" },
-  { en: "Check — fix what’s wrong, on the map", ja: "チェック — 問題を地図上で修正する" },
-  { en: "Deliver — pick the outputs you need", ja: "書き出し — 必要な出力を選ぶ" }
-];
+const HOW: Record<ShapefileStageId, { en: string; ja: string }> = {
+  "bring-in": { en: "read the per‑floor files", ja: "フロアごとのファイルを読み込む" },
+  "set-up": { en: "describe the station and its floors", ja: "駅とフロアの情報を入力する" },
+  check: { en: "fix what’s wrong, on the map", ja: "問題を地図上で修正する" },
+  deliver: { en: "pick the outputs you need", ja: "必要な出力を選ぶ" }
+};
 
 function StartNew() {
   const { t } = useUiLanguage();
@@ -394,6 +399,14 @@ function StartNew() {
     async (files: File[]) => {
       setProblem(null);
       const decision = await routeDroppedFiles(files);
+      if (decision.route && decision.ignored.length > 0) {
+        const names = decision.ignored.join(", ");
+        pushToast({
+          title: t("Some files were left out", "一部のファイルを除外しました"),
+          description: t(`Not used: ${names}`, `使用しないファイル: ${names}`),
+          variant: "info"
+        });
+      }
       if (decision.route === "imdf") {
         await openImdf(decision.files[0]);
       } else if (decision.route) {
@@ -417,7 +430,7 @@ function StartNew() {
         );
       }
     },
-    [navigate, openImdf, t]
+    [navigate, openImdf, pushToast, t]
   );
 
   const { getRootProps, getInputProps, open, isDragActive } = useDropzone({
@@ -520,15 +533,15 @@ function StartNew() {
           {t("How a project goes", "プロジェクトの流れ")}
         </h3>
         <ol className="flex flex-col gap-2">
-          {HOW.map((step, index) => (
-            <li key={step.en} className="flex items-center gap-2.5 text-[13px] text-foreground/80">
+          {FLOW_STAGES.shapefiles.map(({ id, label }, index) => (
+            <li key={id} className="flex items-center gap-2.5 text-[13px] text-foreground/80">
               <span
                 aria-hidden="true"
                 className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold"
               >
                 {index + 1}
               </span>
-              {t(step.en, step.ja)}
+              {t(label.en, label.ja)} — {t(HOW[id as ShapefileStageId].en, HOW[id as ShapefileStageId].ja)}
             </li>
           ))}
         </ol>

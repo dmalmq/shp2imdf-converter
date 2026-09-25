@@ -104,7 +104,7 @@ export function lifetime(limits: ProjectLimits): { unit: "days" | "hours"; value
 export type DropRoute = "shapefiles" | "artwork" | "imdf";
 
 export type DropDecision =
-  | { route: DropRoute; files: File[] }
+  | { route: DropRoute; files: File[]; ignored: string[] }
   | { route: null; reason: "unsupported" | "mixed" | "several" };
 
 /** State handed to `/p/new` or `/illustrator` along with the navigation. */
@@ -127,17 +127,50 @@ function readBytes(blob: Blob): Promise<ArrayBuffer> {
   });
 }
 
+const END_OF_DIRECTORY = 0x06054b50;
+const DIRECTORY_ENTRY = 0x02014b50;
+/** The end record is 22 bytes plus a comment of at most 64 KB. */
+const END_SEARCH = 22 + 0xffff;
+
+/** Entry names from a zip's central directory, or null when it has none to read. */
+export async function zipEntryNames(file: Blob): Promise<string[] | null> {
+  const start = Math.max(0, file.size - END_SEARCH);
+  const tail = new DataView(await readBytes(file.slice(start)));
+  for (let at = tail.byteLength - 22; at >= 0; at -= 1) {
+    if (tail.getUint32(at, true) !== END_OF_DIRECTORY) continue;
+    const count = tail.getUint16(at + 10, true);
+    const size = tail.getUint32(at + 12, true);
+    const offset = tail.getUint32(at + 16, true);
+    const directory = new DataView(await readBytes(file.slice(offset, offset + size)));
+    const decoder = new TextDecoder();
+    const names: string[] = [];
+    let entry = 0;
+    for (let n = 0; n < count && entry + 46 <= directory.byteLength; n += 1) {
+      if (directory.getUint32(entry, true) !== DIRECTORY_ENTRY) break;
+      const nameLength = directory.getUint16(entry + 28, true);
+      const extraLength = directory.getUint16(entry + 30, true);
+      const commentLength = directory.getUint16(entry + 32, true);
+      names.push(decoder.decode(new Uint8Array(directory.buffer, directory.byteOffset + entry + 46, nameLength)));
+      entry += 46 + nameLength + extraLength + commentLength;
+    }
+    return names;
+  }
+  return null;
+}
+
 /**
- * A zip is either shapefiles or an IMDF archive. IMDF archives carry a
- * `manifest.json` at the root, and a zip's file names sit uncompressed in the
- * central directory at its end, so the last 64 KB is enough to tell.
+ * An IMDF archive has `manifest.json` at its root, or under the one folder
+ * that wraps everything when it was re-zipped from its folder. A zip that
+ * also holds a `.shp` is shapefiles: an IMDF archive never carries one.
  */
 async function isImdfArchive(file: File): Promise<boolean> {
   if (/\.imdf\.zip$/i.test(file.name)) return true;
-  const tail = new Uint8Array(await readBytes(file.slice(Math.max(0, file.size - 65536))));
-  let text = "";
-  for (const byte of tail) text += String.fromCharCode(byte);
-  return text.includes("manifest.json") && !/\.shp/i.test(text);
+  const names = await zipEntryNames(file);
+  if (!names || names.some((name) => /\.shp$/i.test(name))) return false;
+  if (names.includes("manifest.json")) return true;
+  const tops = new Set(names.map((name) => name.split("/")[0]));
+  const [top] = tops;
+  return tops.size === 1 && names.includes(`${top}/manifest.json`);
 }
 
 async function routeOf(file: File): Promise<DropRoute | null> {
@@ -150,9 +183,9 @@ async function routeOf(file: File): Promise<DropRoute | null> {
 }
 
 /**
- * Files that are not one of the three routes are dropped here, as Bring in
- * would skip them; a drop that mixes routes, or offers more than one artwork
- * or archive, is refused rather than guessed at.
+ * Files that fit none of the three routes are left behind and named in
+ * `ignored`; a drop that mixes routes, or offers more than one artwork or
+ * archive, is refused rather than guessed at.
  */
 export async function routeDroppedFiles(files: ReadonlyArray<File>): Promise<DropDecision> {
   const routed = await Promise.all(files.map(async (file) => ({ file, route: await routeOf(file) })));
@@ -162,5 +195,6 @@ export async function routeDroppedFiles(files: ReadonlyArray<File>): Promise<Dro
   if (routes.size > 1) return { route: null, reason: "mixed" };
   const [route] = routes;
   if (route !== "shapefiles" && known.length > 1) return { route: null, reason: "several" };
-  return { route, files: known.map((item) => item.file) };
+  const ignored = routed.filter((item) => item.route === null).map((item) => item.file.name);
+  return { route, files: known.map((item) => item.file), ignored };
 }

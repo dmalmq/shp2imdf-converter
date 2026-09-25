@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { useDropzone } from "react-dropzone";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 import {
   importImdfShapefiles,
@@ -10,12 +10,12 @@ import {
 } from "../api/client";
 import { useToast } from "../components/shared/ToastProvider";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
+import { useDroppedFiles } from "../hooks/useDroppedFiles";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
 import { Button, Card, Badge, Checkbox, DisabledHint } from "../components/ui";
 import { usePrimaryAction } from "../components/shell/ShellContext";
 import { projectPath } from "../components/shell/stages";
-import type { DroppedFiles } from "../lib/hub";
 import { cn } from "@/lib/utils";
 
 /**
@@ -179,9 +179,9 @@ export function UploadPage({ fromProject = false }: UploadPageProps = {}) {
   const handleApiError = useApiErrorHandler();
   const { t } = useUiLanguage();
 
-  const location = useLocation();
+  const dropped = useDroppedFiles();
   const [queuedFiles, setQueuedFiles] = useState<QueuedUploadFile[]>(() =>
-    ((location.state as DroppedFiles | null)?.droppedFiles ?? [])
+    dropped
       .map(toQueuedUploadFile)
       .filter((item): item is QueuedUploadFile => item !== null)
   );

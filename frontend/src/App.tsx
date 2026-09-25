@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 
 import { ErrorBoundary } from "./components/shared/ErrorBoundary";
 import { SessionExpiredDialog } from "./components/shared/SessionExpiredDialog";
@@ -8,11 +8,11 @@ import { HubPage } from "./pages/HubPage";
 import { IllustratorPage } from "./pages/IllustratorPage";
 import { LegacyStageRedirect, ProjectLayout, ProjectStage } from "./pages/ProjectRoutes";
 import { UploadPage } from "./pages/UploadPage";
-import type { DroppedFiles } from "./lib/hub";
+import { useDroppedFiles } from "./hooks/useDroppedFiles";
 
 function IllustratorRoute() {
-  const state = useLocation().state as DroppedFiles | null;
-  return <IllustratorPage initialFile={state?.droppedFiles?.[0]} />;
+  const [dropped] = useDroppedFiles();
+  return <IllustratorPage initialFile={dropped} />;
 }
 
 

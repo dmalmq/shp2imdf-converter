@@ -76,8 +76,10 @@ Stable handles (do not use click coordinates):
 | Import profile | buttons `Standard`, `IMDF schema` |
 | Shapefile file input | `input[type=file]:not(#imdf-file-input)` |
 | Import | button `Import & Continue` (standard) or `Import to Review` (IMDF schema) |
-| Open archive | card `Open IMDF archive` / `#imdf-file-input` |
-| Illustrator entry | card `Illustrator artwork`; then `Choose file` / `#illustrator-georef-input` |
+| Hub | `/`: h1 `Station projects`, list `Projects` (one card per shapefile project, button `Continue <name>` or `Open <name>`), filters `All` / `In progress` / `Delivered`; empty state `No projects on this PC yet` |
+| Open archive | hub card `Reopen an IMDF archive` / `#imdf-file-input` |
+| Illustrator entry | hub card `From Illustrator artwork`; then `Choose file` / `#illustrator-georef-input` |
+| New shapefile project | hub card `From floor shapefiles` → `/p/new`; the hub's drop zone input is `[data-testid=hub-drop-input]` |
 | Wizard sections | `Sections` nav buttons, e.g. `Venue Info`, `Summary & Generate`; the h1 names the section |
 | Venue | textbox named `Venue Name*`; `Locality*` (autosaves; the top bar shows `Saved · HH:MM`, or `Not saved yet` while a required field is missing) |
 | Generate | button `Generate & open Review` |

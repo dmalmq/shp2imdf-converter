@@ -92,4 +92,5 @@ test("files dropped on the hub arrive queued, and a new import starts from no pr
   expect(screen.getByText("JRTokyoSta_B1_Space")).toBeInTheDocument();
   expect(screen.getByText(".dbf, .shp")).toBeInTheDocument();
   expect(useAppStore.getState().sessionId).toBeNull();
+  expect(screen.getByText("1 of 1 datasets selected")).toBeInTheDocument();
 });
