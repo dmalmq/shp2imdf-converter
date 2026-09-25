@@ -16,11 +16,11 @@ test("Bring in for a new project offers both import profiles", () => {
     </QueryClientProvider>
   );
 
-  expect(screen.getByRole("button", { name: "Standard" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "IMDF schema" })).toBeInTheDocument();
+  expect(screen.getByRole("radio", { name: /Standard/ })).toBeChecked();
+  expect(screen.getByRole("radio", { name: /IMDF schema/ })).toBeInTheDocument();
 });
 
-test("allows deselecting queued files before import", async () => {
+test("groups sidecar components under one stem", async () => {
   const queryClient = new QueryClient();
   const { container } = render(
     <QueryClientProvider client={queryClient}>
@@ -30,59 +30,23 @@ test("allows deselecting queued files before import", async () => {
     </QueryClientProvider>
   );
 
-  const importButton = screen.getByRole("button", { name: "Import & Continue" });
-  expect(importButton).toBeDisabled();
-
-  const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
-  expect(fileInput).not.toBeNull();
-
-  const sample = new File(["shape"], "sample.shp", { type: "application/octet-stream" });
-  const files = {
-    0: sample,
-    length: 1,
-    item: (index: number) => (index === 0 ? sample : null)
-  } as unknown as FileList;
-  fireEvent.change(fileInput as HTMLInputElement, { target: { files } });
-  await waitFor(() => expect(importButton).toBeEnabled());
-
-  const rowCheckbox = screen.getAllByRole("checkbox")[0];
-  fireEvent.click(rowCheckbox);
-
-  expect(importButton).toBeDisabled();
-  expect(screen.getByText("0 of 1 datasets selected")).toBeInTheDocument();
-});
-
-test("groups sidecar components under one stem selection", async () => {
-  const queryClient = new QueryClient();
-  const { container } = render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/p/new"]}>
-        <App />
-      </MemoryRouter>
-    </QueryClientProvider>
-  );
-
-  const importButton = screen.getByRole("button", { name: "Import & Continue" });
+  const importButton = screen.getAllByRole("button", { name: "Read the files" })[0];
   const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
   expect(fileInput).not.toBeNull();
 
   const shp = new File(["shape"], "JRShinjukuSta_B1_Space.shp", { type: "application/octet-stream" });
   const shx = new File(["shape"], "JRShinjukuSta_B1_Space.shx", { type: "application/octet-stream" });
-  const files = {
-    0: shp,
-    1: shx,
-    length: 2,
-    item: (index: number) => (index === 0 ? shp : index === 1 ? shx : null)
-  } as unknown as FileList;
+  const dbf = new File(["shape"], "JRShinjukuSta_B1_Space.dbf", { type: "application/octet-stream" });
+  const parts = [shp, shx, dbf];
+  const files = { ...parts, length: 3, item: (index: number) => parts[index] ?? null } as unknown as FileList;
   fireEvent.change(fileInput as HTMLInputElement, { target: { files } });
 
   await waitFor(() => expect(importButton).toBeEnabled());
-  expect(screen.getByText("1 of 1 datasets selected")).toBeInTheDocument();
   expect(screen.getByText("JRShinjukuSta_B1_Space")).toBeInTheDocument();
-  expect(screen.getByText(".shp, .shx")).toBeInTheDocument();
+  expect(screen.getByText(".dbf, .shp, .shx")).toBeInTheDocument();
 });
 
-test("queues geopackage uploads as selectable sources", async () => {
+test("queues geopackage uploads as sources", async () => {
   const queryClient = new QueryClient();
   const { container } = render(
     <QueryClientProvider client={queryClient}>
@@ -92,7 +56,7 @@ test("queues geopackage uploads as selectable sources", async () => {
     </QueryClientProvider>
   );
 
-  const importButton = screen.getByRole("button", { name: "Import & Continue" });
+  const importButton = screen.getAllByRole("button", { name: "Read the files" })[0];
   const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
   expect(fileInput).not.toBeNull();
 
@@ -105,7 +69,6 @@ test("queues geopackage uploads as selectable sources", async () => {
   fireEvent.change(fileInput as HTMLInputElement, { target: { files } });
 
   await waitFor(() => expect(importButton).toBeEnabled());
-  expect(screen.getByText("1 of 1 datasets selected")).toBeInTheDocument();
   expect(screen.getByText("station.gpkg")).toBeInTheDocument();
-  expect(screen.getByRole("checkbox", { name: "station.gpkg" })).toBeChecked();
+  expect(screen.getByText("GeoPackage")).toBeInTheDocument();
 });

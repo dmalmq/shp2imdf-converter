@@ -512,7 +512,7 @@ async function queueTokyoStation(page) {
   await gotoEnglishHome(page);
   await page.getByRole("button", { name: /From floor shapefiles/ }).click();
   await page.waitForURL("**/p/new", { timeout: 15000 });
-  await page.getByRole("button", { name: "Standard", exact: true }).click();
+  await page.getByRole("radio", { name: /^Standard/ }).click();
   const files = shapefileParts();
   if (files.length === 0) {
     throw new Error("no tokyo_station shapefile parts — run fixtures");
@@ -523,7 +523,9 @@ async function queueTokyoStation(page) {
 
 async function importTokyoStation(page) {
   await queueTokyoStation(page);
-  await page.getByRole("button", { name: "Import & Continue" }).first().click();
+  await page.getByRole("button", { name: "Read the files" }).first().click();
+  await page.waitForURL("**/p/*/bring-in", { timeout: 60000 });
+  await page.getByRole("button", { name: "Continue to Set up" }).first().click();
   await page.waitForURL("**/p/*/set-up", { timeout: 60000 });
   await page.getByLabel(/Venue Name/).waitFor({ timeout: 30000 });
 }
@@ -551,7 +553,7 @@ async function driveImportShapefiles() {
   await withPage(async (page) => {
     await importTokyoStation(page);
     await writeEvidence("import-shapefiles", page, {
-      entry: "Hub From floor shapefiles → Bring in dropzone + Import & Continue",
+      entry: "Hub From floor shapefiles → Bring in dropzone + Read the files → Continue to Set up",
       notes: `header ${APP_HEADER}; landed on /p/<id>/set-up`,
       body: "Expected: Standard import of tokyo_station fixtures navigates to the wizard Venue Info section."
     });

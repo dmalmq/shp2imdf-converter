@@ -293,9 +293,10 @@ describe("reload on a stage", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  test("Bring in renders the upload screen for the project", async () => {
+  test("Bring in shows what the project brought in", async () => {
     renderAt("/p/tokyo/bring-in");
-    expect(await screen.findByRole("button", { name: "Import & Continue" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Bring in the floor files" })).toBeInTheDocument();
+    expect(screen.getByText("Tokyo_B1_Space")).toBeInTheDocument();
     expect(useAppStore.getState().sessionId).toBe("tokyo");
   });
 
@@ -493,7 +494,7 @@ describe("history", () => {
     expect(pathname).toBe("/p/shinjuku/set-up");
   });
 
-  test("Bring in says it starts a new project, and Back returns to the old one", async () => {
+  test("other files start a new project, and Back returns to the old one", async () => {
     vi.mocked(importShapefiles).mockResolvedValue({
       session_id: "kanda",
       import_profile: "standard",
@@ -502,17 +503,18 @@ describe("history", () => {
       warnings: []
     });
     const { container } = renderAt("/p/tokyo/bring-in");
-    expect(await screen.findByText(/Bringing in files starts a new project/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("link", { name: "bring in other files" }));
+    await waitFor(() => expect(pathname).toBe("/p/new"));
 
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
-    const shp = new File(["shape"], "Kanda_1_Space.shp", { type: "application/octet-stream" });
-    fireEvent.change(input, { target: { files: { 0: shp, length: 1, item: () => shp } } });
-    const importButton = screen.getAllByRole("button", { name: "Import & Continue" })[0];
+    const parts = [".shp", ".shx", ".dbf"].map((extension) => new File(["shape"], `Kanda_1_Space${extension}`));
+    fireEvent.change(input, { target: { files: { ...parts, length: parts.length, item: (index: number) => parts[index] } } });
+    const importButton = screen.getAllByRole("button", { name: "Read the files" })[0];
     await waitFor(() => expect(importButton).toBeEnabled());
     fireEvent.click(importButton);
 
-    await waitFor(() => expect(pathname).toBe("/p/kanda/set-up"));
-    await screen.findByDisplayValue("Kanda");
+    await waitFor(() => expect(pathname).toBe("/p/kanda/bring-in"));
+    await screen.findByText("Kanda_1_Space");
 
     act(() => navigate(-1));
     await waitFor(() => expect(pathname).toBe("/p/tokyo/bring-in"));
