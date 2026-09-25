@@ -81,7 +81,9 @@ export function DeliverPage() {
   const wizardState = useAppStore((state) => state.wizardState);
   const handleApiError = useApiErrorHandler(sessionId);
   const pushToast = useToast();
-  const { t } = useUiLanguage();
+  const { t, isJapanese } = useUiLanguage();
+  // Geist Mono has no Japanese, so the small caps labels are sans there.
+  const label = cn("text-[11px] font-medium", !isJapanese && "font-mono uppercase tracking-[0.06em]");
 
   const geoPackage = files.some((file) => file.source_format === "gpkg");
   const [selected, setSelected] = useState(() => defaultSelection(importProfile, geoPackage));
@@ -257,7 +259,7 @@ export function DeliverPage() {
               <div className="flex items-baseline gap-2.5">
                 <h2
                   id={`deliver-${group.id}`}
-                  className="font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-primary"
+                  className={cn(label, "text-primary")}
                 >
                   {t(group.label.en, group.label.ja)}
                 </h2>
@@ -273,7 +275,7 @@ export function DeliverPage() {
 
           {view.showEncoding ? (
             <section aria-labelledby="deliver-options" className="flex flex-col gap-3">
-              <h2 id="deliver-options" className="font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+              <h2 id="deliver-options" className={cn(label, "text-muted-foreground")}>
                 {t("Shapefile options", "シェープファイルの設定")}
               </h2>
               <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
@@ -358,7 +360,7 @@ export function DeliverPage() {
                 {t(".", "。")}
               </p>
             ) : null}
-            <h3 className="font-mono text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
+            <h3 className={cn(label, "text-muted-foreground")}>
               {t("Last checks", "最終チェック")}
             </h3>
             <ul className="flex flex-col gap-2.5">
