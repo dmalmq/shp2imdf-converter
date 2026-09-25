@@ -316,7 +316,7 @@ function deliverStatus(checks: DeliverInput["checks"], checking: boolean): Deliv
           tone: "stale",
           title: { en: "The checks are out of date.", ja: "チェック結果が古くなっています。" },
           detail: {
-            en: "Something changed since Check last ran, so nobody knows yet what blocks delivery.",
+            en: "Something changed since Check last ran, so what blocks delivery isn’t known yet.",
             ja: "前回のチェック以降に変更があったため、書き出しを妨げるものがあるか分かりません。"
           },
           action: { label: { en: "Check again", ja: "もう一度チェック" }, goes: "check-again" }

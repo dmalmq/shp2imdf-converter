@@ -13,8 +13,7 @@ export type StageId = ShapefileStageId | ArtworkStageId;
 
 /**
  * Where a stage goes when clicked. `route` is a path; `page` means the page on
- * screen registered a handler for it (Review's export dialog, the Illustrator
- * route's Export tab). A stage with no target is not clickable.
+ * screen registered a handler for it (the Illustrator route's Export tab). A stage with no target is not clickable.
  */
 export type StageTarget = { kind: "route"; to: string } | { kind: "page" };
 
@@ -49,7 +48,7 @@ export function flowForPath(pathname: string): Flow {
 
 /** What the page on screen has told the shell about its own stages. */
 export type PageStages = {
-  /** Overrides the route's stage, e.g. Deliver while Review's export dialog is open. */
+  /** Overrides the route's stage, e.g. Deliver while the Illustrator route's Export tab is open. */
   current?: StageId | null;
   /** Stages the page can switch to itself. */
   targets?: ReadonlyArray<StageId>;
@@ -163,8 +162,7 @@ export function shapefileStages({
     const stage: Stage = { id, label, status };
 
     if (status !== "current") {
-      // The page's own handler wins: Deliver from Check opens the export
-      // dialog in place rather than going through the route.
+      // The page's own handler wins over the route.
       stage.target = pageTarget(page, id) ?? routeTarget(sessionId, id, project);
     }
 
@@ -194,6 +192,10 @@ export function shapefileStages({
           ? { en: `${fix.en} · ${waiting} can wait`, ja: `${fix.ja} · 後回し ${waiting} 件` }
           : fix;
       stage.detailTone = errors > 0 ? "danger" : "default";
+    }
+
+    if (id === "deliver" && status === "current") {
+      stage.detail = { en: "Choose outputs", ja: "出力を選ぶ" };
     }
 
     if (index === current + 1 && status === "todo" && page?.nextBlockedReason && !stage.target) {
