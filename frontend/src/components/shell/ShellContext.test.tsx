@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 
 import { useAppStore } from "../../store/useAppStore";
 import { AppShell } from "./AppShell";
@@ -125,6 +125,27 @@ describe("primary action", () => {
 
     act(() => screen.getByRole("button", { name: "Switch theme" }).focus());
     expect(within(topBar()).queryByRole("button", { name: "Import & Continue" })).toBeNull();
+  });
+
+  test("a top-bar button that navigated does not stay beside the next page's own", () => {
+    function Stages() {
+      const navigate = useNavigate();
+      return (
+        <Routes>
+          <Route
+            path="/p/s1/check"
+            element={<Page action={{ label: "Deliver", run: () => navigate("/p/s1/deliver") }} withAnchor={false} />}
+          />
+          <Route path="/p/s1/deliver" element={<Page action={{ label: "Create the output", run: () => {} }} withAnchor />} />
+        </Routes>
+      );
+    }
+    renderShell(<Stages />, "/p/s1/check");
+    const deliver = within(topBar()).getByRole("button", { name: "Deliver" });
+    act(() => deliver.focus());
+    fireEvent.click(deliver);
+    setVisible(true);
+    expect(screen.getAllByRole("button", { name: "Create the output" })).toHaveLength(1);
   });
 
   test("a disabled action says why and counts what blocks it", () => {

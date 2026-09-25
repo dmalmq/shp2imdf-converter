@@ -209,9 +209,9 @@ async function captureShapefileFlow(page, shoot) {
   await page.keyboard.press("Escape");
 
   await page.getByRole("banner").getByRole("button", { name: /^Deliver/ }).click();
-  await page.getByRole("dialog").waitFor({ timeout: 15000 });
-  await shoot("review-export-dialog", { wait: 800 });
-  await page.keyboard.press("Escape");
+  await page.waitForURL("**/p/*/deliver", { timeout: 15000 });
+  await page.getByRole("list", { name: "Files" }).waitFor({ timeout: 30000 });
+  await shoot("deliver", { wait: 800 });
 
   await gotoHub(page);
   await shoot("hub-projects");

@@ -14,6 +14,7 @@ import {
 import { Button } from "../components/ui/button";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
+import { DeliverPage } from "./DeliverPage";
 import { ReviewPage } from "./ReviewPage";
 import { UploadPage } from "./UploadPage";
 import { WizardPage } from "./WizardPage";
@@ -134,8 +135,8 @@ export function ProjectStage() {
   }
   if (stage === "bring-in") return <UploadPage fromProject />;
   if (stage === "set-up") return <WizardPage />;
-  // Check and Deliver are one page, so moving between them keeps it mounted.
-  return <ReviewPage stage={stage} />;
+  if (stage === "deliver") return <DeliverPage />;
+  return <ReviewPage />;
 }
 
 /** The pre-project routes, kept so bookmarks and muscle memory still land. */

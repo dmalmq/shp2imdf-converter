@@ -1,11 +1,9 @@
 import React from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import {
   autofixSession,
   deleteSessionFeature,
-  exportSessionArchive,
-  exportSessionShapefiles,
   fetchFeatureTypeCatalog,
   fetchSessionFeatures,
   fetchSessionFiles,
@@ -17,7 +15,6 @@ import {
   resolveSessionUnitOverlapsSafe,
   restoreSessionFeatures,
   type ValidationResponse,
-  type WizardState,
   validateSession
 } from "../api/client";
 import { ApiClientError } from "../api/errors";
@@ -29,9 +26,6 @@ import { ReviewPage } from "./ReviewPage";
 vi.mock("../api/client", () => ({
   autofixSession: vi.fn(),
   deleteSessionFeature: vi.fn(),
-  exportSessionArchive: vi.fn(),
-  exportSessionQgisProject: vi.fn(),
-  exportSessionShapefiles: vi.fn(),
   fetchFeatureTypeCatalog: vi.fn(),
   fetchSessionFeatures: vi.fn(),
   fetchSessionFiles: vi.fn(),
@@ -71,8 +65,6 @@ const fetchSessionFeaturesMock = vi.mocked(fetchSessionFeatures);
 const fetchFeatureTypeCatalogMock = vi.mocked(fetchFeatureTypeCatalog);
 const generateSessionDraftMock = vi.mocked(generateSessionDraft);
 const validateSessionMock = vi.mocked(validateSession);
-const exportSessionArchiveMock = vi.mocked(exportSessionArchive);
-const exportSessionShapefilesMock = vi.mocked(exportSessionShapefiles);
 const autofixSessionMock = vi.mocked(autofixSession);
 const deleteSessionFeatureMock = vi.mocked(deleteSessionFeature);
 const patchSessionFeatureMock = vi.mocked(patchSessionFeature);
@@ -82,12 +74,17 @@ const resolveSessionUnitOverlapsSafeMock = vi.mocked(resolveSessionUnitOverlapsS
 const fetchStoredValidationMock = vi.mocked(fetchStoredValidation);
 const restoreSessionFeaturesMock = vi.mocked(restoreSessionFeatures);
 
+function Location() {
+  return <span data-testid="location">{useLocation().pathname}</span>;
+}
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={["/p/session-123/check"]}>
       <ToastProvider>
         <AppShell>
           <ReviewPage />
+          <Location />
         </AppShell>
       </ToastProvider>
     </MemoryRouter>
@@ -189,8 +186,6 @@ beforeEach(() => {
       opening_issues_count: 0
     }
   });
-  exportSessionArchiveMock.mockResolvedValue({ blob: new Blob(), filename: "output.imdf" });
-  exportSessionShapefilesMock.mockResolvedValue({ blob: new Blob(), filename: "output_shapefiles.zip" });
   autofixSessionMock.mockResolvedValue({
     fixes_applied: [],
     fixes_requiring_confirmation: [],
@@ -275,82 +270,6 @@ beforeEach(() => {
       }
     }
   });
-});
-
-test("hides shapefile export when the session includes geopackage sources", async () => {
-  renderPage();
-
-  const exportButton = await screen.findByRole("button", { name: /^Deliver/ });
-  await waitFor(() => expect(exportButton).toBeEnabled());
-
-  fireEvent.click(exportButton);
-
-  await waitFor(() => expect(validateSessionMock).toHaveBeenCalledWith("session-123"));
-  expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("value"))).toEqual([
-    "imdf",
-    "imdf_zip"
-  ]);
-  expect(screen.queryByRole("radio", { name: /Shapefiles \(\.zip\)/ })).not.toBeInTheDocument();
-  expect(
-    screen.getByText(
-      "This session includes GeoPackage sources, so only IMDF export is available."
-    )
-  ).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Download .imdf" })).toBeEnabled();
-});
-
-test("requires an explicit prefix for open data export", async () => {
-  const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
-  const wizardState = {
-    project: {
-      project_name: "JRTokyoSta",
-      venue_name: "JR Tokyo Station",
-      language: "en"
-    },
-    mappings: { unit: { code_column: null } },
-    company_mappings: {}
-  } as unknown as WizardState;
-  useAppStore.setState({
-    importProfile: "imdf_shapefile",
-    files: [],
-    wizardState
-  });
-  fetchSessionFilesMock.mockResolvedValue({
-    session_id: "session-123",
-    import_profile: "imdf_shapefile",
-    files: []
-  });
-
-  renderPage();
-  const exportButton = await screen.findByRole("button", { name: /^Deliver/ });
-  await waitFor(() => expect(exportButton).toBeEnabled());
-  fireEvent.click(exportButton);
-
-  await waitFor(() => expect(validateSessionMock).toHaveBeenCalledWith("session-123"));
-  const formats = screen.getByRole("radiogroup", { name: "Format" });
-  expect(within(formats).getAllByRole("radio")).toHaveLength(5);
-  const odc = within(formats).getByRole("radio", { name: /Open Data Contest 2026 shapefiles \(\.zip\)/ });
-  expect(odc).toBeChecked();
-  fireEvent.click(within(formats).getByRole("radio", { name: /IMDF \(\.zip\)/ }));
-  expect(odc).not.toBeChecked();
-  fireEvent.click(odc);
-  expect(odc).toBeChecked();
-  const nameInput = await screen.findByRole("textbox", { name: /Export file prefix/ });
-  expect(nameInput).toHaveValue("");
-
-  fireEvent.click(screen.getByRole("button", { name: "Download ODC 2026 .zip" }));
-  expect(await screen.findAllByText("Enter an export file prefix.")).not.toHaveLength(0);
-  expect(exportSessionShapefilesMock).not.toHaveBeenCalled();
-
-  fireEvent.change(nameInput, { target: { value: "TokyoSta" } });
-  fireEvent.click(screen.getByRole("button", { name: "Download ODC 2026 .zip" }));
-  await waitFor(() =>
-    expect(exportSessionShapefilesMock).toHaveBeenCalledWith(
-      "session-123",
-      expect.objectContaining({ profile: "odc2026", export_name: "TokyoSta" })
-    )
-  );
-  anchorClick.mockRestore();
 });
 
 test("bulk retypes selected polygon units to geofence", async () => {
@@ -505,15 +424,15 @@ test("review sits under the one app header instead of drawing its own", async ()
   expect(within(track).getByText("3 · Check").closest("[aria-current]")).toHaveAttribute("aria-current", "step");
 });
 
-test("the Deliver stage opens the export dialog", async () => {
+test("Deliver on Check goes to the Deliver stage", async () => {
   renderPage();
-  await waitFor(() => expect(screen.getByRole("button", { name: /^Deliver/ })).toBeEnabled());
+  const deliver = await screen.findByRole("button", { name: /^Deliver/ });
+  await waitFor(() => expect(deliver).toBeEnabled());
 
-  const track = screen.getByRole("navigation", { name: "Stages" });
-  fireEvent.click(within(track).getByRole("button", { name: /4 · Deliver/ }));
+  fireEvent.click(deliver);
 
-  expect(await screen.findByRole("dialog")).toBeInTheDocument();
-  expect(validateSessionMock).toHaveBeenCalledWith("session-123");
+  expect(await screen.findByTestId("location")).toHaveTextContent("/p/session-123/deliver");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
 function validationOf(errors: ValidationResponse["errors"], warnings: ValidationResponse["warnings"]): ValidationResponse {

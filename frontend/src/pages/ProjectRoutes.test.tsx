@@ -24,6 +24,7 @@ import { useAppStore } from "../store/useAppStore";
 
 vi.mock("../api/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api/client")>()),
+  fetchExportContents: vi.fn(() => Promise.resolve([])),
   fetchFeatureTypeCatalog: vi.fn(() => Promise.resolve([])),
   fetchFootprintPreview: vi.fn(() => Promise.resolve({ footprint: null, venue: null, units_bbox: null })),
   fetchProjects: vi.fn(() =>
@@ -297,15 +298,14 @@ describe("reload on a stage", () => {
     expect(within(track).getByText("3 · Check").closest("[aria-current]")).toHaveAttribute("aria-current", "step");
   });
 
-  test("Deliver lands in Review with the export dialog open", async () => {
+  test("Deliver is a page of its own, reading the stored checks without running them", async () => {
     renderAt("/p/shinjuku/deliver");
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    expect(validateSession).toHaveBeenCalledWith("shinjuku");
-    expect(pathname).toBe("/p/shinjuku/deliver");
-
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(pathname).toBe("/p/shinjuku/check"));
+    expect(await screen.findByRole("heading", { level: 1, name: /^Deliver/ })).toBeInTheDocument();
+    const track = screen.getByRole("navigation", { name: "Stages" });
+    expect(within(track).getByText("4 · Deliver").closest("[aria-current]")).toHaveAttribute("aria-current", "step");
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(validateSession).not.toHaveBeenCalled();
+    expect(pathname).toBe("/p/shinjuku/deliver");
   });
 
   test("Bring in shows what the project brought in", async () => {
@@ -509,20 +509,15 @@ describe("switching project in the same tab", () => {
 });
 
 describe("history", () => {
-  test("closing an export dialog opened from Check, also after Forward, leaves no extra entry", async () => {
+  test("Deliver from Check is one entry: Back returns to Check, then to Set up", async () => {
     renderAt(["/p/shinjuku/set-up", "/p/shinjuku/check"]);
     await waitFor(() => expect(screen.getByRole("button", { name: /^Deliver/ })).toBeEnabled());
 
     fireEvent.click(screen.getByRole("button", { name: /^Deliver/ }));
-    await screen.findByRole("dialog");
+    await screen.findByRole("heading", { level: 1, name: /^Deliver/ });
     expect(pathname).toBe("/p/shinjuku/deliver");
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(pathname).toBe("/p/shinjuku/check"));
 
-    act(() => navigate(1));
-    await screen.findByRole("dialog");
-    expect(pathname).toBe("/p/shinjuku/deliver");
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    act(() => navigate(-1));
     await waitFor(() => expect(pathname).toBe("/p/shinjuku/check"));
 
     act(() => navigate(-1));

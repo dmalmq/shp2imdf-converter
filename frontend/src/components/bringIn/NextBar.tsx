@@ -3,22 +3,28 @@ import { ArrowRight } from "lucide-react";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import type { NextStep } from "../../lib/bringIn";
+import type { Bilingual } from "../shell/stages";
 import { cn } from "@/lib/utils";
 import { Button, DisabledHint } from "../ui";
 
 type Props = {
-  step: NextStep;
+  step: Omit<NextStep, "goes">;
   onGo: () => void;
-  /** Percent read so far while the files upload. */
+  /** Percent done so far while the action runs. */
   progress?: number | null;
+  /** What the button says while it runs; Bring in reads files. */
+  busyLabel?: Bilingual;
   secondary?: ReactNode;
 };
 
-/** The bar under Bring in: what stands between the operator and the next stage, and the way on. */
-export const NextBar = forwardRef<HTMLDivElement, Props>(function NextBar({ step, onGo, progress = null, secondary }, ref) {
+/** The bar under a stage page: what stands between the operator and the next step, and the way on. */
+export const NextBar = forwardRef<HTMLDivElement, Props>(function NextBar(
+  { step, onGo, progress = null, busyLabel = { en: "Reading…", ja: "読み込み中…" }, secondary },
+  ref
+) {
   const { t } = useUiLanguage();
   const busy = progress !== null;
-  const label = busy ? t(`Reading… ${progress}%`, `読み込み中… ${progress}%`) : t(step.action.en, step.action.ja);
+  const label = busy ? `${t(busyLabel.en, busyLabel.ja)} ${progress}%` : t(step.action.en, step.action.ja);
   const blocked = step.blocked ? t(step.blocked.en, step.blocked.ja) : null;
 
   return (

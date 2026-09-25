@@ -72,16 +72,16 @@ describe("shapefile flow", () => {
     expect(statuses(stages)).toEqual(["done", "current", "blocked", "todo"]);
   });
 
-  test("Review is Check; Deliver goes to the page's export dialog", () => {
+  test("Review is Check; Deliver is a route of its own", () => {
     const stages = shapefileStages({
       ...base,
       pathname: "/p/s1/check",
       sessionId: "s1",
       reviewReached: true,
-      page: { targets: ["deliver"], checkErrors: 3 }
+      page: { checkErrors: 3 }
     });
     expect(statuses(stages)).toEqual(["done", "done", "current", "todo"]);
-    expect(targets(stages)).toEqual(["/p/s1/bring-in", "/p/s1/set-up", null, "page"]);
+    expect(targets(stages)).toEqual(["/p/s1/bring-in", "/p/s1/set-up", null, "/p/s1/deliver"]);
     expect(stages[2].detail).toEqual({ en: "3 to fix", ja: "要修正 3 件" });
     expect(stages[2].detailTone).toBe("danger");
   });
@@ -110,16 +110,18 @@ describe("shapefile flow", () => {
     expect(stages[2].detailTone).toBe("danger");
   });
 
-  test("an open export dialog makes Deliver current", () => {
+  test("Deliver asks for outputs, and still shows what Check counted", () => {
     const stages = shapefileStages({
       ...base,
-      pathname: "/p/s1/check",
+      pathname: "/p/s1/deliver",
       sessionId: "s1",
       reviewReached: true,
-      page: { current: "deliver", targets: ["deliver"] }
+      page: { checkErrors: 0, checkWarnings: 5 }
     });
     expect(statuses(stages)).toEqual(["done", "done", "done", "current"]);
     expect(stages[3].target).toBeUndefined();
+    expect(stages[3].detail?.en).toBe("Choose outputs");
+    expect(stages[2].detail?.en).toBe("Nothing to fix · 5 can wait");
   });
 
   test("IMDF shapefile imports skip Set up, so it is never a link", () => {

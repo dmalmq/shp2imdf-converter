@@ -610,6 +610,27 @@ class ShapefileExportRequest(BaseModel):
     export_name: str | None = None
 
 
+ExportFormat = Literal["imdf", "imdf_zip", "shapefiles", "odc2026_shapefiles", "qgis_project"]
+ExportUnavailable = Literal["geopackage", "no_prefix", "no_sources", "qgis_missing", "failed"]
+
+
+class ExportContents(BaseModel):
+    """What one export format would download, read from the archive it builds."""
+
+    format: ExportFormat
+    filename: str | None = None
+    entries: list[str] = Field(default_factory=list)
+    unavailable: str | None = None
+    # Why, for the page to word in the operator's language; `unavailable` is the server's own text.
+    reason: ExportUnavailable | None = None
+    # Rows the ODC writer leaves out because their geometry is the wrong kind for the layer.
+    rows_skipped: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ExportContentsResponse(BaseModel):
+    outputs: list[ExportContents]
+
+
 class FeatureResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
