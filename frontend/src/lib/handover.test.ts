@@ -11,8 +11,8 @@ const visit = { started_at: "2026-09-24T09:00:00Z", ended_at: "2026-09-24T10:40:
 
 describe("eventLine", () => {
   it("counts things in both languages", () => {
-    expect(eventLine(event("features_edited", 3))).toEqual({ en: "Edited 3 features", ja: "3 件のフィーチャーを編集" });
-    expect(eventLine(event("features_edited", 1)).en).toBe("Edited 1 feature");
+    expect(eventLine(event("features_edited", 3))).toEqual({ en: "3 feature edits", ja: "フィーチャーの編集 3 件" });
+    expect(eventLine(event("features_edited", 1)).en).toBe("1 feature edit");
     expect(eventLine(event("imported", 1, { files: 16 }))).toEqual({
       en: "Brought in 16 files",
       ja: "16 ファイルを取り込み"

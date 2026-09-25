@@ -34,7 +34,7 @@ test("shows the last visit, newest change first, with the note", async () => {
   expect(await screen.findByRole("dialog", { name: "Last time on 東京駅" })).toBeInTheDocument();
   expect(screen.getByText(/^Last session · 18 Aug( 2026)? · 1 h 40 min$/)).toBeInTheDocument();
   const lines = screen.getAllByRole("listitem").map((item) => item.textContent);
-  expect(lines).toEqual(["Edited 12 features", "Changed the level mapping", "and 3 earlier changes"]);
+  expect(lines).toEqual(["12 feature edits", "Changed the level mapping", "and 3 earlier changes"]);
   expect(screen.getByRole("textbox")).toHaveValue("屋外 outline still provisional.");
   await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toHaveFocus());
 });
@@ -68,6 +68,6 @@ test("reads in Japanese", async () => {
   vi.mocked(fetchHandover).mockResolvedValue(RESUMED);
   render(<WelcomeBack sessionId="s-1" station="東京駅" />);
   expect(await screen.findByRole("dialog", { name: "前回の 東京駅" })).toBeInTheDocument();
-  expect(screen.getByText("12 件のフィーチャーを編集")).toBeInTheDocument();
+  expect(screen.getByText("フィーチャーの編集 12 件")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "続ける" })).toBeInTheDocument();
 });

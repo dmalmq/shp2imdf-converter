@@ -49,7 +49,7 @@ export function eventLine(event: HandoverEvent): Bilingual {
     case "generated":
       return times(n, { en: "Generated the draft", ja: "ドラフトを生成" });
     case "features_edited":
-      return { en: plural(n, "Edited 1 feature", "Edited {n} features"), ja: `${n} 件のフィーチャーを編集` };
+      return { en: plural(n, "1 feature edit", "{n} feature edits"), ja: `フィーチャーの編集 ${n} 件` };
     case "features_deleted":
       return { en: plural(n, "Deleted 1 feature", "Deleted {n} features"), ja: `${n} 件のフィーチャーを削除` };
     case "units_merged":
