@@ -410,6 +410,30 @@ export type ShapefileExportRequest = {
   export_name?: string | null;
 };
 
+export type ExportFormat = "imdf" | "imdf_zip" | "shapefiles" | "odc2026_shapefiles" | "qgis_project";
+
+/** What one format would download, read from the archive the export builds. */
+export type ExportContents = {
+  format: ExportFormat;
+  filename: string | null;
+  entries: string[];
+  /** Why the format cannot be exported now, as the server words it. */
+  unavailable: string | null;
+  /** Rows the ODC writer leaves out because their geometry does not fit the layer. */
+  rows_skipped: Array<{ layer?: string; feature_id?: string; geometry_type?: string }>;
+};
+
+/** Read-only: builds the archives to list them, and records no delivery. */
+export async function fetchExportContents(
+  sessionId: string,
+  exportName: string,
+  encoding: ShapefileExportEncoding
+): Promise<ExportContents[]> {
+  const query = new URLSearchParams({ export_name: exportName, encoding });
+  const response = await fetch(`/api/session/${sessionId}/export/contents?${query}`);
+  return (await handleJson<{ outputs: ExportContents[] }>(response)).outputs;
+}
+
 /** One project in `GET /api/projects`. Null fields are unknown, not empty. */
 export type ProjectSummary = {
   id: string;
