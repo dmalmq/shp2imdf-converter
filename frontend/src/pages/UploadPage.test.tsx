@@ -2,18 +2,29 @@ import React from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
-import { importImdfShapefiles, importShapefiles, updateSessionFile, type ImportedFile } from "../api/client";
+import {
+  detectAllFiles,
+  fetchSessionFeatures,
+  importImdfShapefiles,
+  importShapefiles,
+  updateSessionFile,
+  type ImportedFile
+} from "../api/client";
 import { ApiClientError } from "../api/errors";
 import { ToastProvider } from "../components/shared/ToastProvider";
 import { useAppStore } from "../store/useAppStore";
 import { UploadPage } from "./UploadPage";
 
 vi.mock("../api/client", () => ({
+  detectAllFiles: vi.fn(),
+  fetchSessionFeatures: vi.fn(),
   importImdfShapefiles: vi.fn(),
   importShapefiles: vi.fn(),
   updateSessionFile: vi.fn()
 }));
 
+const detectAllFilesMock = vi.mocked(detectAllFiles);
+vi.mocked(fetchSessionFeatures).mockResolvedValue({ type: "FeatureCollection", features: [] });
 const importImdfShapefilesMock = vi.mocked(importImdfShapefiles);
 const importShapefilesMock = vi.mocked(importShapefiles);
 const updateSessionFileMock = vi.mocked(updateSessionFile);
@@ -288,5 +299,39 @@ describe("a project's Bring in", () => {
     expect(screen.queryByRole("region", { name: "Needs you" })).not.toBeInTheDocument();
     fireEvent.click(nextButton(/Continue to Check/));
     expect(screen.getByTestId("where")).toHaveTextContent("/p/s1/check");
+  });
+
+  test("a file that looks right can still change type, and a suggested keyword can be remembered", async () => {
+    const opening = brought[1];
+    const suggestion = {
+      source_stem: opening.stem,
+      keyword: "Opening",
+      feature_type: "fixture",
+      affected_stems: ["JRTokyoSta_B1_Opening"],
+      message: "Apply suffix 'Opening' as fixture keyword to 1 other files?"
+    };
+    updateSessionFileMock.mockResolvedValueOnce({ ...saved({ ...opening, detected_type: "fixture" }), learning_suggestion: suggestion });
+    renderPage(true, "/p/s1/bring-in");
+
+    await choose(`What ${opening.stem} is`, "Fixtures");
+    expect(updateSessionFileMock).toHaveBeenCalledWith("s1", opening.stem, { detected_type: "fixture" });
+    expect(await screen.findByText(/Read names ending in “Opening” as Fixtures from now on\? That changes 1 other file/)).toBeInTheDocument();
+
+    updateSessionFileMock.mockResolvedValueOnce(saved({ ...opening, detected_type: "fixture" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remember it" }));
+    expect(updateSessionFileMock).toHaveBeenLastCalledWith("s1", opening.stem, {
+      detected_type: "fixture",
+      apply_learning: true,
+      learning_keyword: "Opening"
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Remember it" })).not.toBeInTheDocument());
+  });
+
+  test("guessing the types again takes the server's new reading of every file", async () => {
+    detectAllFilesMock.mockResolvedValueOnce({ session_id: "s1", files: brought.map((item) => ({ ...item, confidence: "green", detected_level: 0 })) });
+    renderPage(true, "/p/s1/bring-in");
+    fireEvent.click(screen.getByRole("button", { name: "Guess the types again" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Needs you" })).not.toBeInTheDocument());
+    expect(detectAllFilesMock).toHaveBeenCalledWith("s1");
   });
 });

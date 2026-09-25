@@ -4,7 +4,8 @@ import type { ImportProfile } from "../../store/useAppStore";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import type { FloorFound } from "../../lib/bringIn";
 import { cn } from "@/lib/utils";
-import { RadioGroup, RadioGroupItem } from "../ui";
+import { PreviewMap, type BasicFeature } from "../shared/PreviewMap";
+import { Button, RadioGroup, RadioGroupItem } from "../ui";
 
 function RailCard({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -127,10 +128,11 @@ export function FloorsFound({ floors }: { floors: FloorFound[] | null }) {
   );
 }
 
-export function WhyGuesses() {
+/** Why the guesses can be wrong, and, for read files, a way to guess the types again. */
+export function WhyGuesses({ onGuessAgain, guessing = false }: { onGuessAgain?: () => void; guessing?: boolean }) {
   const { t } = useUiLanguage();
   return (
-    <section className="flex flex-col gap-1.5 px-1 pt-1">
+    <section className="flex flex-col items-start gap-1.5 px-1 pt-1">
       <h2 className="font-mono text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
         {t("Why a guess can be wrong", "推定が外れる理由")}
       </h2>
@@ -140,6 +142,47 @@ export function WhyGuesses() {
           "<駅>_<階>_<種類> のような名前を手がかりにしています。ほかの名前のファイルも使えます。種類を教えてください。"
         )}
       </p>
+      {onGuessAgain ? (
+        <>
+          <Button variant="outline" size="sm" className="mt-1" disabled={guessing} onClick={onGuessAgain}>
+            {guessing ? t("Guessing…", "推定中…") : t("Guess the types again", "種類をもう一度推定")}
+          </Button>
+          <p className="text-xs leading-[1.45] text-muted-foreground">
+            {t(
+              "Uses the names and any keywords you taught it. Types you chose are guessed again too; floors you set stay.",
+              "名前と、覚えさせたキーワードを使います。選んだ種類も推定し直します。設定した階はそのままです。"
+            )}
+          </p>
+        </>
+      ) : null}
     </section>
+  );
+}
+
+/** The files' shapes, with the hovered one picked out and a chosen one shown alone. */
+export function OnTheMap({
+  features,
+  hovered,
+  selected
+}: {
+  features: BasicFeature[] | null;
+  hovered: string | null;
+  selected: string | null;
+}) {
+  const { t } = useUiLanguage();
+  return (
+    <RailCard title={t("On the map", "地図で確認")}>
+      <p className="text-xs leading-[1.45] text-muted-foreground">
+        {t(
+          "Point at a file to pick out its shapes; click its name to show it alone.",
+          "ファイルにカーソルを合わせると図形を強調します。名前をクリックするとそのファイルだけを表示します。"
+        )}
+      </p>
+      {features === null ? (
+        <p className="text-xs text-muted-foreground">{t("Loading shapes…", "図形を読み込み中…")}</p>
+      ) : (
+        <PreviewMap features={features} hoveredStem={hovered} selectedStem={selected} />
+      )}
+    </RailCard>
   );
 }
