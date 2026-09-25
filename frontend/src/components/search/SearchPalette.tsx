@@ -458,7 +458,7 @@ export function SearchPalette() {
       <PopoverContent
         align="start"
         sideOffset={8}
-        className="flex max-h-[calc(100vh-96px)] w-[min(700px,calc(100vw-2rem))] flex-col gap-0.5 rounded-xl p-2 pb-0 shadow-[0_14px_36px_rgba(31,36,38,0.18)]"
+        className="flex max-h-[calc(100vh-96px)] w-[min(700px,calc(100vw-2rem))] flex-col gap-0.5 rounded-xl p-2 pb-0 shadow-lg"
         onOpenAutoFocus={(event) => event.preventDefault()}
         onCloseAutoFocus={(event) => event.preventDefault()}
         onEscapeKeyDown={(event) => event.preventDefault()}

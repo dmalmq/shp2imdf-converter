@@ -42,6 +42,7 @@ from backend.src.schemas import (
     BulkPatchWithUndoResponse,
     DetectResponse,
     FeatureResponse,
+    PatchedFeatureResponse,
     FeatureCollectionResponse,
     ImportedFile,
     PatchFeatureRequest,
@@ -640,13 +641,13 @@ def get_feature(session_id: str, feature_id: str, request: Request) -> FeatureRe
     return FeatureResponse.model_validate(features[index])
 
 
-@router.patch("/features/{feature_id}", response_model=FeatureResponse)
+@router.patch("/features/{feature_id}", response_model=PatchedFeatureResponse)
 def patch_feature(
     session_id: str,
     feature_id: str,
     payload: PatchFeatureRequest,
     request: Request,
-) -> FeatureResponse:
+) -> PatchedFeatureResponse:
     manager = session_manager(request)
     session = get_session_or_raise(session_id, request)
     features = session.feature_collection.get("features", [])
@@ -677,7 +678,7 @@ def patch_feature(
         session.feature_collection["features"] = features
         mark_changed(session, "features_edited")
     manager.save_session(session)
-    return FeatureResponse.model_validate(updated)
+    return PatchedFeatureResponse.model_validate({**updated, "content_rev": session.content_rev})
 
 
 @router.delete("/features/{feature_id}")
@@ -696,4 +697,4 @@ def delete_feature(session_id: str, feature_id: str, request: Request) -> dict[s
     session.feature_collection["features"] = features
     mark_changed(session, "features_deleted")
     manager.save_session(session)
-    return {"session_id": session_id, "deleted_id": deleted.get("id")}
+    return {"session_id": session_id, "deleted_id": deleted.get("id"), "content_rev": session.content_rev}

@@ -706,7 +706,7 @@ export async function patchSessionFeature(
   sessionId: string,
   featureId: string,
   payload: FeaturePatchRequest
-): Promise<FeatureItem> {
+): Promise<FeatureItem & { content_rev?: number }> {
   const response = await fetch(`/api/session/${sessionId}/features/${encodeURIComponent(featureId)}`, {
     method: "PATCH",
     headers: {
@@ -714,7 +714,7 @@ export async function patchSessionFeature(
     },
     body: JSON.stringify(payload)
   });
-  return handleJson<FeatureItem>(response);
+  return handleJson<FeatureItem & { content_rev?: number }>(response);
 }
 
 export async function patchSessionFeaturesBulk(
@@ -759,11 +759,11 @@ export async function patchFeaturesGuarded(
 export async function deleteSessionFeature(
   sessionId: string,
   featureId: string
-): Promise<{ session_id: string; deleted_id: string }> {
+): Promise<{ session_id: string; deleted_id: string; content_rev?: number }> {
   const response = await fetch(`/api/session/${sessionId}/features/${encodeURIComponent(featureId)}`, {
     method: "DELETE"
   });
-  return handleJson<{ session_id: string; deleted_id: string }>(response);
+  return handleJson<{ session_id: string; deleted_id: string; content_rev?: number }>(response);
 }
 
 export async function fetchWizardState(sessionId: string): Promise<WizardStateResponse> {

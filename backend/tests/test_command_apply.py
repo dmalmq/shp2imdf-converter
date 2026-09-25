@@ -122,3 +122,20 @@ def test_undo_is_only_offered_on_patch(test_client, sample_dir: Path) -> None:
 
     assert refused.status_code == 400
     assert _as_a_browser_sends(_content(test_client, session_id)).get(level["id"]) is not None
+
+
+def test_a_single_edit_reports_the_revision_it_left_so_the_next_guarded_change_applies(
+    test_client, sample_dir: Path
+) -> None:
+    session_id = _generated_session(test_client, sample_dir)
+    level = _a_level(test_client, session_id)
+    unit = next(row for row in _features(test_client, session_id)["features"] if row["feature_type"] == "unit")
+
+    edited = test_client.patch(f"/api/session/{session_id}/features/{unit['id']}", json={"properties": {"elevation": 3}})
+    assert edited.json()["content_rev"] == _features(test_client, session_id)["content_rev"]
+    applied = _move(test_client, session_id, level["id"], base_rev=edited.json()["content_rev"], with_undo=True)
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["deleted_count"] == 0
+
+    deleted = test_client.delete(f"/api/session/{session_id}/features/{unit['id']}")
+    assert deleted.json()["content_rev"] == _features(test_client, session_id)["content_rev"]

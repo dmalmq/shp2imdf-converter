@@ -325,7 +325,9 @@ last floors. This staleness is documented rather than refreshed, since refreshin
 reading the session.
 
 **Nothing per keystroke touches the network.** Each source's items are built and normalised
-once per source identity. A keystroke scans a few hundred items at most, and
+once per source identity. At most 300 issues are indexed, must fix first and then can wait in
+the rail's order (`MAX_ISSUE_ITEMS`), so a large session's warnings do not grow the scan. A
+keystroke scans a few hundred items at most, and
 `useDeferredValue` keeps typing ahead of rendering. Unit and amenity names are not indexed in
 this phase, and the placeholder no longer promises "features" (§10).
 
@@ -428,6 +430,9 @@ and pytest for `base_rev` 409 and the `with_undo` round-trip through `restore`.
 - The seal on an `undo` is a plain SHA-256 with no secret, so it proves only that the payload is
   intact. This is unchanged from the fixes, and the fingerprints are what actually guard the
   data.
-- After a table edit, Check's `content_rev` is behind, because a single-feature PATCH does not
-  return one. The first Apply after a table edit is refused with 409, and the panel reloads and
-  re-previews. That is a safe failure, but an extra step.
+- Check's `content_rev` has to follow every write Check makes itself, or the colleague's own
+  edit would make the next Apply fail as if someone else had changed the project. The
+  single-feature PATCH and DELETE return `content_rev`, and Check takes it from their replies
+  (the table editor, the venue panel and Ctrl Z). Bulk actions and fixes reload the features,
+  which brings the revision with them. The client never bumps the revision itself, because an
+  edit that changes nothing does not bump it on the server.

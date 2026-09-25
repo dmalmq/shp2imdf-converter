@@ -1,5 +1,6 @@
 import type { ImportedFile, ProjectSummary, ValidationIssue } from "../../api/client";
 import { featureLevelId } from "../../components/review/floorGroups";
+import type { ReviewFeature } from "../../components/review/types";
 import { FLOW_STAGES, projectPath, type Bilingual } from "../../components/shell/stages";
 import type { UiLanguage } from "../../store/useAppStore";
 import { featureLabel, type CheckGroup } from "../check";
@@ -114,15 +115,15 @@ function floorItems(input: ItemsInput): SearchItem[] {
   });
 }
 
-function issueDetail(issue: ValidationIssue, group: CheckGroup, check: CheckSource): Bilingual {
-  const byId = new Map(check.snapshot.features.map((feature) => [feature.id, feature]));
-  const floorOf = new Map(check.snapshot.floors.flatMap((floor) => floor.levelIds.map((id) => [id, floor.label] as const)));
-  const feature = issue.feature_id ? byId.get(issue.feature_id) : undefined;
+/** Issues indexed for search: must fix first, then can wait, in the rail's order. */
+export const MAX_ISSUE_ITEMS = 300;
+
+type Lookup = { byId: ReadonlyMap<string, ReviewFeature>; floorOf: ReadonlyMap<string, string>; language: string };
+
+function issueDetail(issue: ValidationIssue, group: CheckGroup, names: Bilingual[], lookup: Lookup): Bilingual {
+  const feature = issue.feature_id ? lookup.byId.get(issue.feature_id) : undefined;
   const levelId = feature ? featureLevelId(feature) : null;
-  const floor = levelId ? floorOf.get(levelId) : undefined;
-  const names = [issue.feature_id, issue.related_feature_id]
-    .filter((id): id is string => Boolean(id))
-    .map((id) => featureLabel(byId.get(id), check.snapshot.language));
+  const floor = levelId ? lookup.floorOf.get(levelId) : undefined;
   const parts: Bilingual[] = [];
   if (floor) parts.push({ en: floor, ja: floor });
   if (names.length === 2) parts.push({ en: `${names[0].en} and ${names[1].en}`, ja: `${names[0].ja} と ${names[1].ja}` });
@@ -133,24 +134,31 @@ function issueDetail(issue: ValidationIssue, group: CheckGroup, check: CheckSour
 
 function issueItems(check: CheckSource | null): SearchItem[] {
   if (!check) return [];
-  const byId = new Map(check.snapshot.features.map((feature) => [feature.id, feature]));
-  return [...check.snapshot.view.mustFix, ...check.snapshot.view.canWait].flatMap((group) =>
-    group.issues.map((issue, index) => {
-      const copy = issueCopy(group.check);
+  const lookup: Lookup = {
+    byId: new Map(check.snapshot.features.map((feature) => [feature.id, feature])),
+    floorOf: new Map(check.snapshot.floors.flatMap((floor) => floor.levelIds.map((id) => [id, floor.label] as const))),
+    language: check.snapshot.language
+  };
+  const items: SearchItem[] = [];
+  for (const group of [...check.snapshot.view.mustFix, ...check.snapshot.view.canWait]) {
+    const copy = issueCopy(group.check);
+    for (const [index, issue] of group.issues.entries()) {
+      if (items.length >= MAX_ISSUE_ITEMS) return items;
       const names = [issue.feature_id, issue.related_feature_id]
         .filter((id): id is string => Boolean(id))
-        .map((id) => featureLabel(byId.get(id), check.snapshot.language).en);
-      return {
+        .map((id) => featureLabel(lookup.byId.get(id), lookup.language));
+      items.push({
         id: `issue:${group.key}:${index}`,
         kind: "issue",
         label: copy.title,
-        detail: issueDetail(issue, group, check),
+        detail: issueDetail(issue, group, names, lookup),
         hint: { en: "Show on the map", ja: "地図で見る" },
         run: { kind: "page", invoke: () => check.openIssue({ key: group.key, index }) },
-        terms: termsOf(copy.title.en, copy.title.ja, group.check.replace(/_/g, " "), ...group.floors, ...names)
-      } satisfies SearchItem;
-    })
-  );
+        terms: termsOf(copy.title.en, copy.title.ja, group.check.replace(/_/g, " "), ...group.floors, ...names.map((name) => name.en))
+      });
+    }
+  }
+  return items;
 }
 
 function fileItems(input: ItemsInput): SearchItem[] {

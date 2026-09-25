@@ -710,6 +710,12 @@ class FeatureResponse(BaseModel):
     properties: dict[str, Any]
 
 
+class PatchedFeatureResponse(FeatureResponse):
+    """A feature as an edit left it, with the revision the project is now at."""
+
+    content_rev: int
+
+
 class PatchFeatureRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -748,6 +754,7 @@ class BulkPatchWithUndoResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     updated_count: int
+    deleted_count: int = 0
     undo: FeatureUndo
     validation: ValidationResponse
     content_rev: int

@@ -432,7 +432,7 @@ export function ReviewPage() {
         featureId,
         featureType ? { properties, feature_type: featureType } : { properties }
       );
-      afterEdit();
+      afterEdit(updated.content_rev);
       const nextFeature: ReviewFeature = {
         type: updated.type,
         id: updated.id,
@@ -482,8 +482,8 @@ export function ReviewPage() {
       return;
     }
     try {
-      await deleteSessionFeature(sessionId, featureId);
-      afterEdit();
+      const deleted = await deleteSessionFeature(sessionId, featureId);
+      afterEdit(deleted.content_rev);
       setFeatures((prev) => prev.filter((item) => item.id !== featureId));
       setSelectedFeatureIds(selectedFeatureIds.filter((id) => id !== featureId));
       pushToast({ title: t("Feature deleted", "フィーチャーを削除しました"), variant: "success" });
@@ -700,7 +700,8 @@ export function ReviewPage() {
   };
 
   /** Any edit that is not a fix: the stored checks no longer describe the project, and undoing a fix could undo it. */
-  const afterEdit = () => {
+  const afterEdit = (rev?: number) => {
+    if (typeof rev === "number") setContentRev(rev);
     setChecksStale(true);
     setDone((previous) => previous.map((entry) => ({ ...entry, stale: true })));
   };
@@ -990,7 +991,7 @@ export function ReviewPage() {
             : {})
         })
           .then((updated) => {
-            afterEdit();
+            afterEdit(updated.content_rev);
             setFeatures((prev) =>
               prev.map((item) =>
                 item.id === updated.id

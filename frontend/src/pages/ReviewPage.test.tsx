@@ -709,6 +709,38 @@ describe("typed commands on Check", () => {
     await waitFor(() => expect(restoreSessionFeaturesMock).toHaveBeenCalledWith("session-123", undo));
   });
 
+  test("after the colleague's own edit, assign applies first time at the revision that edit left", async () => {
+    patchSessionFeatureMock.mockResolvedValue({
+      type: "Feature",
+      id: "u1",
+      feature_type: "unit",
+      geometry: null,
+      properties: { level_id: "l0" },
+      content_rev: 5
+    });
+    render(
+      <MemoryRouter initialEntries={["/p/session-123/check"]}>
+        <ToastProvider>
+          <AppShell>
+            <ReviewPage />
+          </AppShell>
+        </ToastProvider>
+      </MemoryRouter>
+    );
+    await screen.findByRole("button", { name: /0F/ });
+    act(() => {
+      useAppStore.setState({ editHistory: [{ featureId: "u1", previousProperties: { level_id: "l0" } }] });
+    });
+    fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(patchSessionFeatureMock).toHaveBeenCalledTimes(1));
+
+    await typeCommand("assign 屋外 to 1F");
+
+    await waitFor(() => expect(patchFeaturesGuarded).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(patchFeaturesGuarded).mock.calls[0][3]).toBe(5);
+    expect(await screen.findByText("Moved 屋外 to 1F.")).toBeInTheDocument();
+  });
+
   test("a refused revision reloads the features and says the preview changed", async () => {
     vi.mocked(patchFeaturesGuarded).mockRejectedValue(new ApiClientError(409, "REVISION_STALE", "changed", true));
     render(
