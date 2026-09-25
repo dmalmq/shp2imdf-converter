@@ -26,12 +26,14 @@ from backend.src.feature_types import (
     geometry_kind,
     spec_for,
 )
+from backend.src.feature_undo import changes_anything, restore_features, undo_between
 from backend.src.importer import rebuild_normalized_feature_collection
 from backend.src.projects import current_validation, mark_changed, mark_validated
 from backend.src.schemas import (
     BulkPatchFeaturesRequest,
     BulkPatchFeaturesResponse,
     DetectResponse,
+    FeatureUndo,
     FeatureResponse,
     FeatureCollectionResponse,
     ImportedFile,
@@ -393,6 +395,20 @@ def patch_features_bulk(
     if not isinstance(features, list):
         raise ValueError("Session feature collection is malformed")
 
+    if payload.action == "restore":
+        undo = FeatureUndo(remove_ids=payload.feature_ids, features=payload.features or [])
+        restored = restore_features(features, undo)
+        session.feature_collection["features"] = restored
+        if changes_anything(undo_between(features, restored)):
+            mark_changed(session)
+        validation = _revalidate_session(session)
+        manager.save_session(session)
+        return BulkPatchFeaturesResponse(
+            updated_count=len(undo.features),
+            deleted_count=len(features) + len(undo.features) - len(restored),
+            validation=validation,
+        )
+
     feature_ids = {str(item) for item in payload.feature_ids}
     if not feature_ids:
         return BulkPatchFeaturesResponse()
@@ -474,6 +490,7 @@ def resolve_unit_overlap(
     features = session.feature_collection.get("features", [])
     if not isinstance(features, list):
         raise ValueError("Session feature collection is malformed")
+    before = list(features)
 
     updated_count, deleted_count = _clip_unit_overlap(
         features=features,
@@ -485,6 +502,7 @@ def resolve_unit_overlap(
     session.feature_collection["features"] = features
     if resolved or removed:
         mark_changed(session)
+    undo = undo_between(before, features)
     validation = _revalidate_session(session)
     manager.save_session(session)
     return ResolveUnitOverlapsResponse(
@@ -494,6 +512,7 @@ def resolve_unit_overlap(
         deleted_count=deleted_count + len(removed),
         skipped_count=0 if resolved else 1,
         validation=validation,
+        undo=undo,
     )
 
 
@@ -505,6 +524,7 @@ def resolve_unit_overlaps_safe(session_id: str, request: Request) -> ResolveUnit
     if not isinstance(features, list):
         raise ValueError("Session feature collection is malformed")
 
+    before = list(features)
     validation = current_validation(session) or validate_feature_collection(session.feature_collection)
     seen_pairs: set[tuple[str, str]] = set()
     overlap_pairs: list[tuple[str, str]] = []
@@ -554,6 +574,7 @@ def resolve_unit_overlaps_safe(session_id: str, request: Request) -> ResolveUnit
     session.feature_collection["features"] = features
     if resolved_pairs or removed:
         mark_changed(session)
+    undo = undo_between(before, features)
     revalidation = _revalidate_session(session)
     manager.save_session(session)
     return ResolveUnitOverlapsResponse(
@@ -563,6 +584,7 @@ def resolve_unit_overlaps_safe(session_id: str, request: Request) -> ResolveUnit
         deleted_count=deleted_count,
         skipped_count=skipped_count,
         validation=revalidation,
+        undo=undo,
     )
 
 
