@@ -22,6 +22,7 @@ from backend.routers.export_router import router as export_router
 from backend.routers.features_router import router as features_router
 from backend.routers.generate_router import router as generate_router
 from backend.routers.import_router import router as import_router
+from backend.routers.projects_router import router as projects_router
 from backend.routers.reference_router import router as reference_router
 from backend.routers.wizard_router import router as wizard_router
 from backend.src.errors import ApiError
@@ -271,6 +272,7 @@ app.include_router(features_router)
 app.include_router(wizard_router)
 app.include_router(generate_router)
 app.include_router(export_router)
+app.include_router(projects_router)
 
 
 @app.get("/api/health")

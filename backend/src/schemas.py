@@ -986,3 +986,40 @@ class IllustratorSurveySnapResponse(BaseModel):
 
     match: IllustratorShapeMatchSuggestion | None = None
     reason: Literal["no_consensus"] | None = None
+
+
+ProjectFlow = Literal["shapefiles", "artwork"]
+
+
+class ProjectSummary(BaseModel):
+    """One project in the hub list. Null fields are unknown, not empty: the client falls back."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    flow: ProjectFlow
+    name: str | None
+    import_profile: str | None
+    stage: Literal["bring-in", "set-up", "check", "deliver", "name-floors", "place"] | None
+    updated_at: datetime | None
+    last_opened: datetime
+    blockers: int | None
+    can_wait: int | None
+    delivered_at: datetime | None
+    changed_since_delivery: bool
+    expires_at: datetime
+
+
+class ProjectListLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    idle_days: float
+    max_projects: int
+
+
+class ProjectListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    projects: list[ProjectSummary]
+    total: int
+    limits: ProjectListLimits
