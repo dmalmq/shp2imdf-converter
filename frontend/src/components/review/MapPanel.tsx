@@ -1,6 +1,6 @@
 import { Maximize2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Layer, type LayerProps, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Layer, type LayerProps, type MapLayerMouseEvent, type MapRef, Marker, Source } from "react-map-gl/maplibre";
 
 import { type ReviewFeature, type ReviewIssue, featureLayerKey, isLocatedFeature } from "./types";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
@@ -23,6 +23,8 @@ type Props = {
   visibleLevelIds: readonly string[] | null;
   showBasemap: boolean;
   activeIssue?: ReviewIssue | null;
+  /** Drawn at a point on the map: the active issue's marker. */
+  pin?: { lngLat: [number, number]; content: ReactNode } | null;
   onSelectFeature: (id: string, multi?: boolean) => void;
 };
 
@@ -262,6 +264,7 @@ export function MapPanel({
   visibleLevelIds,
   showBasemap,
   activeIssue,
+  pin,
   onSelectFeature
 }: Props) {
   const mapRef = useRef<MapRef | null>(null);
@@ -569,7 +572,7 @@ export function MapPanel({
       <Button
         variant="outline"
         size="sm"
-        className="absolute right-3 top-3 z-10 bg-popover/95 backdrop-blur"
+        className="absolute bottom-8 right-3 z-10 bg-popover/95 backdrop-blur"
         onClick={zoomToFit}
         title={t("Frame everything on screen", "\u8868\u793a\u4e2d\u306e\u5168\u4f53\u3092\u8868\u793a")}
       >
@@ -633,6 +636,11 @@ export function MapPanel({
               <Layer {...OVERLAP_LAYER} />
             )}
           </Source>
+        ) : null}
+        {pin ? (
+          <Marker longitude={pin.lngLat[0]} latitude={pin.lngLat[1]} anchor="center">
+            {pin.content}
+          </Marker>
         ) : null}
       </MapView>
     </div>

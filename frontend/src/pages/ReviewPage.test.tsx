@@ -9,11 +9,14 @@ import {
   fetchFeatureTypeCatalog,
   fetchSessionFeatures,
   fetchSessionFiles,
+  fetchStoredValidation,
   generateSessionDraft,
   patchSessionFeature,
   patchSessionFeaturesBulk,
   resolveSessionUnitOverlap,
   resolveSessionUnitOverlapsSafe,
+  restoreSessionFeatures,
+  type ValidationResponse,
   type WizardState,
   validateSession
 } from "../api/client";
@@ -31,11 +34,14 @@ vi.mock("../api/client", () => ({
   fetchFeatureTypeCatalog: vi.fn(),
   fetchSessionFeatures: vi.fn(),
   fetchSessionFiles: vi.fn(),
+  fetchStoredValidation: vi.fn(),
   generateSessionDraft: vi.fn(),
   patchSessionFeature: vi.fn(),
   patchSessionFeaturesBulk: vi.fn(),
   resolveSessionUnitOverlap: vi.fn(),
   resolveSessionUnitOverlapsSafe: vi.fn(),
+  restoreSessionFeatures: vi.fn(),
+  snapOpening: vi.fn(),
   validateSession: vi.fn()
 }));
 
@@ -44,7 +50,7 @@ vi.mock("../components/review/LayerTree", () => ({
 }));
 
 vi.mock("../components/review/MapPanel", () => ({
-  MapPanel: () => <div data-testid="map-panel" />
+  MapPanel: ({ pin }: { pin?: { content: React.ReactNode } | null }) => <div data-testid="map-panel">{pin?.content}</div>
 }));
 
 vi.mock("../components/review/PropertiesPanel", () => ({
@@ -72,12 +78,16 @@ const patchSessionFeatureMock = vi.mocked(patchSessionFeature);
 const patchSessionFeaturesBulkMock = vi.mocked(patchSessionFeaturesBulk);
 const resolveSessionUnitOverlapMock = vi.mocked(resolveSessionUnitOverlap);
 const resolveSessionUnitOverlapsSafeMock = vi.mocked(resolveSessionUnitOverlapsSafe);
+const fetchStoredValidationMock = vi.mocked(fetchStoredValidation);
+const restoreSessionFeaturesMock = vi.mocked(restoreSessionFeatures);
 
 function renderPage() {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={["/p/session-123/check"]}>
       <ToastProvider>
-        <ReviewPage />
+        <AppShell>
+          <ReviewPage />
+        </AppShell>
       </ToastProvider>
     </MemoryRouter>
   );
@@ -117,6 +127,7 @@ beforeEach(() => {
     editHistory: []
   });
 
+  fetchStoredValidationMock.mockResolvedValue(null);
   fetchFeatureTypeCatalogMock.mockResolvedValue([
     {
       feature_type: "unit",
@@ -268,7 +279,7 @@ beforeEach(() => {
 test("hides shapefile export when the session includes geopackage sources", async () => {
   renderPage();
 
-  const exportButton = await screen.findByRole("button", { name: "Export" });
+  const exportButton = await screen.findByRole("button", { name: /^Deliver/ });
   await waitFor(() => expect(exportButton).toBeEnabled());
 
   fireEvent.click(exportButton);
@@ -310,7 +321,7 @@ test("requires an explicit prefix for open data export", async () => {
   });
 
   renderPage();
-  const exportButton = await screen.findByRole("button", { name: "Export" });
+  const exportButton = await screen.findByRole("button", { name: /^Deliver/ });
   await waitFor(() => expect(exportButton).toBeEnabled());
   fireEvent.click(exportButton);
 
@@ -386,7 +397,7 @@ test("bulk retypes selected polygon units to geofence", async () => {
   });
 
   renderPage();
-  const exportButton = await screen.findByRole("button", { name: "Export" });
+  const exportButton = await screen.findByRole("button", { name: /^Deliver/ });
   await waitFor(() => expect(exportButton).toBeEnabled());
 
   act(() => {
@@ -476,21 +487,10 @@ test("selecting a table row selects it for the rest of the screen", async () => 
   );
 });
 
-function renderInShell() {
-  return render(
-    <MemoryRouter initialEntries={["/p/session-123/check"]}>
-      <ToastProvider>
-        <AppShell>
-          <ReviewPage />
-        </AppShell>
-      </ToastProvider>
-    </MemoryRouter>
-  );
-}
 
 test("review sits under the one app header instead of drawing its own", async () => {
-  renderInShell();
-  await waitFor(() => expect(screen.getByRole("button", { name: "Export" })).toBeEnabled());
+  renderPage();
+  await waitFor(() => expect(screen.getByRole("button", { name: /^Deliver/ })).toBeEnabled());
 
   const [banner, ...others] = screen.getAllByRole("banner");
   expect(others).toHaveLength(0);
@@ -498,20 +498,142 @@ test("review sits under the one app header instead of drawing its own", async ()
   expect(within(banner).getByRole("link", { name: "Projects" })).toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: "Switch theme" })).toHaveLength(1);
   expect(screen.getAllByRole("group", { name: "Display language" })).toHaveLength(1);
-  // The validation bar's Export is on screen, so the top bar does not repeat it.
-  expect(screen.getAllByRole("button", { name: "Export" })).toHaveLength(1);
+  expect(screen.getAllByRole("button", { name: /^Deliver/ })).toHaveLength(1);
 
   const track = screen.getByRole("navigation", { name: "Stages" });
   expect(within(track).getByText("3 · Check").closest("[aria-current]")).toHaveAttribute("aria-current", "step");
 });
 
 test("the Deliver stage opens the export dialog", async () => {
-  renderInShell();
-  await waitFor(() => expect(screen.getByRole("button", { name: "Export" })).toBeEnabled());
+  renderPage();
+  await waitFor(() => expect(screen.getByRole("button", { name: /^Deliver/ })).toBeEnabled());
 
   const track = screen.getByRole("navigation", { name: "Stages" });
   fireEvent.click(within(track).getByRole("button", { name: /4 · Deliver/ }));
 
   expect(await screen.findByRole("dialog")).toBeInTheDocument();
   expect(validateSessionMock).toHaveBeenCalledWith("session-123");
+});
+
+function validationOf(errors: ValidationResponse["errors"], warnings: ValidationResponse["warnings"]): ValidationResponse {
+  return {
+    errors,
+    warnings,
+    passed: [],
+    summary: {
+      total_features: 3,
+      by_type: {},
+      error_count: errors.length,
+      warning_count: warnings.length,
+      auto_fixable_count: 0,
+      checks_passed: 0,
+      checks_failed: 0,
+      unspecified_count: 0,
+      overlap_count: 0,
+      opening_issues_count: 0
+    }
+  };
+}
+
+const square = (x: number) => ({
+  type: "Polygon",
+  coordinates: [[[x, 0], [x + 1, 0], [x + 1, 1], [x, 1], [x, 0]]]
+});
+
+const overlapWarnings: ValidationResponse["warnings"] = [
+  {
+    feature_id: "unit-a",
+    related_feature_id: "unit-b",
+    check: "overlapping_units",
+    message: "Overlaps with unit B.",
+    severity: "warning",
+    auto_fixable: false,
+    overlap_geometry: square(0.5)
+  },
+  {
+    feature_id: "unit-b",
+    related_feature_id: "unit-a",
+    check: "overlapping_units",
+    message: "Overlaps with unit A.",
+    severity: "warning",
+    auto_fixable: false,
+    overlap_geometry: square(0.5)
+  }
+];
+
+const missingCategory: ValidationResponse["errors"] = [
+  {
+    feature_id: "unit-a",
+    check: "unit_missing_category_error",
+    message: "Unit has no category.",
+    severity: "error",
+    auto_fixable: false
+  }
+];
+
+function withOverlap() {
+  fetchSessionFeaturesMock.mockResolvedValue({
+    type: "FeatureCollection",
+    features: [
+      { type: "Feature", id: "level-1", feature_type: "level", geometry: null, properties: { short_name: { en: "1F" }, ordinal: 0 } },
+      { type: "Feature", id: "unit-a", feature_type: "unit", geometry: square(0), properties: { name: { en: "Concourse" }, level_id: "level-1" } },
+      { type: "Feature", id: "unit-b", feature_type: "unit", geometry: square(0.5), properties: { name: { en: "Gate area" }, level_id: "level-1" } }
+    ]
+  });
+}
+
+test("Check shows the stored validation as must fix and can wait without running the checker", async () => {
+  withOverlap();
+  fetchStoredValidationMock.mockResolvedValue(validationOf(missingCategory, overlapWarnings));
+
+  renderPage();
+
+  const mustFix = await screen.findByRole("list", { name: "Must fix" });
+  expect(within(mustFix).getByText("Space has no category")).toBeInTheDocument();
+  expect(within(mustFix).getByText("Concourse")).toBeInTheDocument();
+  const canWait = screen.getByRole("region", { name: "Can wait" });
+  expect(within(canWait).getByText("Can wait · 2 warnings")).toBeInTheDocument();
+  expect(within(canWait).getByText("Two spaces overlap")).toBeInTheDocument();
+  expect(screen.getByText("0 fixed · 1 left to fix")).toBeInTheDocument();
+  const track = screen.getByRole("navigation", { name: "Stages" });
+  expect(within(track).getByText("1 to fix · 2 can wait")).toBeInTheDocument();
+  expect(validateSessionMock).not.toHaveBeenCalled();
+});
+
+test("keeping one of two overlapping spaces is done, and Undo restores it and the counts", async () => {
+  withOverlap();
+  const before = validationOf(missingCategory, overlapWarnings);
+  const after = validationOf(missingCategory, []);
+  const undo = { remove_ids: [], features: [{ id: "unit-b" }] };
+  fetchStoredValidationMock.mockResolvedValue(before);
+  resolveSessionUnitOverlapMock.mockResolvedValue({
+    session_id: "session-123",
+    resolved_pairs: 1,
+    updated_count: 1,
+    deleted_count: 0,
+    skipped_count: 0,
+    validation: after,
+    undo
+  });
+  restoreSessionFeaturesMock.mockResolvedValue(before);
+
+  renderPage();
+  const canWait = await screen.findByRole("region", { name: "Can wait" });
+  fireEvent.click(within(canWait).getByRole("button", { name: "Resolve" }));
+
+  const popover = await screen.findByRole("dialog", { name: /These two spaces overlap by/ });
+  expect(within(popover).getByText(/Why it matters/)).toBeInTheDocument();
+  fireEvent.click(within(popover).getByRole("button", { name: /Keep A · Concourse/ }));
+  fireEvent.click(within(popover).getByRole("button", { name: "Keep A and trim B" }));
+
+  await waitFor(() => expect(resolveSessionUnitOverlapMock).toHaveBeenCalledWith("session-123", "unit-a", "unit-b"));
+  const doneList = await screen.findByRole("region", { name: "Done" });
+  expect(within(doneList).getByText("overlap resolved — kept Concourse")).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Can wait" })).not.toBeInTheDocument();
+
+  fireEvent.click(within(doneList).getByRole("button", { name: "Undo" }));
+
+  await waitFor(() => expect(restoreSessionFeaturesMock).toHaveBeenCalledWith("session-123", undo));
+  expect(await screen.findByText("Can wait · 2 warnings")).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Done" })).not.toBeInTheDocument();
 });

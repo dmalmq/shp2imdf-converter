@@ -1,4 +1,4 @@
-import { ChevronRight, PanelLeft, X } from "lucide-react";
+import { ChevronRight, PanelLeftOpen, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -12,22 +12,26 @@ import {
   fetchFeatureTypeCatalog,
   fetchSessionFiles,
   fetchSessionFeatures,
+  fetchStoredValidation,
   generateSessionDraft,
   patchSessionFeature,
   patchSessionFeaturesBulk,
   resolveSessionUnitOverlap,
   resolveSessionUnitOverlapsSafe,
+  restoreSessionFeatures,
   snapOpening,
   type FeatureTypeOption,
+  type FeatureUndo,
   type ShapefileExportEncoding,
   type ShapefileExportRequest,
   type WizardState,
   validateSession,
   type ValidationIssue,
   type ValidationResponse} from "../api/client";
-import { FeatureList } from "../components/review/FeatureList";
+import { CheckRail } from "../components/check/CheckRail";
+import { IssuePopover } from "../components/check/IssuePopover";
+import { FloorSwitcher, MapToolbar } from "../components/check/MapChrome";
 import { FilterBar, activeFilterCount } from "../components/review/FilterBar";
-import { IssuesPanel } from "../components/review/IssuesPanel";
 import {
   buildFloorGroups,
   buildLevelOptions,
@@ -41,14 +45,26 @@ import { MapPanel } from "../components/review/MapPanel";
 import { compatibleFeatureTypes, geometryKindOf, typeIsCompatible } from "../components/review/featureTypeOptions";
 import { PropertiesPanel } from "../components/review/PropertiesPanel";
 import { TablePanel } from "../components/review/TablePanel";
-import { ValidationBar } from "../components/review/ValidationBar";
 import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
 import { type ReviewFeature, featureLayerKey, featureName, layerKeyBaseType, orderedLayerKeys } from "../components/review/types";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
-import { projectPath } from "../components/shell/stages";
+import {
+  buildCheckView,
+  composeUndo,
+  featureLabel,
+  findGroup,
+  focusedIssue,
+  issueAnchor,
+  locateIssue,
+  refocus,
+  type DoneFix,
+  type Focus
+} from "../lib/check";
+import { issueCopy } from "../lib/checkCopy";
+import { projectPath, type Bilingual } from "../components/shell/stages";
 import { useAppStore, useSessionAction } from "../store/useAppStore";
 import {
   Button,
@@ -67,10 +83,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
   Textarea
 } from "../components/ui";
 import { usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
@@ -79,6 +91,14 @@ import { cn } from "@/lib/utils";
 
 /** Only these feature types are visible by default on the map. */
 const DEFAULT_VISIBLE_TYPES = new Set(["unit", "detail", "opening"]);
+
+/** The layers the map toolbar offers as pills; every layer is in its layer list. */
+const LAYER_PILLS: ReadonlyArray<[string, Bilingual]> = [
+  ["unit", { en: "Units", ja: "ユニット" }],
+  ["opening", { en: "Openings", ja: "開口部" }],
+  ["fixture", { en: "Fixtures", ja: "什器" }],
+  ["detail", { en: "Details", ja: "詳細" }]
+];
 type ExportFormat = "imdf" | "imdf_zip" | "shapefiles" | "odc2026_shapefiles" | "qgis_project";
 
 /**
@@ -309,9 +329,9 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
   });
   const [showBasemap, setShowBasemap] = useState(true);
   const [validating, setValidating] = useState(false);
-  const [autofixing, setAutofixing] = useState(false);
-  const [overlapResolving, setOverlapResolving] = useState(false);
-  const [openingSnapping, setOpeningSnapping] = useState(false);
+  const [fixing, setFixing] = useState(false);
+  const [focus, setFocus] = useState<Focus | null>(null);
+  const [done, setDone] = useState<DoneFix[]>([]);
   const [exporting, setExporting] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("imdf");
@@ -323,12 +343,9 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
   const [shapefileLegacyMapText, setShapefileLegacyMapText] = useState("");
   const [shapefileExportName, setShapefileExportName] = useState("");
   const [exportOptionsError, setExportOptionsError] = useState<string | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState("features");
+  const [railHidden, setRailHidden] = useState(false);
   const [mainView, setMainView] = useState<"map" | "table">("map");
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
-  const [activeIssueIndex, setActiveIssueIndex] = useState<number | null>(null);
-  const [issuesPanelCollapsed, setIssuesPanelCollapsed] = useState(false);
 
   const captureError = (caught: unknown, fallbackMessage: string, title: string) => {
     const message = handleApiError(caught, fallbackMessage, { title });
@@ -379,8 +396,20 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
     }
   };
 
+  // The stored validation is reused while nothing has changed since it ran;
+  // otherwise Check runs the checker itself, so the to-do list is never empty
+  // just because nobody pressed a button.
   useEffect(() => {
-    void loadFeatures();
+    if (!sessionId) return;
+    void loadFeatures().then(async () => {
+      try {
+        const stored = await fetchStoredValidation(sessionId);
+        if (stored) applyPostValidationState(stored);
+        else await runValidation({ quiet: true });
+      } catch (caught) {
+        captureError(caught, t("Could not read the checks", "チェック結果を読み込めませんでした"), t("Check failed", "チェック失敗"));
+      }
+    });
   }, [sessionId]);
 
   useEffect(() => {
@@ -499,7 +528,6 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
   // Auto-show right sidebar when a feature is selected
   useEffect(() => {
     setRightSidebarOpen(Boolean(selectedFeature));
-    setActiveIssueIndex(null);
   }, [selectedFeature]);
 
   const saveFeatureProperties = async (
@@ -727,10 +755,20 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
     return issuesByFeature.get(selectedFeature.id) ?? [];
   }, [issuesByFeature, selectedFeature]);
 
-  const activeIssue = useMemo(() => {
-    if (activeIssueIndex === null) return null;
-    return selectedFeatureIssues[activeIssueIndex] ?? null;
-  }, [activeIssueIndex, selectedFeatureIssues]);
+  const featuresById = useMemo(() => new Map(features.map((item) => [item.id, item])), [features]);
+  const checkView = useMemo(() => buildCheckView(validation, features, floorOptions), [validation, features, floorOptions]);
+  const activeIssue = focusedIssue(checkView, focus);
+  const floorsWithIssues = useMemo(
+    () => ({
+      must: new Set(checkView.mustFix.flatMap((group) => group.floors)),
+      wait: new Set(checkView.canWait.flatMap((group) => group.floors))
+    }),
+    [checkView]
+  );
+
+  useEffect(() => {
+    setFocus((current) => refocus(checkView, current));
+  }, [checkView]);
 
   // When an issue is activated, switch the map to that feature's level so the
   // zoomed-to geometry is actually visible — otherwise the map fits to a feature
@@ -743,7 +781,7 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
     if (!targetId) {
       return;
     }
-    const target = features.find((item) => item.id === targetId);
+    const target = featuresById.get(targetId);
     if (!target) {
       return;
     }
@@ -758,25 +796,33 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
     if (floorId && floorId !== mapFloorFilter) {
       setMapFloorFilter(floorId);
     }
-  }, [activeIssue, features, floorOptions, mapFloorFilter]);
+  }, [activeIssue, featuresById, floorOptions, mapFloorFilter]);
+
+  /** Opens an issue on the map, switching its layer on when that layer is hidden. */
+  const openIssue = (next: Focus) => {
+    const issue = focusedIssue(checkView, next);
+    if (!issue) return;
+    const hidden = [issue.feature_id, issue.related_feature_id]
+      .map((id) => (id ? featuresById.get(id) : undefined))
+      .filter((item): item is ReviewFeature => Boolean(item?.geometry))
+      .map(featureLayerKey)
+      .filter((key) => layerVisibility[key] === false);
+    if (hidden.length > 0) {
+      setLayerVisibility({ ...layerVisibility, ...Object.fromEntries(hidden.map((key) => [key, true])) });
+    }
+    setMainView("map");
+    setFocus(next);
+  };
 
   const applyPostValidationState = (next: ValidationResponse) => {
-    setActiveIssueIndex(null);
     setValidation(next);
     setValidationResults({
       errors: next.summary.error_count,
       warnings: next.summary.warning_count
     });
-    if (next.summary.error_count > 0) {
-      setFilters({ ...filters, status: "error" });
-    } else if (next.summary.warning_count > 0) {
-      setFilters({ ...filters, status: "warning" });
-    } else {
-      setFilters({ ...filters, status: undefined });
-    }
   };
 
-  const runValidation = async (): Promise<ValidationResponse | null> => {
+  const runValidation = async ({ quiet = false } = {}): Promise<ValidationResponse | null> => {
     if (!sessionId) {
       return null;
     }
@@ -786,14 +832,16 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
       const response = await validateSession(sessionId);
       applyPostValidationState(response);
       await loadFeatures();
-      pushToast({
-        title: t("Validation complete", "検証が完了しました"),
-        description: t(
-          `${response.summary.error_count} errors, ${response.summary.warning_count} warnings.`,
-          `エラー ${response.summary.error_count} 件、警告 ${response.summary.warning_count} 件。`
-        ),
-        variant: response.summary.error_count > 0 ? "info" : "success"
-      });
+      if (!quiet) {
+        pushToast({
+          title: t("Validation complete", "検証が完了しました"),
+          description: t(
+            `${response.summary.error_count} errors, ${response.summary.warning_count} warnings.`,
+            `エラー ${response.summary.error_count} 件、警告 ${response.summary.warning_count} 件。`
+          ),
+          variant: response.summary.error_count > 0 ? "info" : "success"
+        });
+      }
       return response;
     } catch (caught) {
       captureError(caught, t("Validation failed", "検証に失敗しました"), t("Validation failed", "検証失敗"));
@@ -803,123 +851,115 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
     }
   };
 
-  const runAutofix = async (applyPrompted = false) => {
-    if (!sessionId) {
-      return;
-    }
-    setAutofixing(true);
+  /**
+   * Every fix goes through here: it applies the revalidation the fix returns,
+   * reloads the features, and records the fix with what undoes it.
+   */
+  const applyFix = async (
+    request: () => Promise<{ validation: ValidationResponse; undo: FeatureUndo } | null>,
+    label: Bilingual,
+    failure: Bilingual
+  ) => {
+    if (!sessionId) return;
+    setFixing(true);
     setError(null);
     try {
-      const response = await autofixSession(sessionId, applyPrompted);
-      let totalFixed = response.total_fixed;
-      if (!applyPrompted && response.total_requiring_confirmation > 0) {
+      const result = await request();
+      if (!result) return;
+      applyPostValidationState(result.validation);
+      await loadFeatures();
+      if (result.undo.features.length > 0 || result.undo.remove_ids.length > 0) {
+        setDone((previous) => [...previous, { id: (previous[previous.length - 1]?.id ?? 0) + 1, label, undo: result.undo }]);
+      }
+      const left = result.validation.summary.error_count;
+      pushToast({
+        title: t(`Fixed: ${label.en}`, `修正しました：${label.ja}`),
+        description: t(`${left} left to fix.`, `残り ${left} 件。`),
+        variant: "success"
+      });
+    } catch (caught) {
+      captureError(caught, t(failure.en, failure.ja), t(failure.en, failure.ja));
+    } finally {
+      setFixing(false);
+    }
+  };
+
+  const undoFix = async (entry: DoneFix) => {
+    if (!sessionId) return;
+    setFixing(true);
+    setError(null);
+    try {
+      applyPostValidationState(await restoreSessionFeatures(sessionId, entry.undo));
+      await loadFeatures();
+      setDone((previous) => previous.filter((item) => item.id !== entry.id));
+      pushToast({ title: t(`Undone: ${entry.label.en}`, `元に戻しました：${entry.label.ja}`), variant: "success" });
+    } catch (caught) {
+      captureError(caught, t("Undo failed", "元に戻せませんでした"), t("Undo failed", "元に戻せませんでした"));
+    } finally {
+      setFixing(false);
+    }
+  };
+
+  const nameOf = (id: string) => featureLabel(featuresById.get(id), wizardState?.project?.language ?? "en");
+
+  const runAutofix = () =>
+    applyFix(
+      async () => {
+        const response = await autofixSession(sessionId!, false);
+        if (response.total_requiring_confirmation === 0) return { validation: response.revalidation, undo: response.undo };
         const confirmed = window.confirm(
           t(
-            `${response.total_requiring_confirmation} destructive fixes require confirmation. Apply them now?`,
-            `${response.total_requiring_confirmation} 件の破壊的修正には確認が必要です。今すぐ適用しますか？`
+            `${response.total_requiring_confirmation} fixes delete a feature or fill a hole. Apply them too?`,
+            `${response.total_requiring_confirmation} 件の修正はフィーチャーの削除または穴埋めを行います。これらも適用しますか？`
           )
         );
-        if (confirmed) {
-          const confirmedResponse = await autofixSession(sessionId, true);
-          totalFixed += confirmedResponse.total_fixed;
-          applyPostValidationState(confirmedResponse.revalidation);
-        } else {
-          applyPostValidationState(response.revalidation);
+        if (!confirmed) return { validation: response.revalidation, undo: response.undo };
+        const all = await autofixSession(sessionId!, true);
+        return { validation: all.revalidation, undo: composeUndo(response.undo, all.undo) };
+      },
+      { en: "automatic fixes applied", ja: "自動修正を適用" },
+      { en: "Auto-fix failed", ja: "自動修正に失敗しました" }
+    );
+
+  const resolveOverlapPair = (keepFeatureId: string, clipFeatureId: string) => {
+    const kept = nameOf(keepFeatureId);
+    return applyFix(
+      async () => {
+        const response = await resolveSessionUnitOverlap(sessionId!, keepFeatureId, clipFeatureId);
+        if (response.deleted_count > 0) {
+          setSelectedFeatureIds(selectedFeatureIds.filter((item) => item !== clipFeatureId));
         }
-      } else {
-        applyPostValidationState(response.revalidation);
-      }
-      await loadFeatures();
-      pushToast({
-        title: t("Auto-fix completed", "自動修正が完了しました"),
-        description: t(`${totalFixed} issue(s) fixed automatically.`, `${totalFixed} 件を自動修正しました。`),
-        variant: "success"
-      });
-    } catch (caught) {
-      captureError(caught, t("Auto-fix failed", "自動修正に失敗しました"), t("Auto-fix failed", "自動修正失敗"));
-    } finally {
-      setAutofixing(false);
-    }
+        return response;
+      },
+      { en: `overlap resolved — kept ${kept.en}`, ja: `重なりを解消 — ${kept.ja}を残す` },
+      { en: "Failed to resolve overlap", ja: "重なりの解消に失敗しました" }
+    );
   };
 
-  const resolveOverlapPair = async (keepFeatureId: string, clipFeatureId: string) => {
-    if (!sessionId) {
-      return;
-    }
-    setOverlapResolving(true);
-    setError(null);
-    try {
-      const response = await resolveSessionUnitOverlap(sessionId, keepFeatureId, clipFeatureId);
-      applyPostValidationState(response.validation);
-      await loadFeatures();
-      if (response.deleted_count > 0) {
-        setSelectedFeatureIds(selectedFeatureIds.filter((item) => item !== clipFeatureId));
-      }
-      pushToast({
-        title: t("Overlap resolved", "重なりを解消しました"),
-        description: t(
-          `${response.resolved_pairs} overlap pair resolved.`,
-          `${response.resolved_pairs} 件の重なりを解消しました。`
-        ),
-        variant: "success"
-      });
-    } catch (caught) {
-      captureError(caught, t("Failed to resolve overlap", "重なりの解消に失敗しました"), t("Overlap fix failed", "重なり修正失敗"));
-    } finally {
-      setOverlapResolving(false);
-    }
+  const handleSnapOpening = (openingId: string, unitId: string) => {
+    const unit = nameOf(unitId);
+    return applyFix(
+      () => snapOpening(sessionId!, openingId, unitId),
+      { en: `door snapped to ${unit.en}`, ja: `開口部を${unit.ja}にスナップ` },
+      { en: "Failed to snap opening", ja: "開口部のスナップに失敗しました" }
+    );
   };
 
-  const handleSnapOpening = async (openingId: string, unitId: string) => {
-    if (!sessionId) {
-      return;
-    }
-    setOpeningSnapping(true);
-    setError(null);
-    try {
-      const response = await snapOpening(sessionId, openingId, unitId);
-      applyPostValidationState(response.validation);
-      await loadFeatures();
-      pushToast({
-        title: t("Opening snapped", "開口部をスナップしました"),
-        description: t("Opening moved to unit boundary.", "開口部をユニット境界に移動しました。"),
-        variant: "success"
-      });
-    } catch (caught) {
-      captureError(caught, t("Failed to snap opening", "開口部のスナップに失敗しました"), t("Snap failed", "スナップ失敗"));
-    } finally {
-      setOpeningSnapping(false);
-    }
-  };
-
-  const resolveSafeOverlaps = async () => {
-    if (!sessionId) {
-      return;
-    }
-    setOverlapResolving(true);
-    setError(null);
-    try {
-      const response = await resolveSessionUnitOverlapsSafe(sessionId);
-      applyPostValidationState(response.validation);
-      await loadFeatures();
-      pushToast({
-        title: t("Safe overlap fix complete", "安全な重なり修正が完了しました"),
-        description: t(
-          `${response.resolved_pairs} resolved, ${response.skipped_count} need review.`,
-          `${response.resolved_pairs} 件解消、${response.skipped_count} 件は確認が必要です。`
-        ),
-        variant: response.skipped_count > 0 ? "info" : "success"
-      });
-    } catch (caught) {
-      captureError(
-        caught,
-        t("Failed to apply safe overlap fix", "安全な重なり修正の適用に失敗しました"),
-        t("Overlap fix failed", "重なり修正失敗")
-      );
-    } finally {
-      setOverlapResolving(false);
-    }
-  };
+  const resolveSafeOverlaps = () =>
+    applyFix(
+      async () => {
+        const response = await resolveSessionUnitOverlapsSafe(sessionId!);
+        if (response.skipped_count > 0) {
+          pushToast({
+            title: t(`${response.skipped_count} overlaps need your choice`, `${response.skipped_count} 件の重なりは選択が必要です`),
+            variant: "info"
+          });
+        }
+        return response;
+      },
+      { en: "clear-cut overlaps trimmed", ja: "はっきりした重なりを解消" },
+      { en: "Failed to apply safe overlap fix", ja: "安全な重なり修正の適用に失敗しました" }
+    );
 
   const hasGeoPackageSources = useMemo(
     () => files.some((item) => item.source_format === "gpkg"),
@@ -1178,6 +1218,7 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
       if (event.key === "Escape" && !isFormTarget(event.target)) {
         event.preventDefault();
         clearSelectedFeatureIds();
+        setFocus(null);
         if (exportDialogOpen) {
           setExportDialogOpen(false);
         }
@@ -1236,26 +1277,62 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
     validation
   ]);
 
-  const exportButtonRef = useRef<HTMLButtonElement>(null);
-  const exportBusy = exporting || validating || loading;
+  const exportBusy = exporting || validating || loading || fixing;
   usePrimaryAction({
-    label: exporting ? t("Exporting...", "エクスポート中...") : t("Export", "エクスポート"),
+    label: exporting ? t("Exporting...", "エクスポート中...") : t("Deliver", "書き出し"),
     run: () => void openExportDialog(),
     disabledReason: exportBusy ? t("Wait for the current task to finish", "処理の完了をお待ちください") : null,
     busy: exportBusy,
-    blockers: validation?.summary.error_count || null,
-    anchor: exportButtonRef
+    blockers: validation?.summary.error_count || null
   });
   usePageShell({
     current: exportDialogOpen && validation !== null ? "deliver" : null,
     targets: ["deliver"],
     go: { deliver: () => void openExportDialog() },
-    checkErrors: validation ? validation.summary.error_count : null
+    checkErrors: validation ? validation.summary.error_count : null,
+    checkWarnings: validation ? validation.summary.warning_count : null
   });
 
-  // ─── Layout ───────────────────────────────────────────────────────────
-
-  const sidebarWidth = sidebarCollapsed ? 0 : 340;
+  const language = wizardState?.project?.language ?? "en";
+  const focusGroup = focus ? findGroup(checkView, focus.key) : undefined;
+  const focusAnchor = activeIssue ? issueAnchor(activeIssue, featuresById) : null;
+  const focusNumber = focusGroup?.mustFix ? checkView.mustFix.indexOf(focusGroup) + 1 : null;
+  const issuePin =
+    activeIssue && focusAnchor
+      ? {
+          lngLat: focusAnchor,
+          content: (
+            <span
+              aria-hidden="true"
+              className={cn(
+                "flex h-[26px] w-[26px] items-center justify-center rounded-full border-2 border-card text-xs font-semibold shadow",
+                focusNumber === null ? "bg-warning text-card" : "bg-destructive text-destructive-foreground"
+              )}
+            >
+              {focusNumber ?? "!"}
+            </span>
+          )
+        }
+      : null;
+  const issuePopover =
+    activeIssue && focus && focusGroup ? (
+      <div className="absolute right-5 top-[76px] z-10 max-h-[calc(100%-120px)] overflow-y-auto rounded-2xl">
+        <IssuePopover
+          issue={activeIssue}
+          number={focusNumber}
+          position={{ index: focus.index, count: focusGroup.issues.length }}
+          featuresById={featuresById}
+          language={language}
+          busy={fixing}
+          onStep={(delta) => openIssue({ key: focus.key, index: focus.index + delta })}
+          onClose={() => setFocus(null)}
+          onKeep={(keep, trim) => void resolveOverlapPair(keep, trim)}
+          onFixClearOverlaps={() => void resolveSafeOverlaps()}
+          onSnap={(opening, unit) => void handleSnapOpening(opening, unit)}
+          onEdit={(featureId) => setSelectedFeatureIds([featureId])}
+        />
+      </div>
+    ) : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
@@ -1265,104 +1342,174 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
         </div>
       ) : null}
 
-      {/* Main area: left sidebar + map + right sidebar */}
       <div className="flex flex-1 overflow-hidden">
-        {/* ── Left sidebar: Features / Layers ── */}
-        {/* Both used to be stacked in one scroller, so the layer panel ate the
-            top 300px and the feature list — the thing you came here to work
-            through — started below the fold. */}
-        {!sidebarCollapsed ? (
-          <aside
-            className="flex flex-col border-r border-border bg-card"
-            style={{ width: sidebarWidth, minWidth: sidebarWidth }}
+        {railHidden ? null : (
+          <CheckRail
+            view={checkView}
+            validated={validation !== null}
+            checking={validating}
+            busy={fixing || validating}
+            done={done}
+            focusKey={focus?.key ?? null}
+            featuresById={featuresById}
+            language={language}
+            onFocus={(key) => openIssue(focus?.key === key ? focus : { key, index: 0 })}
+            onUndo={(entry) => void undoFix(entry)}
+            onCheckAgain={() => void runValidation()}
+            onAutoFix={() => void runAutofix()}
+            onHide={() => setRailHidden(true)}
           >
-            <Tabs
-              value={sidebarTab}
-              onValueChange={setSidebarTab}
-              className="flex min-h-0 flex-1 flex-col"
-            >
-              <TabsList className="mx-3 mt-3 grid grid-cols-2">
-                <TabsTrigger value="features">
-                  {t("Features", "フィーチャー")}
-                </TabsTrigger>
-                <TabsTrigger value="layers">{t("Layers", "レイヤー")}</TabsTrigger>
-              </TabsList>
+            {importProfile === "imdf_shapefile" ? (
+              <VenueDetailsPanel
+                venue={venueFeature}
+                building={buildingFeature}
+                address={addressFeature}
+                language={language}
+                onSave={(featureId, properties) => void saveFeatureProperties(featureId, properties)}
+                onRequestAutofill={requestAddressAutofill}
+              />
+            ) : null}
+          </CheckRail>
+        )}
 
-              <TabsContent
-                value="features"
-                className="flex min-h-0 flex-1 flex-col data-[state=active]:mt-3"
-              >
-                {importProfile === "imdf_shapefile" ? (
-                  <VenueDetailsPanel
-                    venue={venueFeature}
-                    building={buildingFeature}
-                    address={addressFeature}
-                    language={wizardState?.project?.language ?? "en"}
-                    onSave={(featureId, properties) => void saveFeatureProperties(featureId, properties)}
-                    onRequestAutofill={requestAddressAutofill}
-                  />
-                ) : null}
-
-                {loading ? (
-                  <div className="flex flex-col gap-2 p-3">
-                    <SkeletonBlock className="h-6 w-full" />
-                    <SkeletonBlock className="h-6 w-full" />
-                    <SkeletonBlock className="h-6 w-full" />
-                    <SkeletonBlock className="h-6 w-full" />
-                    <SkeletonBlock className="h-6 w-full" />
-                  </div>
-                ) : (
-                  <>
-                    {filters.status ? (
-                      <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs leading-4 text-muted-foreground">
-                        <span>
-                          {t("Showing", "表示中")}:{" "}
-                          <span className="font-medium capitalize text-foreground">{filters.status}</span>
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="ml-auto h-auto px-1.5 py-0.5 text-xs font-normal"
-                          onClick={() => setFilters({ ...filters, status: undefined })}
-                        >
-                          {t("Clear", "解除")}
-                        </Button>
-                      </div>
-                    ) : null}
-                    <FeatureList
-                      features={filteredFeatures}
-                      selectedFeatureIds={selectedFeatureIds}
-                      validationIssues={allValidationIssues}
-                      onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
-                      onSelectionChange={(ids) => setSelectedFeatureIds(ids)}
-                    />
-                  </>
-                )}
-              </TabsContent>
-
-              <TabsContent
-                value="layers"
-                className="min-h-0 flex-1 overflow-y-auto p-3 data-[state=active]:mt-1"
-              >
-                <LayerTree
-                  featureTypes={layerKeys}
+        {/* The map stays mounted behind the table rather than unmounting on
+            every view switch: rebuilding a MapLibre instance throws away the
+            tiles, the camera and the fitted bounds. */}
+        <div className="relative min-w-0 flex-1">
+          {/* Hidden with opacity rather than `visibility` or `display`: a
+              descendant can override `visibility` — MapLibre's attribution
+              control does, and the © OpenStreetMap pill floated over the
+              table — and `display: none` makes the map lose its size, which
+              means a resize on every switch back. Opacity does neither. */}
+          <div
+            className={cn(
+              "absolute inset-0 transition-opacity",
+              mainView === "table" && "pointer-events-none opacity-0"
+            )}
+            aria-hidden={mainView === "table"}
+          >
+            {loading && !loadedOnce ? (
+              <div className="flex h-full items-center justify-center bg-muted">
+                <SkeletonBlock className="h-full w-full" />
+              </div>
+            ) : (
+              <ErrorBoundary>
+                <MapPanel
+                  features={features}
+                  selectedFeatureIds={selectedFeatureIds}
                   layerVisibility={layerVisibility}
-                  floorFilter={mapFloorFilter ?? ""}
-                  floorOptions={floorOptions}
-                  validationLoaded={validation !== null}
+                  validationIssues={allValidationIssues}
                   overlayVisibility={overlayVisibility}
+                  visibleLevelIds={visibleLevelIds}
                   showBasemap={showBasemap}
-                  onLayerVisibilityChange={setLayerVisibility}
-                  onFloorFilterChange={setMapFloorFilter}
-                  onOverlayVisibilityChange={setOverlayVisibility}
-                  onShowBasemapChange={setShowBasemap}
+                  activeIssue={activeIssue}
+                  pin={issuePin}
+                  onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
                 />
-              </TabsContent>
-            </Tabs>
+              </ErrorBoundary>
+            )}
+            {floorOptions.length > 0 ? (
+              <FloorSwitcher
+                floors={floorOptions}
+                value={mapFloorFilter ?? ""}
+                mustFix={floorsWithIssues.must}
+                canWait={floorsWithIssues.wait}
+                onChange={setMapFloorFilter}
+              />
+            ) : null}
+            {issuePopover}
+          </div>
 
-            {/* Bulk actions bar (when multiple selected) */}
+          {mainView === "table" ? (
+            <div className="absolute inset-0 flex flex-col gap-3 overflow-auto bg-muted px-3 pb-3 pt-[76px]">
+              <div className="flex items-end justify-between gap-3">
+                <FilterBar
+                  filters={filters}
+                  featureTypes={filterFeatureTypes}
+                  levels={levelOptions}
+                  categories={filterCategories}
+                  onChange={(next) => setFilters(next)}
+                />
+                <span className="shrink-0 pb-2 font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
+                  {filterCount > 0
+                    ? t(
+                        `${filteredFeatures.length} of ${features.length} features`,
+                        `${features.length} 件中 ${filteredFeatures.length} 件`
+                      )
+                    : t(`${features.length} features`, `${features.length} 件`)}
+                </span>
+              </div>
+              <TablePanel
+                features={filteredFeatures}
+                levelOptions={levelOptions}
+                issuesByFeature={issuesByFeature}
+                selectedFeatureIds={selectedFeatureIds}
+                onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
+                onSelectionChange={(ids) => setSelectedFeatureIds(ids)}
+              />
+            </div>
+          ) : null}
+
+          {railHidden ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn("absolute z-10 bg-card", mainView === "map" && floorOptions.length > 0 ? "bottom-8 left-5" : "left-5 top-5")}
+              onClick={() => setRailHidden(false)}
+            >
+              <PanelLeftOpen />
+              {checkView.blockers > 0
+                ? t(`To-do · ${checkView.blockers}`, `ToDo · ${checkView.blockers}`)
+                : t("To-do", "ToDo")}
+            </Button>
+          ) : null}
+
+          <MapToolbar
+            view={mainView}
+            onView={setMainView}
+            layers={LAYER_PILLS.filter(([key]) => layerKeys.includes(key)).map(([key, label]) => ({
+              key,
+              label: t(label.en, label.ja),
+              on: layerVisibility[key] ?? true
+            }))}
+            onToggleLayer={(key) => setLayerVisibility({ ...layerVisibility, [key]: !(layerVisibility[key] ?? true) })}
+            allLayers={
+              <LayerTree
+                featureTypes={layerKeys}
+                layerVisibility={layerVisibility}
+                validationLoaded={validation !== null}
+                overlayVisibility={overlayVisibility}
+                showBasemap={showBasemap}
+                onLayerVisibilityChange={setLayerVisibility}
+                onOverlayVisibilityChange={setOverlayVisibility}
+                onShowBasemapChange={setShowBasemap}
+              />
+            }
+          />
+        </div>
+
+        {/* ── Right sidebar: bulk actions and properties ── */}
+        {rightSidebarOpen && selectedFeature ? (
+          <aside
+            className="flex flex-col overflow-y-auto border-l border-border bg-card"
+            style={{ width: 340, minWidth: 340 }}
+          >
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
+              <span className="text-[13px] font-semibold leading-[18px] text-foreground">
+                {t("Properties", "プロパティ")}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                aria-label={t("Close properties", "プロパティを閉じる")}
+                onClick={() => setRightSidebarOpen(false)}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
             {selectedFeatureIds.length > 1 ? (
-              <div className="shrink-0 border-t border-border bg-muted p-2.5">
+              <div className="shrink-0 border-b border-border bg-muted p-2.5">
                 <div className="mb-2 font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
                   {selectedFeatureIds.length} {t("selected", "選択中")}
                 </div>
@@ -1436,161 +1583,37 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
                 </div>
               </div>
             ) : null}
-          </aside>
-        ) : null}
-
-        {/* ── Main area: map or table ── */}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-3 py-1.5">
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => setSidebarCollapsed((prev) => !prev)}
-                aria-label={sidebarCollapsed ? t("Show sidebar", "サイドバーを表示") : t("Hide sidebar", "サイドバーを非表示")}
-                title={sidebarCollapsed ? t("Show sidebar", "サイドバーを表示") : t("Hide sidebar", "サイドバーを非表示")}
-              >
-                <PanelLeft />
-              </Button>
-              <div
-                role="group"
-                aria-label={t("View", "表示")}
-                className="inline-flex gap-0.5 rounded-md bg-muted p-1"
-              >
-                {([
-                  ["map", t("Map", "地図")],
-                  ["table", t("Table", "表")]
-                ] as const).map(([view, label]) => (
-                  <button
-                    key={view}
-                    type="button"
-                    aria-pressed={mainView === view}
-                    onClick={() => setMainView(view)}
-                    className={cn(
-                      "rounded-sm px-3 py-1 text-[13px] font-medium leading-[18px] transition-colors",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      mainView === view
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <span className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
-              {filterCount > 0
-                ? t(
-                    `${filteredFeatures.length} of ${features.length} features`,
-                    `${features.length} 件中 ${filteredFeatures.length} 件`
-                  )
-                : t(`${features.length} features`, `${features.length} 件`)}
-            </span>
-          </div>
-
-          {/* The map stays mounted behind the table rather than unmounting on
-              every view switch: rebuilding a MapLibre instance throws away the
-              tiles, the camera and the fitted bounds. */}
-          <div className="relative min-h-0 flex-1">
-            {/* Hidden with opacity rather than `visibility` or `display`: a
-                descendant can override `visibility` — MapLibre's attribution
-                control does, and the © OpenStreetMap pill floated over the
-                table — and `display: none` makes the map lose its size, which
-                means a resize on every switch back. Opacity does neither. */}
-            <div
-              className={cn(
-                "absolute inset-0 transition-opacity",
-                mainView === "table" && "pointer-events-none opacity-0"
-              )}
-              aria-hidden={mainView === "table"}
-            >
-              {loading ? (
-                <div className="flex h-full items-center justify-center bg-muted">
-                  <SkeletonBlock className="h-full w-full" />
-                </div>
-              ) : (
-                <ErrorBoundary>
-                  <MapPanel
-                    features={features}
-                    selectedFeatureIds={selectedFeatureIds}
-                    layerVisibility={layerVisibility}
-                    validationIssues={allValidationIssues}
-                    overlayVisibility={overlayVisibility}
-                    visibleLevelIds={visibleLevelIds}
-                    showBasemap={showBasemap}
-                    activeIssue={activeIssue}
-                    onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
-                  />
-                </ErrorBoundary>
-              )}
-            </div>
-
-            {mainView === "table" ? (
-              <div className="absolute inset-0 flex flex-col gap-3 overflow-auto bg-muted p-3">
-                <FilterBar
-                  filters={filters}
-                  featureTypes={filterFeatureTypes}
-                  levels={levelOptions}
-                  categories={filterCategories}
-                  onChange={(next) => setFilters(next)}
-                />
-                <TablePanel
-                  features={filteredFeatures}
-                  levelOptions={levelOptions}
-                  issuesByFeature={issuesByFeature}
-                  selectedFeatureIds={selectedFeatureIds}
-                  onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
-                  onSelectionChange={(ids) => setSelectedFeatureIds(ids)}
-                />
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        {/* ── Right sidebar: Properties ── */}
-        {rightSidebarOpen && selectedFeature ? (
-          <aside
-            className="flex flex-col border-l border-border bg-card overflow-y-auto"
-            style={{ width: 340, minWidth: 340 }}
-          >
-            <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
-              <span className="text-[13px] font-semibold leading-[18px] text-foreground">
-                {t("Properties", "プロパティ")}
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                aria-label={t("Close properties", "プロパティを閉じる")}
-                onClick={() => setRightSidebarOpen(false)}
-              >
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            </div>
             <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3">
               {selectedFeatureIssues.length > 0 ? (
-                <IssuesPanel
-                  issues={selectedFeatureIssues}
-                  activeIndex={activeIssueIndex}
-                  collapsed={issuesPanelCollapsed}
-                  feature={selectedFeature}
-                  allFeatures={features}
-                  autoFixing={autofixing}
-                  overlapResolving={overlapResolving}
-                  openingSnapping={openingSnapping}
-                  onSelectIssue={setActiveIssueIndex}
-                  onToggleCollapsed={() => setIssuesPanelCollapsed((prev) => !prev)}
-                  onAutoFixSafe={() => void runAutofix(false)}
-                  onResolveUnitOverlap={(keepFeatureId, clipFeatureId) => void resolveOverlapPair(keepFeatureId, clipFeatureId)}
-                  onSnapOpening={(openingId, unitId) => void handleSnapOpening(openingId, unitId)}
-                />
+                <section aria-label={t("Issues on this feature", "このフィーチャーの問題")} className="flex flex-col gap-1.5">
+                  <h3 className="font-mono text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
+                    {t("Issues on this feature", "このフィーチャーの問題")}
+                  </h3>
+                  {selectedFeatureIssues.map((issue, index) => {
+                    const copy = issueCopy(issue.check);
+                    const where = locateIssue(checkView, issue);
+                    return (
+                      <button
+                        key={`${issue.check}-${index}`}
+                        type="button"
+                        disabled={!where}
+                        onClick={() => where && openIssue(where)}
+                        className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-left text-xs hover:bg-muted disabled:cursor-default"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={cn("h-2 w-2 shrink-0 rounded-full", issue.severity === "error" ? "bg-destructive" : "bg-warning")}
+                        />
+                        <span className="min-w-0 flex-1 text-foreground">{t(copy.title.en, copy.title.ja)}</span>
+                        {where ? <span className="shrink-0 text-primary">{t("Open →", "開く →")}</span> : null}
+                      </button>
+                    );
+                  })}
+                </section>
               ) : null}
               <PropertiesPanel
                 feature={selectedFeature}
-                language={wizardState?.project?.language ?? "en"}
+                language={language}
                 levelOptions={levelOptions}
                 addressOptions={addressOptions}
                 featureTypes={featureTypes}
@@ -1601,21 +1624,6 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
           </aside>
         ) : null}
       </div>
-
-      {/* Validation bar */}
-      <ValidationBar
-        validation={validation}
-        validating={validating}
-        autofixing={autofixing}
-        overlapResolving={overlapResolving}
-        exporting={exporting}
-        loading={loading}
-        onValidate={() => void runValidation()}
-        onAutoFix={() => void runAutofix(false)}
-        onFixOverlaps={() => void resolveSafeOverlaps()}
-        onExport={() => void openExportDialog()}
-        exportButtonRef={exportButtonRef}
-      />
 
       {/* Export dialog */}
       {/* Was a hand-rolled fixed overlay: no focus trap, no escape-to-close and
