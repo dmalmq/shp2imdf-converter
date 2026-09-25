@@ -292,6 +292,13 @@ class ConversionStore:
         summaries.sort(key=lambda item: (-item.last_used_at, item.conversion_id))
         return summaries
 
+    def summary(self, conversion_id: str) -> ConversionSummary:
+        """One entry's summary, read as ``list_summaries`` reads it: no touch, no discard."""
+        summary = self._summarise(self._directory_for(conversion_id))
+        if summary is None:
+            raise ConversionExpiredError(_UNAVAILABLE)
+        return summary
+
     def _summarise(self, directory: Path) -> ConversionSummary | None:
         try:
             payload = json.loads((directory / _META_NAME).read_text(encoding="utf-8"))
