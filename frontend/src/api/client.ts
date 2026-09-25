@@ -295,8 +295,8 @@ export type BulkFeaturePatchRequest = {
   properties?: Record<string, unknown>;
   merge_name?: string | null;
   feature_type?: string;
-  /** `restore` only: the features to put back, replacing any with the same id. */
-  features?: Record<string, unknown>[];
+  /** `restore` only: the undo a fix returned, sent back unchanged. */
+  undo?: FeatureUndo;
 };
 
 export type BulkFeaturePatchResponse = {
@@ -307,10 +307,16 @@ export type BulkFeaturePatchResponse = {
   validation?: ValidationResponse | null;
 };
 
-/** What puts back a fix: drop `remove_ids` and the ids in `features`, then restore `features`. */
+/**
+ * What puts back a fix: drop `remove_ids` and the ids in `features`, then
+ * restore `features`. The server refuses it (409 UNDO_STALE) once anything
+ * the fix touched has changed, which `fingerprints` records.
+ */
 export type FeatureUndo = {
   remove_ids: string[];
   features: Record<string, unknown>[];
+  fingerprints: Record<string, string>;
+  digest: string;
 };
 
 export type ValidationIssue = {
@@ -820,11 +826,7 @@ export async function fetchStoredValidation(sessionId: string): Promise<Validati
 }
 
 export async function restoreSessionFeatures(sessionId: string, undo: FeatureUndo): Promise<ValidationResponse> {
-  const response = await patchSessionFeaturesBulk(sessionId, {
-    action: "restore",
-    feature_ids: undo.remove_ids,
-    features: undo.features
-  });
+  const response = await patchSessionFeaturesBulk(sessionId, { action: "restore", feature_ids: [], undo });
   if (!response.validation) throw new Error("Restore returned no validation");
   return response.validation;
 }

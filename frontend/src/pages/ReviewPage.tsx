@@ -49,11 +49,11 @@ import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
 import { type ReviewFeature, featureLayerKey, featureName, layerKeyBaseType, orderedLayerKeys } from "../components/review/types";
+import { isApiClientError } from "../api/errors";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import {
   buildCheckView,
-  composeUndo,
   featureLabel,
   findGroup,
   focusedIssue,
@@ -332,6 +332,7 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
   const [fixing, setFixing] = useState(false);
   const [focus, setFocus] = useState<Focus | null>(null);
   const [done, setDone] = useState<DoneFix[]>([]);
+  const [checksStale, setChecksStale] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("imdf");
@@ -554,6 +555,7 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
         featureId,
         featureType ? { properties, feature_type: featureType } : { properties }
       );
+      afterEdit();
       const nextFeature: ReviewFeature = {
         type: updated.type,
         id: updated.id,
@@ -604,6 +606,7 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
     }
     try {
       await deleteSessionFeature(sessionId, featureId);
+      afterEdit();
       setFeatures((prev) => prev.filter((item) => item.id !== featureId));
       setSelectedFeatureIds(selectedFeatureIds.filter((id) => id !== featureId));
       pushToast({ title: t("Feature deleted", "フィーチャーを削除しました"), variant: "success" });
@@ -624,6 +627,7 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
           level_id: bulkLevel
         }
       });
+      afterEdit();
       await loadFeatures();
       pushToast({
         title: t("Bulk update applied", "一括更新を適用しました"),
@@ -647,6 +651,7 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
           category: bulkCategory
         }
       });
+      afterEdit();
       await loadFeatures();
       pushToast({
         title: t("Bulk update applied", "一括更新を適用しました"),
@@ -670,6 +675,7 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
         action: "patch",
         feature_type: targetType
       });
+      afterEdit();
       const rows = await loadFeatures();
       const reloaded =
         (sampleId ? rows.find((item) => item.id === sampleId) : undefined) ??
@@ -702,6 +708,7 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
         action: "merge_units",
         merge_name: mergeName || null
       });
+      afterEdit();
       clearSelectedFeatureIds();
       await loadFeatures();
       pushToast({ title: t("Units merged", "ユニットを結合しました"), variant: "success" });
@@ -722,6 +729,7 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
         feature_ids: selectedFeatureIds,
         action: "delete"
       });
+      afterEdit();
       clearSelectedFeatureIds();
       await loadFeatures();
       pushToast({ title: t("Selection deleted", "選択項目を削除しました"), variant: "success" });
@@ -814,7 +822,14 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
     setFocus(next);
   };
 
+  /** Any edit that is not a fix: the stored checks no longer describe the project, and undoing a fix could undo it. */
+  const afterEdit = () => {
+    setChecksStale(true);
+    setDone((previous) => previous.map((entry) => ({ ...entry, stale: true })));
+  };
+
   const applyPostValidationState = (next: ValidationResponse) => {
+    setChecksStale(false);
     setValidation(next);
     setValidationResults({
       errors: next.summary.error_count,
@@ -894,7 +909,20 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
       setDone((previous) => previous.filter((item) => item.id !== entry.id));
       pushToast({ title: t(`Undone: ${entry.label.en}`, `元に戻しました：${entry.label.ja}`), variant: "success" });
     } catch (caught) {
-      captureError(caught, t("Undo failed", "元に戻せませんでした"), t("Undo failed", "元に戻せませんでした"));
+      if (isApiClientError(caught) && (caught.code === "UNDO_STALE" || caught.code === "UNDO_INVALID")) {
+        setDone((previous) => previous.filter((item) => item.id !== entry.id));
+        setChecksStale(true);
+        pushToast({
+          title: t("Can’t undo — changed since", "元に戻せません — その後に変更されています"),
+          description: t(
+            `Something the fix touched was edited after it (${entry.label.en}), so undoing it would overwrite that edit.`,
+            `修正（${entry.label.ja}）の後に対象が編集されたため、元に戻すとその編集を上書きしてしまいます。`
+          ),
+          variant: "info"
+        });
+      } else {
+        captureError(caught, t("Undo failed", "元に戻せませんでした"), t("Undo failed", "元に戻せませんでした"));
+      }
     } finally {
       setFixing(false);
     }
@@ -902,24 +930,38 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
 
   const nameOf = (id: string) => featureLabel(featuresById.get(id), wizardState?.project?.language ?? "en");
 
-  const runAutofix = () =>
-    applyFix(
+  /** Safe fixes first; the ones that delete or fill are asked about and recorded as a fix of their own. */
+  const runAutofix = async () => {
+    let prompted = 0;
+    const failure = { en: "Auto-fix failed", ja: "自動修正に失敗しました" };
+    await applyFix(
       async () => {
         const response = await autofixSession(sessionId!, false);
-        if (response.total_requiring_confirmation === 0) return { validation: response.revalidation, undo: response.undo };
-        const confirmed = window.confirm(
-          t(
-            `${response.total_requiring_confirmation} fixes delete a feature or fill a hole. Apply them too?`,
-            `${response.total_requiring_confirmation} 件の修正はフィーチャーの削除または穴埋めを行います。これらも適用しますか？`
-          )
-        );
-        if (!confirmed) return { validation: response.revalidation, undo: response.undo };
-        const all = await autofixSession(sessionId!, true);
-        return { validation: all.revalidation, undo: composeUndo(response.undo, all.undo) };
+        prompted = response.total_requiring_confirmation;
+        return { validation: response.revalidation, undo: response.undo };
       },
       { en: "automatic fixes applied", ja: "自動修正を適用" },
-      { en: "Auto-fix failed", ja: "自動修正に失敗しました" }
+      failure
     );
+    if (
+      prompted > 0 &&
+      window.confirm(
+        t(
+          `${prompted} fixes delete a feature or fill a hole. Apply them too?`,
+          `${prompted} 件の修正はフィーチャーの削除または穴埋めを行います。これらも適用しますか？`
+        )
+      )
+    ) {
+      await applyFix(
+        async () => {
+          const response = await autofixSession(sessionId!, true);
+          return { validation: response.revalidation, undo: response.undo };
+        },
+        { en: "features deleted or holes filled", ja: "フィーチャーの削除・穴埋め" },
+        failure
+      );
+    }
+  };
 
   const resolveOverlapPair = (keepFeatureId: string, clipFeatureId: string) => {
     const kept = nameOf(keepFeatureId);
@@ -1195,6 +1237,7 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
             : {})
         })
           .then((updated) => {
+            afterEdit();
             setFeatures((prev) =>
               prev.map((item) =>
                 item.id === updated.id
@@ -1283,14 +1326,14 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
     run: () => void openExportDialog(),
     disabledReason: exportBusy ? t("Wait for the current task to finish", "処理の完了をお待ちください") : null,
     busy: exportBusy,
-    blockers: validation?.summary.error_count || null
+    blockers: (!checksStale && validation?.summary.error_count) || null
   });
   usePageShell({
     current: exportDialogOpen && validation !== null ? "deliver" : null,
     targets: ["deliver"],
     go: { deliver: () => void openExportDialog() },
-    checkErrors: validation ? validation.summary.error_count : null,
-    checkWarnings: validation ? validation.summary.warning_count : null
+    checkErrors: validation && !checksStale ? validation.summary.error_count : null,
+    checkWarnings: validation && !checksStale ? validation.summary.warning_count : null
   });
 
   const language = wizardState?.project?.language ?? "en";
@@ -1347,6 +1390,7 @@ export function ReviewPage({ stage = "check" }: ReviewPageProps = {}) {
           <CheckRail
             view={checkView}
             validated={validation !== null}
+            stale={checksStale}
             checking={validating}
             busy={fixing || validating}
             done={done}

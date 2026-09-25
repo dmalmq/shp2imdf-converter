@@ -26,8 +26,8 @@ export type CheckView = {
 /** The issue open in the map popover: an index into one group. */
 export type Focus = { key: string; index: number };
 
-/** A fix made on this visit, with what undoes it. */
-export type DoneFix = { id: number; label: Bilingual; undo: FeatureUndo };
+/** A fix made on this visit, with what undoes it. `stale` once another edit was made here, so Undo is withdrawn. */
+export type DoneFix = { id: number; label: Bilingual; undo: FeatureUndo; stale?: boolean };
 
 export const EMPTY_VIEW: CheckView = { mustFix: [], canWait: [], blockers: 0, warnings: 0, autoFixable: 0 };
 
@@ -135,17 +135,9 @@ function touchedIds(undo: FeatureUndo): Set<string> {
   return new Set([...undo.remove_ids, ...undo.features.map((feature) => String(feature.id))]);
 }
 
-/** One undo for two fixes run back to back: a feature the first touched goes back to how it was before the first. */
-export function composeUndo(first: FeatureUndo, second: FeatureUndo): FeatureUndo {
-  const earlier = touchedIds(first);
-  return {
-    remove_ids: [...new Set([...first.remove_ids, ...second.remove_ids])],
-    features: [...first.features, ...second.features.filter((feature) => !earlier.has(String(feature.id)))]
-  };
-}
-
 /** Undo is offered only while no later fix touched the same features, so undoing cannot drop a later one. */
 export function undoable(done: DoneFix[], entry: DoneFix): boolean {
+  if (entry.stale) return false;
   const ids = touchedIds;
   const mine = ids(entry.undo);
   return done
@@ -182,6 +174,12 @@ export function areaSquareMetres(geometry: unknown): number {
     const latitude = outer[0][1];
     return total + ringArea(outer, latitude) - holes.reduce((sum, hole) => sum + ringArea(hole, latitude), 0);
   }, 0);
+}
+
+/** Whether trimming `trimmed` by the overlap leaves nothing, so the fix deletes it (the server's own test is an empty difference). */
+export function trimRemoves(overlapGeometry: unknown, trimmed: ReviewFeature | undefined): boolean {
+  const whole = areaSquareMetres(trimmed?.geometry);
+  return whole > 0 && areaSquareMetres(overlapGeometry) >= whole * 0.999;
 }
 
 function points(value: unknown, out: number[][]): void {

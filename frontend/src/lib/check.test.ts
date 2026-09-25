@@ -1,7 +1,7 @@
 import type { ValidationIssue, ValidationResponse } from "../api/client";
 import type { FloorGroup } from "../components/review/floorGroups";
 import type { ReviewFeature } from "../components/review/types";
-import { areaSquareMetres, buildCheckView, composeUndo, locateIssue, refocus, undoable, type DoneFix } from "./check";
+import { areaSquareMetres, buildCheckView, locateIssue, refocus, trimRemoves, undoable, type DoneFix } from "./check";
 import { issueCopy } from "./checkCopy";
 
 const issue = (check: string, severity: "error" | "warning", feature_id: string, related_feature_id?: string): ValidationIssue => ({
@@ -69,20 +69,30 @@ test("after a fix the popover stays on the check, or closes when none are left",
 });
 
 test("a fix can be undone only while no later fix touched the same features", () => {
-  const first: DoneFix = { id: 1, label: { en: "", ja: "" }, undo: { remove_ids: [], features: [{ id: "a" }] } };
-  const later: DoneFix = { id: 2, label: { en: "", ja: "" }, undo: { remove_ids: ["a"], features: [] } };
-  const unrelated: DoneFix = { id: 2, label: { en: "", ja: "" }, undo: { remove_ids: [], features: [{ id: "b" }] } };
+  const undo = (remove_ids: string[], ids: string[]) => ({
+    remove_ids,
+    features: ids.map((id) => ({ id })),
+    fingerprints: {},
+    digest: ""
+  });
+  const first: DoneFix = { id: 1, label: { en: "", ja: "" }, undo: undo([], ["a"]) };
+  const later: DoneFix = { id: 2, label: { en: "", ja: "" }, undo: undo(["a"], []) };
+  const unrelated: DoneFix = { id: 2, label: { en: "", ja: "" }, undo: undo([], ["b"]) };
   expect(undoable([first, later], first)).toBe(false);
   expect(undoable([first, later], later)).toBe(true);
   expect(undoable([first, unrelated], first)).toBe(true);
+  expect(undoable([{ ...first, stale: true }], { ...first, stale: true })).toBe(false);
 });
 
-test("two fixes in a row undo to the state before the first", () => {
-  const undo = composeUndo(
-    { remove_ids: ["new"], features: [{ id: "a", v: 0 }] },
-    { remove_ids: ["b"], features: [{ id: "a", v: 1 }, { id: "new" }, { id: "b", v: 0 }] }
-  );
-  expect(undo).toEqual({ remove_ids: ["new", "b"], features: [{ id: "a", v: 0 }, { id: "b", v: 0 }] });
+test("keeping one of two spaces removes the other when it lies wholly inside the overlap", () => {
+  const side = 10 / 111_320;
+  const box = (x: number, width: number) => ({
+    type: "Polygon",
+    coordinates: [[[x, 0], [x + width, 0], [x + width, side], [x, side], [x, 0]]]
+  });
+  const inner: ReviewFeature = { type: "Feature", id: "b", feature_type: "unit", geometry: box(139, side), properties: {} };
+  expect(trimRemoves(box(139, side), inner)).toBe(true);
+  expect(trimRemoves(box(139, side / 2), inner)).toBe(false);
 });
 
 test("overlap area is in square metres", () => {

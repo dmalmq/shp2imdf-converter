@@ -12,6 +12,8 @@ type Props = {
   view: CheckView;
   /** False until a validation has been read or run. */
   validated: boolean;
+  /** An edit was made since the last check, so the counts may be out of date. */
+  stale: boolean;
   checking: boolean;
   busy: boolean;
   done: DoneFix[];
@@ -53,6 +55,7 @@ function Progress({ fixed, left }: { fixed: number; left: number }) {
 export function CheckRail({
   view,
   validated,
+  stale,
   checking,
   busy,
   done,
@@ -100,7 +103,14 @@ export function CheckRail({
         </Button>
       </div>
 
-      {validated ? (
+      {validated && stale ? (
+        <p role="status" className="rounded-[10px] bg-warning-surface p-2.5 text-xs leading-[1.45] text-warning-foreground">
+          {t(
+            "Changed since the last check. Check again to bring the list up to date.",
+            "前回のチェックの後に変更がありました。もう一度チェックしてリストを更新してください。"
+          )}
+        </p>
+      ) : validated ? (
         <Progress fixed={done.length} left={view.blockers} />
       ) : (
         <p className="text-xs text-muted-foreground">
@@ -108,7 +118,7 @@ export function CheckRail({
         </p>
       )}
 
-      <Button variant="outline" size="sm" className="self-start" disabled={checking || busy} onClick={onCheckAgain}>
+      <Button variant={stale ? "default" : "outline"} size="sm" className="self-start" disabled={checking || busy} onClick={onCheckAgain}>
         {checking ? t("Checking…", "チェック中…") : t("Check again", "もう一度チェック")}
       </Button>
 
@@ -184,6 +194,8 @@ export function CheckRail({
                   >
                     {t("Undo", "元に戻す")}
                   </button>
+                ) : entry.stale ? (
+                  <span className="shrink-0 text-[11px] text-muted-foreground">{t("Edited since", "その後に編集")}</span>
                 ) : null}
               </li>
             ))}
@@ -211,7 +223,11 @@ export function CheckRail({
               return (
                 <li key={group.key} className="flex items-center gap-2">
                   <span className="min-w-0 flex-1 text-[12.5px] text-foreground/80">
-                    <span className="mr-1.5 font-mono text-[11px] text-muted-foreground">{group.issues.length}</span>
+                    <span className="mr-1.5 font-mono text-[11px] text-muted-foreground">
+                      {group.check === "overlapping_units"
+                        ? t(`${group.issues.length} pairs`, `${group.issues.length} 組`)
+                        : group.issues.length}
+                    </span>
                     {t(copy.title.en, copy.title.ja)}
                   </span>
                   <button

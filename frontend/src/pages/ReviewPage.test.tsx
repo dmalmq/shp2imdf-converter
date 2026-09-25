@@ -20,6 +20,7 @@ import {
   type WizardState,
   validateSession
 } from "../api/client";
+import { ApiClientError } from "../api/errors";
 import { ToastProvider } from "../components/shared/ToastProvider";
 import { AppShell } from "../components/shell/AppShell";
 import { useAppStore } from "../store/useAppStore";
@@ -540,6 +541,8 @@ const square = (x: number) => ({
   coordinates: [[[x, 0], [x + 1, 0], [x + 1, 1], [x, 1], [x, 0]]]
 });
 
+const shared = { type: "Polygon", coordinates: [[[0.5, 0], [1, 0], [1, 1], [0.5, 1], [0.5, 0]]] };
+
 const overlapWarnings: ValidationResponse["warnings"] = [
   {
     feature_id: "unit-a",
@@ -548,7 +551,7 @@ const overlapWarnings: ValidationResponse["warnings"] = [
     message: "Overlaps with unit B.",
     severity: "warning",
     auto_fixable: false,
-    overlap_geometry: square(0.5)
+    overlap_geometry: shared
   },
   {
     feature_id: "unit-b",
@@ -557,7 +560,7 @@ const overlapWarnings: ValidationResponse["warnings"] = [
     message: "Overlaps with unit A.",
     severity: "warning",
     auto_fixable: false,
-    overlap_geometry: square(0.5)
+    overlap_geometry: shared
   }
 ];
 
@@ -604,7 +607,7 @@ test("keeping one of two overlapping spaces is done, and Undo restores it and th
   withOverlap();
   const before = validationOf(missingCategory, overlapWarnings);
   const after = validationOf(missingCategory, []);
-  const undo = { remove_ids: [], features: [{ id: "unit-b" }] };
+  const undo = { remove_ids: ["unit-b"], features: [{ id: "unit-b" }], fingerprints: { "unit-b": "x" }, digest: "d" };
   fetchStoredValidationMock.mockResolvedValue(before);
   resolveSessionUnitOverlapMock.mockResolvedValue({
     session_id: "session-123",
@@ -636,4 +639,67 @@ test("keeping one of two overlapping spaces is done, and Undo restores it and th
   await waitFor(() => expect(restoreSessionFeaturesMock).toHaveBeenCalledWith("session-123", undo));
   expect(await screen.findByText("Can wait · 2 warnings")).toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "Done" })).not.toBeInTheDocument();
+});
+
+test("an edit after a fix withdraws its Undo and marks the counts as out of date", async () => {
+  withOverlap();
+  const before = validationOf(missingCategory, overlapWarnings);
+  fetchStoredValidationMock.mockResolvedValue(before);
+  resolveSessionUnitOverlapMock.mockResolvedValue({
+    session_id: "session-123",
+    resolved_pairs: 1,
+    updated_count: 1,
+    deleted_count: 0,
+    skipped_count: 0,
+    validation: validationOf(missingCategory, []),
+    undo: { remove_ids: ["unit-b"], features: [{ id: "unit-b" }], fingerprints: { "unit-b": "x" }, digest: "d" }
+  });
+
+  renderPage();
+  const canWait = await screen.findByRole("region", { name: "Can wait" });
+  fireEvent.click(within(canWait).getByRole("button", { name: "Resolve" }));
+  const popover = await screen.findByRole("dialog", { name: /These two spaces overlap by/ });
+  fireEvent.click(within(popover).getByRole("button", { name: /Keep A · Concourse/ }));
+  fireEvent.click(within(popover).getByRole("button", { name: "Keep A and trim B" }));
+  const doneList = await screen.findByRole("region", { name: "Done" });
+
+  act(() => {
+    useAppStore.setState({ selectedFeatureIds: ["unit-a", "unit-b"] });
+  });
+  fireEvent.change(await screen.findByPlaceholderText("Category"), { target: { value: "room" } });
+  fireEvent.click(screen.getAllByRole("button", { name: "Apply" })[1]);
+
+  expect(await within(doneList).findByText("Edited since")).toBeInTheDocument();
+  expect(within(doneList).queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+  expect(screen.getByText(/Changed since the last check/)).toBeInTheDocument();
+  const track = screen.getByRole("navigation", { name: "Stages" });
+  expect(within(track).queryByText(/to fix/)).not.toBeInTheDocument();
+});
+
+test("an Undo the server refuses says why and is withdrawn", async () => {
+  withOverlap();
+  fetchStoredValidationMock.mockResolvedValue(validationOf(missingCategory, overlapWarnings));
+  resolveSessionUnitOverlapMock.mockResolvedValue({
+    session_id: "session-123",
+    resolved_pairs: 1,
+    updated_count: 1,
+    deleted_count: 0,
+    skipped_count: 0,
+    validation: validationOf(missingCategory, []),
+    undo: { remove_ids: ["unit-b"], features: [{ id: "unit-b" }], fingerprints: { "unit-b": "x" }, digest: "d" }
+  });
+  restoreSessionFeaturesMock.mockRejectedValue(new ApiClientError(409, "UNDO_STALE", "changed", true));
+
+  renderPage();
+  const canWait = await screen.findByRole("region", { name: "Can wait" });
+  fireEvent.click(within(canWait).getByRole("button", { name: "Resolve" }));
+  const popover = await screen.findByRole("dialog", { name: /These two spaces overlap by/ });
+  fireEvent.click(within(popover).getByRole("button", { name: /Keep A · Concourse/ }));
+  fireEvent.click(within(popover).getByRole("button", { name: "Keep A and trim B" }));
+  const doneList = await screen.findByRole("region", { name: "Done" });
+
+  fireEvent.click(within(doneList).getByRole("button", { name: "Undo" }));
+
+  expect(await screen.findByText("Can’t undo — changed since")).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByRole("region", { name: "Done" })).not.toBeInTheDocument());
 });

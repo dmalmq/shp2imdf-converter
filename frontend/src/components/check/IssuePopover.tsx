@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 import type { ValidationIssue } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { areaSquareMetres, featureLabel } from "../../lib/check";
+import { areaSquareMetres, featureLabel, trimRemoves } from "../../lib/check";
 import { featureNoun, issueCopy } from "../../lib/checkCopy";
 import { geometryToPath } from "../../lib/svgPreview";
 import type { ReviewFeature } from "../review/types";
@@ -100,18 +100,29 @@ export function IssuePopover({
 
   const pair = overlap ? [overlap.feature_id!, overlap.related_feature_id!] : [];
   const letters = ["A", "B"];
+  /** The IMDF category is a code, shown as one in both languages; without one, the kind of feature. */
   const kindOf = (target: ReviewFeature | undefined) => {
     const category = target?.properties.category;
-    return typeof category === "string" && category ? category : t(featureNoun(target?.feature_type ?? "").en, featureNoun(target?.feature_type ?? "").ja);
+    if (typeof category === "string" && category) return <span className="font-mono">{category}</span>;
+    const noun = featureNoun(target?.feature_type ?? "");
+    return t(noun.en, noun.ja);
   };
+
+  const keptIndex = overlap && choice ? pair.indexOf(choice) : -1;
+  const removes =
+    keptIndex >= 0 && overlap?.overlap_geometry
+      ? trimRemoves(overlap.overlap_geometry, featuresById.get(pair[1 - keptIndex]))
+      : false;
 
   let primary: { label: string; run: () => void } | null = null;
   if (overlap) {
-    const keptIndex = choice ? pair.indexOf(choice) : -1;
+    const [kept, other] = keptIndex >= 0 ? [letters[keptIndex], letters[1 - keptIndex]] : ["", ""];
     primary =
       keptIndex >= 0
         ? {
-            label: t(`Keep ${letters[keptIndex]} and trim ${letters[1 - keptIndex]}`, `${letters[keptIndex]} を残して ${letters[1 - keptIndex]} を削る`),
+            label: removes
+              ? t(`Keep ${kept} and remove ${other}`, `${kept} を残して ${other} を削除`)
+              : t(`Keep ${kept} and trim ${other}`, `${kept} を残して ${other} を削る`),
             run: () => onKeep(pair[keptIndex], pair[1 - keptIndex])
           }
         : null;
@@ -123,7 +134,7 @@ export function IssuePopover({
     primary = { label: t("Edit this feature", "このフィーチャーを編集"), run: () => onEdit(feature.id) };
   }
 
-  const choiceCard = (id: string, heading: string, sub: string, sketch?: React.ReactNode) => (
+  const choiceCard = (id: string, heading: string, sub: React.ReactNode, sketch?: React.ReactNode) => (
     <button
       key={id}
       type="button"
@@ -145,7 +156,7 @@ export function IssuePopover({
     <div
       role="dialog"
       aria-label={title}
-      className="flex w-[400px] flex-col gap-3.5 rounded-2xl border border-input bg-popover p-5 text-popover-foreground shadow-[0_8px_14px_rgba(26,20,13,0.16)]"
+      className="flex w-[400px] flex-col gap-3.5 rounded-2xl border border-input bg-popover p-5 text-popover-foreground shadow-lg"
     >
       <div className="flex items-center gap-2">
         <span
@@ -180,6 +191,14 @@ export function IssuePopover({
               )
             )}
           </div>
+          {removes ? (
+            <p role="alert" className="rounded-[10px] bg-destructive-muted p-2.5 text-xs leading-[1.45] text-destructive">
+              {t(
+                `${letters[1 - keptIndex]} lies entirely inside ${letters[keptIndex]}, so keeping ${letters[keptIndex]} removes ${letters[1 - keptIndex]}. Undo brings it back.`,
+                `${letters[1 - keptIndex]} は ${letters[keptIndex]} の中に完全に収まっているため、${letters[keptIndex]} を残すと ${letters[1 - keptIndex]} は削除されます。元に戻すで復元できます。`
+              )}
+            </p>
+          ) : null}
           <button
             type="button"
             disabled={busy}
