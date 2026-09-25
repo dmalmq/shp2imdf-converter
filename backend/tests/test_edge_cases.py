@@ -143,7 +143,7 @@ def test_session_cleanup_prunes_expired_records() -> None:
 
 @pytest.mark.phase6
 def test_concurrent_session_limit_evicts_oldest() -> None:
-  manager = SessionManager(backend=MemorySessionBackend(), ttl_hours=24, max_sessions=2)
+  manager = SessionManager(backend=MemorySessionBackend(), ttl_hours=24 * 30, max_sessions=2)
 
   first = manager.create_session(
     files=[ImportedFile(stem="first", geometry_type="Polygon", feature_count=1, attribute_columns=[], confidence="green")],
@@ -152,7 +152,7 @@ def test_concurrent_session_limit_evicts_oldest() -> None:
   )
   first_record = manager.get_session(first.session_id, touch=False)
   assert first_record is not None
-  first_record.last_accessed = datetime.now(UTC) - timedelta(minutes=30)
+  first_record.last_accessed = datetime.now(UTC) - timedelta(days=3)
   manager.backend.save(first_record)
 
   second = manager.create_session(
@@ -162,7 +162,7 @@ def test_concurrent_session_limit_evicts_oldest() -> None:
   )
   second_record = manager.get_session(second.session_id, touch=False)
   assert second_record is not None
-  second_record.last_accessed = datetime.now(UTC) - timedelta(minutes=10)
+  second_record.last_accessed = datetime.now(UTC) - timedelta(days=2)
   manager.backend.save(second_record)
 
   third = manager.create_session(

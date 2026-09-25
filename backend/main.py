@@ -35,6 +35,7 @@ from backend.src.illustrator_store import (
     migrate_legacy_conversions,
 )
 from backend.src.placements import DuplicatePlacementError, PlacementStore
+from backend.src.project_limits import ORPHAN_UPLOAD_SECONDS, ProjectLimits
 from backend.src.qgis_export import QgisExportError, QgisUnavailableError
 from backend.src.reference_overlay import ReferenceOverlayStore
 from backend.src.schemas import ErrorResponse
@@ -46,13 +47,22 @@ logger = logging.getLogger(__name__)
 _CLEANUP_INTERVAL_SECONDS = 3600
 
 
-def _load_session_manager() -> SessionManager:
-    ttl_hours = int(os.getenv("SESSION_TTL_HOURS", "24"))
-    max_sessions = int(os.getenv("MAX_SESSIONS", "50"))
+def _load_project_limits() -> ProjectLimits:
+    limits = ProjectLimits.from_env()
+    for warning in limits.legacy_warnings():
+        logger.warning(warning)
+    logger.info(limits.describe())
+    return limits
+
+
+def _load_session_manager(limits: ProjectLimits | None = None) -> SessionManager:
+    flow = (limits or ProjectLimits.from_env()).sessions
     backend_name = os.getenv("SESSION_BACKEND", "filesystem")
     data_dir = os.getenv("SESSION_DATA_DIR", "./data/sessions")
     backend = build_session_backend(backend_name=backend_name, session_data_dir=data_dir)
-    return SessionManager(backend=backend, ttl_hours=ttl_hours, max_sessions=max_sessions)
+    return SessionManager(
+        backend=backend, ttl_hours=flow.idle_seconds / 3600, max_sessions=flow.max_projects
+    )
 
 
 def _load_max_upload_bytes() -> int:
@@ -70,14 +80,15 @@ def _load_reference_overlay() -> ReferenceOverlayStore:
     return ReferenceOverlayStore(source, cache)
 
 
-def _load_illustrator_store() -> ConversionStore:
+def _load_illustrator_store(limits: ProjectLimits | None = None) -> ConversionStore:
+    flow = (limits or ProjectLimits.from_env()).artwork
     root = Path(os.getenv("ILLUSTRATOR_DATA_DIR", "./data/illustrator"))
     legacy = Path(os.getenv("TEMP_DATA_DIR", "./data/tmp")) / "illustrator"
     migrate_legacy_conversions(legacy, root)
     return ConversionStore(
         root=root,
-        ttl_seconds=float(os.getenv("ILLUSTRATOR_CACHE_TTL_MINUTES", "120")) * 60,
-        max_entries=int(os.getenv("ILLUSTRATOR_CACHE_MAX_ENTRIES", "20")),
+        ttl_seconds=flow.idle_seconds,
+        max_entries=flow.max_projects,
     )
 
 
@@ -95,15 +106,21 @@ async def _session_cleanup_loop(app: FastAPI, stop: asyncio.Event) -> None:
                 logger.exception("Periodic cleanup failed; retrying next interval")
 
 
-def _prune_orphan_uploads(uploads_dir: Path, manager: SessionManager) -> None:
-    """Delete upload dirs no live session owns, once they are older than the session TTL."""
+def _prune_orphan_uploads(
+    uploads_dir: Path, manager: SessionManager, max_age_seconds: float = ORPHAN_UPLOAD_SECONDS
+) -> None:
+    """Delete upload dirs no live session owns, once they are older than ``max_age_seconds``.
+
+    An orphan is an upload whose import failed or whose session was deleted by
+    hand, so it does not live as long as a session does.
+    """
     try:
         live = {
             Path(summary.upload_artifact_dir).resolve()
             for summary in manager.backend.list_summaries()
             if summary.upload_artifact_dir
         }
-        cutoff = time.time() - manager.ttl.total_seconds()
+        cutoff = time.time() - max_age_seconds
         removed = 0
         for entry in uploads_dir.iterdir():
             try:
@@ -119,23 +136,102 @@ def _prune_orphan_uploads(uploads_dir: Path, manager: SessionManager) -> None:
         logger.exception("Orphaned upload cleanup failed")
 
 
+def _tree_bytes(path: Path) -> int:
+    total = 0
+    try:
+        entries = list(os.scandir(path))
+    except OSError:
+        return 0
+    for entry in entries:
+        try:
+            if entry.is_dir(follow_symlinks=False):
+                total += _tree_bytes(Path(entry.path))
+            elif entry.is_file(follow_symlinks=False):
+                total += entry.stat(follow_symlinks=False).st_size
+        except OSError:
+            continue
+    return total
+
+
+def _format_bytes(size: int) -> str:
+    if size < 1024:
+        return f"{size} B"
+    value = size / 1024
+    for unit in ("KB", "MB"):
+        if value < 1024:
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} GB"
+
+
+def _projects(count: int) -> str:
+    return f"{count} project" if count == 1 else f"{count} projects"
+
+
+def _log_store_sizes(manager: SessionManager, uploads_dir: Path, store: ConversionStore) -> None:
+    """Log how many projects each store holds and what they take on disk."""
+    try:
+        sessions = len(manager.backend.list_summaries())
+        data_dir = getattr(manager.backend, "data_dir", None)
+        record_bytes = _tree_bytes(data_dir) if data_dir is not None else 0
+        upload_bytes = _tree_bytes(uploads_dir)
+        logger.info(
+            "Shapefile sessions on disk: %s, %s (records %s in %s, uploads %s in %s)",
+            _projects(sessions),
+            _format_bytes(record_bytes + upload_bytes),
+            _format_bytes(record_bytes),
+            data_dir if data_dir is not None else "memory",
+            _format_bytes(upload_bytes),
+            uploads_dir,
+        )
+        conversions = sum(1 for _ in store.root.glob("*/conversion.json"))
+        logger.info(
+            "Artwork conversions on disk: %s, %s in %s",
+            _projects(conversions),
+            _format_bytes(_tree_bytes(store.root)),
+            store.root,
+        )
+    except Exception:
+        logger.exception("Measuring the project stores failed")
+
+
+def _startup_housekeeping(uploads_dir: Path, manager: SessionManager, store: ConversionStore) -> None:
+    _prune_orphan_uploads(uploads_dir, manager)
+    _log_store_sizes(manager, uploads_dir, store)
+
+
+def _ensure_backend_log_output() -> None:
+    """Show ``backend.*`` INFO lines under plain uvicorn, which only configures its own loggers."""
+    backend_logger = logging.getLogger("backend")
+    if backend_logger.handlers or logging.getLogger().handlers:
+        return
+    from uvicorn.logging import DefaultFormatter
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(DefaultFormatter("%(levelprefix)s %(name)s: %(message)s", use_colors=False))
+    backend_logger.addHandler(handler)
+    backend_logger.setLevel(os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.session_manager = _load_session_manager()
+    _ensure_backend_log_output()
+    app.state.project_limits = _load_project_limits()
+    app.state.session_manager = _load_session_manager(app.state.project_limits)
     app.state.max_upload_bytes = _load_max_upload_bytes()
     app.state.session_uploads_dir = Path(os.getenv("SESSION_UPLOADS_DIR", "./data/session_uploads"))
     app.state.session_uploads_dir.mkdir(parents=True, exist_ok=True)
+    app.state.illustrator_store = _load_illustrator_store(app.state.project_limits)
     # A daemon thread: thousands of leftover dirs must not hold up startup or shutdown.
     threading.Thread(
-        target=_prune_orphan_uploads,
-        args=(app.state.session_uploads_dir, app.state.session_manager),
+        target=_startup_housekeeping,
+        args=(app.state.session_uploads_dir, app.state.session_manager, app.state.illustrator_store),
         name="orphan-upload-cleanup",
         daemon=True,
     ).start()
     app.state.filename_keywords_path = Path(__file__).parent / "config" / "filename_keywords.json"
     app.state.unit_categories_path = Path(__file__).parent / "config" / "unit_categories.json"
     app.state.company_mappings_path = Path(__file__).parent / "config" / "company_mappings.json"
-    app.state.illustrator_store = _load_illustrator_store()
     app.state.placement_store = PlacementStore(
         Path(os.getenv("PLACEMENTS_DB", "./data/placements.db"))
     )

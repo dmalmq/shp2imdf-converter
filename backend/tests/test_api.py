@@ -141,7 +141,7 @@ def test_import_persists_uploaded_artifacts_and_prune_removes_them(test_client, 
             assert artifact_dir.exists()
             assert any(artifact_dir.iterdir())
 
-            session.last_accessed = datetime.now(UTC) - timedelta(hours=48)
+            session.last_accessed = datetime.now(UTC) - timedelta(days=31)
             manager.backend.save(session)
             removed = manager.prune_expired()
 

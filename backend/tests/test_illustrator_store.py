@@ -16,6 +16,9 @@ def store(tmp_path: Path) -> ConversionStore:
     return ConversionStore(root=tmp_path, ttl_seconds=3600, max_entries=3)
 
 
+_DAY = 24 * 3600
+
+
 class _FakeClock:
     def __init__(self, start: float = 1_000_000.0) -> None:
         self.now = start
@@ -60,10 +63,12 @@ def test_expired_entry_raises_and_is_removed(tmp_path: Path) -> None:
 
 
 @pytest.mark.georef
-def test_oldest_entries_are_evicted_beyond_the_cap(store: ConversionStore) -> None:
+def test_oldest_entries_are_evicted_beyond_the_cap(tmp_path: Path, clock: _FakeClock) -> None:
+    store = ConversionStore(root=tmp_path, ttl_seconds=30 * _DAY, max_entries=3)
     payload = _build_minimal_ai_pdf()
     first = store.put(parse_ai(payload, "one.ai"))
     for name in ("two.ai", "three.ai", "four.ai"):
+        clock.now += _DAY
         store.put(parse_ai(payload, name))
 
     with pytest.raises(ConversionExpiredError):
@@ -168,14 +173,14 @@ def test_an_idle_conversion_still_expires(tmp_path: Path, clock: _FakeClock) -> 
 def test_the_cap_evicts_the_least_recently_used_entry(
     tmp_path: Path, clock: _FakeClock
 ) -> None:
-    store = ConversionStore(root=tmp_path, ttl_seconds=3600, max_entries=3)
+    store = ConversionStore(root=tmp_path, ttl_seconds=30 * _DAY, max_entries=3)
     payload = _build_minimal_ai_pdf()
     entries = []
     for name in ("one.ai", "two.ai", "three.ai"):
         entries.append(store.put(parse_ai(payload, name)))
-        clock.now += 1
+        clock.now += _DAY
     store.get(entries[0].conversion_id)
-    clock.now += 1
+    clock.now += _DAY
     store.put(parse_ai(payload, "four.ai"))
 
     assert store.get(entries[0].conversion_id).stem == "one"
