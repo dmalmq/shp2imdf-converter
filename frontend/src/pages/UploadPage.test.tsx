@@ -317,7 +317,13 @@ describe("a project's Bring in", () => {
     expect(updateSessionFileMock).toHaveBeenCalledWith("s1", opening.stem, { detected_type: "fixture" });
     expect(await screen.findByText(/Read names ending in “Opening” as Fixtures from now on\? That changes 1 other file/)).toBeInTheDocument();
 
-    updateSessionFileMock.mockResolvedValueOnce(saved({ ...opening, detected_type: "fixture" }));
+    expect(screen.getByRole("region", { name: "Needs you" })).toHaveTextContent("Needs you · 1");
+    const relearned = brought.map((item) =>
+      item.stem === opening.stem || item.stem === "qwzx"
+        ? { ...item, detected_type: "fixture", confidence: "green" as const, detected_level: 0 }
+        : item
+    );
+    updateSessionFileMock.mockResolvedValueOnce({ ...saved(relearned[1]), files: relearned });
     fireEvent.click(screen.getByRole("button", { name: "Remember it" }));
     expect(updateSessionFileMock).toHaveBeenLastCalledWith("s1", opening.stem, {
       detected_type: "fixture",
@@ -325,6 +331,26 @@ describe("a project's Bring in", () => {
       learning_keyword: "Opening"
     });
     await waitFor(() => expect(screen.queryByRole("button", { name: "Remember it" })).not.toBeInTheDocument());
+    const types = useAppStore.getState().files.map((item) => [item.stem, item.detected_type]);
+    expect(types).toContainEqual(["qwzx", "fixture"]);
+    expect(screen.queryByRole("region", { name: "Needs you" })).not.toBeInTheDocument();
+    expect(nextButton(/Continue to Set up/)).toBeEnabled();
+  });
+
+  test("a type can be cleared, and each file says its geometry and GeoPackage layer", async () => {
+    useAppStore.setState({
+      files: [...brought, file("stations", { source_format: "gpkg", source_layer: "Station_pg", geometry_type: "MultiPolygon" })]
+    });
+    updateSessionFileMock.mockResolvedValueOnce(saved({ ...brought[0], detected_type: null, confidence: "red" }));
+    renderPage(true, "/p/s1/bring-in");
+    expect(screen.getByText("MultiPolygon · layer Station_pg")).toBeInTheDocument();
+    expect(screen.getAllByText("LineString")).toHaveLength(1);
+
+    await choose("What JRTokyoSta_B1_Space is", "Unknown — decide later");
+    expect(updateSessionFileMock).toHaveBeenCalledWith("s1", "JRTokyoSta_B1_Space", { detected_type: null });
+    await waitFor(() =>
+      expect(within(screen.getByRole("region", { name: "Needs you" })).getByText("JRTokyoSta_B1_Space")).toBeInTheDocument()
+    );
   });
 
   test("guessing the types again takes the server's new reading of every file", async () => {

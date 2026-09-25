@@ -117,7 +117,9 @@ export function HoursEditor({ value, onChange }: Props) {
         <button
           type="button"
           onClick={copyMonday}
-          className="rounded-sm text-xs leading-4 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          disabled={!days.Mo.open}
+          title={days.Mo.open ? undefined : t("Open Monday first to copy its hours", "コピーするには月曜日を営業にしてください")}
+          className="rounded-sm text-xs leading-4 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-muted-foreground"
         >
           {t("Copy Monday to all", "月曜日を全曜日にコピー")}
         </button>

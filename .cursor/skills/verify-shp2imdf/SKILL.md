@@ -80,8 +80,8 @@ Stable handles (do not use click coordinates):
 | Open archive | hub card `Reopen an IMDF archive` / `#imdf-file-input` |
 | Illustrator entry | hub card `From Illustrator artwork`; then `Choose file` / `#illustrator-georef-input` |
 | New shapefile project | hub card `From floor shapefiles` → `/p/new`; the hub's drop zone input is `[data-testid=hub-drop-input]` |
-| Wizard sections | `Sections` nav buttons, e.g. `Venue info`, `Summary & generate`; the h1 names the section |
-| Venue | textbox named `Venue name*`; `Locality*` (autosaves; the top bar shows `Saved · HH:MM`, or `Not saved yet` while a required field is missing) |
+| Wizard sections | nav `Sections` holding buttons named by section, e.g. `Venue info`, `Summary & generate` (the open one has `aria-current="true"`); children show only while their parent is open; the h1 names the section |
+| Venue | textbox named exactly `Venue name` and `Locality` (the `*` is outside the label); they render only while Project & venue or Venue info is open (autosaves; the top bar shows `Saved · HH:MM`, or `Not saved yet` while a required field is missing) |
 | Generate | button `Generate & open Review` |
 | Review | buttons `Validate`, `Export`, `Download .imdf` |
 

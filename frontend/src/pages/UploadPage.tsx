@@ -304,7 +304,13 @@ function BroughtIn() {
     setSaving((previous) => new Set(previous).add(stem));
     try {
       const response = await updateSessionFile(sessionId, stem, payload);
-      if (latest.current.get(stem) === request) upsertFile(response.file);
+      if (payload.apply_learning) {
+        const pendingElsewhere = (other: string) => latest.current.has(other) && latest.current.get(other) !== request;
+        const current = new Map(useAppStore.getState().files.map((item) => [item.stem, item]));
+        setFiles(response.files.map((item) => (pendingElsewhere(item.stem) ? (current.get(item.stem) ?? item) : item)));
+      } else if (latest.current.get(stem) === request) {
+        upsertFile(response.file);
+      }
       if ("detected_type" in payload) {
         setLearning(response.learning_suggestion);
         void loadFeatures();

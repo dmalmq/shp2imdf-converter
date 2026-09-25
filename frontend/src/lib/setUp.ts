@@ -98,7 +98,7 @@ export function setUpView(input: SetUpInput): SetUpView {
     { id: "locality", label: { en: "Locality", ja: "市区町村" }, where: VENUE_ADDRESS, fix: "project-info", field: "locality", done: locality },
     { id: "country", label: { en: "Country", ja: "国" }, where: VENUE_ADDRESS, fix: "project-info", field: "country", done: country },
     { id: "buildings", label: { en: "Buildings", ja: "建物" }, where: PROJECT_AND_VENUE, fix: "building", done: buildings },
-    { id: "file-types", label: { en: "Every file has a type", ja: "すべてのファイルの種類" }, where: { en: "Bring in", ja: "取り込み" }, fix: "bring-in", done: typed },
+    { id: "file-types", label: { en: "Every file has a type", ja: "すべてのファイルに種類が決まっている" }, where: { en: "Bring in", ja: "取り込み" }, fix: "bring-in", done: typed },
     { id: "levels", label: LEVEL_MAPPING, where: null, fix: "levels", done: levels },
     ...(has("unit")
       ? [{ id: "unit-column", label: { en: "Unit code column", ja: "ユニットのコード列" }, where: ATTRIBUTE_MAPPING, fix: "unit" as const, done: unitColumn }]
@@ -196,6 +196,22 @@ export function codeName(kind: "language" | "region", code: string, uiLanguage: 
   } catch {
     return code;
   }
+}
+
+/** The canonical BCP 47 form of `input` ("zh-hant" → "zh-Hant"), or null if it is not a language tag. */
+export function canonicalTag(input: string): string | null {
+  const tag = input.trim();
+  if (!tag) return null;
+  try {
+    return Intl.getCanonicalLocales(tag)[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** A stored country code as it is compared and shown: `"jp "` is `JP`. */
+export function countryCode(value: string | null | undefined): string {
+  return (value ?? "").trim().toUpperCase();
 }
 
 /** `options`, plus `current` if it is not one of them, so a stored value is never shown blank. */

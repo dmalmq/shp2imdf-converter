@@ -1,6 +1,6 @@
 import React from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
 import {
   fetchSessionFeatures,
@@ -470,6 +470,29 @@ test("Fix on a missing venue field opens Venue info with the cursor in that fiel
   const locality = await screen.findByLabelText(/Locality/);
   await waitFor(() => expect(locality).toHaveFocus());
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Venue info");
+});
+
+test("Fix on a file with no type goes back to Bring in", async () => {
+  vi.mocked(fetchSessionFiles).mockResolvedValue({ files: [FILE, { ...FILE, stem: "qwzx", detected_type: null }] } as never);
+  server = wizard(COMPLETE_PROJECT);
+  vi.mocked(fetchWizardState).mockImplementation(async () => ({ session_id: "session-1", wizard: server }));
+  function Where() {
+    return <output data-testid="where">{useLocation().pathname}</output>;
+  }
+  render(
+    <MemoryRouter initialEntries={["/p/session-1/set-up"]}>
+      <ToastProvider>
+        <Routes>
+          <Route path="/p/:id/set-up" element={<WizardPage />} />
+          <Route path="*" element={<Where />} />
+        </Routes>
+      </ToastProvider>
+    </MemoryRouter>
+  );
+  await screen.findByLabelText(/^Venue name$/);
+  openSection("Summary & generate");
+  fireEvent.click(await screen.findByRole("button", { name: "Fix: Every file has a type" }));
+  expect(await screen.findByTestId("where")).toHaveTextContent("/p/session-1/bring-in");
 });
 
 test("Enter on a focused button is that button's, not Generate's", async () => {

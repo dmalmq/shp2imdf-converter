@@ -8,7 +8,9 @@ import {
   LANGUAGE_TAGS,
   RESTRICTIONS,
   VENUE_CATEGORIES,
+  canonicalTag,
   codeName,
+  countryCode,
   withCurrent,
   type CodedOption
 } from "../../lib/setUp";
@@ -37,6 +39,7 @@ type Props = {
 
 
 const NO_RESTRICTION = "__none__";
+const OTHER_LANGUAGE = "__other__";
 
 
 function createDefaultProject(): ProjectWizardState {
@@ -154,12 +157,15 @@ export function ProjectInfoStep({
   const [moreOpen, setMoreOpen] = useState(() =>
     Boolean(form.address.unit || form.address.postal_code_ext || form.address.postal_code_vanity)
   );
+  const [otherTag, setOtherTag] = useState<string | null>(null);
+  const [otherInvalid, setOtherInvalid] = useState(false);
+  const country = countryCode(form.address.country);
   const countries = useMemo(
     () =>
-      withCurrent(COUNTRY_CODES, form.address.country)
+      withCurrent(COUNTRY_CODES, country)
         .map((code) => ({ code, name: codeName("region", code, uiLanguage) }))
         .sort((left, right) => left.name.localeCompare(right.name, uiLanguage)),
-    [form.address.country, uiLanguage]
+    [country, uiLanguage]
   );
   const labelOf = (options: CodedOption[], code: string) => {
     const option = options.find((item) => item.code === code);
@@ -253,21 +259,71 @@ export function ProjectInfoStep({
           </Field>
           <Field label={t("Language", "言語")} code={form.language || null}>
             {(id) => (
-              <Select
-                value={form.language}
-                onValueChange={(value) => setForm((previous) => ({ ...previous, language: value }))}
-              >
-                <SelectTrigger id={id}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {withCurrent(LANGUAGE_TAGS, form.language).map((tag) => (
-                    <SelectItem key={tag} value={tag}>
-                      {codeName("language", tag, uiLanguage)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex flex-col gap-2">
+                <Select
+                  value={otherTag === null ? form.language : OTHER_LANGUAGE}
+                  onValueChange={(value) => {
+                    if (value === OTHER_LANGUAGE) {
+                      setOtherTag("");
+                      return;
+                    }
+                    setOtherTag(null);
+                    setForm((previous) => ({ ...previous, language: value }));
+                  }}
+                >
+                  <SelectTrigger id={id}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {withCurrent(LANGUAGE_TAGS, form.language).map((tag) => (
+                      <SelectItem key={tag} value={tag}>
+                        {codeName("language", tag, uiLanguage)}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={OTHER_LANGUAGE}>{t("Other…", "その他…")}</SelectItem>
+                  </SelectContent>
+                </Select>
+                {otherTag !== null ? (
+                  <form
+                    className="flex gap-2"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const tag = canonicalTag(otherTag);
+                      if (!tag) {
+                        setOtherInvalid(true);
+                        return;
+                      }
+                      setOtherTag(null);
+                      setOtherInvalid(false);
+                      setForm((previous) => ({ ...previous, language: tag }));
+                    }}
+                  >
+                    <Input
+                      autoFocus
+                      className="font-mono"
+                      aria-label={t("Language tag", "言語タグ")}
+                      aria-invalid={otherInvalid || undefined}
+                      placeholder="fr, pt-BR, zh-Hant-TW"
+                      value={otherTag}
+                      onChange={(event) => {
+                        setOtherTag(event.target.value);
+                        setOtherInvalid(false);
+                      }}
+                    />
+                    <Button type="submit" variant="outline">
+                      {t("Use", "使う")}
+                    </Button>
+                  </form>
+                ) : null}
+                {otherInvalid ? (
+                  <p role="alert" className="text-xs text-destructive">
+                    {t(
+                      "That is not a language tag. Use a BCP 47 tag such as fr or pt-BR.",
+                      "言語タグではありません。fr や pt-BR のような BCP 47 のタグを入力してください。"
+                    )}
+                  </p>
+                ) : null}
+              </div>
             )}
           </Field>
         </div>
@@ -436,9 +492,9 @@ export function ProjectInfoStep({
               />
             )}
           </Field>
-          <Field label={t("Country", "国")} required code={form.address.country || null}>
+          <Field label={t("Country", "国")} required code={country || null}>
             {(id) => (
-              <Select value={form.address.country} onValueChange={(country) => setAddress({ country })}>
+              <Select value={country} onValueChange={(next) => setAddress({ country: next })}>
                 <SelectTrigger id={id} data-field="country">
                   <SelectValue placeholder={t("Choose…", "選択…")} />
                 </SelectTrigger>

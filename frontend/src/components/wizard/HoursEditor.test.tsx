@@ -16,6 +16,15 @@ test("Open and Closed set a day, and Copy Monday to all copies its hours", () =>
   expect(onChange).toHaveBeenLastCalledWith("Mo-Su 05:00-23:30; PH 05:00-23:30");
 });
 
+test("Copy Monday to all is off while Monday is closed, so it cannot erase the other days", () => {
+  const onChange = vi.fn();
+  render(<HoursEditor value="Tu-Fr 09:00-17:00" onChange={onChange} />);
+  const copy = screen.getByRole("button", { name: "Copy Monday to all" });
+  expect(copy).toBeDisabled();
+  fireEvent.click(copy);
+  expect(onChange).not.toHaveBeenCalled();
+});
+
 test("PH is emitted as a separate token, never merged into a weekday range", () => {
   const state = parseOsmHours("");
   for (const key of ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su", "PH"]) {

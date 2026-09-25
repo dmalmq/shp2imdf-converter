@@ -30,13 +30,14 @@ export function Field({
   const id = useId();
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
-      <label
-        htmlFor={id}
-        className="text-[13px] font-medium leading-[18px] text-foreground"
-      >
-        {label}
-        {required ? <span className="ml-0.5 text-muted-foreground">*</span> : null}
-      </label>
+      <span className="text-[13px] font-medium leading-[18px] text-foreground">
+        <label htmlFor={id}>{label}</label>
+        {required ? (
+          <span aria-hidden="true" className="ml-0.5 text-muted-foreground">
+            *
+          </span>
+        ) : null}
+      </span>
       {children(id)}
       {code ? <p className="font-mono text-[11px] leading-[14px] text-muted-foreground">{code}</p> : null}
       {hint ? <p className="text-xs leading-4 text-muted-foreground">{hint}</p> : null}

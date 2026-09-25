@@ -17,6 +17,8 @@ import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue }
 const DETECTED_COLUMNS = "grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_7.5rem_4.5rem]";
 const QUEUED_COLUMNS = "grid-cols-[minmax(0,1.3fr)_8rem_5rem_minmax(0,1fr)]";
 const LOOK_RIGHT_SHOWN = 8;
+// Radix Select has no empty-string value, so clearing a type needs a sentinel.
+const NO_TYPE = "__unknown__";
 
 type T = (english: string, japanese: string) => string;
 
@@ -77,12 +79,23 @@ function Row({
   );
 }
 
-function FileName({ name, note, tone }: { name: string; note?: string | null; tone?: "danger" | "muted" }) {
+function FileName({
+  name,
+  detail,
+  note,
+  tone
+}: {
+  name: string;
+  detail?: string | null;
+  note?: string | null;
+  tone?: "danger" | "muted";
+}) {
   return (
     <span className="flex min-w-0 flex-col gap-[3px]">
       <span className="truncate font-mono text-[12.5px] text-foreground" title={name}>
         {name}
       </span>
+      {detail ? <span className="truncate font-mono text-[11px] text-muted-foreground">{detail}</span> : null}
       {note ? (
         <span className={cn("text-xs leading-[1.4]", tone === "danger" ? "text-destructive" : "text-muted-foreground")}>
           {note}
@@ -164,7 +177,7 @@ export function DetectedTable({
     <Select
       value={row.type ?? ""}
       disabled={saving.has(row.stem)}
-      onValueChange={(value) => onResolve(row.stem, { detected_type: value })}
+      onValueChange={(value) => onResolve(row.stem, { detected_type: value === NO_TYPE ? null : value })}
     >
       <SelectTrigger
         className={cn(
@@ -184,9 +197,13 @@ export function DetectedTable({
             {typeLabel(option, t)}
           </SelectItem>
         ))}
+        <SelectItem value={NO_TYPE}>{t("Unknown — decide later", "不明（あとで決める）")}</SelectItem>
       </SelectContent>
     </Select>
   );
+
+  const rowDetail = (row: BringInRow) =>
+    row.layer ? t(`${row.geometry} · layer ${row.layer}`, `${row.geometry} · レイヤー ${row.layer}`) : row.geometry;
 
   const rowProps = (row: BringInRow) => ({
     onMouseEnter: onHover ? () => onHover(row.stem) : undefined,
@@ -204,10 +221,10 @@ export function DetectedTable({
           selected === row.stem && "underline decoration-primary decoration-2 underline-offset-4"
         )}
       >
-        <FileName name={row.stem} note={note} tone={tone} />
+        <FileName name={row.stem} detail={rowDetail(row)} note={note} tone={tone} />
       </button>
     ) : (
-      <FileName name={row.stem} note={note} tone={tone} />
+      <FileName name={row.stem} detail={rowDetail(row)} note={note} tone={tone} />
     );
 
   return (
