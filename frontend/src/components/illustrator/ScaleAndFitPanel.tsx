@@ -17,6 +17,7 @@ import { Separator } from "../ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { cn } from "@/lib/utils";
 import { ControlPointList } from "./ControlPointList";
+import { PlacementScopeNote } from "./PlacementScopeNote";
 import type { ReferenceLayer } from "./PlacementMap";
 import { ShapeMatchPanel, type ShapeMatchPanelModel } from "./ShapeMatchPanel";
 
@@ -25,7 +26,7 @@ type Props = {
   dispatch: (action: PlacementAction) => void;
   /** Pair-picking stage, forwarded to the control-point list. */
   pickStage: "artwork" | "map" | null;
-  /** What fits and scale operations act on. */
+  /** What fits, scale and calibration act on. */
   mode: AdjustmentMode;
   onTogglePicking: () => void;
   referenceLayers: ReferenceLayer[];
@@ -123,6 +124,7 @@ export function ScaleAndFitPanel({
         </CollapsibleTrigger>
 
         <CollapsibleContent className="flex flex-col gap-3 pt-3">
+          <PlacementScopeNote state={state} mode={mode} />
           <p className="font-mono text-[11px] leading-[14px] tracking-[0.02em] text-muted-foreground">
             {(activeTransform?.metresPerPoint ?? state.frame.metresPerPoint).toFixed(6)}{" "}
             {t("m per point", "m/pt")}
@@ -142,7 +144,7 @@ export function ScaleAndFitPanel({
               size="sm"
               className="ml-auto"
               disabled={state.scaleLocked || pinned}
-              onClick={() => dispatch({ type: "setDrawingScale", denominator: Number(denominator) })}
+              onClick={() => dispatch({ type: "setDrawingScale", denominator: Number(denominator), mode })}
             >
               {t("Apply", "適用")}
             </Button>
@@ -177,7 +179,8 @@ export function ScaleAndFitPanel({
                 dispatch({
                   type: "calibrateDistance",
                   artworkDistance: Number(artworkDistance),
-                  realMetres: Number(realMetres)
+                  realMetres: Number(realMetres),
+                  mode
                 })
               }
             >

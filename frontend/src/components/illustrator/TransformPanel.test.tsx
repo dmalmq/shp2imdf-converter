@@ -159,11 +159,32 @@ test("individual mode edits the active floor from the rotation input", () => {
   expect(seen).toEqual([{ type: "rotateFloor", label: "1F", rotationDeg: 45 }]);
 });
 
-test("the (this floor) suffix follows what the controls edit, not just linking", () => {
+test("the scope note follows what the controls edit, not just linking", () => {
   const { rerender } = render(<TransformPanel mode="group" state={THREE_LINKED} dispatch={() => {}} />);
-  expect(screen.queryByText(/this floor/)).toBeNull();
+  expect(screen.getByTestId("placement-scope")).toHaveTextContent(
+    "Editing linked levels: 1F, 2F, 3F"
+  );
   rerender(<TransformPanel mode="individual" state={THREE_LINKED} dispatch={() => {}} />);
-  expect(screen.getByText(/this floor/)).toBeInTheDocument();
+  expect(screen.getByTestId("placement-scope")).toHaveTextContent("Editing 1F only");
+  const split = stateWith(
+    [
+      { label: "1F", linked: true },
+      { label: "2F", linked: false }
+    ],
+    "2F"
+  );
+  rerender(<TransformPanel mode="group" state={split} dispatch={() => {}} />);
+  expect(screen.getByTestId("placement-scope")).toHaveTextContent("Editing 2F only");
+});
+
+test("Japanese copy names the scope", () => {
+  useAppStore.getState().setUiLanguage("ja");
+  const { rerender } = render(<TransformPanel mode="group" state={THREE_LINKED} dispatch={() => {}} />);
+  expect(screen.getByTestId("placement-scope")).toHaveTextContent(
+    "リンク中のフロアを編集中：1F、2F、3F"
+  );
+  rerender(<TransformPanel mode="individual" state={THREE_LINKED} dispatch={() => {}} />);
+  expect(screen.getByTestId("placement-scope")).toHaveTextContent("1Fのみ編集中");
 });
 
 test("a frozen active floor hides relink and disables rotation edits", () => {
