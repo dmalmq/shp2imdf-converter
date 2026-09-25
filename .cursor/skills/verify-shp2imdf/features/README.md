@@ -24,7 +24,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 
 - Capture action and result: screenshot + ARIA snapshot + `report.md` under `artifacts/verify-shp2imdf/<feature-id>/`.
 - UI proof includes app identity (`IMDF Converter` or `SHP to IMDF Converter`).
-- Mutation proof includes the URL after navigation (`/wizard` or `/review`).
+- Mutation proof includes the URL after navigation (`/p/<sessionId>/set-up` or `/p/<sessionId>/check`).
 - Record feature id and entry point on every artifact.
 - An unreachable path is a fail with the unmet precondition, not a pass via another path.
 

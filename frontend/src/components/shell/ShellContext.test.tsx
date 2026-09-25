@@ -133,7 +133,7 @@ describe("primary action", () => {
         action={{ label: "Generate & open Review", run: () => {}, disabledReason: "Finish sections", blockers: 2 }}
         withAnchor={false}
       />,
-      "/wizard"
+      "/p/session-abc123/set-up"
     );
     const button = within(topBar()).getByRole("button", { name: /Generate & open Review/ });
     expect(button).toBeDisabled();
@@ -192,7 +192,7 @@ describe("top bar", () => {
   });
 
   test("the breadcrumb names the station and the stage, never the session", () => {
-    renderShell(null, "/wizard");
+    renderShell(null, "/p/session-abc123/set-up");
     const crumbs = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(crumbs).toHaveTextContent("Projects/JRTokyoSta/Set up");
     expect(crumbs).not.toHaveTextContent("session-abc");
@@ -209,10 +209,10 @@ describe("top bar", () => {
 
   test("save status shows on Set up only", () => {
     useAppStore.setState({ wizardSaveStatus: "saved", wizardSavedAt: new Date(2026, 8, 24, 14, 32).getTime() });
-    const { unmount } = renderShell(null, "/wizard");
+    const { unmount } = renderShell(null, "/p/session-abc123/set-up");
     expect(within(topBar()).getByRole("status")).toHaveTextContent("Saved · 14:32");
     unmount();
-    renderShell(null, "/review");
+    renderShell(null, "/p/session-abc123/check");
     expect(within(topBar()).queryByRole("status")).toBeNull();
   });
 
@@ -226,7 +226,7 @@ describe("top bar", () => {
   });
 
   test("a stage with a route navigates there", () => {
-    renderShell(null, "/wizard");
+    renderShell(null, "/p/session-abc123/set-up");
     const track = screen.getByRole("navigation", { name: "Stages" });
     fireEvent.click(within(track).getByRole("button", { name: /1 · Bring in/ }));
     expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Bring in");

@@ -482,7 +482,7 @@ test("the top bar's save status agrees with the footer while a draft is held", a
   server = wizard(null);
   vi.mocked(fetchWizardState).mockImplementation(async () => ({ session_id: "session-1", wizard: server }));
   render(
-    <MemoryRouter initialEntries={["/wizard"]}>
+    <MemoryRouter initialEntries={["/p/session-1/set-up"]}>
       <ToastProvider>
         <AppShell>
           <WizardPage />

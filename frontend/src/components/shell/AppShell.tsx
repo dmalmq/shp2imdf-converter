@@ -21,6 +21,7 @@ import {
   artworkStages,
   currentStage,
   flowForPath,
+  parseProjectPath,
   shapefileStages,
   stationName,
   type Stage
@@ -110,7 +111,7 @@ function ShellFrame({ children }: Props) {
         {/* Search and commands arrive in phase 12; until then the space is kept, not faked. */}
         <div className="min-w-0 flex-1" data-slot="search" />
 
-        {location.pathname === "/wizard" ? <SaveStatus held={Boolean(page?.saveHeld)} /> : null}
+        {parseProjectPath(location.pathname)?.stage === "set-up" ? <SaveStatus held={Boolean(page?.saveHeld)} /> : null}
         <LanguageSwitch />
         <Button
           variant="ghost"
@@ -158,7 +159,7 @@ function useStages(pathname: string, page: PageShell | null, primary: PrimaryAct
       ? artworkStages({ illustratorStage, page: pageStages })
       : shapefileStages({
           pathname,
-          hasSession: Boolean(sessionId),
+          sessionId,
           importProfile,
           reviewReached: currentScreen === "review",
           page: pageStages

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { create } from "zustand";
 
 import type {
@@ -30,7 +31,16 @@ export type IllustratorStage = 1 | 2 | 3;
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 export type UiLanguage = "en" | "ja";
 export type Theme = "light" | "dark";
-type ImportProfile = "standard" | "imdf_shapefile";
+export type ImportProfile = "standard" | "imdf_shapefile";
+
+/** What a project needs on arrival for its stages to be resolved and drawn. */
+export type LoadedProject = {
+  importProfile: ImportProfile;
+  files: ImportedFile[];
+  wizardState?: WizardState | null;
+  /** Check has something to show: a draft was generated, or the import needs no Set up. */
+  reviewReached: boolean;
+};
 
 type Filters = {
   type?: string;
@@ -49,6 +59,8 @@ type AppState = {
   uiLanguage: UiLanguage;
   theme: Theme;
   sessionId: string | null;
+  /** The project whose files, profile and stage the store holds; null while it loads. */
+  loadedSessionId: string | null;
   importProfile: ImportProfile;
   sessionExpiredMessage: string | null;
   currentScreen: Screen;
@@ -77,7 +89,13 @@ type AppState = {
   learningSuggestion: LearningSuggestion | null;
   setUiLanguage: (language: UiLanguage) => void;
   setTheme: (theme: Theme) => void;
-  setSessionId: (sessionId: string | null) => void;
+  /**
+   * Makes `sessionId` the store's project. Everything that belongs to the
+   * previous project goes with it; display preferences stay.
+   */
+  switchProject: (sessionId: string | null) => void;
+  /** Fills in the project just switched to; ignored if the store has since moved on. */
+  projectLoaded: (sessionId: string, project: LoadedProject) => void;
   setImportProfile: (profile: ImportProfile) => void;
   setSessionExpiredMessage: (message: string | null) => void;
   clearSession: () => void;
@@ -130,7 +148,8 @@ function readInitialLanguage(): UiLanguage {
 const INITIAL_STATE = {
   uiLanguage: readInitialLanguage(),
   theme: readInitialTheme(),
-  sessionId: null,
+  sessionId: null as string | null,
+  loadedSessionId: null as string | null,
   importProfile: "standard" as ImportProfile,
   sessionExpiredMessage: null,
   currentScreen: "upload" as Screen,
@@ -170,8 +189,30 @@ export const useAppStore = create<AppState>((set) => ({
     }
     set({ theme });
   },
-  setSessionId: (sessionId) =>
-    set((state) => (state.sessionId === sessionId ? {} : { sessionId, wizardDrafts: NO_DRAFTS })),
+  switchProject: (sessionId) =>
+    set((state) =>
+      state.sessionId === sessionId
+        ? {}
+        : {
+            ...INITIAL_STATE,
+            layerVisibility: state.layerVisibility,
+            theme: state.theme,
+            uiLanguage: state.uiLanguage,
+            sessionId
+          }
+    ),
+  projectLoaded: (sessionId, project) =>
+    set((state) =>
+      state.sessionId !== sessionId
+        ? {}
+        : {
+            loadedSessionId: sessionId,
+            importProfile: project.importProfile,
+            files: project.files,
+            ...(project.wizardState !== undefined ? { wizardState: project.wizardState } : {}),
+            currentScreen: project.reviewReached ? "review" : "wizard"
+          }
+    ),
   setImportProfile: (importProfile) => set({ importProfile }),
   setSessionExpiredMessage: (sessionExpiredMessage) => set({ sessionExpiredMessage }),
   clearSession: () =>
@@ -245,3 +286,25 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({ wizardDrafts: { ...state.wizardDrafts, [section]: draft } })),
   setLearningSuggestion: (learningSuggestion) => set({ learningSuggestion })
 }));
+
+/**
+ * Wraps a store action so it does nothing once the store holds a different
+ * project: a response for the project just left must not land in the next.
+ */
+export function forSession<A extends unknown[]>(
+  sessionId: string | null,
+  action: (...args: A) => void
+): (...args: A) => void {
+  return (...args: A) => {
+    if (useAppStore.getState().sessionId === sessionId) action(...args);
+  };
+}
+
+/** A store action, from a page opened for `sessionId`, that only lands while that is still the store's project. */
+export function useSessionAction<A extends unknown[]>(
+  sessionId: string | null,
+  pick: (state: AppState) => (...args: A) => void
+): (...args: A) => void {
+  const action = useAppStore(pick);
+  return useMemo(() => forSession(sessionId, action), [sessionId, action]);
+}

@@ -59,16 +59,57 @@ export type PageStages = {
   checkErrors?: number | null;
 };
 
+const SHAPEFILE_STAGE_IDS: ReadonlyArray<ShapefileStageId> = ["bring-in", "set-up", "check", "deliver"];
+
+export function isShapefileStage(value: unknown): value is ShapefileStageId {
+  return typeof value === "string" && (SHAPEFILE_STAGE_IDS as ReadonlyArray<string>).includes(value);
+}
+
+export function projectPath(sessionId: string, stage: ShapefileStageId): string {
+  return `/p/${encodeURIComponent(sessionId)}/${stage}`;
+}
+
+/** `/p/:sessionId` and `/p/:sessionId/:stage`; the stage is whatever the URL says, valid or not. */
+export function parseProjectPath(pathname: string): { sessionId: string; stage: string | null } | null {
+  const match = /^\/p\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname);
+  if (!match) return null;
+  return { sessionId: decodeURIComponent(match[1]), stage: match[2] ?? null };
+}
+
+/** What decides which stages of a shapefile project can be opened. */
+export type ShapefileProject = {
+  importProfile: "standard" | "imdf_shapefile";
+  /** Check has something to show (the store's `currentScreen` is "review"). */
+  reviewReached: boolean;
+};
+
+export function stageReachable(stage: ShapefileStageId, project: ShapefileProject): boolean {
+  if (stage === "bring-in") return true;
+  if (stage === "set-up") return project.importProfile !== "imdf_shapefile";
+  return project.reviewReached || project.importProfile === "imdf_shapefile";
+}
+
+/**
+ * Where a project opens when its URL names no stage, or one it cannot reach
+ * yet. Always a reachable stage, so redirecting to it cannot redirect again.
+ */
+export function landingStage(project: ShapefileProject): ShapefileStageId {
+  return stageReachable("check", project) ? "check" : "set-up";
+}
+
 export type ShapefileInput = {
   pathname: string;
-  hasSession: boolean;
+  sessionId: string | null;
   importProfile: "standard" | "imdf_shapefile";
   /** Review has been reached in this session (the store's `currentScreen`). */
   reviewReached: boolean;
   page?: PageStages;
 };
 
-const SHAPEFILE_ROUTE_INDEX: Record<string, number> = { "/": 0, "/wizard": 1, "/review": 2 };
+function routeIndex(pathname: string): number {
+  const stage = parseProjectPath(pathname)?.stage;
+  return isShapefileStage(stage) ? SHAPEFILE_STAGE_IDS.indexOf(stage) : 0;
+}
 
 function statusFor(index: number, current: number): StageStatus {
   if (index < current) return "done";
@@ -80,33 +121,40 @@ function pageTarget(page: PageStages | undefined, id: StageId): StageTarget | un
   return page?.targets?.includes(id) ? { kind: "page" } : undefined;
 }
 
+function routeTarget(
+  sessionId: string | null,
+  id: ShapefileStageId,
+  project: ShapefileProject
+): StageTarget | undefined {
+  if (id === "bring-in") return { kind: "route", to: sessionId ? projectPath(sessionId, id) : "/" };
+  if (!sessionId || !stageReachable(id, project)) return undefined;
+  return { kind: "route", to: projectPath(sessionId, id) };
+}
+
 export function shapefileStages({
   pathname,
-  hasSession,
+  sessionId,
   importProfile,
   reviewReached,
   page
 }: ShapefileInput): Stage[] {
-  const routeIndex = SHAPEFILE_ROUTE_INDEX[pathname] ?? 0;
-  const order = FLOW_STAGES.shapefiles.map((stage) => stage.id);
-  const current = page?.current ? Math.max(order.indexOf(page.current), 0) : routeIndex;
+  const current = page?.current
+    ? Math.max(FLOW_STAGES.shapefiles.findIndex((stage) => stage.id === page.current), 0)
+    : routeIndex(pathname);
+  const hasSession = Boolean(sessionId);
   const setUpSkipped = importProfile === "imdf_shapefile" && hasSession;
+  const project: ShapefileProject = { importProfile, reviewReached };
   const errors = page?.checkErrors;
 
-  return FLOW_STAGES.shapefiles.map(({ id, label }, index) => {
+  return SHAPEFILE_STAGE_IDS.map((id, index) => {
+    const { label } = FLOW_STAGES.shapefiles[index];
     let status = statusFor(index, current);
     const stage: Stage = { id, label, status };
 
     if (status !== "current") {
-      if (id === "bring-in") {
-        stage.target = { kind: "route", to: "/" };
-      } else if (id === "set-up" && hasSession && !setUpSkipped) {
-        stage.target = { kind: "route", to: "/wizard" };
-      } else if (id === "check" && hasSession && reviewReached) {
-        stage.target = { kind: "route", to: "/review" };
-      } else {
-        stage.target = pageTarget(page, id);
-      }
+      // The page's own handler wins: Deliver from Check opens the export
+      // dialog in place rather than going through the route.
+      stage.target = pageTarget(page, id) ?? routeTarget(sessionId, id, project);
     }
 
     // Set up is behind you once Review has been reached, even from Bring in.

@@ -5,9 +5,8 @@ import { SessionExpiredDialog } from "./components/shared/SessionExpiredDialog";
 import { ToastProvider } from "./components/shared/ToastProvider";
 import { AppShell } from "./components/shell/AppShell";
 import { IllustratorPage } from "./pages/IllustratorPage";
-import { ReviewPage } from "./pages/ReviewPage";
+import { LegacyStageRedirect, ProjectLayout, ProjectStage } from "./pages/ProjectRoutes";
 import { UploadPage } from "./pages/UploadPage";
-import { WizardPage } from "./pages/WizardPage";
 
 
 export default function App() {
@@ -17,8 +16,13 @@ export default function App() {
         <AppShell>
           <Routes>
             <Route path="/" element={<UploadPage />} />
-            <Route path="/wizard" element={<WizardPage />} />
-            <Route path="/review" element={<ReviewPage />} />
+            <Route path="/p/new" element={<Navigate to="/" replace />} />
+            <Route path="/p/:sessionId" element={<ProjectLayout />}>
+              <Route index element={<ProjectStage />} />
+              <Route path=":stage" element={<ProjectStage />} />
+            </Route>
+            <Route path="/wizard" element={<LegacyStageRedirect stage="set-up" />} />
+            <Route path="/review" element={<LegacyStageRedirect stage="check" />} />
             <Route path="/illustrator" element={<IllustratorPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

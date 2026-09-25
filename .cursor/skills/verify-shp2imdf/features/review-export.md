@@ -19,7 +19,7 @@ Review shows generated features on a map and in a list, runs validation, and dow
 Preconditions:
 
 - Doctor is OK.
-- Client is on `/review` with a generated session (`drive wizard-configure`).
+- Client is on `/p/<sessionId>/check` with a generated session (`drive wizard-configure`).
 - There is no one-shot `drive review-export` yet — drive with Playwright or the Cursor browser using these handles, then write `artifacts/verify-shp2imdf/review-export/`.
 
 - **Chrome.** `Export` and `Validate` are visible. Run `getByRole('button', { name: 'Export' })` and `getByRole('button', { name: 'Validate' })`.

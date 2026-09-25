@@ -160,7 +160,7 @@ async function captureShapefileFlow(page, shoot) {
   await queueTokyoStation(page);
   await shoot("upload-queued");
   await page.getByRole("button", { name: "Import & Continue" }).first().click();
-  await page.waitForURL("**/wizard", { timeout: 60000 });
+  await page.waitForURL("**/p/*/set-up", { timeout: 60000 });
   await page.getByLabel(/Venue Name/).waitFor({ timeout: 30000 });
   await fillVenue(page);
 

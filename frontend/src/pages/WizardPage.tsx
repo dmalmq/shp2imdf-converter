@@ -41,9 +41,10 @@ import { SummaryStep } from "../components/wizard/SummaryStep";
 import { UnitMapStep } from "../components/wizard/UnitMapStep";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
-import { useAppStore, type WizardDrafts } from "../store/useAppStore";
+import { useAppStore, useSessionAction, type WizardDrafts } from "../store/useAppStore";
 import { Button, DisabledHint } from "../components/ui";
 import { useInShell, usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
+import { projectPath } from "../components/shell/stages";
 import { formatClock } from "../lib/clock";
 import { WizardFooterProvider, sameAsSaved, useAutosave, useWizardFooterState } from "../components/wizard/wizardSave";
 
@@ -191,25 +192,25 @@ function WizardStepSkeleton() {
 export function WizardPage() {
   const navigate = useNavigate();
   const sessionId = useAppStore((state) => state.sessionId);
-  const setCurrentScreen = useAppStore((state) => state.setCurrentScreen);
+  const setCurrentScreen = useSessionAction(sessionId, (state) => state.setCurrentScreen);
   const files = useAppStore((state) => state.files);
   const cleanupSummary = useAppStore((state) => state.cleanupSummary);
   const wizardState = useAppStore((state) => state.wizardState);
-  const setFiles = useAppStore((state) => state.setFiles);
-  const setWizardState = useAppStore((state) => state.setWizardState);
+  const setFiles = useSessionAction(sessionId, (state) => state.setFiles);
+  const setWizardState = useSessionAction(sessionId, (state) => state.setWizardState);
   const selectedFileStem = useAppStore((state) => state.selectedFileStem);
   const setSelectedFileStem = useAppStore((state) => state.setSelectedFileStem);
   const hoveredFileStem = useAppStore((state) => state.hoveredFileStem);
   const setHoveredFileStem = useAppStore((state) => state.setHoveredFileStem);
   const wizardSaveStatus = useAppStore((state) => state.wizardSaveStatus);
   const wizardSaveError = useAppStore((state) => state.wizardSaveError);
-  const setWizardSaveStatus = useAppStore((state) => state.setWizardSaveStatus);
+  const setWizardSaveStatus = useSessionAction(sessionId, (state) => state.setWizardSaveStatus);
   const wizardSavedAt = useAppStore((state) => state.wizardSavedAt);
   const wizardSaveRetry = useAppStore((state) => state.wizardSaveRetry);
   const learningSuggestion = useAppStore((state) => state.learningSuggestion);
-  const setLearningSuggestion = useAppStore((state) => state.setLearningSuggestion);
-  const setSessionExpiredMessage = useAppStore((state) => state.setSessionExpiredMessage);
-  const handleApiError = useApiErrorHandler();
+  const setLearningSuggestion = useSessionAction(sessionId, (state) => state.setLearningSuggestion);
+  const setSessionExpiredMessage = useSessionAction(sessionId, (state) => state.setSessionExpiredMessage);
+  const handleApiError = useApiErrorHandler(sessionId);
   const pushToast = useToast();
   const { t, isJapanese } = useUiLanguage();
 
@@ -221,7 +222,7 @@ export function WizardPage() {
   const { project: projectDraft, buildings: buildingsDraft, footprint: footprintDraft } = useAppStore(
     (state) => state.wizardDrafts
   );
-  const setWizardDraft = useAppStore((state) => state.setWizardDraft);
+  const setWizardDraft = useSessionAction(sessionId, (state) => state.setWizardDraft);
   const [loading, setLoading] = useState(false);
   const [features, setFeatures] = useState<
     {
@@ -695,7 +696,7 @@ export function WizardPage() {
         description: t("Opening review workspace.", "レビュー画面を開きます。"),
         variant: "success"
       });
-      navigate("/review");
+      navigate(projectPath(sessionId, "check"));
     } catch (error) {
       const message = handleApiError(error, t("Failed to generate draft features", "ドラフト生成に失敗しました"), {
         title: t("Generation failed", "生成失敗")

@@ -96,7 +96,7 @@ Proof standards:
 - Exercise the real UI path (file picker, Import, wizard, review). Do not PATCH zustand or call `/api/import` as a stand-in for `import-shapefiles`.
 - Capture the action and the result: screenshot + ARIA snapshot after the state change, plus `report.md` with URL, feature id, and entry point.
 - Identity must be visible (the `shp2imdf` top bar).
-- Side effects: a successful import navigates to `/wizard` (standard) or `/review` (IMDF-schema / `.imdf` reopen). Confirm the URL, not only a toast.
+- Side effects: a successful import navigates to `/p/<sessionId>/set-up` (standard) or `/p/<sessionId>/check` (IMDF-schema / `.imdf` reopen). Confirm the URL, not only a toast.
 - Import **does** create a real in-memory session and can evict the oldest of `MAX_SESSIONS` (default 5). That is a production behavior — record it; do not pretend it is a dry-run.
 - Do not save, overwrite, or delete named Illustrator placements (`data/placements.db`). Opening `/illustrator` is safe; clicking Save on a named placement is not.
 
