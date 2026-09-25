@@ -26,7 +26,7 @@ from backend.src.feature_types import (
     geometry_kind,
     spec_for,
 )
-from backend.src.feature_undo import changes_anything, restore_features, undo_between
+from backend.src.feature_undo import changes_anything, finish_fix, restore_features, undo_between
 from backend.src.importer import rebuild_normalized_feature_collection
 from backend.src.projects import current_validation, mark_changed, mark_validated
 from backend.src.schemas import (
@@ -499,10 +499,10 @@ def resolve_unit_overlap(
     )
     resolved = bool(updated_count or deleted_count)
     features, removed = prune_empty_geometry_features(features)
+    features, undo = finish_fix(before, features)
     session.feature_collection["features"] = features
     if resolved or removed:
         mark_changed(session)
-    undo = undo_between(before, features)
     validation = _revalidate_session(session)
     manager.save_session(session)
     return ResolveUnitOverlapsResponse(
@@ -571,10 +571,10 @@ def resolve_unit_overlaps_safe(session_id: str, request: Request) -> ResolveUnit
 
     features, removed = prune_empty_geometry_features(features)
     deleted_count += len(removed)
+    features, undo = finish_fix(before, features)
     session.feature_collection["features"] = features
     if resolved_pairs or removed:
         mark_changed(session)
-    undo = undo_between(before, features)
     revalidation = _revalidate_session(session)
     manager.save_session(session)
     return ResolveUnitOverlapsResponse(

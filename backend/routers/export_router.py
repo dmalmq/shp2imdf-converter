@@ -12,7 +12,7 @@ from backend.routers.common import get_session_or_raise, session_manager
 from backend.src.errors import NotFoundError
 from backend.src.autofix import apply_autofix
 from backend.src.exporter import build_export_archive
-from backend.src.feature_undo import undo_between
+from backend.src.feature_undo import finish_fix
 from backend.src.projects import current_validation, mark_changed, mark_delivered, mark_validated
 from backend.src.schemas import AutofixRequest, AutofixResponse, SessionRecord, ShapefileExportRequest, SnapOpeningRequest, SnapOpeningResponse, ValidationResponse
 from backend.src.shapefile_exporter import build_qgis_project_archive, build_shapefile_export_archive
@@ -61,7 +61,7 @@ def autofix_session(
         validation=validation,
         apply_prompted=payload.apply_prompted,
     )
-    undo = undo_between(session.feature_collection.get("features", []), updated.get("features", []))
+    updated["features"], undo = finish_fix(session.feature_collection.get("features", []), updated.get("features", []))
     session.feature_collection = updated
     if fixes_applied:
         mark_changed(session)
@@ -121,9 +121,8 @@ def snap_opening(session_id: str, payload: SnapOpeningRequest, request: Request)
     dx = nearest_pt.x - opening_geom.centroid.x
     dy = nearest_pt.y - opening_geom.centroid.y
     snapped = translate(opening_geom, xoff=dx, yoff=dy)
-    before = list(features)
-    features[opening_index] = {**opening_row, "geometry": mapping(snapped)}
-    undo = undo_between(before, features)
+    moved = [*features[:opening_index], {**opening_row, "geometry": mapping(snapped)}, *features[opening_index + 1 :]]
+    session.feature_collection["features"], undo = finish_fix(features, moved)
     if undo.features:
         mark_changed(session)
 

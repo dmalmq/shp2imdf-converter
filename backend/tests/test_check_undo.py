@@ -110,6 +110,64 @@ def test_undoing_a_snap_moves_the_opening_back(test_client, sample_dir: Path) ->
     assert _content(test_client, session_id) == before
 
 
+def _loose_door_with_label(client, session_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """An opening moved 2 m off its wall, its label point on its middle vertex, the way imports write it."""
+    opening = _features(client, session_id, "opening")[0]
+    line = [[x + 2e-5, y] for x, y in opening["geometry"]["coordinates"]]
+    line.insert(1, [(line[0][0] + line[1][0]) / 2, (line[0][1] + line[1][1]) / 2])
+    geometry = {"type": "LineString", "coordinates": line}
+    label = {"type": "Point", "coordinates": line[1]}
+    response = client.patch(
+        f"/api/session/{session_id}/features/{opening['id']}",
+        json={"geometry": geometry, "properties": {"display_point": label}},
+    )
+    assert response.status_code == 200, response.text
+    return response.json(), _features(client, session_id, "unit")[0]
+
+
+def test_snapping_a_door_takes_its_label_point_along(test_client, sample_dir: Path) -> None:
+    session_id = _generated_session(test_client, sample_dir)
+    opening, unit = _loose_door_with_label(test_client, session_id)
+    loose = test_client.post(f"/api/session/{session_id}/validate").json()
+    assert not [issue for issue in loose["errors"] if issue["feature_id"] == opening["id"]]
+
+    fixed = test_client.post(
+        f"/api/session/{session_id}/snap_opening", json={"opening_id": opening["id"], "unit_id": unit["id"]}
+    ).json()
+
+    assert fixed["validation"]["summary"]["error_count"] <= loose["summary"]["error_count"]
+    assert "display_point_within_geometry" not in {issue["check"] for issue in fixed["validation"]["errors"]}
+    moved = _content(test_client, session_id)[opening["id"]]
+    assert moved["properties"]["display_point"]["coordinates"] == pytest.approx(moved["geometry"]["coordinates"][1], abs=1e-12)
+
+    _undo(test_client, session_id, fixed["undo"])
+    restored = _content(test_client, session_id)[opening["id"]]
+    assert restored["properties"]["display_point"] == opening["properties"]["display_point"]
+    assert restored["geometry"] == opening["geometry"]
+
+
+def test_trimming_an_overlap_keeps_the_trimmed_units_label_inside(test_client, sample_dir: Path) -> None:
+    session_id = _generated_session(test_client, sample_dir)
+    keep, clip = _features(test_client, session_id, "unit")[:2]
+    overlapping = _shifted(keep["geometry"], 1e-6)
+    ring = overlapping["coordinates"][0]
+    inside_keep = {"type": "Point", "coordinates": [(ring[0][0] + ring[2][0]) / 2, (ring[0][1] + ring[2][1]) / 2]}
+    test_client.patch(
+        f"/api/session/{session_id}/features/{clip['id']}",
+        json={"geometry": overlapping, "properties": {"display_point": inside_keep}},
+    )
+
+    fixed = test_client.post(
+        f"/api/session/{session_id}/overlaps/resolve",
+        json={"keep_feature_id": keep["id"], "clip_feature_id": clip["id"]},
+    ).json()
+
+    assert fixed["updated_count"] == 1
+    assert "display_point_within_geometry" not in {issue["check"] for issue in fixed["validation"]["errors"]}
+    _undo(test_client, session_id, fixed["undo"])
+    assert _content(test_client, session_id)[clip["id"]]["properties"]["display_point"] == inside_keep
+
+
 def test_undoing_an_autofix_restores_the_coordinates(test_client, sample_dir: Path) -> None:
     session_id = _generated_session(test_client, sample_dir)
     unit = _features(test_client, session_id, "unit")[0]

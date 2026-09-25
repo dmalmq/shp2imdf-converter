@@ -1,8 +1,10 @@
-"""Undo for the fixes Check offers.
+"""What a Check fix leaves behind, and how to undo it.
 
-A fix reports the features it touched as they were before it ran; restoring
-them is a feature edit like any other, so it bumps ``content_rev`` only when
-it changes something and the caller revalidates.
+A fix that reshapes a feature carries its display point along, so moving a
+door onto a wall does not leave its label behind as a new error. A fix
+reports the features it touched as they were before it ran; restoring them
+is a feature edit like any other, so it bumps ``content_rev`` only when it
+changes something and the caller revalidates.
 """
 
 from __future__ import annotations
@@ -10,7 +12,11 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from shapely.affinity import translate
+from shapely.geometry import mapping, shape
+
 from backend.src.schemas import FeatureUndo
+from backend.src.validator import _point_in_geometry
 
 # Rewritten by every validation, so a fix neither changes nor restores them.
 _VALIDATION_ANNOTATIONS = frozenset({"status", "issues"})
@@ -46,6 +52,43 @@ def _rows_by_id(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     return grouped
 
 
+def _settled_point(point: dict[str, Any], old_geometry: Any, new_geometry: Any) -> dict[str, Any] | None:
+    """Where a display point goes once its shape has changed, or None when it can stay.
+
+    It moves with the shape's centre first, which is exact for a translated
+    door; failing that, onto the shape's representative point, which GEOS
+    puts on a vertex for a line and inside for a polygon.
+    """
+    try:
+        new = shape(new_geometry)
+        old = shape(old_geometry)
+        current = shape(point)
+    except Exception:
+        return None
+    if new.is_empty or _point_in_geometry(point, new):
+        return None
+    shifted = mapping(translate(current, new.centroid.x - old.centroid.x, new.centroid.y - old.centroid.y))
+    if _point_in_geometry(shifted, new):
+        return shifted
+    return mapping(new.representative_point())
+
+
+def carry_display_points(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """``after`` with every reshaped feature's display point back inside its shape."""
+    old = _rows_by_id(before)
+    carried: list[dict[str, Any]] = []
+    for row in after:
+        prior = old.get(str(row.get("id"))) if isinstance(row, dict) else None
+        properties = row.get("properties") if isinstance(row, dict) else None
+        point = properties.get("display_point") if isinstance(properties, dict) else None
+        if not prior or prior[0] is row or not isinstance(point, dict) or _as_json(prior[0].get("geometry")) == _as_json(row.get("geometry")):
+            carried.append(row)
+            continue
+        settled = _settled_point(point, prior[0].get("geometry"), row.get("geometry"))
+        carried.append(row if settled is None else {**row, "properties": {**properties, "display_point": settled}})
+    return carried
+
+
 def undo_between(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> FeatureUndo:
     """What turns ``after`` back into ``before``. Ids are compared as groups,
     since a collection can hold duplicates until auto-fix renumbers them."""
@@ -59,6 +102,12 @@ def undo_between(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> F
         remove_ids=[feature_id for feature_id in touched if feature_id in new],
         features=[copy.deepcopy(row) for feature_id in touched for row in old.get(feature_id, [])],
     )
+
+
+def finish_fix(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], FeatureUndo]:
+    """Every fix ends here: its features with display points carried along, and what undoes it."""
+    settled = carry_display_points(before, after)
+    return settled, undo_between(before, settled)
 
 
 def restore_features(rows: list[dict[str, Any]], undo: FeatureUndo) -> list[dict[str, Any]]:
