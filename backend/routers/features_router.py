@@ -26,7 +26,14 @@ from backend.src.feature_types import (
     geometry_kind,
     spec_for,
 )
-from backend.src.feature_undo import changes_anything, check_restorable, finish_fix, restore_features, undo_between
+from backend.src.feature_undo import (
+    changes_anything,
+    check_restorable,
+    finish_fix,
+    restore_features,
+    same_content,
+    undo_between,
+)
 from backend.src.importer import rebuild_normalized_feature_collection
 from backend.src.projects import current_validation, mark_changed, mark_validated
 from backend.src.schemas import (
@@ -325,7 +332,7 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
         raise NotFoundError("File stem not found")
 
     current: ImportedFile = session.files[file_index]
-    files_before = [item.model_copy(deep=True) for item in session.files]
+    files_before = [item.model_dump_json() for item in session.files]
     keywords_before = dict(session.learned_keywords)
     updated = current.model_copy(deep=True)
     changed_fields = payload.model_fields_set
@@ -372,7 +379,7 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
             )
 
     _refresh_source_views(session)
-    if session.files != files_before or session.learned_keywords != keywords_before:
+    if [item.model_dump_json() for item in session.files] != files_before or session.learned_keywords != keywords_before:
         mark_changed(session, "file_changed", stem=stem)
     manager.save_session(session)
 
@@ -477,7 +484,7 @@ def patch_features_bulk(
             merged = _merge_properties(copied.get("properties") or {}, payload.properties)
             copied["properties"] = conform_properties(merged, copied["feature_type"]) if retyped else merged
         updated += 1
-        changed += copied != item
+        changed += not same_content(copied, item)
         next_features.append(copied)
     session.feature_collection["features"] = next_features
     if changed:
@@ -640,7 +647,7 @@ def patch_feature(
         # authoritative instead of letting them leak back in.
         updated["properties"] = conform_properties(merged, updated["feature_type"]) if retyped else merged
 
-    if updated != features[index]:
+    if not same_content(updated, features[index]):
         features[index] = updated
         session.feature_collection["features"] = features
         mark_changed(session, "features_edited")

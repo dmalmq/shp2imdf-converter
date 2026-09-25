@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Handover, HandoverEvent } from "../api/client";
-import { eventLine, formatDuration, shouldWelcome } from "./handover";
+import { eventLine, formatDuration, readDismissed, shouldWelcome, writeDismissed } from "./handover";
 
 function event(kind: HandoverEvent["kind"], n = 1, params: HandoverEvent["params"] = {}): HandoverEvent {
   return { at: "2026-09-24T10:00:00Z", kind, n, params };
@@ -51,5 +51,37 @@ describe("shouldWelcome", () => {
 
   it("stays away from a project's first visit", () => {
     expect(shouldWelcome({ ...resumed, last_visit: null }, null)).toBe(false);
+  });
+});
+
+describe("shouldWelcome over a project's visits", () => {
+  const id = "session-life";
+  const first = "2026-09-24T09:00:00Z";
+  const second = "2026-09-25T08:00:00Z";
+  const third = "2026-09-26T08:00:00Z";
+  const welcome = (handover: Handover) => shouldWelcome(handover, readDismissed(id));
+
+  beforeEach(() => window.localStorage.clear());
+
+  it("stays away from a brand-new project", () => {
+    expect(welcome({ visit_started_at: first, last_visit: null, note: null })).toBe(false);
+  });
+
+  it("shows on resume after the gap, not again within the visit or after a reload once dismissed", () => {
+    const resumed: Handover = { visit_started_at: second, last_visit: visit, note: null };
+    expect(welcome(resumed)).toBe(true);
+    expect(welcome(resumed)).toBe(true);
+
+    writeDismissed(id, second);
+    expect(welcome(resumed)).toBe(false);
+    const reloaded: Handover = JSON.parse(JSON.stringify(resumed));
+    expect(welcome(reloaded)).toBe(false);
+
+    expect(welcome({ ...resumed, visit_started_at: third })).toBe(true);
+  });
+
+  it("keeps one project's dismissal off another", () => {
+    writeDismissed("another", second);
+    expect(welcome({ visit_started_at: second, last_visit: visit, note: null })).toBe(true);
   });
 });

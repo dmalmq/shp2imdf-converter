@@ -5,16 +5,19 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from backend.src.handover import (
     MAX_EVENTS_PER_VISIT,
     MAX_VISITS,
     begin_or_continue_visit,
+    gap_setting_problem,
     last_visit,
     record_event,
     visit_gap,
 )
 from backend.src.schemas import Handover, SessionRecord
-from backend.src.session import SessionManager
+from backend.src.session import FileSystemSessionBackend, SessionManager
 from backend.tests.test_projects_api import _reopen_sessions
 from backend.tests.test_session_projects import _PROJECT, _import
 
@@ -156,8 +159,8 @@ def test_an_edit_long_after_the_visit_began_is_a_new_visit_even_if_the_start_was
 
 
 def test_the_gap_can_be_shortened_for_a_live_check(monkeypatch) -> None:
-    monkeypatch.setenv("HANDOVER_VISIT_GAP_MINUTES", "0.05")
-    assert visit_gap() == timedelta(seconds=3)
+    monkeypatch.setenv("HANDOVER_VISIT_GAP_MINUTES", "0.1")
+    assert visit_gap() == timedelta(seconds=6)
 
 
 # Through the API
@@ -298,3 +301,141 @@ def test_the_meta_file_carries_no_handover(test_client, sample_dir: Path) -> Non
     meta = (Path(manager.backend.data_dir) / f"{session_id}.meta.json").read_text(encoding="utf-8")
     assert "imported" not in meta
     assert "a note for the meta" not in meta
+
+
+# A visit boundary outlives the cache and a restart
+
+
+def _resume_by_touch(client, session_id: str) -> str:
+    _age(client, session_id, timedelta(hours=3))
+    assert client.get(f"/api/session/{session_id}/files").status_code == 200
+    started = _record(client, session_id).handover.visit_started_at
+    assert started is not None and datetime.now(UTC) - started < timedelta(minutes=1)
+    return started.isoformat().replace("+00:00", "Z")
+
+
+def _same_instant(left: str, right: str) -> bool:
+    return datetime.fromisoformat(left.replace("Z", "+00:00")) == datetime.fromisoformat(right.replace("Z", "+00:00"))
+
+
+def test_a_visit_started_by_a_touch_survives_cache_eviction(test_client, sample_dir: Path) -> None:
+    session_id = _import(test_client, sample_dir)
+    current: SessionManager = test_client.app.state.session_manager
+    manager = SessionManager(
+        FileSystemSessionBackend(current.backend.data_dir, cache_size=1),
+        ttl_hours=int(current.ttl.total_seconds() // 3600),
+        max_sessions=current.max_sessions,
+    )
+    test_client.app.state.session_manager = manager
+    started = _resume_by_touch(test_client, session_id)
+
+    other = _import(test_client, sample_dir)
+    assert test_client.get(f"/api/session/{other}/files").status_code == 200
+    assert session_id not in manager.backend._cache
+
+    body = test_client.get(f"/api/session/{session_id}/handover").json()
+    assert _same_instant(body["visit_started_at"], started)
+    assert body["last_visit"] is not None
+
+
+def test_a_visit_started_by_a_touch_survives_a_restart(test_client, sample_dir: Path) -> None:
+    session_id = _import(test_client, sample_dir)
+    started = _resume_by_touch(test_client, session_id)
+
+    _reopen_sessions(test_client)
+    body = test_client.get(f"/api/session/{session_id}/handover").json()
+    assert _same_instant(body["visit_started_at"], started)
+    assert body["last_visit"] is not None
+
+
+def test_a_touch_within_a_visit_does_not_rewrite_the_record(test_client, sample_dir: Path, monkeypatch) -> None:
+    session_id = _import(test_client, sample_dir)
+    manager: SessionManager = test_client.app.state.session_manager
+    saves: list[str] = []
+    original = manager.backend.save
+
+    def counting(session: SessionRecord) -> None:
+        saves.append(session.session_id)
+        original(session)
+
+    monkeypatch.setattr(manager.backend, "save", counting)
+    for _ in range(3):
+        assert test_client.get(f"/api/session/{session_id}/files").status_code == 200
+    assert saves == []
+
+
+# Gap setting
+
+
+@pytest.mark.parametrize("raw", ["inf", "-inf", "nan", "0", "-5", "0.01", "100000", "soon"])
+def test_an_unusable_gap_falls_back_to_the_default(monkeypatch, raw: str) -> None:
+    monkeypatch.setenv("HANDOVER_VISIT_GAP_MINUTES", raw)
+    assert visit_gap() == timedelta(minutes=30)
+    assert gap_setting_problem() is not None
+
+
+def test_a_usable_gap_reports_no_problem(monkeypatch) -> None:
+    monkeypatch.setenv("HANDOVER_VISIT_GAP_MINUTES", str(7 * 24 * 60))
+    assert visit_gap() == timedelta(days=7)
+    assert gap_setting_problem() is None
+    monkeypatch.delenv("HANDOVER_VISIT_GAP_MINUTES")
+    assert gap_setting_problem() is None
+
+
+def test_an_unusable_gap_is_warned_about_at_startup(monkeypatch, tmp_path: Path, caplog) -> None:
+    from backend.main import _load_session_manager
+
+    monkeypatch.setenv("SESSION_DATA_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv("HANDOVER_VISIT_GAP_MINUTES", "inf")
+    with caplog.at_level("WARNING"):
+        _load_session_manager()
+    assert any("HANDOVER_VISIT_GAP_MINUTES='inf'" in record.getMessage() for record in caplog.records)
+
+
+def test_an_infinite_gap_does_not_break_requests(test_client, sample_dir: Path, monkeypatch) -> None:
+    session_id = _import(test_client, sample_dir)
+    monkeypatch.setenv("HANDOVER_VISIT_GAP_MINUTES", "inf")
+    assert test_client.get(f"/api/session/{session_id}/handover").status_code == 200
+
+
+# No-op comparison as JSON sees it
+
+
+def test_a_change_from_one_to_true_is_stored_and_counts(test_client, sample_dir: Path) -> None:
+    session_id = _import(test_client, sample_dir)
+    feature = _first_feature(test_client, session_id)
+    url = f"/api/session/{session_id}/features/{feature['id']}"
+    assert test_client.patch(url, json={"properties": {**feature["properties"], "flag": 1}}).status_code == 200
+    rev = _record(test_client, session_id).content_rev
+
+    assert test_client.patch(url, json={"properties": {**feature["properties"], "flag": True}}).status_code == 200
+    assert test_client.get(url).json()["properties"]["flag"] is True
+    assert _record(test_client, session_id).content_rev == rev + 1
+
+    bulk = f"/api/session/{session_id}/features/bulk"
+    assert test_client.patch(bulk, json={"feature_ids": [feature["id"]], "properties": {"flag": 1}}).status_code == 200
+    assert test_client.get(url).json()["properties"]["flag"] == 1
+    assert _record(test_client, session_id).content_rev == rev + 2
+
+
+def test_the_same_geometry_as_tuples_or_lists_does_not_count(test_client, sample_dir: Path) -> None:
+    session_id = _import(test_client, sample_dir)
+    feature = _first_feature(test_client, session_id)
+    record = _record(test_client, session_id)
+    row = next(item for item in record.feature_collection["features"] if item["id"] == feature["id"])
+
+    def as_tuples(value):
+        return tuple(as_tuples(item) for item in value) if isinstance(value, list) else value
+
+    row["geometry"] = {**row["geometry"], "coordinates": as_tuples(row["geometry"]["coordinates"])}
+    rev = record.content_rev
+    events = _events(test_client, session_id)
+    url = f"/api/session/{session_id}/features/{feature['id']}"
+    assert test_client.patch(url, json={"geometry": feature["geometry"]}).status_code == 200
+    bulk = test_client.patch(
+        f"/api/session/{session_id}/features/bulk",
+        json={"feature_ids": [feature["id"]], "properties": {}},
+    )
+    assert bulk.status_code == 200
+    assert _record(test_client, session_id).content_rev == rev
+    assert _events(test_client, session_id) == events

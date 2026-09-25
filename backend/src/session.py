@@ -356,9 +356,13 @@ class SessionManager:
             return None
         if touch:
             now = datetime.now(UTC)
-            begin_or_continue_visit(session.handover, previous=_aware(session.last_accessed), now=now)
+            began = begin_or_continue_visit(session.handover, previous=_aware(session.last_accessed), now=now)
             session.last_accessed = now
-            self.backend.touch(session)
+            # A touch lives in memory only; a visit's start must outlast the cache and a restart.
+            if began:
+                self.backend.save(session)
+            else:
+                self.backend.touch(session)
         return session
 
     def prune_expired(self) -> int:
