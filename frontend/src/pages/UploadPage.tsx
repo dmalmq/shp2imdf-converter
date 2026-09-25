@@ -1,62 +1,22 @@
-import { Fragment, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { useDropzone } from "react-dropzone";
 import { useNavigate } from "react-router-dom";
 
 import {
-  importImdf,
   importImdfShapefiles,
   importShapefiles,
   type ImportResponse
 } from "../api/client";
 import { useToast } from "../components/shared/ToastProvider";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
+import { useDroppedFiles } from "../hooks/useDroppedFiles";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
 import { Button, Card, Badge, Checkbox, DisabledHint } from "../components/ui";
 import { usePrimaryAction } from "../components/shell/ShellContext";
 import { projectPath } from "../components/shell/stages";
 import { cn } from "@/lib/utils";
-
-/**
- * One of the ways into the app that is not "import shapefiles".
- *
- * Both used to be full-width secondary buttons stacked under the primary
- * action, which left the Illustrator route — half the product — reading as a
- * footnote. They are siblings, so they look like siblings.
- */
-function EntryCard({
-  title,
-  description,
-  disabled,
-  onClick,
-  icon
-}: {
-  title: string;
-  description: string;
-  disabled?: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "flex flex-col gap-2 rounded-lg border border-border bg-card p-4 text-left transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        disabled ? "opacity-60" : "hover:bg-accent"
-      )}
-    >
-      <span className="text-muted-foreground">{icon}</span>
-      <span className="flex flex-col gap-0.5">
-        <span className="text-sm font-medium leading-5 text-foreground">{title}</span>
-        <span className="text-[13px] leading-[18px] text-muted-foreground">{description}</span>
-      </span>
-    </button>
-  );
-}
 
 /**
  * One queued dataset.
@@ -201,7 +161,11 @@ function toQueuedUploadFile(file: File): QueuedUploadFile | null {
 
 
 type UploadPageProps = {
-  /** Shown from a project's Bring in: importing here does not add to that project. */
+  /**
+   * Shown from a project's Bring in: importing here does not add to that
+   * project. Otherwise this is `/p/new`, which starts from no project and
+   * queues whatever the hub's drop zone handed over.
+   */
   fromProject?: boolean;
 };
 
@@ -215,7 +179,16 @@ export function UploadPage({ fromProject = false }: UploadPageProps = {}) {
   const handleApiError = useApiErrorHandler();
   const { t } = useUiLanguage();
 
-  const [queuedFiles, setQueuedFiles] = useState<QueuedUploadFile[]>([]);
+  const dropped = useDroppedFiles();
+  const [queuedFiles, setQueuedFiles] = useState<QueuedUploadFile[]>(() =>
+    dropped
+      .map(toQueuedUploadFile)
+      .filter((item): item is QueuedUploadFile => item !== null)
+  );
+
+  useEffect(() => {
+    if (!fromProject) switchProject(null);
+  }, [fromProject, switchProject]);
   const [progress, setProgress] = useState(0);
   const [loading, setLoading] = useState(false);
   const [importMode, setImportMode] = useState<"standard" | "imdf_shapefile">("standard");
@@ -223,8 +196,6 @@ export function UploadPage({ fromProject = false }: UploadPageProps = {}) {
   const [error, setError] = useState<string | null>(null);
   const [cleanupExpanded, setCleanupExpanded] = useState(false);
   const [lastCleanup, setLastCleanup] = useState<ImportResponse["cleanup_summary"] | null>(null);
-  const [imdfLoading, setImdfLoading] = useState(false);
-  const [imdfError, setImdfError] = useState<string | null>(null);
 
   const onDrop = (acceptedFiles: File[]) => {
     const parsed = acceptedFiles.map(toQueuedUploadFile);
@@ -386,30 +357,6 @@ export function UploadPage({ fromProject = false }: UploadPageProps = {}) {
         return item.stem.toLowerCase() !== stemKey;
       })
     );
-  };
-
-  const runImdfImport = async (file: File) => {
-    setImdfLoading(true);
-    setImdfError(null);
-    try {
-      const payload = await importImdf(file);
-      setSessionExpiredMessage(null);
-      switchProject(payload.session_id);
-      projectLoaded(payload.session_id, { importProfile: "standard", files: [], reviewReached: true });
-      pushToast({
-        title: t("IMDF archive opened", "IMDFアーカイブを開きました"),
-        description: t(`${payload.feature_count} features loaded.`, `${payload.feature_count} 件のフィーチャーを読み込みました。`),
-        variant: "success"
-      });
-      navigate(projectPath(payload.session_id, "check"));
-    } catch (caught) {
-      const message = handleApiError(caught, t("Failed to open IMDF archive", "IMDFアーカイブを開けませんでした"), {
-        title: t("Open failed", "オープン失敗")
-      });
-      setImdfError(message);
-    } finally {
-      setImdfLoading(false);
-    }
   };
 
   // Import & auto-continue to wizard
@@ -763,75 +710,6 @@ export function UploadPage({ fromProject = false }: UploadPageProps = {}) {
         </div>
 
       </Card>
-
-        {/* ── the other ways in ──
-            An equal pair under one divider, rather than the primary action's
-            leftovers. The hidden input stays outside the card so the card can
-            be a plain button. */}
-        <div className="flex items-center gap-3">
-          <div className="h-px flex-1 bg-border" />
-          <span className="text-xs leading-4 text-muted-foreground">
-            {t("or start from", "または次から開始")}
-          </span>
-          <div className="h-px flex-1 bg-border" />
-        </div>
-
-        <input
-          type="file"
-          accept=".imdf,.zip"
-          className="hidden"
-          disabled={imdfLoading}
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) void runImdfImport(file);
-            e.target.value = "";
-          }}
-          id="imdf-file-input"
-        />
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <EntryCard
-            title={
-              imdfLoading
-                ? t("Opening…", "開いています…")
-                : t("Open IMDF archive", "IMDFアーカイブを開く")
-            }
-            description={t(
-              "Re-open an exported .imdf.zip and keep editing.",
-              "以前書き出した .imdf.zip を再編集のために開きます。"
-            )}
-            disabled={imdfLoading}
-            onClick={() => document.getElementById("imdf-file-input")?.click()}
-            icon={
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
-                <path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5v-9Z" />
-                <path d="m3 7.5 9 4.5 9-4.5M12 12v9" />
-              </svg>
-            }
-          />
-          <EntryCard
-            title={t("Illustrator artwork", "Illustrator 図面")}
-            description={t(
-              "Convert an .ai or .pdf and place it on the map.",
-              ".ai または .pdf を変換して地図上に配置します。"
-            )}
-            onClick={() => navigate("/illustrator")}
-            icon={
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 19l7-7 3 3-7 7-3-3Z" />
-                <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5Z" />
-                <path d="M2 2l7.586 7.586" />
-                <circle cx="11" cy="11" r="2" />
-              </svg>
-            }
-          />
-        </div>
-
-        {imdfError ? (
-          <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {imdfError}
-          </div>
-        ) : null}
       </div>
     </div>
   );

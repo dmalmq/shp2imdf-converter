@@ -6,11 +6,11 @@ import { MemoryRouter } from "react-router-dom";
 import App from "./App";
 
 
-test("renders upload page heading", () => {
+test("Bring in for a new project offers both import profiles", () => {
   const queryClient = new QueryClient();
   render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/p/new"]}>
         <App />
       </MemoryRouter>
     </QueryClientProvider>
@@ -24,7 +24,7 @@ test("allows deselecting queued files before import", async () => {
   const queryClient = new QueryClient();
   const { container } = render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/p/new"]}>
         <App />
       </MemoryRouter>
     </QueryClientProvider>
@@ -56,7 +56,7 @@ test("groups sidecar components under one stem selection", async () => {
   const queryClient = new QueryClient();
   const { container } = render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/p/new"]}>
         <App />
       </MemoryRouter>
     </QueryClientProvider>
@@ -86,7 +86,7 @@ test("queues geopackage uploads as selectable sources", async () => {
   const queryClient = new QueryClient();
   const { container } = render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/p/new"]}>
         <App />
       </MemoryRouter>
     </QueryClientProvider>

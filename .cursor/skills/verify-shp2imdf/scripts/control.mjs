@@ -510,6 +510,8 @@ async function gotoEnglishHome(page) {
 
 async function queueTokyoStation(page) {
   await gotoEnglishHome(page);
+  await page.getByRole("button", { name: /From floor shapefiles/ }).click();
+  await page.waitForURL("**/p/new", { timeout: 15000 });
   await page.getByRole("button", { name: "Standard", exact: true }).click();
   const files = shapefileParts();
   if (files.length === 0) {
@@ -549,7 +551,7 @@ async function driveImportShapefiles() {
   await withPage(async (page) => {
     await importTokyoStation(page);
     await writeEvidence("import-shapefiles", page, {
-      entry: "Import dropzone + Import & Continue",
+      entry: "Hub From floor shapefiles → Bring in dropzone + Import & Continue",
       notes: `header ${APP_HEADER}; landed on /p/<id>/set-up`,
       body: "Expected: Standard import of tokyo_station fixtures navigates to the wizard Venue Info section."
     });
@@ -579,7 +581,7 @@ async function driveWizardConfigure() {
 
 async function openIllustrator(page) {
   await gotoEnglishHome(page);
-  await page.getByRole("button", { name: /Illustrator artwork/ }).click();
+  await page.getByRole("button", { name: /From Illustrator artwork/ }).click();
   await page.waitForURL("**/illustrator", { timeout: 15000 });
   await page.getByRole("heading", { name: /Place Illustrator artwork/ }).waitFor({ timeout: 15000 });
   await page.getByRole("button", { name: "Choose file", exact: true }).waitFor();
@@ -589,7 +591,7 @@ async function driveIllustratorOpen() {
   await withPage(async (page) => {
     await openIllustrator(page);
     await writeEvidence("illustrator-open", page, {
-      entry: "Import page card Illustrator artwork",
+      entry: "Hub card From Illustrator artwork",
       body: "Expected: Place Illustrator artwork heading and Choose file. Did not write placements.db."
     });
     console.log("drive illustrator-open OK");

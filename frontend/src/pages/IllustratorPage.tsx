@@ -281,7 +281,8 @@ const DEFAULT_STATE: PlacementState = {
   ]
 };
 
-export function IllustratorPage() {
+/** `initialFile` is converted on arrival: the file dropped on the hub. */
+export function IllustratorPage({ initialFile }: { initialFile?: File } = {}) {
   const { t } = useUiLanguage();
   const [preview, setPreview] = useState<IllustratorPreviewResponse | null>(null);
   const [assignment, setAssignment] = useState<AssignedRegion[] | null>(null);
@@ -924,6 +925,13 @@ export function IllustratorPage() {
       setLoading(false);
     }
   };
+
+  const handedOver = useRef(false);
+  useEffect(() => {
+    if (!initialFile || handedOver.current) return;
+    handedOver.current = true;
+    void convert(initialFile);
+  }, []);
 
   /**
    * Re-cache an expired conversion from the file the browser still holds and

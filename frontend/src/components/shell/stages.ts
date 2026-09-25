@@ -65,6 +65,9 @@ export function isShapefileStage(value: unknown): value is ShapefileStageId {
   return typeof value === "string" && (SHAPEFILE_STAGE_IDS as ReadonlyArray<string>).includes(value);
 }
 
+/** Bring in for work that is not a project yet. */
+export const NEW_PROJECT_PATH = "/p/new";
+
 export function projectPath(sessionId: string, stage: ShapefileStageId): string {
   return `/p/${encodeURIComponent(sessionId)}/${stage}`;
 }
@@ -126,7 +129,7 @@ function routeTarget(
   id: ShapefileStageId,
   project: ShapefileProject
 ): StageTarget | undefined {
-  if (id === "bring-in") return { kind: "route", to: sessionId ? projectPath(sessionId, id) : "/" };
+  if (id === "bring-in") return { kind: "route", to: sessionId ? projectPath(sessionId, id) : NEW_PROJECT_PATH };
   if (!sessionId || !stageReachable(id, project)) return undefined;
   return { kind: "route", to: projectPath(sessionId, id) };
 }

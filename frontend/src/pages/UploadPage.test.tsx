@@ -9,8 +9,7 @@ import { UploadPage } from "./UploadPage";
 
 vi.mock("../api/client", () => ({
   importImdfShapefiles: vi.fn(),
-  importShapefiles: vi.fn(),
-  openImdfArchive: vi.fn()
+  importShapefiles: vi.fn()
 }));
 
 const importImdfShapefilesMock = vi.mocked(importImdfShapefiles);
@@ -77,4 +76,21 @@ test("the chosen filename-floor value reaches the import call", async () => {
   fireEvent.click(screen.getByText(/Import to Review/));
   await waitFor(() => expect(importImdfShapefilesMock).toHaveBeenCalledTimes(1));
   expect(importImdfShapefilesMock.mock.calls[0][2]).toBe(true);
+});
+
+test("files dropped on the hub arrive queued, and a new import starts from no project", () => {
+  useAppStore.setState({ sessionId: "previous", loadedSessionId: "previous" });
+  const shp = new File(["x"], "JRTokyoSta_B1_Space.shp");
+  const dbf = new File(["x"], "JRTokyoSta_B1_Space.dbf");
+  render(
+    <MemoryRouter initialEntries={[{ pathname: "/p/new", state: { droppedFiles: [shp, dbf] } }]}>
+      <ToastProvider>
+        <UploadPage />
+      </ToastProvider>
+    </MemoryRouter>
+  );
+  expect(screen.getByText("JRTokyoSta_B1_Space")).toBeInTheDocument();
+  expect(screen.getByText(".dbf, .shp")).toBeInTheDocument();
+  expect(useAppStore.getState().sessionId).toBeNull();
+  expect(screen.getByText("1 of 1 datasets selected")).toBeInTheDocument();
 });
