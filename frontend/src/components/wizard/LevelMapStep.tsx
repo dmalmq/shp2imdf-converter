@@ -2,6 +2,7 @@ import { useMemo } from "react";
 
 import type { ImportedFile, UpdateFileRequest } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { LEVEL_REQUIRED_TYPES } from "../../lib/bringIn";
 import {
   Checkbox,
   Input,
@@ -23,9 +24,6 @@ type LevelBucket = {
   files: ImportedFile[];
   names: string[];
 };
-
-const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail", "kiosk", "section"]);
-
 
 // Japanese floor convention (inverse of detect_level_ordinal): ordinal 0 = ground = "1F",
 // ordinal 1 = "2F", ordinal -1 = "B1F". Used for both the level name and short name.

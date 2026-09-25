@@ -42,6 +42,14 @@ describe("shapefile flow", () => {
     expect(stages[1].detail?.en).toBe("Add a file");
   });
 
+  test("Bring in counts the files that need a decision", () => {
+    const stages = shapefileStages({ ...base, pathname: "/p/s1/bring-in", sessionId: "s1", page: { bringInNeeds: 2 } });
+    expect(stages[0].detail).toEqual({ en: "2 files need you", ja: "確認が必要なファイル 2 件" });
+    expect(stages[0].detailTone).toBe("danger");
+    const settled = shapefileStages({ ...base, pathname: "/p/s1/bring-in", sessionId: "s1", page: { bringInNeeds: 0 } });
+    expect(settled[0].detail).toBeUndefined();
+  });
+
   test("the wizard is Set up, with Bring in behind it", () => {
     const stages = shapefileStages({ ...base, pathname: "/p/s1/set-up", sessionId: "s1" });
     expect(statuses(stages)).toEqual(["done", "current", "todo", "todo"]);
@@ -180,7 +188,9 @@ describe("project URLs", () => {
     { importProfile: "standard", reviewReached: false },
     { importProfile: "standard", reviewReached: true },
     { importProfile: "imdf_shapefile", reviewReached: false },
-    { importProfile: "imdf_shapefile", reviewReached: true }
+    { importProfile: "imdf_shapefile", reviewReached: true },
+    { importProfile: "standard", reviewReached: false, setUpStarted: false },
+    { importProfile: "imdf_shapefile", reviewReached: false, setUpStarted: false }
   ] as const;
 
   test.each(projects)("the landing stage is reachable, so a redirect to it cannot loop (%o)", (project) => {
@@ -194,6 +204,8 @@ describe("project URLs", () => {
     expect(stageReachable("check", fresh)).toBe(false);
     expect(stageReachable("deliver", fresh)).toBe(false);
     expect(landingStage(fresh)).toBe("set-up");
+    expect(landingStage({ ...fresh, setUpStarted: false })).toBe("bring-in");
+    expect(landingStage({ ...fresh, setUpStarted: true })).toBe("set-up");
 
     const imdf = { importProfile: "imdf_shapefile", reviewReached: false } as const;
     expect(stageReachable("set-up", imdf)).toBe(false);

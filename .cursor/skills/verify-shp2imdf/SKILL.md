@@ -72,10 +72,10 @@ Stable handles (do not use click coordinates):
 | Theme | button `Switch theme` (toggles `.dark` on `<html>`) |
 | Breadcrumb | nav `Breadcrumb`: link `Projects` / station / current stage |
 | Stages | nav `Stages` under the top bar: `1 · Bring in`, `2 · Set up`, `3 · Check`, `4 · Deliver` (Illustrator: `Bring in artwork`, `Name floors`, `Place on map`, `Deliver`); the current one has `aria-current="step"`, reachable ones are buttons |
-| Top-bar action | the stage's primary action (e.g. `Import & Continue`) appears in the banner only while the page's own button for it is off screen; use `.first()` when clicking by name |
-| Import profile | buttons `Standard`, `IMDF schema` |
+| Top-bar action | the stage's primary action (e.g. `Read the files`) appears in the banner only while the page's own button for it is off screen; use `.first()` when clicking by name |
+| Import profile | radios `Standard · recommended`, `IMDF schema` (read-only on a project's Bring in) |
 | Shapefile file input | `input[type=file]:not(#imdf-file-input)` |
-| Import | button `Import & Continue` (standard) or `Import to Review` (IMDF schema) |
+| Import | next-bar button `Read the files` (standard, lands on `/p/<id>/bring-in`) or `Import to Check` (IMDF schema); then `Continue to Set up` |
 | Hub | `/`: h1 `Station projects`, list `Projects` (one card per shapefile project, button `Continue <name>` or `Open <name>`), filters `All` / `In progress` / `Delivered`; empty state `No projects on this PC yet` |
 | Open archive | hub card `Reopen an IMDF archive` / `#imdf-file-input` |
 | Illustrator entry | hub card `From Illustrator artwork`; then `Choose file` / `#illustrator-georef-input` |

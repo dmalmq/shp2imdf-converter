@@ -164,6 +164,7 @@ export function usePageShell(page: PageShell | null) {
       page?.current,
       page?.targets?.join(","),
       page?.checkErrors,
+      page?.bringInNeeds,
       page?.saveHeld
     ]
   );

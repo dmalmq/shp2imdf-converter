@@ -24,18 +24,18 @@ Preconditions:
 - `backend/tests/fixtures/tokyo_station/JRTokyoSta_B1_Space.shp` exists.
 - One-shot: `node .cursor/skills/verify-shp2imdf/scripts/control.mjs drive import-shapefiles`.
 
-- **Open import.** Go to `/`, choose `From floor shapefiles`, wait for `/p/new`. The header reads `IMDF Converter`. The `Standard` / `IMDF schema` profile switch is visible.
-- **Choose standard.** Choose `Standard`. Run `getByRole('button', { name: 'Standard', exact: true }).click()`. It shows as pressed; the primary button label is `Import & Continue`.
-- **Queue fixtures.** Set the dropzone input to every `tokyo_station` shapefile sidecar. Run `locator('input[type="file"]:not(#imdf-file-input)').first().setInputFiles(<paths>)`. A chip `JRTokyoSta_B1_Space` appears (also `JRTokyoSta_B1_Opening`, `JRTokyoSta_GF_Space`).
-- **Import.** Choose `Import & Continue`. Run `getByRole('button', { name: 'Import & Continue' }).click()`. Wait until the URL is `/p/<sessionId>/set-up`.
+- **Open import.** Go to `/`, choose `From floor shapefiles`, wait for `/p/new`. The header reads `IMDF Converter`. The `Standard · recommended` / `IMDF schema` radios under `How should we read these?` are visible.
+- **Choose standard.** Run `getByRole('radio', { name: /^Standard/ }).click()`. It shows as checked; the next bar's button is `Read the files`.
+- **Queue fixtures.** Set the dropzone input to every `tokyo_station` shapefile sidecar. Run `locator('input[type="file"]:not(#imdf-file-input)').first().setInputFiles(<paths>)`. A row `JRTokyoSta_B1_Space` appears under `Ready to read` (also `JRTokyoSta_B1_Opening`, `JRTokyoSta_GF_Space`).
+- **Import.** Run `getByRole('button', { name: 'Read the files' }).first().click()`. Wait until the URL is `/p/<sessionId>/bring-in`: the files are grouped `Needs you` / `Look right` with type and floor, and `Floors we found` lists them.
+- **Continue.** Run `getByRole('button', { name: 'Continue to Set up' }).first().click()` (disabled while any file needs you). Wait until the URL is `/p/<sessionId>/set-up`.
 - **Land on wizard.** Heading `Project & Venue` and the `Venue Name*` field are visible (do not treat the section skeleton as done — Vite StrictMode remounts the wizard once).
-- **Empty control.** Reload `/p/new` with no files. The `Import & Continue` button is disabled.
+- **Empty control.** Reload `/p/new` with no files. The `Read the files` button is disabled.
 - **Proof.** Capture wizard Project & Venue. Write `artifacts/verify-shp2imdf/import-shapefiles/result.png`, `result.aria.txt`, and `report.md`. Artifacts show `IMDF Converter` and `Venue Name`.
 
 ## Gotchas
 
 - `/p/new` has one file input, the shapefile dropzone. The hub's `#imdf-file-input` is the archive reopen path.
-- UI language follows the OS unless `ui_language` is `en`. Japanese labels are `インポートして次へ`. The language toggle accessible name is exactly `EN` or `日本語` — a substring match on `EN` hits other buttons.
+- UI language follows the OS unless `ui_language` is `en`. Japanese labels are `ファイルを読み込む` and `設定へ進む`. The language toggle accessible name is exactly `EN` or `日本語` — a substring match on `EN` hits other buttons.
 - Import creates a real session and can evict the oldest of five (`MAX_SESSIONS`). Stop if a colleague is mid-wizard on this shared PC.
-- The primary button is `Import & Continue`, not `Import Files` (that string is leftover in `audit-ui.mjs`).
-- Wait for `/p/*/set-up`, not a fixed sleep. Large shapefiles take seconds; the tokyo_station fixture is small.
+- Wait for `/p/*/bring-in`, not a fixed sleep. Large shapefiles take seconds; the tokyo_station fixture is small.

@@ -1,5 +1,6 @@
 import type { ImportedFile } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import { TYPE_OPTIONS } from "../../lib/bringIn";
 import {
   Button,
   Select,
@@ -10,25 +11,6 @@ import {
 } from "../ui";
 import { ConfidenceDot } from "../shared/ConfidenceDot";
 import { PreviewMap } from "../shared/PreviewMap";
-
-
-const TYPE_OPTIONS = [
-  "unit",
-  "opening",
-  "fixture",
-  "detail",
-  "level",
-  "building",
-  "venue",
-  "amenity",
-  "anchor",
-  "geofence",
-  "kiosk",
-  "occupant",
-  "relationship",
-  "section",
-  "facility"
-];
 
 type BasicFeature = {
   type: string;

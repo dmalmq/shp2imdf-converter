@@ -5,6 +5,7 @@ import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from "r
 
 import App from "../App";
 import {
+  fetchProjects,
   fetchSessionFeatures,
   fetchSessionFiles,
   fetchWizardState,
@@ -18,6 +19,7 @@ import {
 } from "../api/client";
 import { ApiClientError } from "../api/errors";
 import { AUTOSAVE_DELAY_MS } from "../components/wizard/wizardSave";
+import { projectSummary } from "../lib/hub.fixtures";
 import { useAppStore } from "../store/useAppStore";
 
 vi.mock("../api/client", async (importOriginal) => ({
@@ -58,6 +60,8 @@ type Fixture = {
   files: ImportedFile[];
   /** Drafted features exist, whatever `generation` says now. */
   drafted?: boolean;
+  /** Only brought in: Set up has saved no project yet. */
+  broughtInOnly?: boolean;
 };
 
 function file(stem: string): ImportedFile {
@@ -105,7 +109,7 @@ function project(venue: string): ProjectWizardState {
 
 function wizardFor(fixture: Fixture): WizardState {
   return {
-    project: project(fixture.venue),
+    project: fixture.broughtInOnly ? null : project(fixture.venue),
     levels: { items: [] },
     buildings: [],
     mappings: {
@@ -161,7 +165,17 @@ const PROJECTS: Record<string, Fixture> = {
     files: [file("Ikebukuro_1_Space")]
   },
   ueno: { profile: "imdf_shapefile", generation: "generated", venue: "Ueno", files: [file("Ueno_1_Space")] },
-  empty: { profile: "standard", generation: "not_started", venue: "", files: [] }
+  empty: { profile: "standard", generation: "not_started", venue: "", files: [] },
+  nishi: {
+    profile: "standard",
+    generation: "not_started",
+    venue: "",
+    broughtInOnly: true,
+    files: [
+      { ...file("Nishi_1_Space"), confidence: "green" },
+      { ...file("qxzv"), detected_type: null, detected_level: null, confidence: "red" }
+    ]
+  }
 };
 
 function gone(id: string) {
@@ -293,9 +307,10 @@ describe("reload on a stage", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  test("Bring in renders the upload screen for the project", async () => {
+  test("Bring in shows what the project brought in", async () => {
     renderAt("/p/tokyo/bring-in");
-    expect(await screen.findByRole("button", { name: "Import & Continue" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Bring in the floor files" })).toBeInTheDocument();
+    expect(screen.getByText("Tokyo_B1_Space")).toBeInTheDocument();
     expect(useAppStore.getState().sessionId).toBe("tokyo");
   });
 
@@ -306,6 +321,25 @@ describe("reload on a stage", () => {
     const track = screen.getByRole("navigation", { name: "Stages" });
     expect(within(track).getByText("Not needed for IMDF shapefiles")).toBeInTheDocument();
   });
+});
+
+test("Save and leave, then Continue on the hub, comes back to the files that still need a decision", async () => {
+  renderAt("/p/nishi/bring-in");
+  const needsYou = await screen.findByRole("region", { name: "Needs you" });
+  expect(within(needsYou).getByText("qxzv")).toBeInTheDocument();
+
+  vi.mocked(fetchProjects).mockResolvedValue({
+    projects: [projectSummary({ id: "nishi", name: "Nishi", stage: "bring-in", blockers: null, can_wait: null })],
+    total: 1,
+    limits: { sessions: { idle_days: 30, max_projects: 200 }, artwork: { idle_days: 30, max_projects: 200 } }
+  });
+  fireEvent.click(screen.getByRole("link", { name: "Save and leave" }));
+  await waitFor(() => expect(pathname).toBe("/"));
+
+  fireEvent.click(await screen.findByRole("button", { name: /Continue Nishi/ }));
+  await waitFor(() => expect(pathname).toBe("/p/nishi/bring-in"));
+  const again = await screen.findByRole("region", { name: "Needs you" });
+  expect(within(again).getByText("qxzv")).toBeInTheDocument();
 });
 
 describe("redirects", () => {
@@ -320,7 +354,9 @@ describe("redirects", () => {
     ["/p/tokyo/check", "/p/tokyo/set-up"],
     ["/p/tokyo/deliver", "/p/tokyo/set-up"],
     ["/p/tokyo/not-a-stage", "/p/tokyo/set-up"],
-    ["/p/ueno/set-up", "/p/ueno/check"]
+    ["/p/ueno/set-up", "/p/ueno/check"],
+    ["/p/nishi", "/p/nishi/bring-in"],
+    ["/p/nishi/check", "/p/nishi/bring-in"]
   ])("%s lands on %s", async (from, to) => {
     renderAt(from);
     await waitFor(() => expect(pathname).toBe(to));
@@ -493,7 +529,7 @@ describe("history", () => {
     expect(pathname).toBe("/p/shinjuku/set-up");
   });
 
-  test("Bring in says it starts a new project, and Back returns to the old one", async () => {
+  test("other files start a new project, and Back returns to the old one", async () => {
     vi.mocked(importShapefiles).mockResolvedValue({
       session_id: "kanda",
       import_profile: "standard",
@@ -502,17 +538,18 @@ describe("history", () => {
       warnings: []
     });
     const { container } = renderAt("/p/tokyo/bring-in");
-    expect(await screen.findByText(/Bringing in files starts a new project/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("link", { name: "bring in other files" }));
+    await waitFor(() => expect(pathname).toBe("/p/new"));
 
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
-    const shp = new File(["shape"], "Kanda_1_Space.shp", { type: "application/octet-stream" });
-    fireEvent.change(input, { target: { files: { 0: shp, length: 1, item: () => shp } } });
-    const importButton = screen.getAllByRole("button", { name: "Import & Continue" })[0];
+    const parts = [".shp", ".shx", ".dbf"].map((extension) => new File(["shape"], `Kanda_1_Space${extension}`));
+    fireEvent.change(input, { target: { files: { ...parts, length: parts.length, item: (index: number) => parts[index] } } });
+    const importButton = screen.getAllByRole("button", { name: "Read the files" })[0];
     await waitFor(() => expect(importButton).toBeEnabled());
     fireEvent.click(importButton);
 
-    await waitFor(() => expect(pathname).toBe("/p/kanda/set-up"));
-    await screen.findByDisplayValue("Kanda");
+    await waitFor(() => expect(pathname).toBe("/p/kanda/bring-in"));
+    await screen.findByText("Kanda_1_Space");
 
     act(() => navigate(-1));
     await waitFor(() => expect(pathname).toBe("/p/tokyo/bring-in"));
