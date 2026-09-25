@@ -215,11 +215,11 @@ export function IssuePopover({
 
       <div className="flex items-center gap-2">
         {position.count > 1 ? (
-          <div className="flex items-center gap-0.5">
+          <div className="flex shrink-0 items-center gap-0.5">
             <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={t("Previous", "前へ")} disabled={position.index === 0} onClick={() => onStep(-1)}>
               <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
-            <span className="font-mono text-[11px] text-muted-foreground">
+            <span className="whitespace-nowrap font-mono text-[11px] text-muted-foreground">
               {position.index + 1} / {position.count}
             </span>
             <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={t("Next", "次へ")} disabled={position.index >= position.count - 1} onClick={() => onStep(1)}>
