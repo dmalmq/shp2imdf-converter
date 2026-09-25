@@ -25,8 +25,6 @@ type LevelBucket = {
   names: string[];
 };
 
-
-
 // Japanese floor convention (inverse of detect_level_ordinal): ordinal 0 = ground = "1F",
 // ordinal 1 = "2F", ordinal -1 = "B1F". Used for both the level name and short name.
 function makeFloorLabel(ordinal: number | null): string {

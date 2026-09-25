@@ -188,7 +188,9 @@ describe("project URLs", () => {
     { importProfile: "standard", reviewReached: false },
     { importProfile: "standard", reviewReached: true },
     { importProfile: "imdf_shapefile", reviewReached: false },
-    { importProfile: "imdf_shapefile", reviewReached: true }
+    { importProfile: "imdf_shapefile", reviewReached: true },
+    { importProfile: "standard", reviewReached: false, setUpStarted: false },
+    { importProfile: "imdf_shapefile", reviewReached: false, setUpStarted: false }
   ] as const;
 
   test.each(projects)("the landing stage is reachable, so a redirect to it cannot loop (%o)", (project) => {
@@ -202,6 +204,8 @@ describe("project URLs", () => {
     expect(stageReachable("check", fresh)).toBe(false);
     expect(stageReachable("deliver", fresh)).toBe(false);
     expect(landingStage(fresh)).toBe("set-up");
+    expect(landingStage({ ...fresh, setUpStarted: false })).toBe("bring-in");
+    expect(landingStage({ ...fresh, setUpStarted: true })).toBe("set-up");
 
     const imdf = { importProfile: "imdf_shapefile", reviewReached: false } as const;
     expect(stageReachable("set-up", imdf)).toBe(false);

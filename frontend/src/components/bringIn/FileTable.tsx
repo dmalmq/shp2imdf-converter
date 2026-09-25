@@ -104,7 +104,8 @@ type DetectedProps = {
   needsYou: BringInRow[];
   looksRight: BringInRow[];
   floorChoices: number[];
-  saving: string | null;
+  /** Files with a choice on its way to the server. */
+  saving: ReadonlySet<string>;
   onResolve: (stem: string, payload: UpdateFileRequest) => void;
 };
 
@@ -124,7 +125,7 @@ export function DetectedTable({ needsYou, looksRight, floorChoices, saving, onRe
     return (
       <Select
         value=""
-        disabled={saving === row.stem}
+        disabled={saving.has(row.stem)}
         onValueChange={(value) => onResolve(row.stem, { detected_level: Number(value) })}
       >
         <SelectTrigger className="h-8 bg-card text-[13px]" aria-label={t(`Floor of ${row.stem}`, `${row.stem} の階`)}>
@@ -147,7 +148,7 @@ export function DetectedTable({ needsYou, looksRight, floorChoices, saving, onRe
     ) : (
       <Select
         value=""
-        disabled={saving === row.stem}
+        disabled={saving.has(row.stem)}
         onValueChange={(value) => onResolve(row.stem, { detected_type: value })}
       >
         <SelectTrigger className="h-8 bg-card text-[13px]" aria-label={t(`What ${row.stem} is`, `${row.stem} の種類`)}>
@@ -279,7 +280,18 @@ export function QueuedTable({ datasets, onAddParts, onLeaveOut }: QueuedProps) {
           <ul>
             {ready.map((dataset) => (
               <Row key={dataset.key} columns={QUEUED_COLUMNS} needsYou={false}>
-                <FileName name={dataset.name} note={dataset.parts.join(", ") || null} tone="muted" />
+                <FileName
+                  name={dataset.name}
+                  note={
+                    dataset.skipped
+                      ? t(
+                          `${dataset.parts.join(", ")} · no .shp, so this is passed over`,
+                          `${dataset.parts.join(", ")} · .shp がないため読み込まれません`
+                        )
+                      : dataset.parts.join(", ") || null
+                  }
+                  tone="muted"
+                />
                 <span className="text-[13px] text-foreground">{kind(dataset)}</span>
                 <span className="font-mono text-xs text-muted-foreground">{sizeLabel(dataset.bytes)}</span>
                 <span className="flex justify-end">{leaveOut(dataset)}</span>

@@ -49,7 +49,6 @@ import { LEVEL_REQUIRED_TYPES } from "../lib/bringIn";
 import { formatClock } from "../lib/clock";
 import { WizardFooterProvider, sameAsSaved, useAutosave, useWizardFooterState } from "../components/wizard/wizardSave";
 
-
 const EMPTY_UNIT_MAPPING: UnitMappingState = {
   code_column: null,
   name_column: null,

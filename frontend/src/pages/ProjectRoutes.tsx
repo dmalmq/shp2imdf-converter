@@ -126,7 +126,8 @@ export function ProjectStage() {
   const { sessionId = "", stage } = useParams();
   const importProfile = useAppStore((state) => state.importProfile);
   const reviewReached = useAppStore((state) => state.currentScreen === "review");
-  const project: ShapefileProject = { importProfile, reviewReached };
+  const setUpStarted = useAppStore((state) => Boolean(state.wizardState?.project));
+  const project: ShapefileProject = { importProfile, reviewReached, setUpStarted };
 
   if (!isShapefileStage(stage) || !stageReachable(stage, project)) {
     return <Navigate replace to={projectPath(sessionId, landingStage(project))} />;

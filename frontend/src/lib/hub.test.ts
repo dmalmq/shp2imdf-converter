@@ -16,8 +16,8 @@ test("most recently opened first, ties broken by id", () => {
 });
 
 test.each([
-  ["bring-in", "/p/s1"],
-  [null, "/p/s1"],
+  ["bring-in", "/p/s1/bring-in"],
+  [null, "/p/s1/bring-in"],
   ["set-up", "/p/s1/set-up"],
   ["check", "/p/s1/check"],
   ["deliver", "/p/s1/deliver"]

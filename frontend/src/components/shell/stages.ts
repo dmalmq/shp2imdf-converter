@@ -86,6 +86,8 @@ export type ShapefileProject = {
   importProfile: "standard" | "imdf_shapefile";
   /** Check has something to show (the store's `currentScreen` is "review"). */
   reviewReached: boolean;
+  /** False while the project has only been brought in: Set up has saved nothing yet. */
+  setUpStarted?: boolean;
 };
 
 export function stageReachable(stage: ShapefileStageId, project: ShapefileProject): boolean {
@@ -99,7 +101,8 @@ export function stageReachable(stage: ShapefileStageId, project: ShapefileProjec
  * yet. Always a reachable stage, so redirecting to it cannot redirect again.
  */
 export function landingStage(project: ShapefileProject): ShapefileStageId {
-  return stageReachable("check", project) ? "check" : "set-up";
+  if (stageReachable("check", project)) return "check";
+  return project.setUpStarted === false ? "bring-in" : "set-up";
 }
 
 export type ShapefileInput = {

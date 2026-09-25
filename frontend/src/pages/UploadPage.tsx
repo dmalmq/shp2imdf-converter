@@ -254,10 +254,12 @@ function BroughtIn() {
   const sessionId = useAppStore((state) => state.sessionId);
   const files = useAppStore((state) => state.files);
   const profile = useAppStore((state) => state.importProfile);
-  const setFiles = useSessionAction(sessionId, (state) => state.setFiles);
+  const upsertFile = useSessionAction(sessionId, (state) => state.upsertFile);
   const handleApiError = useApiErrorHandler();
   const { t } = useUiLanguage();
-  const [saving, setSaving] = useState<string | null>(null);
+  const [saving, setSaving] = useState<ReadonlySet<string>>(() => new Set());
+  const latest = useRef(new Map<string, number>());
+  const sent = useRef(0);
 
   const view = useMemo(() => {
     const read = bringInView(files);
@@ -268,23 +270,32 @@ function BroughtIn() {
 
   const resolve = async (stem: string, payload: UpdateFileRequest) => {
     if (!sessionId) return;
-    setSaving(stem);
+    const request = ++sent.current;
+    latest.current.set(stem, request);
+    setSaving((previous) => new Set(previous).add(stem));
     try {
       const response = await updateSessionFile(sessionId, stem, payload);
-      setFiles(response.files);
+      if (latest.current.get(stem) === request) upsertFile(response.file);
     } catch (caught) {
       handleApiError(caught, t("Could not save that choice", "選択を保存できませんでした"), {
         title: t("Not saved", "保存されませんでした")
       });
     } finally {
-      setSaving(null);
+      if (latest.current.get(stem) === request) {
+        latest.current.delete(stem);
+        setSaving((previous) => {
+          const next = new Set(previous);
+          next.delete(stem);
+          return next;
+        });
+      }
     }
   };
 
   const go = () => {
     if (sessionId && !step.blocked && step.goes !== "import") navigate(projectPath(sessionId, step.goes));
   };
-  const anchor = useNextAction(step, go, saving !== null);
+  const anchor = useNextAction(step, go, saving.size > 0);
   usePageShell({ bringInNeeds: view.needsYou.length });
 
   const floorCount = view.floors.length;

@@ -119,19 +119,24 @@ export function floorChoices(floors: ReadonlyArray<FloorFound>): number[] {
 }
 
 const SHAPEFILE_PARTS = [".shp", ".dbf", ".shx", ".prj", ".cpg", ".qix"];
-const REQUIRED_PARTS = [".shp", ".shx", ".dbf"];
+const SIDECARS_REQUIRED = [".shx", ".dbf"];
 
 export const ACCEPTED_EXTENSIONS = [...SHAPEFILE_PARTS, ".gpkg", ".zip"];
 
-/** One thing the operator thinks of as a file: a shapefile's parts together, a GeoPackage, or a zip. */
+/**
+ * One thing the operator thinks of as a file: a shapefile's parts together, a GeoPackage, or a zip.
+ * Parts group the way the importer groups them: by the exact stem, with the extension's case ignored.
+ */
 export type QueuedDataset = {
   key: string;
   name: string;
   kind: "shapefile" | "gpkg" | "archive";
   /** Extensions present, for a shapefile. */
   parts: string[];
-  /** Required parts not yet added; the import refuses a shapefile without them. */
+  /** Sidecars a `.shp` still lacks; the import refuses it without them. */
   missing: string[];
+  /** Parts with no `.shp`, which the importer passes over. */
+  skipped: boolean;
   bytes: number;
 };
 
@@ -146,8 +151,8 @@ export function isAccepted(file: File): boolean {
 
 export function datasetKey(file: File): string {
   const extension = fileExtension(file.name);
-  if (SHAPEFILE_PARTS.includes(extension)) return `shp:${file.name.slice(0, -extension.length).toLowerCase()}`;
-  return `file:${file.name.toLowerCase()}`;
+  if (SHAPEFILE_PARTS.includes(extension)) return `shp:${file.name.slice(0, -extension.length)}`;
+  return `file:${file.name}`;
 }
 
 export function queuedDatasets(files: ReadonlyArray<File>): QueuedDataset[] {
@@ -162,6 +167,7 @@ export function queuedDatasets(files: ReadonlyArray<File>): QueuedDataset[] {
       kind: shapefile ? "shapefile" : extension === ".gpkg" ? "gpkg" : "archive",
       parts: [],
       missing: [],
+      skipped: false,
       bytes: 0
     };
     if (shapefile && !dataset.parts.includes(extension)) dataset.parts.push(extension);
@@ -172,15 +178,16 @@ export function queuedDatasets(files: ReadonlyArray<File>): QueuedDataset[] {
   for (const dataset of datasets) {
     if (dataset.kind !== "shapefile") continue;
     dataset.parts.sort();
-    dataset.missing = REQUIRED_PARTS.filter((part) => !dataset.parts.includes(part));
+    dataset.skipped = !dataset.parts.includes(".shp");
+    dataset.missing = dataset.skipped ? [] : SIDECARS_REQUIRED.filter((part) => !dataset.parts.includes(part));
   }
   return datasets;
 }
 
-/** Adds `incoming` to `queued`; a file named like one already queued replaces it. */
+/** Adds `incoming` to `queued`; a file with the name of one already queued replaces it. */
 export function addToQueue(queued: ReadonlyArray<File>, incoming: ReadonlyArray<File>): File[] {
-  const names = new Set(incoming.map((file) => file.name.toLowerCase()));
-  return [...queued.filter((file) => !names.has(file.name.toLowerCase())), ...incoming];
+  const names = new Set(incoming.map((file) => file.name));
+  return [...queued.filter((file) => !names.has(file.name)), ...incoming];
 }
 
 /** What the bar under Bring in says, and whether its button can run. */
@@ -218,7 +225,7 @@ export function queueNextStep(datasets: ReadonlyArray<QueuedDataset>, profile: I
     action: imdf ? { en: "Import to Check", ja: "チェックへ取り込む" } : { en: "Read the files", ja: "ファイルを読み込む" },
     goes: "import" as const
   };
-  if (datasets.length === 0) {
+  if (datasets.every((dataset) => dataset.skipped)) {
     const blocked = { en: "Add at least one floor file first", ja: "フロアのファイルを 1 つ以上追加してください" };
     return { ...base, title: { en: "Add the floor files to begin", ja: "フロアのファイルを追加してください" }, blocked };
   }
@@ -230,10 +237,11 @@ export function queueNextStep(datasets: ReadonlyArray<QueuedDataset>, profile: I
     };
     return { ...base, title: blocked, blocked };
   }
+  const readable = datasets.filter((dataset) => !dataset.skipped).length;
   const title =
-    datasets.length === 1
+    readable === 1
       ? { en: "1 file ready to read", ja: "読み込めるファイル 1 件" }
-      : { en: `${datasets.length} files ready to read`, ja: `読み込めるファイル ${datasets.length} 件` };
+      : { en: `${readable} files ready to read`, ja: `読み込めるファイル ${readable} 件` };
   return { ...base, title, blocked: null };
 }
 

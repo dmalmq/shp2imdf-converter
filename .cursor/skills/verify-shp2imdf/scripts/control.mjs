@@ -521,12 +521,26 @@ async function queueTokyoStation(page) {
   await page.getByText("JRTokyoSta_B1_Space").first().waitFor({ timeout: 15000 });
 }
 
+// Continue stays disabled while any file needs a decision; say so instead of timing out on a click.
+async function continueToSetUp(page) {
+  const button = page.getByRole("region", { name: "Next step" }).getByRole("button", { name: "Continue to Set up" });
+  await button.waitFor({ timeout: 30000 });
+  try {
+    await page.waitForFunction((element) => !element.disabled, await button.elementHandle(), { timeout: 15000 });
+  } catch {
+    const needs = await page.getByRole("region", { name: "Needs you" }).innerText().catch(() => "");
+    throw new Error(`Continue to Set up stayed disabled; Bring in still has files that need a decision:
+${needs}`);
+  }
+  await button.click();
+  await page.waitForURL("**/p/*/set-up", { timeout: 60000 });
+}
+
 async function importTokyoStation(page) {
   await queueTokyoStation(page);
   await page.getByRole("button", { name: "Read the files" }).first().click();
   await page.waitForURL("**/p/*/bring-in", { timeout: 60000 });
-  await page.getByRole("button", { name: "Continue to Set up" }).first().click();
-  await page.waitForURL("**/p/*/set-up", { timeout: 60000 });
+  await continueToSetUp(page);
   await page.getByLabel(/Venue Name/).waitFor({ timeout: 30000 });
 }
 
@@ -642,6 +656,7 @@ options (any command):
 
 export {
   cmdCleanup,
+  continueToSetUp,
   cmdDoctor,
   cmdFixtures,
   cmdLaunch,

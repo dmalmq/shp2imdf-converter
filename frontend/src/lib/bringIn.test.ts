@@ -1,5 +1,5 @@
 import type { ImportedFile } from "../api/client";
-import { bringInView, floorChoices, floorLabel, queuedDatasets, toRow } from "./bringIn";
+import { bringInView, floorChoices, floorLabel, queueNextStep, queuedDatasets, toRow } from "./bringIn";
 
 function file(stem: string, overrides: Partial<ImportedFile> = {}): ImportedFile {
   return {
@@ -57,4 +57,22 @@ test("a shapefile's parts queue as one dataset that knows what it lacks", () => 
     { name: "B.zip", kind: "archive", missing: [] },
     { name: "C.GPKG", kind: "gpkg", missing: [] }
   ]);
+});
+
+const named = (name: string) => new File(["x"], name);
+
+test("parts group by the exact stem, as the importer groups them", () => {
+  const datasets = queuedDatasets(["Foo.shp", "foo.shx", "Foo.DBF"].map(named));
+  expect(datasets.map(({ name, missing, skipped }) => ({ name, missing, skipped }))).toEqual([
+    { name: "foo", missing: [], skipped: true },
+    { name: "Foo", missing: [".shx"], skipped: false }
+  ]);
+  expect(queueNextStep(datasets, "standard").blocked?.en).toBe("1 file needs a decision before you continue");
+});
+
+test("parts without a .shp are passed over, and do not hold up the import", () => {
+  const datasets = queuedDatasets(["A.shp", "A.shx", "A.dbf", "Stray.cpg"].map(named));
+  expect(datasets.find((dataset) => dataset.name === "Stray")).toMatchObject({ skipped: true, missing: [] });
+  expect(queueNextStep(datasets, "standard")).toMatchObject({ blocked: null, title: { en: "1 file ready to read" } });
+  expect(queueNextStep(queuedDatasets([named("Stray.cpg")]), "standard").blocked).not.toBeNull();
 });

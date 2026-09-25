@@ -22,6 +22,7 @@ import {
   cmdFixtures,
   cmdLaunch,
   configurePorts,
+  continueToSetUp,
   fillVenue,
   generateReview,
   gotoEnglishHome,
@@ -173,8 +174,7 @@ async function captureShapefileFlow(page, shoot) {
   await page.waitForURL("**/p/*/bring-in", { timeout: 60000 });
   await page.getByRole("region", { name: "Look right" }).waitFor({ timeout: 30000 });
   await shoot("bring-in");
-  await page.getByRole("button", { name: "Continue to Set up" }).first().click();
-  await page.waitForURL("**/p/*/set-up", { timeout: 60000 });
+  await continueToSetUp(page);
   await page.getByLabel(/Venue Name/).waitFor({ timeout: 30000 });
   await fillVenue(page);
 

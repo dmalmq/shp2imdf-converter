@@ -38,13 +38,9 @@ function currentStageId(summary: ProjectSummary): ShapefileStageId {
     : "bring-in";
 }
 
-/**
- * Where Continue goes. A project that has only been brought in has nothing
- * left to do on Bring in (importing there starts a new project), so it opens
- * at `/p/:id`, which lands on the first stage it can use.
- */
+/** Where Continue goes: the project's own stage, Bring in included, since files there can still need a decision. */
 export function projectHref(id: string, stage: ShapefileStageId): string {
-  return stage === "bring-in" ? `/p/${encodeURIComponent(id)}` : projectPath(id, stage);
+  return projectPath(id, stage);
 }
 
 function statusOf(summary: ProjectSummary, finished: boolean): HubStatus {

@@ -2,7 +2,8 @@ import React from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
-import { importImdfShapefiles, importShapefiles, type ImportedFile } from "../api/client";
+import { importImdfShapefiles, importShapefiles, updateSessionFile, type ImportedFile } from "../api/client";
+import { ApiClientError } from "../api/errors";
 import { ToastProvider } from "../components/shared/ToastProvider";
 import { useAppStore } from "../store/useAppStore";
 import { UploadPage } from "./UploadPage";
@@ -15,6 +16,7 @@ vi.mock("../api/client", () => ({
 
 const importImdfShapefilesMock = vi.mocked(importImdfShapefiles);
 const importShapefilesMock = vi.mocked(importShapefiles);
+const updateSessionFileMock = vi.mocked(updateSessionFile);
 
 const FLOOR_CHECKBOX = /Prefer the floor in the filename/;
 
@@ -72,6 +74,7 @@ beforeEach(() => {
   useAppStore.setState({ sessionId: null, loadedSessionId: null, files: [], importProfile: "standard" });
   importImdfShapefilesMock.mockReset();
   importShapefilesMock.mockReset();
+  updateSessionFileMock.mockReset();
   importImdfShapefilesMock.mockResolvedValue({
     session_id: "session-1",
     import_profile: "imdf_shapefile",
@@ -140,6 +143,22 @@ describe("new work", () => {
     expect(nextButton(/Read the files/)).toBeEnabled();
   });
 
+  test("a stray .cpg is passed over, and the import goes ahead without it", async () => {
+    importShapefilesMock.mockResolvedValue({
+      session_id: "session-3",
+      import_profile: "standard",
+      files: [file("JRTokyoSta_1_Space")],
+      cleanup_summary: null,
+      warnings: []
+    } as never);
+    renderPage();
+    await queue(...parts("JRTokyoSta_1_Space"), "Leftover.cpg");
+    expect(screen.getByText(/no \.shp, so this is passed over/)).toBeInTheDocument();
+    expect(nextStep()).toHaveTextContent("1 file ready to read");
+    fireEvent.click(nextButton(/Read the files/));
+    await waitFor(() => expect(importShapefilesMock).toHaveBeenCalledTimes(1));
+  });
+
   test("a standard import opens the new project's Bring in to show what was read", async () => {
     importShapefilesMock.mockResolvedValue({
       session_id: "session-2",
@@ -199,6 +218,66 @@ describe("a project's Bring in", () => {
     expect(nextStep()).toHaveTextContent("Every file looks right");
     fireEvent.click(nextButton(/Continue to Set up/));
     expect(screen.getByTestId("where")).toHaveTextContent("/p/s1/set-up");
+  });
+
+  async function choose(combobox: string, option: string) {
+    fireEvent.click(screen.getByRole("combobox", { name: combobox }));
+    fireEvent.click(await screen.findByRole("option", { name: option }));
+  }
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    return { promise, resolve, reject };
+  }
+
+  const saved = (next: ImportedFile) => ({ session_id: "s1", file: next, files: [], save_status: "saved" as const, learning_suggestion: null });
+
+  test("a choice saves through the file endpoint and moves the file to look right", async () => {
+    const qwzx = brought[3];
+    updateSessionFileMock.mockResolvedValueOnce(saved({ ...qwzx, confidence: "green" }));
+    renderPage(true, "/p/s1/bring-in");
+    await choose("What qwzx is", "Units (rooms & spaces)");
+    expect(updateSessionFileMock).toHaveBeenCalledWith("s1", "qwzx", { detected_type: "unit" });
+    await screen.findByRole("combobox", { name: "Floor of qwzx" });
+
+    updateSessionFileMock.mockResolvedValueOnce(saved({ ...qwzx, confidence: "green", detected_level: 1 }));
+    await choose("Floor of qwzx", "2F");
+    expect(updateSessionFileMock).toHaveBeenLastCalledWith("s1", "qwzx", { detected_level: 1 });
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Needs you" })).not.toBeInTheDocument());
+    expect(nextButton(/Continue to Set up/)).toBeEnabled();
+  });
+
+  test("a choice the server refuses leaves the file needing you and Continue blocked", async () => {
+    updateSessionFileMock.mockRejectedValueOnce(new ApiClientError(500, "INTERNAL", "boom", false));
+    renderPage(true, "/p/s1/bring-in");
+    await choose("What qwzx is", "Units (rooms & spaces)");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "What qwzx is" })).toBeEnabled());
+    expect(within(screen.getByRole("region", { name: "Needs you" })).getByText("qwzx")).toBeInTheDocument();
+    expect(nextButton(/Continue to Set up/)).toBeDisabled();
+  });
+
+  test("each file stays locked until its own save lands, and a late reply does not undo a newer one", async () => {
+    const extra = file("zzyx", { detected_type: null, confidence: "red", detected_level: null });
+    useAppStore.setState({ files: [...brought, extra] });
+    const first = deferred<ReturnType<typeof saved>>();
+    const second = deferred<ReturnType<typeof saved>>();
+    updateSessionFileMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    renderPage(true, "/p/s1/bring-in");
+
+    await choose("What qwzx is", "Units (rooms & spaces)");
+    await choose("What zzyx is", "Fixtures");
+    await act(async () => second.resolve(saved({ ...extra, detected_type: "fixture", confidence: "green" })));
+    expect(screen.getByRole("combobox", { name: "What qwzx is" })).toBeDisabled();
+
+    await act(async () => first.resolve(saved({ ...brought[3], confidence: "green" })));
+    const stems = useAppStore.getState().files.map((item) => [item.stem, item.detected_type, item.confidence]);
+    expect(stems).toContainEqual(["qwzx", "unit", "green"]);
+    expect(stems).toContainEqual(["zzyx", "fixture", "green"]);
   });
 
   test("shows the project's profile without offering to change it", () => {
