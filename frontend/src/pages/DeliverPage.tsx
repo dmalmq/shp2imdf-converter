@@ -7,15 +7,18 @@ import {
   exportSessionQgisProject,
   exportSessionShapefiles,
   fetchExportContents,
+  fetchHandover,
   fetchStoredValidation,
   validateSession,
   type ExportContents,
   type ExportFormat,
+  type HandoverNote as StoredNote,
   type ShapefileExportEncoding,
   type ShapefileExportRequest,
   type ValidationSummary
 } from "../api/client";
 import { NextBar } from "../components/bringIn/NextBar";
+import { HandoverNote } from "../components/handover/HandoverNote";
 import { useToast } from "../components/shared/ToastProvider";
 import { usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
 import { projectPath, stationName } from "../components/shell/stages";
@@ -145,6 +148,19 @@ export function DeliverPage() {
     [selected, contents, checks, checking, geoPackage, options, files]
   );
   const station = stationName(wizardState, files) ?? "";
+  const [note, setNote] = useState<{ loaded: boolean; note: StoredNote | null }>({ loaded: false, note: null });
+
+  useEffect(() => {
+    if (!sessionId) return;
+    let active = true;
+    fetchHandover(sessionId).then(
+      (handover) => active && setNote({ loaded: true, note: handover.note }),
+      () => active && setNote({ loaded: true, note: null })
+    );
+    return () => {
+      active = false;
+    };
+  }, [sessionId]);
   const busy = progress !== null;
 
   const checkAgain = async () => {
@@ -437,6 +453,7 @@ export function DeliverPage() {
               ))}
             </ul>
           </section>
+          {note.loaded ? <HandoverNote sessionId={sessionId} station={station} note={note.note} /> : null}
         </aside>
       </div>
       <NextBar

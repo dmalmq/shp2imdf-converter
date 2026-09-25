@@ -11,7 +11,14 @@ from datetime import UTC, datetime
 import os
 from typing import Any, get_args
 
-from backend.src.schemas import DeliveryRecord, SessionRecord, SessionStage as Stage, ValidationResponse
+from backend.src.handover import record_event
+from backend.src.schemas import (
+    DeliveryRecord,
+    HandoverEventKind,
+    SessionRecord,
+    SessionStage as Stage,
+    ValidationResponse,
+)
 
 STAGES: tuple[str, ...] = get_args(Stage)
 
@@ -77,16 +84,18 @@ def current_validation(record: SessionRecord) -> ValidationResponse | None:
     return record.validation
 
 
-def mark_changed(record: SessionRecord) -> None:
+def mark_changed(record: SessionRecord, kind: HandoverEventKind, n: int = 1, **params: str | int) -> None:
+    now = datetime.now(UTC)
     record.content_rev += 1
-    record.content_changed_at = datetime.now(UTC)
+    record.content_changed_at = now
+    record_event(record.handover, kind, now, n, **params)
 
 
-def reset_generation(record: SessionRecord) -> None:
+def reset_generation(record: SessionRecord, section: str) -> None:
     record.wizard.generation_status = "not_started"
     record.validation = None
     record.validation_rev = None
-    mark_changed(record)
+    mark_changed(record, "setup_changed", section=section)
 
 
 def setup_snapshot(record: SessionRecord) -> str:
@@ -101,11 +110,11 @@ def setup_snapshot(record: SessionRecord) -> str:
     return wizard + files
 
 
-def reset_generation_if_changed(record: SessionRecord, before: str) -> bool:
+def reset_generation_if_changed(record: SessionRecord, before: str, section: str) -> bool:
     """The wizard re-sends unchanged sections on every visit; only a real change counts."""
     if setup_snapshot(record) == before:
         return False
-    reset_generation(record)
+    reset_generation(record, section)
     return True
 
 
@@ -115,12 +124,9 @@ def mark_validated(record: SessionRecord, validation: ValidationResponse) -> Non
 
 
 def mark_delivered(record: SessionRecord, export_format: str, blockers: int | None) -> None:
-    record.delivered = DeliveryRecord(
-        at=datetime.now(UTC),
-        rev=record.content_rev,
-        format=export_format,
-        blockers=blockers,
-    )
+    now = datetime.now(UTC)
+    record.delivered = DeliveryRecord(at=now, rev=record.content_rev, format=export_format, blockers=blockers)
+    record_event(record.handover, "delivered", now, format=export_format)
 
 
 def _stage(record: SessionRecord, validation: ValidationResponse | None, changed_since_delivery: bool) -> Stage:

@@ -37,6 +37,8 @@ const THEMES = ["light", "dark"];
 const LANGS = ["en", "ja"];
 const VIEWPORT = { width: 1440, height: 960 };
 const OUT_MARKER = ".capture-output";
+process.env.HANDOVER_VISIT_GAP_MINUTES ??= "0.5";
+const VISIT_GAP_MINUTES = Number(process.env.HANDOVER_VISIT_GAP_MINUTES);
 
 // Accessible names in both languages, since the toggles are pressed from
 // whichever language the previous capture left the page in.
@@ -211,10 +213,31 @@ async function captureShapefileFlow(page, shoot) {
   await page.getByRole("banner").getByRole("button", { name: /^Deliver/ }).click();
   await page.waitForURL("**/p/*/deliver", { timeout: 15000 });
   await page.getByRole("list", { name: "Files" }).waitFor({ timeout: 30000 });
+  const note = page.getByRole("textbox", { name: /^Leave a note for whoever opens/ });
+  await note.fill("屋外 outline still provisional. Check the B1 doors before delivering.");
+  await note.blur();
+  await page.getByText(/^Saved · /).waitFor({ timeout: 15000 });
   await shoot("deliver", { wait: 800 });
 
   await gotoHub(page);
   await shoot("hub-projects");
+  await captureWelcomeBack(page, shoot);
+}
+
+// The backend this script launches gets a short visit gap, so waiting it out
+// at the hub makes reopening the project a new visit.
+async function captureWelcomeBack(page, shoot) {
+  await page.waitForTimeout(VISIT_GAP_MINUTES * 60000 + 5000);
+  await page.getByLabel(/^(Open|Continue) /).first().click();
+  const dialog = page.getByRole("dialog", { name: /^Last time on / });
+  try {
+    await dialog.waitFor({ timeout: 20000 });
+  } catch {
+    console.log("welcome-back: no dialog (an attached backend keeps its own visit gap); skipped");
+    return;
+  }
+  await shoot("welcome-back", { wait: 800 });
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
 }
 
 async function captureIllustratorFlow(page, shoot, artwork) {

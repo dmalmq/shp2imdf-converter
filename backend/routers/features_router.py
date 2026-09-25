@@ -26,7 +26,14 @@ from backend.src.feature_types import (
     geometry_kind,
     spec_for,
 )
-from backend.src.feature_undo import changes_anything, check_restorable, finish_fix, restore_features, undo_between
+from backend.src.feature_undo import (
+    changes_anything,
+    check_restorable,
+    finish_fix,
+    restore_features,
+    same_content,
+    undo_between,
+)
 from backend.src.importer import rebuild_normalized_feature_collection
 from backend.src.projects import current_validation, mark_changed, mark_validated
 from backend.src.schemas import (
@@ -308,7 +315,7 @@ def detect_all(session_id: str, request: Request) -> DetectResponse:
     before = session.files
     session.files = detect_files(session.files, keyword_map, preserve_manual_levels=True)
     if session.files != before:
-        mark_changed(session)
+        mark_changed(session, "files_detected")
     _refresh_source_views(session)
     manager.save_session(session)
 
@@ -325,6 +332,8 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
         raise NotFoundError("File stem not found")
 
     current: ImportedFile = session.files[file_index]
+    files_before = [item.model_dump_json() for item in session.files]
+    keywords_before = dict(session.learned_keywords)
     updated = current.model_copy(deep=True)
     changed_fields = payload.model_fields_set
 
@@ -370,7 +379,8 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
             )
 
     _refresh_source_views(session)
-    mark_changed(session)
+    if [item.model_dump_json() for item in session.files] != files_before or session.learned_keywords != keywords_before:
+        mark_changed(session, "file_changed", stem=stem)
     manager.save_session(session)
 
     final_file = next((item for item in session.files if item.stem == stem), updated)
@@ -402,7 +412,7 @@ def patch_features_bulk(
         restored = restore_features(features, undo)
         session.feature_collection["features"] = restored
         if changes_anything(undo_between(features, restored)):
-            mark_changed(session)
+            mark_changed(session, "fix_undone")
         validation = _revalidate_session(session)
         manager.save_session(session)
         return BulkPatchFeaturesResponse(
@@ -420,7 +430,7 @@ def patch_features_bulk(
         deleted = len(features) - len(kept)
         session.feature_collection["features"] = kept
         if deleted:
-            mark_changed(session)
+            mark_changed(session, "features_deleted", deleted)
         manager.save_session(session)
         return BulkPatchFeaturesResponse(updated_count=0, deleted_count=deleted)
 
@@ -454,7 +464,7 @@ def patch_features_bulk(
         kept = [item for item in features if str(item.get("id")) not in feature_ids]
         kept.append(template)
         session.feature_collection["features"] = kept
-        mark_changed(session)
+        mark_changed(session, "units_merged")
         manager.save_session(session)
         return BulkPatchFeaturesResponse(updated_count=1, deleted_count=len(selected), merged_feature_id=template["id"])
 
@@ -462,6 +472,7 @@ def patch_features_bulk(
         raise ValueError("Bulk patch requires a properties or feature_type payload")
 
     updated = 0
+    changed = 0
     next_features: list[dict[str, Any]] = []
     for item in features:
         if str(item.get("id")) not in feature_ids:
@@ -473,10 +484,11 @@ def patch_features_bulk(
             merged = _merge_properties(copied.get("properties") or {}, payload.properties)
             copied["properties"] = conform_properties(merged, copied["feature_type"]) if retyped else merged
         updated += 1
+        changed += not same_content(copied, item)
         next_features.append(copied)
     session.feature_collection["features"] = next_features
-    if updated:
-        mark_changed(session)
+    if changed:
+        mark_changed(session, "features_edited", changed)
     manager.save_session(session)
     return BulkPatchFeaturesResponse(updated_count=updated, deleted_count=0)
 
@@ -504,7 +516,7 @@ def resolve_unit_overlap(
     features, undo = finish_fix(before, features)
     session.feature_collection["features"] = features
     if resolved or removed:
-        mark_changed(session)
+        mark_changed(session, "overlaps_resolved")
     validation = _revalidate_session(session)
     manager.save_session(session)
     return ResolveUnitOverlapsResponse(
@@ -576,7 +588,7 @@ def resolve_unit_overlaps_safe(session_id: str, request: Request) -> ResolveUnit
     features, undo = finish_fix(before, features)
     session.feature_collection["features"] = features
     if resolved_pairs or removed:
-        mark_changed(session)
+        mark_changed(session, "overlaps_resolved", max(resolved_pairs, 1))
     revalidation = _revalidate_session(session)
     manager.save_session(session)
     return ResolveUnitOverlapsResponse(
@@ -635,9 +647,10 @@ def patch_feature(
         # authoritative instead of letting them leak back in.
         updated["properties"] = conform_properties(merged, updated["feature_type"]) if retyped else merged
 
-    features[index] = updated
-    session.feature_collection["features"] = features
-    mark_changed(session)
+    if not same_content(updated, features[index]):
+        features[index] = updated
+        session.feature_collection["features"] = features
+        mark_changed(session, "features_edited")
     manager.save_session(session)
     return FeatureResponse.model_validate(updated)
 
@@ -656,6 +669,6 @@ def delete_feature(session_id: str, feature_id: str, request: Request) -> dict[s
 
     deleted = features.pop(index)
     session.feature_collection["features"] = features
-    mark_changed(session)
+    mark_changed(session, "features_deleted")
     manager.save_session(session)
     return {"session_id": session_id, "deleted_id": deleted.get("id")}

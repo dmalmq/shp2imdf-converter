@@ -438,6 +438,61 @@ export async function fetchExportContents(
   return (await handleJson<{ outputs: ExportContents[] }>(response)).outputs;
 }
 
+export type HandoverEventKind =
+  | "imported"
+  | "files_detected"
+  | "file_changed"
+  | "setup_changed"
+  | "generated"
+  | "features_edited"
+  | "features_deleted"
+  | "units_merged"
+  | "overlaps_resolved"
+  | "opening_snapped"
+  | "autofixed"
+  | "fix_undone"
+  | "delivered";
+
+/** One line of the change log; `n` is how many of it the visit made. */
+export type HandoverEvent = {
+  at: string;
+  kind: HandoverEventKind;
+  n: number;
+  params: Record<string, string | number>;
+};
+
+export type HandoverVisit = {
+  started_at: string;
+  ended_at: string;
+  events: HandoverEvent[];
+  /** Older events of this visit that were trimmed from the log. */
+  dropped: number;
+};
+
+export type HandoverNote = { text: string; at: string };
+
+export type Handover = {
+  visit_started_at: string | null;
+  /** The latest visit before this one that changed something. */
+  last_visit: HandoverVisit | null;
+  note: HandoverNote | null;
+};
+
+export async function fetchHandover(sessionId: string): Promise<Handover> {
+  const response = await fetch(`/api/session/${sessionId}/handover`);
+  return handleJson<Handover>(response);
+}
+
+/** Blank text clears the note. Saving it is not an edit of the project. */
+export async function saveHandoverNote(sessionId: string, text: string): Promise<Handover> {
+  const response = await fetch(`/api/session/${sessionId}/handover/note`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text })
+  });
+  return handleJson<Handover>(response);
+}
+
 /** One project in `GET /api/projects`. Null fields are unknown, not empty. */
 export type ProjectSummary = {
   id: string;

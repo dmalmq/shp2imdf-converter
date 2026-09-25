@@ -44,10 +44,25 @@ def _content(row: dict[str, Any]) -> Any:
     return _as_json([row.get("feature_type"), row.get("geometry"), properties])
 
 
+def same_content(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """Whether two rows hold the same feature once written out as JSON.
+
+    Compared as serialised text because Python's ``True == 1`` would call a
+    change from ``1`` to ``true`` no change at all.
+    """
+    if left is right:
+        return True
+    return _serialised(_content(left)) == _serialised(_content(right))
+
+
+def _serialised(content: Any) -> str:
+    return json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+
+
 def _same(left: list[dict[str, Any]], right: list[dict[str, Any]]) -> bool:
     if len(left) != len(right):
         return False
-    return all(a is b or _content(a) == _content(b) for a, b in zip(left, right))
+    return all(same_content(a, b) for a, b in zip(left, right))
 
 
 def _rows_by_id(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:

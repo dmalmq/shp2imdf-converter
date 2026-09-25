@@ -226,7 +226,7 @@ def test_session_cap_prefers_a_delivered_unchanged_one_only_on_a_tie(tmp_path: P
         record = manager.get_session(session.session_id, touch=False)
         mark_delivered(record, "imdf", 0)
         if changed_after:
-            mark_changed(record)
+            mark_changed(record, "features_edited")
         record.last_accessed = stamp if session is not oldest else stamp - timedelta(days=4)
         manager.backend.save(record)
 
@@ -250,7 +250,7 @@ def test_session_delivery_state_for_the_cap_survives_a_restart(tmp_path: Path) -
         record = manager.get_session(session.session_id, touch=False)
         mark_delivered(record, "imdf", 0)
         if session is reworked:
-            mark_changed(record)
+            mark_changed(record, "features_edited")
         record.last_accessed = stamp
         manager.backend.save(record)
 

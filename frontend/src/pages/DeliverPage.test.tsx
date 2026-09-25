@@ -7,7 +7,9 @@ import {
   exportSessionQgisProject,
   exportSessionShapefiles,
   fetchExportContents,
+  fetchHandover,
   fetchStoredValidation,
+  saveHandoverNote,
   validateSession,
   type ExportContents,
   type ImportedFile,
@@ -24,7 +26,9 @@ vi.mock("../api/client", () => ({
   exportSessionQgisProject: vi.fn(),
   exportSessionShapefiles: vi.fn(),
   fetchExportContents: vi.fn(),
+  fetchHandover: vi.fn(),
   fetchStoredValidation: vi.fn(),
+  saveHandoverNote: vi.fn(),
   validateSession: vi.fn()
 }));
 
@@ -94,6 +98,7 @@ beforeEach(() => {
     } as unknown as WizardState
   });
   vi.mocked(fetchExportContents).mockResolvedValue(CONTENTS);
+  vi.mocked(fetchHandover).mockResolvedValue({ visit_started_at: null, last_visit: null, note: null });
   vi.mocked(fetchStoredValidation).mockResolvedValue(summary(0, 5));
   vi.mocked(exportSessionArchive).mockResolvedValue({ blob: new Blob(), filename: "Tokyo_Station.imdf" });
   vi.mocked(exportSessionShapefiles).mockResolvedValue({ blob: new Blob(), filename: "JRTokyoSta_odc2026_shapefiles.zip" });
@@ -209,4 +214,17 @@ test("a GeoPackage project can only have the IMDF outputs", async () => {
   within(gis).getAllByRole("checkbox").forEach((box) => expect(box).toBeDisabled());
   expect(within(gis).getAllByText("Not for projects brought in from GeoPackages.")).toHaveLength(3);
   expect(outputs().filter((box) => !box.hasAttribute("disabled"))).toHaveLength(2);
+});
+
+test("the handover slot keeps an unsigned note for whoever opens the project next", async () => {
+  const at = "2026-09-24T05:32:00Z";
+  vi.mocked(saveHandoverNote).mockResolvedValue({ visit_started_at: null, last_visit: null, note: { text: "屋外 still provisional", at } });
+  renderPage();
+  const note = await screen.findByRole("textbox", { name: "Leave a note for whoever opens Tokyo Station next" });
+  fireEvent.change(note, { target: { value: "屋外 still provisional" } });
+  fireEvent.blur(note);
+
+  await waitFor(() => expect(saveHandoverNote).toHaveBeenCalledWith("session-123", "屋外 still provisional"));
+  expect(await screen.findByText(/^Saved · /)).toBeInTheDocument();
+  expect(saveHandoverNote).toHaveBeenCalledTimes(1);
 });

@@ -67,7 +67,7 @@ def autofix_session(
     updated["features"], undo = finish_fix(session.feature_collection.get("features", []), updated.get("features", []))
     session.feature_collection = updated
     if fixes_applied:
-        mark_changed(session)
+        mark_changed(session, "autofixed", len(fixes_applied))
     revalidation = validate_feature_collection(session.feature_collection)
     session.feature_collection = annotate_feature_collection_with_validation(session.feature_collection, revalidation)
     mark_validated(session, revalidation)
@@ -138,7 +138,7 @@ def snap_opening(session_id: str, payload: SnapOpeningRequest, request: Request)
     moved = [*features[:opening_index], {**opening_row, "geometry": mapping(snapped)}, *features[opening_index + 1 :]]
     session.feature_collection["features"], undo = finish_fix(features, moved)
     if undo.features:
-        mark_changed(session)
+        mark_changed(session, "opening_snapped")
 
     validation = validate_feature_collection(session.feature_collection)
     session.feature_collection = annotate_feature_collection_with_validation(session.feature_collection, validation)

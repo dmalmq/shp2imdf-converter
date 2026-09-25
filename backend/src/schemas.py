@@ -329,7 +329,74 @@ class AutofixResponse(BaseModel):
     undo: FeatureUndo = Field(default_factory=FeatureUndo)
 
 
-SESSION_RECORD_SCHEMA_VERSION = 2
+SESSION_RECORD_SCHEMA_VERSION = 3
+
+
+HandoverEventKind = Literal[
+    "imported",
+    "files_detected",
+    "file_changed",
+    "setup_changed",
+    "generated",
+    "features_edited",
+    "features_deleted",
+    "units_merged",
+    "overlaps_resolved",
+    "opening_snapped",
+    "autofixed",
+    "fix_undone",
+    "delivered",
+]
+
+
+class HandoverEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    at: datetime
+    kind: HandoverEventKind
+    n: int = 1
+    params: dict[str, str | int] = Field(default_factory=dict)
+
+
+class HandoverVisit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    started_at: datetime
+    ended_at: datetime
+    events: list[HandoverEvent] = Field(default_factory=list)
+    dropped: int = 0
+
+
+class HandoverNote(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    at: datetime
+
+
+class Handover(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    visit_started_at: datetime | None = None
+    visits: list[HandoverVisit] = Field(default_factory=list)
+    note: HandoverNote | None = None
+
+
+HANDOVER_NOTE_MAX_LENGTH = 2000
+
+
+class HandoverNoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(max_length=HANDOVER_NOTE_MAX_LENGTH)
+
+
+class HandoverResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    visit_started_at: datetime | None
+    last_visit: HandoverVisit | None
+    note: HandoverNote | None
 
 
 class DeliveryRecord(BaseModel):
@@ -366,6 +433,7 @@ class SessionRecord(BaseModel):
     # The content_rev the stored validation describes; any other value means stale.
     validation_rev: int | None = None
     delivered: DeliveryRecord | None = None
+    handover: Handover = Field(default_factory=Handover)
 
     @classmethod
     def from_stored(cls, payload: Any, dropped: list[str] | None = None) -> SessionRecord:

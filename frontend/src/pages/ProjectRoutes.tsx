@@ -3,12 +3,14 @@ import { Link, Navigate, Outlet, useParams } from "react-router-dom";
 
 import { fetchSessionFeatures, fetchSessionFiles, fetchWizardState } from "../api/client";
 import { isSessionNotFoundError, toErrorMessage } from "../api/errors";
+import { WelcomeBack } from "../components/handover/WelcomeBack";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import {
   isShapefileStage,
   landingStage,
   projectPath,
   stageReachable,
+  stationName,
   type ShapefileProject
 } from "../components/shell/stages";
 import { Button } from "../components/ui/button";
@@ -49,6 +51,7 @@ export function ProjectLayout() {
   const { sessionId: id = "" } = useParams();
   const storeId = useAppStore((state) => state.sessionId);
   const loadedId = useAppStore((state) => state.loadedSessionId);
+  const station = useAppStore((state) => stationName(state.wizardState, state.files));
   const [failure, setFailure] = useState<{ id: string; message: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const { t } = useUiLanguage();
@@ -92,7 +95,12 @@ export function ProjectLayout() {
   }, [id, attempt]);
 
   if (storeId === id && loadedId === id) {
-    return <Outlet key={id} />;
+    return (
+      <>
+        <Outlet key={id} />
+        <WelcomeBack key={`welcome-${id}`} sessionId={id} station={station ?? t("this project", "このプロジェクト")} />
+      </>
+    );
   }
 
   if (failure?.id === id) {

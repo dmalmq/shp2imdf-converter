@@ -21,12 +21,14 @@ from fastapi.staticfiles import StaticFiles
 from backend.routers.export_router import router as export_router
 from backend.routers.features_router import router as features_router
 from backend.routers.generate_router import router as generate_router
+from backend.routers.handover_router import router as handover_router
 from backend.routers.import_router import router as import_router
 from backend.routers.projects_router import router as projects_router
 from backend.routers.reference_router import router as reference_router
 from backend.routers.wizard_router import router as wizard_router
 from backend.src.errors import ApiError
 from backend.src.geocoding import GeocodingError, build_geocoder
+from backend.src.handover import gap_setting_problem
 from backend.src.illustrator_export import FloorExportError
 from backend.src.illustrator_importer import IllustratorConversionError
 from backend.src.illustrator_store import (
@@ -61,6 +63,8 @@ def _load_session_manager(limits: ProjectLimits | None = None) -> SessionManager
     backend_name = os.getenv("SESSION_BACKEND", "filesystem")
     data_dir = os.getenv("SESSION_DATA_DIR", "./data/sessions")
     backend = build_session_backend(backend_name=backend_name, session_data_dir=data_dir)
+    if problem := gap_setting_problem():
+        logger.warning(problem)
     return SessionManager(
         backend=backend, ttl_hours=flow.idle_seconds / 3600, max_sessions=flow.max_projects
     )
@@ -273,6 +277,7 @@ app.include_router(wizard_router)
 app.include_router(generate_router)
 app.include_router(export_router)
 app.include_router(projects_router)
+app.include_router(handover_router)
 
 
 @app.get("/api/health")

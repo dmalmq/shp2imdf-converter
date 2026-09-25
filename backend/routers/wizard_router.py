@@ -557,7 +557,7 @@ def patch_wizard_project(session_id: str, payload: ProjectWizardRequest, request
         ]
     else:
         session.wizard.warnings = []
-    reset_generation_if_changed(session, before)
+    reset_generation_if_changed(session, before, "project")
 
     manager.save_session(session)
     return ProjectWizardResponse(
@@ -604,7 +604,7 @@ def patch_wizard_levels(session_id: str, payload: LevelsWizardRequest, request: 
         updated.level_category = item.category or "unspecified"
         updated_files.append(updated)
     session.files = updated_files
-    reset_generation_if_changed(session, before)
+    reset_generation_if_changed(session, before, "levels")
 
     manager.save_session(session)
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
@@ -651,7 +651,7 @@ def patch_wizard_buildings(
 
     session.wizard.buildings = building_rows
     session.wizard.building_address_features = address_features
-    reset_generation_if_changed(session, before)
+    reset_generation_if_changed(session, before, "buildings")
 
     manager.save_session(session)
     return BuildingsWizardResponse(
@@ -686,7 +686,7 @@ def patch_wizard_mappings(
         session.wizard.company_mappings.update(overrides)
 
     _refresh_unit_preview(session, request)
-    reset_generation_if_changed(session, before)
+    reset_generation_if_changed(session, before, "mappings")
     manager.save_session(session)
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
 
@@ -702,7 +702,7 @@ def patch_wizard_footprint(
     seed_wizard_state(session)
     before = setup_snapshot(session)
     session.wizard.footprint = payload
-    reset_generation_if_changed(session, before)
+    reset_generation_if_changed(session, before, "footprint")
     manager.save_session(session)
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
 
@@ -811,7 +811,7 @@ def _apply_company_mappings(session_id: str, request: Request, payload_raw: byte
     session.wizard.company_mappings = mappings
     session.wizard.company_default_category = default_category
     _, unresolved_count = _refresh_unit_preview(session, request)
-    reset_generation_if_changed(session, before)
+    reset_generation_if_changed(session, before, "company_mappings")
 
     manager.save_session(session)
     return CompanyMappingsUploadResponse(
