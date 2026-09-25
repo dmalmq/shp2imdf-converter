@@ -102,6 +102,7 @@ class FeatureCollectionResponse(BaseModel):
 
     type: str
     features: list[dict[str, Any]]
+    content_rev: int | None = None
 
 
 class AddressInput(BaseModel):
@@ -709,6 +710,12 @@ class FeatureResponse(BaseModel):
     properties: dict[str, Any]
 
 
+class PatchedFeatureResponse(FeatureResponse):
+    """A feature as an edit left it, with the revision the project is now at."""
+
+    content_rev: int
+
+
 class PatchFeatureRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -726,6 +733,10 @@ class BulkPatchFeaturesRequest(BaseModel):
     action: Literal["patch", "delete", "merge_units", "restore"] = "patch"
     merge_name: str | None = None
     undo: FeatureUndo | None = None
+    # Refused with 409 REVISION_STALE unless the session is still at this content_rev.
+    base_rev: int | None = None
+    # `patch` only: also return what undoes it, and revalidate.
+    with_undo: bool = False
 
 
 class BulkPatchFeaturesResponse(BaseModel):
@@ -735,6 +746,18 @@ class BulkPatchFeaturesResponse(BaseModel):
     deleted_count: int = 0
     merged_feature_id: str | None = None
     validation: ValidationResponse | None = None
+
+
+class BulkPatchWithUndoResponse(BaseModel):
+    """A `patch` sent with `with_undo`: the undo a fix would return, and the checks it left."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    updated_count: int
+    deleted_count: int = 0
+    undo: FeatureUndo
+    validation: ValidationResponse
+    content_rev: int
 
 
 class ResolveUnitOverlapRequest(BaseModel):

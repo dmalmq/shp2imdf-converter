@@ -12,7 +12,7 @@ from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, mapping,
 from shapely.ops import unary_union
 
 from backend.routers.common import get_session_or_raise, session_manager
-from backend.src.errors import NotFoundError
+from backend.src.errors import NotFoundError, RevisionStaleError
 from backend.src.detector import (
     detect_files,
     infer_learning_suggestion,
@@ -39,8 +39,10 @@ from backend.src.projects import current_validation, mark_changed, mark_validate
 from backend.src.schemas import (
     BulkPatchFeaturesRequest,
     BulkPatchFeaturesResponse,
+    BulkPatchWithUndoResponse,
     DetectResponse,
     FeatureResponse,
+    PatchedFeatureResponse,
     FeatureCollectionResponse,
     ImportedFile,
     PatchFeatureRequest,
@@ -293,7 +295,12 @@ def _refresh_source_views(session: Any) -> None:
 @router.get("/features", response_model=FeatureCollectionResponse)
 def get_features(session_id: str, request: Request) -> FeatureCollectionResponse:
     session = get_session_or_raise(session_id, request)
-    return FeatureCollectionResponse.model_validate(session.feature_collection)
+    return FeatureCollectionResponse.model_validate({**session.feature_collection, "content_rev": session.content_rev})
+
+
+def _require_revision(session: Any, base_rev: int | None) -> None:
+    if base_rev is not None and base_rev != session.content_rev:
+        raise RevisionStaleError()
 
 
 @router.get("/files")
@@ -392,17 +399,20 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
     )
 
 
-@router.patch("/features/bulk", response_model=BulkPatchFeaturesResponse)
+@router.patch("/features/bulk", response_model=BulkPatchWithUndoResponse | BulkPatchFeaturesResponse)
 def patch_features_bulk(
     session_id: str,
     payload: BulkPatchFeaturesRequest,
     request: Request,
-) -> BulkPatchFeaturesResponse:
+) -> BulkPatchWithUndoResponse | BulkPatchFeaturesResponse:
     manager = session_manager(request)
     session = get_session_or_raise(session_id, request)
     features = session.feature_collection.get("features", [])
     if not isinstance(features, list):
         raise ValueError("Session feature collection is malformed")
+    _require_revision(session, payload.base_rev)
+    if payload.with_undo and payload.action != "patch":
+        raise ValueError("with_undo applies to the patch action only")
 
     if payload.action == "restore":
         if payload.undo is None:
@@ -486,6 +496,19 @@ def patch_features_bulk(
         updated += 1
         changed += not same_content(copied, item)
         next_features.append(copied)
+    if payload.with_undo:
+        next_features, undo = finish_fix(features, next_features)
+        session.feature_collection["features"] = next_features
+        if changed:
+            mark_changed(session, "features_edited", changed)
+        validation = _revalidate_session(session)
+        manager.save_session(session)
+        return BulkPatchWithUndoResponse(
+            updated_count=updated,
+            undo=undo,
+            validation=validation,
+            content_rev=session.content_rev,
+        )
     session.feature_collection["features"] = next_features
     if changed:
         mark_changed(session, "features_edited", changed)
@@ -531,12 +554,15 @@ def resolve_unit_overlap(
 
 
 @router.post("/overlaps/fix-safe", response_model=ResolveUnitOverlapsResponse)
-def resolve_unit_overlaps_safe(session_id: str, request: Request) -> ResolveUnitOverlapsResponse:
+def resolve_unit_overlaps_safe(
+    session_id: str, request: Request, base_rev: int | None = None
+) -> ResolveUnitOverlapsResponse:
     manager = session_manager(request)
     session = get_session_or_raise(session_id, request)
     features = session.feature_collection.get("features", [])
     if not isinstance(features, list):
         raise ValueError("Session feature collection is malformed")
+    _require_revision(session, base_rev)
 
     before = list(features)
     validation = current_validation(session) or validate_feature_collection(session.feature_collection)
@@ -615,13 +641,13 @@ def get_feature(session_id: str, feature_id: str, request: Request) -> FeatureRe
     return FeatureResponse.model_validate(features[index])
 
 
-@router.patch("/features/{feature_id}", response_model=FeatureResponse)
+@router.patch("/features/{feature_id}", response_model=PatchedFeatureResponse)
 def patch_feature(
     session_id: str,
     feature_id: str,
     payload: PatchFeatureRequest,
     request: Request,
-) -> FeatureResponse:
+) -> PatchedFeatureResponse:
     manager = session_manager(request)
     session = get_session_or_raise(session_id, request)
     features = session.feature_collection.get("features", [])
@@ -652,7 +678,7 @@ def patch_feature(
         session.feature_collection["features"] = features
         mark_changed(session, "features_edited")
     manager.save_session(session)
-    return FeatureResponse.model_validate(updated)
+    return PatchedFeatureResponse.model_validate({**updated, "content_rev": session.content_rev})
 
 
 @router.delete("/features/{feature_id}")
@@ -671,4 +697,4 @@ def delete_feature(session_id: str, feature_id: str, request: Request) -> dict[s
     session.feature_collection["features"] = features
     mark_changed(session, "features_deleted")
     manager.save_session(session)
-    return {"session_id": session_id, "deleted_id": deleted.get("id")}
+    return {"session_id": session_id, "deleted_id": deleted.get("id"), "content_rev": session.content_rev}

@@ -8,6 +8,8 @@ import { useAppStore, type UiLanguage } from "../../store/useAppStore";
 import { Button } from "../ui/button";
 import { DisabledHint, TooltipProvider } from "../ui/tooltip";
 import { cn } from "@/lib/utils";
+import { SearchProvider } from "../search/SearchContext";
+import { SearchPalette } from "../search/SearchPalette";
 import { ProductMark } from "./ProductMark";
 import {
   ShellProvider,
@@ -35,7 +37,9 @@ export function AppShell({ children }: Props) {
   return (
     <TooltipProvider delayDuration={200}>
       <ShellProvider>
-        <ShellFrame>{children}</ShellFrame>
+        <SearchProvider>
+          <ShellFrame>{children}</ShellFrame>
+        </SearchProvider>
       </ShellProvider>
     </TooltipProvider>
   );
@@ -110,8 +114,7 @@ function ShellFrame({ children }: Props) {
           </ol>
         </nav>
 
-        {/* Search and commands arrive in phase 12; until then the space is kept, not faked. */}
-        <div className="min-w-0 flex-1" data-slot="search" />
+        <SearchPalette />
 
         {parseProjectPath(location.pathname)?.stage === "set-up" ? <SaveStatus held={Boolean(page?.saveHeld)} /> : null}
         <LanguageSwitch />

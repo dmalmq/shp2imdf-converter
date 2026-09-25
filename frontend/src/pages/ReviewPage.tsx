@@ -1,6 +1,6 @@
 import { PanelLeftOpen, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import {
   autofillWizardAddressFromGeometry,
@@ -11,6 +11,7 @@ import {
   fetchSessionFeatures,
   fetchStoredValidation,
   generateSessionDraft,
+  patchFeaturesGuarded,
   patchSessionFeature,
   patchSessionFeaturesBulk,
   resolveSessionUnitOverlap,
@@ -41,7 +42,10 @@ import { PropertiesPanel } from "../components/review/PropertiesPanel";
 import { TablePanel } from "../components/review/TablePanel";
 import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
-import { useToast } from "../components/shared/ToastProvider";
+import { useToast, useWithdrawToastActions } from "../components/shared/ToastProvider";
+import { useSearchSource } from "../components/search/SearchContext";
+import { canonicalFloor } from "../lib/search/parse";
+import type { ApplyOutcome, ChangeCommand, CheckSource } from "../lib/search/source";
 import { type ReviewFeature, featureLayerKey, featureName, layerKeyBaseType, orderedLayerKeys } from "../components/review/types";
 import { isApiClientError } from "../api/errors";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
@@ -54,6 +58,7 @@ import {
   issueAnchor,
   locateIssue,
   refocus,
+  undoable,
   type DoneFix,
   type Focus
 } from "../lib/check";
@@ -156,6 +161,9 @@ function isFormTarget(target: EventTarget | null): boolean {
   return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
 }
 
+/** Toasts whose Undo belongs to this page; withdrawn when it goes. */
+const COMMAND_TOASTS = "check-command";
+
 /** Radix Select has no empty-string value, so "no level chosen" needs one. */
 const BULK_NO_LEVEL = "__none__";
 
@@ -182,6 +190,8 @@ export function ReviewPage() {
   const handleApiError = useApiErrorHandler(sessionId);
   const { t } = useUiLanguage();
   const pushToast = useToast();
+  const withdrawToastActions = useWithdrawToastActions();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [features, setFeatures] = useState<ReviewFeature[]>([]);
   const [loading, setLoading] = useState(false);
@@ -208,6 +218,11 @@ export function ReviewPage() {
   const [railHidden, setRailHidden] = useState(false);
   const [mainView, setMainView] = useState<"map" | "table">("map");
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
+  const [contentRev, setContentRev] = useState<number | null>(null);
+  const [previewIds, setPreviewIds] = useState<readonly string[] | null>(null);
+  const nextDoneId = useRef(0);
+  const doneRef = useRef<DoneFix[]>([]);
+  doneRef.current = done;
 
   const captureError = (caught: unknown, fallbackMessage: string, title: string) => {
     const message = handleApiError(caught, fallbackMessage, { title });
@@ -248,6 +263,7 @@ export function ReviewPage() {
           .filter((item): item is ReviewFeature => item !== null);
       }
       setFeatures(rows);
+      setContentRev(typeof response.content_rev === "number" ? response.content_rev : null);
       return rows;
     } catch (caught) {
       captureError(caught, t("Failed to load review data", "レビュー データの読み込みに失敗しました"), t("Review load failed", "レビュー読み込み失敗"));
@@ -416,7 +432,7 @@ export function ReviewPage() {
         featureId,
         featureType ? { properties, feature_type: featureType } : { properties }
       );
-      afterEdit();
+      afterEdit(updated.content_rev);
       const nextFeature: ReviewFeature = {
         type: updated.type,
         id: updated.id,
@@ -466,8 +482,8 @@ export function ReviewPage() {
       return;
     }
     try {
-      await deleteSessionFeature(sessionId, featureId);
-      afterEdit();
+      const deleted = await deleteSessionFeature(sessionId, featureId);
+      afterEdit(deleted.content_rev);
       setFeatures((prev) => prev.filter((item) => item.id !== featureId));
       setSelectedFeatureIds(selectedFeatureIds.filter((id) => id !== featureId));
       pushToast({ title: t("Feature deleted", "フィーチャーを削除しました"), variant: "success" });
@@ -684,7 +700,8 @@ export function ReviewPage() {
   };
 
   /** Any edit that is not a fix: the stored checks no longer describe the project, and undoing a fix could undo it. */
-  const afterEdit = () => {
+  const afterEdit = (rev?: number) => {
+    if (typeof rev === "number") setContentRev(rev);
     setChecksStale(true);
     setDone((previous) => previous.map((entry) => ({ ...entry, stale: true })));
   };
@@ -742,11 +759,7 @@ export function ReviewPage() {
     try {
       const result = await request();
       if (!result) return;
-      applyPostValidationState(result.validation);
-      await loadFeatures();
-      if (result.undo.features.length > 0 || result.undo.remove_ids.length > 0) {
-        setDone((previous) => [...previous, { id: (previous[previous.length - 1]?.id ?? 0) + 1, label, undo: result.undo }]);
-      }
+      await recordFix(result, label);
       const left = result.validation.summary.error_count;
       pushToast({
         title: t(`Fixed: ${label.en}`, `修正しました：${label.ja}`),
@@ -755,6 +768,86 @@ export function ReviewPage() {
       });
     } catch (caught) {
       captureError(caught, t(failure.en, failure.ja), t(failure.en, failure.ja));
+    } finally {
+      setFixing(false);
+    }
+  };
+
+  /** What every fix does once the server has answered: show its checks, reload, and keep its undo. */
+  const recordFix = async (result: { validation: ValidationResponse; undo: FeatureUndo }, label: Bilingual) => {
+    applyPostValidationState(result.validation);
+    await loadFeatures();
+    if (result.undo.features.length === 0 && result.undo.remove_ids.length === 0) return null;
+    nextDoneId.current += 1;
+    const entry: DoneFix = { id: nextDoneId.current, label, undo: result.undo };
+    setDone((previous) => [...previous, entry]);
+    return entry;
+  };
+
+  /** A typed command's change, guarded by the revision its preview was read at. */
+  const applyCommand = async (command: ChangeCommand, basis: number): Promise<ApplyOutcome> => {
+    if (!sessionId) return { kind: "failed" };
+    setFixing(true);
+    setError(null);
+    try {
+      let result: { validation: ValidationResponse; undo: FeatureUndo };
+      let label: Bilingual | null;
+      if (command.verb === "assign") {
+        const properties: Record<string, unknown> = { ordinal: command.to.ordinal, short_name: command.to.shortName };
+        if (command.outdoor !== "keep") properties.outdoor = command.outdoor === "set";
+        const response = await patchFeaturesGuarded(sessionId, [command.level.id], properties, basis);
+        result = response;
+        label =
+          response.updated_count > 0
+            ? { en: `Moved ${command.level.name} to ${command.to.label}`, ja: `${command.level.name}を${command.to.label}に移動` }
+            : null;
+      } else {
+        const response = await resolveSessionUnitOverlapsSafe(sessionId, basis);
+        result = response;
+        const waiting = response.skipped_count;
+        label =
+          response.resolved_pairs > 0
+            ? {
+                en: `Trimmed ${response.resolved_pairs} overlap${response.resolved_pairs === 1 ? "" : "s"}${waiting > 0 ? ` · ${waiting} need${waiting === 1 ? "s" : ""} your choice` : ""}`,
+                ja: `重なりを ${response.resolved_pairs} 件解消${waiting > 0 ? ` · ${waiting} 件は選択が必要` : ""}`
+              }
+            : null;
+      }
+      const entry = await recordFix(result, label ?? { en: "Nothing changed", ja: "変更なし" });
+      if (!label || !entry) {
+        pushToast({ title: t("Nothing changed", "変更はありませんでした"), variant: "info" });
+        return { kind: "done" };
+      }
+      pushToast({
+        title: t(`${label.en}.`, `${label.ja}。`),
+        description: t(
+          `${result.validation.summary.error_count} left to fix.`,
+          `残り ${result.validation.summary.error_count} 件。`
+        ),
+        variant: "success",
+        durationMs: 8000,
+        group: COMMAND_TOASTS,
+        action: {
+          label: t("Undo", "元に戻す"),
+          run: () => {
+            const current = doneRef.current.find((item) => item.id === entry.id);
+            if (current && !current.stale && undoable(doneRef.current, current)) void undoFix(current);
+            else
+              pushToast({
+                title: t("Can’t undo — changed since", "元に戻せません — その後に変更されています"),
+                variant: "info"
+              });
+          }
+        }
+      });
+      return { kind: "done" };
+    } catch (caught) {
+      if (isApiClientError(caught) && caught.code === "REVISION_STALE") {
+        await loadFeatures();
+        return { kind: "stale" };
+      }
+      captureError(caught, t("The command failed", "コマンドに失敗しました"), t("The command failed", "コマンドに失敗しました"));
+      return { kind: "failed" };
     } finally {
       setFixing(false);
     }
@@ -898,7 +991,7 @@ export function ReviewPage() {
             : {})
         })
           .then((updated) => {
-            afterEdit();
+            afterEdit(updated.content_rev);
             setFeatures((prev) =>
               prev.map((item) =>
                 item.id === updated.id
@@ -966,6 +1059,76 @@ export function ReviewPage() {
   });
 
   const language = wizardState?.project?.language ?? "en";
+
+  const showFloor = (label: string) => {
+    const wanted = canonicalFloor(label);
+    const floor = floorOptions.find((item) => item.id === label || canonicalFloor(item.label) === wanted);
+    if (!floor) return false;
+    setMainView("map");
+    setMapFloorFilter(floor.id);
+    return true;
+  };
+
+  const showLevel = (levelId: string) => {
+    const floor = floorOptions.find((item) => item.levelIds.includes(levelId));
+    setMainView("map");
+    if (floor) setMapFloorFilter(floor.id);
+    setSelectedFeatureIds([levelId]);
+  };
+
+  const searchHandlers = useRef({ openIssue, showFloor, showLevel, runValidation, applyCommand });
+  searchHandlers.current = { openIssue, showFloor, showLevel, runValidation, applyCommand };
+  const currentValidation = checksStale ? null : validation;
+  const searchSource = useMemo<CheckSource | null>(
+    () =>
+      sessionId
+        ? {
+            snapshot: {
+              sessionId,
+              contentRev,
+              features,
+              validation: currentValidation,
+              view: checkView,
+              floors: floorOptions,
+              language
+            },
+            openIssue: (next) => searchHandlers.current.openIssue(next),
+            showFloor: (label) => {
+              searchHandlers.current.showFloor(label);
+            },
+            showLevel: (levelId) => searchHandlers.current.showLevel(levelId),
+            runChecks: () => void searchHandlers.current.runValidation(),
+            showPreview: setPreviewIds,
+            apply: (command, basis) => searchHandlers.current.applyCommand(command, basis)
+          }
+        : null,
+    [sessionId, contentRev, features, currentValidation, checkView, floorOptions, language]
+  );
+  useSearchSource(searchSource);
+
+  useEffect(() => () => withdrawToastActions(COMMAND_TOASTS), [sessionId, withdrawToastActions]);
+
+  // Search opens Check at a floor (?floor=1F) or at the next must-fix issue
+  // (?issue=next); each hint is read once and then dropped from the URL.
+  useEffect(() => {
+    const floor = searchParams.get("floor");
+    if (!floor || floorOptions.length === 0) return;
+    if (!showFloor(floor)) {
+      pushToast({ title: t(`No floor ${floor} in this project`, `このプロジェクトに ${floor} はありません`), variant: "info" });
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("floor");
+    setSearchParams(next, { replace: true });
+  }, [floorOptions, searchParams]);
+
+  useEffect(() => {
+    if (searchParams.get("issue") !== "next" || !validation) return;
+    const first = checkView.mustFix[0];
+    if (first) openIssue({ key: first.key, index: 0 });
+    const next = new URLSearchParams(searchParams);
+    next.delete("issue");
+    setSearchParams(next, { replace: true });
+  }, [checkView, validation, searchParams]);
   const focusGroup = focus ? findGroup(checkView, focus.key) : undefined;
   const focusAnchor = activeIssue ? issueAnchor(activeIssue, featuresById) : null;
   const focusNumber = focusGroup?.mustFix ? checkView.mustFix.indexOf(focusGroup) + 1 : null;
@@ -1077,6 +1240,7 @@ export function ReviewPage() {
                   showBasemap={showBasemap}
                   activeIssue={activeIssue}
                   pin={issuePin}
+                  previewIds={previewIds}
                   onSelectFeature={(id, multi) => toggleSelectedFeatureId(id, multi)}
                 />
               </ErrorBoundary>
