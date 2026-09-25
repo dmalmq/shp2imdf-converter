@@ -57,6 +57,8 @@ export type PageStages = {
   nextBlockedReason?: Bilingual | null;
   /** Errors the Check stage has found; null or undefined when not yet checked. */
   checkErrors?: number | null;
+  /** Files Bring in could not place on its own; null or undefined when nothing is read yet. */
+  bringInNeeds?: number | null;
 };
 
 const SHAPEFILE_STAGE_IDS: ReadonlyArray<ShapefileStageId> = ["bring-in", "set-up", "check", "deliver"];
@@ -148,6 +150,7 @@ export function shapefileStages({
   const setUpSkipped = importProfile === "imdf_shapefile" && hasSession;
   const project: ShapefileProject = { importProfile, reviewReached };
   const errors = page?.checkErrors;
+  const needs = page?.bringInNeeds;
 
   return SHAPEFILE_STAGE_IDS.map((id, index) => {
     const { label } = FLOW_STAGES.shapefiles[index];
@@ -167,6 +170,14 @@ export function shapefileStages({
 
     if (id === "set-up" && setUpSkipped) {
       stage.detail = { en: "Not needed for IMDF shapefiles", ja: "IMDF シェープファイルでは不要" };
+    }
+
+    if (id === "bring-in" && typeof needs === "number" && needs > 0) {
+      stage.detail =
+        needs === 1
+          ? { en: "1 file needs you", ja: "確認が必要なファイル 1 件" }
+          : { en: `${needs} files need you`, ja: `確認が必要なファイル ${needs} 件` };
+      stage.detailTone = "danger";
     }
 
     if (id === "check" && typeof errors === "number") {

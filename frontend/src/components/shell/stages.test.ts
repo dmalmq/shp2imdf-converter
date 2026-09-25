@@ -42,6 +42,14 @@ describe("shapefile flow", () => {
     expect(stages[1].detail?.en).toBe("Add a file");
   });
 
+  test("Bring in counts the files that need a decision", () => {
+    const stages = shapefileStages({ ...base, pathname: "/p/s1/bring-in", sessionId: "s1", page: { bringInNeeds: 2 } });
+    expect(stages[0].detail).toEqual({ en: "2 files need you", ja: "確認が必要なファイル 2 件" });
+    expect(stages[0].detailTone).toBe("danger");
+    const settled = shapefileStages({ ...base, pathname: "/p/s1/bring-in", sessionId: "s1", page: { bringInNeeds: 0 } });
+    expect(settled[0].detail).toBeUndefined();
+  });
+
   test("the wizard is Set up, with Bring in behind it", () => {
     const stages = shapefileStages({ ...base, pathname: "/p/s1/set-up", sessionId: "s1" });
     expect(statuses(stages)).toEqual(["done", "current", "todo", "todo"]);

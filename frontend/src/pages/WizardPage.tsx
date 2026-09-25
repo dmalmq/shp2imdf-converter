@@ -45,10 +45,10 @@ import { useAppStore, useSessionAction, type WizardDrafts } from "../store/useAp
 import { Button, DisabledHint } from "../components/ui";
 import { useInShell, usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
 import { projectPath } from "../components/shell/stages";
+import { LEVEL_REQUIRED_TYPES } from "../lib/bringIn";
 import { formatClock } from "../lib/clock";
 import { WizardFooterProvider, sameAsSaved, useAutosave, useWizardFooterState } from "../components/wizard/wizardSave";
 
-const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail", "kiosk", "section"]);
 
 const EMPTY_UNIT_MAPPING: UnitMappingState = {
   code_column: null,
