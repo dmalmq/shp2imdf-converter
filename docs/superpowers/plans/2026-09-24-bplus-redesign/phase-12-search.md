@@ -13,3 +13,5 @@ Apply, and Undo.
 "assign 屋外 to 1F outdoor" each land where the design says.
 
 **Design gate.** `architect` for the grammar; `interrogate` before shipping.
+
+**Design.** [design-12-commands.md](design-12-commands.md) (types, grammar, verbs, preview, undo, data sources, keyboard).
