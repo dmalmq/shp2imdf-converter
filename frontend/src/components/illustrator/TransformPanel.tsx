@@ -2,6 +2,7 @@ import { HelpCircle, Redo2, Undo2 } from "lucide-react";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
+  placementScope,
   resolvedTransform,
   type AdjustmentMode,
   type PlacementAction,
@@ -11,6 +12,7 @@ import { drawingScaleDenominator } from "../../lib/similarity";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { PlacementScopeNote } from "./PlacementScopeNote";
 
 type Props = {
   state: PlacementState;
@@ -38,7 +40,7 @@ export function TransformPanel({
 
   const activeFloor = state.floors.find((f) => f.label === state.activeFloorLabel) ?? state.floors[0];
   const activeTransform = activeFloor ? resolvedTransform(state, activeFloor) : null;
-  const editPerFloor = mode === "individual" || !activeFloor?.linked;
+  const editPerFloor = placementScope(state, mode).floorOnly;
 
   return (
     <div className="flex flex-col gap-3">
@@ -114,12 +116,11 @@ export function TransformPanel({
         </Button>
       ) : null}
 
+      <PlacementScopeNote state={state} mode={mode} />
+
       <div className="flex flex-col gap-1.5">
         <label className="font-mono text-[11px] uppercase leading-[14px] tracking-[0.04em] text-muted-foreground">
           {t("Rotation (from true north)", "回転（真北基準）")}
-          {activeFloor && editPerFloor ? (
-            <span className="normal-case tracking-normal">{t(" (this floor)", "（この階）")}</span>
-          ) : null}
         </label>
         <div className="flex items-center gap-2">
           <Input

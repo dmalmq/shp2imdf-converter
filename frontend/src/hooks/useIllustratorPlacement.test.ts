@@ -10,6 +10,7 @@ import {
   placedBoundsWgs84,
   placementHistoryReducer,
   placementReducer,
+  placementScope,
   resolvedTransform,
   toFloorPayloads,
   type FloorPlacement,
@@ -322,7 +323,7 @@ test("single-floor dragging keeps the floor linked", () => {
 });
 
 test("a locked scale rejects scaleFrame", () => {
-  let state = placementReducer(BASE, { type: "setDrawingScale", denominator: 500 });
+  let state = placementReducer(BASE, { type: "setDrawingScale", denominator: 500, mode: "group" });
   state = placementReducer(state, { type: "scaleFrame", metresPerPoint: 9 });
   expect(state.frame.metresPerPoint).toBeCloseTo(0.1763888888, 9);
 });
@@ -529,13 +530,13 @@ test("rotation is normalised into (-180, 180]", () => {
 });
 
 test("setting a drawing scale locks the scale", () => {
-  const next = placementReducer(BASE, { type: "setDrawingScale", denominator: 500 });
+  const next = placementReducer(BASE, { type: "setDrawingScale", denominator: 500, mode: "group" });
   expect(next.frame.metresPerPoint).toBeCloseTo(0.1763888888, 9);
   expect(next.scaleLocked).toBe(true);
 });
 
 test("unlocking the scale lets scaleFrame work again", () => {
-  let state = placementReducer(BASE, { type: "setDrawingScale", denominator: 500 });
+  let state = placementReducer(BASE, { type: "setDrawingScale", denominator: 500, mode: "group" });
   state = placementReducer(state, { type: "unlockScale" });
   state = placementReducer(state, { type: "scaleFrame", metresPerPoint: 0.5 });
   expect(state.frame.metresPerPoint).toBe(0.5);
@@ -543,13 +544,13 @@ test("unlocking the scale lets scaleFrame work again", () => {
 
 test("setting a drawing scale is a no-op while locked", () => {
   const locked = placementReducer(BASE, { type: "lockScale" });
-  expect(placementReducer(locked, { type: "setDrawingScale", denominator: 2000 })).toBe(locked);
+  expect(placementReducer(locked, { type: "setDrawingScale", denominator: 2000, mode: "group" })).toBe(locked);
 });
 
 test("distance calibration is a no-op while locked", () => {
   const locked = placementReducer(BASE, { type: "lockScale" });
   expect(
-    placementReducer(locked, { type: "calibrateDistance", artworkDistance: 400, realMetres: 100 })
+    placementReducer(locked, { type: "calibrateDistance", artworkDistance: 400, realMetres: 100, mode: "group" })
   ).toBe(locked);
 });
 
@@ -557,7 +558,8 @@ test("distance calibration locks the scale", () => {
   const next = placementReducer(BASE, {
     type: "calibrateDistance",
     artworkDistance: 400,
-    realMetres: 70.5556
+    realMetres: 70.5556,
+    mode: "group"
   });
   expect(next.frame.metresPerPoint).toBeCloseTo(0.1763889, 6);
   expect(next.scaleLocked).toBe(true);
@@ -699,7 +701,8 @@ test("a perturbed third target leaves a visible residual after fitting", () => {
 test("a group-mode fit respects the locked scale", () => {
   let state = placementReducer(controlPointState(3), {
     type: "setDrawingScale",
-    denominator: 500
+    denominator: 500,
+    mode: "group"
   });
   state = placementReducer(state, { type: "fitControlPoints", mode: "group" });
   expect(state.frame.metresPerPoint).toBeCloseTo(0.1763888888, 9);
@@ -826,7 +829,8 @@ test("group applySimilarity is a no-op when the registration floor is unlinked",
 test("a group applySimilarity respects the locked scale like fitControlPoints", () => {
   let state = placementReducer(stateWithControlPoints(), {
     type: "setDrawingScale",
-    denominator: 500
+    denominator: 500,
+    mode: "group"
   });
   const lockedScale = state.frame.metresPerPoint;
   state = placementReducer(state, {
@@ -903,7 +907,7 @@ test("a later group move leaves a frozen floor's pose unchanged", () => {
   expect(state.floors[1]).toBe(frozen);
   expect(resolvedTransform(state, frozen).rotationDeg).toBe(0);
 
-  state = placementReducer(state, { type: "setDrawingScale", denominator: 500 });
+  state = placementReducer(state, { type: "setDrawingScale", denominator: 500, mode: "group" });
   expect(state.floors[1]).toBe(frozen);
   expect(resolvedTransform(state, frozen).metresPerPoint).toBeCloseTo(0.176389, 9);
   expect(resolvedTransform(state, state.floors[0]).metresPerPoint).toBeCloseTo(0.1763888888, 9);
@@ -917,9 +921,9 @@ test("pose mutations are identity while the target floor is frozen", () => {
   );
   expect(placementReducer(state, { type: "rotateFrame", rotationDeg: 45 })).toBe(state);
   expect(placementReducer(state, { type: "scaleFrame", metresPerPoint: 0.5 })).toBe(state);
-  expect(placementReducer(state, { type: "setDrawingScale", denominator: 500 })).toBe(state);
+  expect(placementReducer(state, { type: "setDrawingScale", denominator: 500, mode: "group" })).toBe(state);
   expect(
-    placementReducer(state, { type: "calibrateDistance", artworkDistance: 10, realMetres: 5 })
+    placementReducer(state, { type: "calibrateDistance", artworkDistance: 10, realMetres: 5, mode: "group" })
   ).toBe(state);
   expect(placementReducer(state, { type: "dragFloor", label: "1F", mapAnchor: [139.71, 35.7] })).toBe(
     state
@@ -1040,7 +1044,7 @@ test("redo replays an undone step and new work clears the redo stack", () => {
   expect(history.present.frame.rotationDeg).toBe(30);
 
   history = placementHistoryReducer(history, { type: "undo" });
-  history = placementHistoryReducer(history, { type: "setDrawingScale", denominator: 500 });
+  history = placementHistoryReducer(history, { type: "setDrawingScale", denominator: 500, mode: "group" });
   expect(history.future).toHaveLength(0);
 });
 
@@ -1054,7 +1058,7 @@ test("a rejected action does not consume an undo step", () => {
   // Locked scale rejects scaleFrame; undo must not become a no-op instead of
   // reverting the lock.
   let history = initialPlacementHistory(BASE);
-  history = placementHistoryReducer(history, { type: "setDrawingScale", denominator: 500 });
+  history = placementHistoryReducer(history, { type: "setDrawingScale", denominator: 500, mode: "group" });
   const locked = history;
   history = placementHistoryReducer(history, { type: "scaleFrame", metresPerPoint: 9 });
   expect(history).toBe(locked);
@@ -1243,4 +1247,97 @@ test("placedBoundsWgs84 unions floors that land in different places", () => {
 test("placedBoundsWgs84 returns null when no floor has a usable transform", () => {
   expect(placedBoundsWgs84(BASE, [{ label: "nope", bounds: [0, 0, 10, 10] }])).toBeNull();
   expect(placedBoundsWgs84(BASE, [])).toBeNull();
+});
+
+const AT_1000 = DEFAULT_METRES_PER_POINT;
+const AT_500 = DEFAULT_METRES_PER_POINT / 2;
+
+/** The review's three-page sample: 1F linked, 2F and 3F already unlinked at 1:1000. */
+const SPLIT: PlacementState = {
+  frame: { rotationDeg: 0, metresPerPoint: AT_1000, workingCrs: "EPSG:6677" },
+  floors: [
+    floor("1F", ANCHOR),
+    { ...floor("2F", [139.7005, 35.691], false), rotationDeg: 3, metresPerPoint: AT_1000 },
+    { ...floor("3F", [139.7008, 35.6912], false), rotationDeg: -2, metresPerPoint: AT_1000 }
+  ],
+  activeFloorLabel: "2F",
+  scaleLocked: false
+};
+
+test("an individual drawing scale on 2F sets 2F to 1:500 and leaves 1F at 1:1000", () => {
+  const next = placementReducer(SPLIT, {
+    type: "setDrawingScale",
+    denominator: 500,
+    mode: "individual"
+  });
+  expect(resolvedTransform(next, next.floors[1]).metresPerPoint).toBeCloseTo(AT_500, 12);
+  expect(resolvedTransform(next, next.floors[0]).metresPerPoint).toBeCloseTo(AT_1000, 12);
+  expect(next.frame).toEqual(SPLIT.frame);
+  expect(next.floors[0]).toBe(SPLIT.floors[0]);
+  expect(next.floors[2]).toBe(SPLIT.floors[2]);
+  expect(next.floors[1]).toEqual({ ...SPLIT.floors[1], metresPerPoint: next.floors[1].metresPerPoint });
+  expect(next.scaleLocked).toBe(true);
+});
+
+test("an unlinked active floor takes the drawing scale alone even in group mode", () => {
+  const next = placementReducer(SPLIT, { type: "setDrawingScale", denominator: 500, mode: "group" });
+  expect(resolvedTransform(next, next.floors[1]).metresPerPoint).toBeCloseTo(AT_500, 12);
+  expect(next.frame).toEqual(SPLIT.frame);
+  expect(next.floors[0]).toBe(SPLIT.floors[0]);
+});
+
+test("an individual calibration changes only the active floor", () => {
+  const next = placementReducer(SPLIT, {
+    type: "calibrateDistance",
+    artworkDistance: 400,
+    realMetres: 70.5556,
+    mode: "individual"
+  });
+  expect(next.floors[1].metresPerPoint).toBeCloseTo(0.1763889, 6);
+  expect(next.frame).toEqual(SPLIT.frame);
+  expect(next.floors[0]).toBe(SPLIT.floors[0]);
+  expect(next.floors[2]).toBe(SPLIT.floors[2]);
+});
+
+test("an individual scale on a linked floor detaches it with the frame rotation frozen in", () => {
+  const next = placementReducer(BASE, { type: "setDrawingScale", denominator: 500, mode: "individual" });
+  expect(next.frame).toEqual(BASE.frame);
+  expect(next.floors[1]).toBe(BASE.floors[1]);
+  expect(next.floors[0]).toMatchObject({
+    linked: false,
+    rotationDeg: BASE.frame.rotationDeg,
+    mapAnchor: BASE.floors[0].mapAnchor
+  });
+  expect(next.floors[0].metresPerPoint).toBeCloseTo(AT_500, 12);
+});
+
+test("a group drawing scale on a linked floor still rescales every linked floor", () => {
+  const linked: PlacementState = { ...SPLIT, activeFloorLabel: "1F" };
+  const next = placementReducer(linked, { type: "setDrawingScale", denominator: 500, mode: "group" });
+  expect(next.frame.metresPerPoint).toBeCloseTo(AT_500, 12);
+  expect(resolvedTransform(next, next.floors[0]).metresPerPoint).toBeCloseTo(AT_500, 12);
+  expect(next.floors[1]).toBe(linked.floors[1]);
+  expect(next.floors[2]).toBe(linked.floors[2]);
+});
+
+test("a single floor stays linked when its scale is set", () => {
+  const single: PlacementState = { ...BASE, floors: [floor("1F", ANCHOR)] };
+  const next = placementReducer(single, {
+    type: "calibrateDistance",
+    artworkDistance: 400,
+    realMetres: 70.5556,
+    mode: "individual"
+  });
+  expect(next.floors[0].linked).toBe(true);
+  expect(next.frame.metresPerPoint).toBeCloseTo(0.1763889, 6);
+});
+
+test("the placement scope names the floors an edit will touch", () => {
+  expect(placementScope(SPLIT, "individual")).toEqual({ floorOnly: true, labels: ["2F"] });
+  expect(placementScope(SPLIT, "group")).toEqual({ floorOnly: true, labels: ["2F"] });
+  const linked = { ...BASE, floors: [...BASE.floors, floor("3F", ANCHOR)] };
+  expect(placementScope(linked, "group")).toEqual({ floorOnly: false, labels: ["1F", "2F", "3F"] });
+  expect(placementScope(linked, "individual")).toEqual({ floorOnly: true, labels: ["1F"] });
+  const single = { ...BASE, floors: [floor("1F", ANCHOR)] };
+  expect(placementScope(single, "individual")).toEqual({ floorOnly: false, labels: ["1F"] });
 });

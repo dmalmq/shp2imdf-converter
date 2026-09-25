@@ -82,8 +82,13 @@ export type PlacementAction =
   /** Per-floor transforms, used once a floor has been moved out of the frame. */
   | { type: "rotateFloor"; label: string; rotationDeg: number }
   | { type: "scaleFloor"; label: string; metresPerPoint: number }
-  | { type: "setDrawingScale"; denominator: number }
-  | { type: "calibrateDistance"; artworkDistance: number; realMetres: number }
+  | { type: "setDrawingScale"; denominator: number; mode: AdjustmentMode }
+  | {
+      type: "calibrateDistance";
+      artworkDistance: number;
+      realMetres: number;
+      mode: AdjustmentMode;
+    }
   | { type: "lockScale" }
   | { type: "unlockScale" }
   | { type: "unlockFloor"; label: string }
@@ -130,6 +135,27 @@ export function resolvedTransform(
 
 function activeFloor(state: PlacementState): FloorPlacement | null {
   return state.floors.find((f) => f.label === state.activeFloorLabel) ?? null;
+}
+
+/**
+ * The floors a placement control acts on. An unlinked active floor, or
+ * individual mode with more than one floor, edits that floor alone; otherwise
+ * the edit goes to the shared frame and every linked, unpinned floor follows.
+ * A lone linked floor always stays on the frame.
+ */
+export function placementScope(
+  state: PlacementState,
+  mode: AdjustmentMode
+): { floorOnly: boolean; labels: string[] } {
+  const active = activeFloor(state) ?? state.floors[0];
+  if (!active) return { floorOnly: false, labels: [] };
+  if (!active.linked || (mode === "individual" && state.floors.length > 1)) {
+    return { floorOnly: true, labels: [active.label] };
+  }
+  return {
+    floorOnly: false,
+    labels: state.floors.filter((f) => f.linked && !f.pinned).map((f) => f.label)
+  };
 }
 
 /** Derived anchor: origin anchor + the frame applied to the artwork offset. */
@@ -356,30 +382,38 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
       });
     }
 
-    case "setDrawingScale": {
-      if (activeFloor(state)?.pinned || state.scaleLocked || !(action.denominator > 0)) {
-        return state;
-      }
-      return recomputeLinked({
-        ...state,
-        scaleLocked: true,
-        frame: { ...state.frame, metresPerPoint: metresPerPointForScale(action.denominator) }
-      });
-    }
-
+    case "setDrawingScale":
     case "calibrateDistance": {
-      if (
-        activeFloor(state)?.pinned ||
-        state.scaleLocked ||
-        !(action.artworkDistance > 0) ||
-        !(action.realMetres > 0)
-      ) {
-        return state;
+      const metresPerPoint =
+        action.type === "setDrawingScale"
+          ? action.denominator > 0
+            ? metresPerPointForScale(action.denominator)
+            : 0
+          : action.artworkDistance > 0 && action.realMetres > 0
+            ? action.realMetres / action.artworkDistance
+            : 0;
+      const active = activeFloor(state);
+      if (active?.pinned || state.scaleLocked || !(metresPerPoint > 0)) return state;
+      if (active && placementScope(state, action.mode).floorOnly) {
+        return {
+          ...state,
+          scaleLocked: true,
+          floors: state.floors.map((f) =>
+            f.label === active.label
+              ? clearArtworkMatch({
+                  ...f,
+                  linked: false,
+                  rotationDeg: resolvedTransform(state, f).rotationDeg,
+                  metresPerPoint
+                })
+              : f
+          )
+        };
       }
       return recomputeLinked({
         ...state,
         scaleLocked: true,
-        frame: { ...state.frame, metresPerPoint: action.realMetres / action.artworkDistance }
+        frame: { ...state.frame, metresPerPoint }
       });
     }
 
