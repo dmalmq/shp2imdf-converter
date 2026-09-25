@@ -82,7 +82,7 @@ function cards(): HTMLElement[] {
 test("lists shapefile projects most recently opened first, with each one's stage and status", async () => {
   vi.mocked(fetchProjects).mockResolvedValue(listing([TOKYO, IKEBUKURO, SHINJUKU]));
   renderHub();
-  expect(fetchProjects).toHaveBeenCalledWith("shapefiles");
+  expect(fetchProjects).toHaveBeenCalledWith();
 
   await screen.findByText("3 projects on this PC · most recently opened first");
   expect(cards().map((card) => within(card).getByRole("heading").textContent)).toEqual(["新宿駅", "池袋駅", "東京駅"]);

@@ -560,3 +560,75 @@ test("pin move re-queries preload and re-uploads only the picked files", async (
   expect(upload.mock.calls[1][0]).toHaveLength(1);
   expect(upload.mock.calls[1][0][0]).toEqual(expect.objectContaining({ name: "station.shp" }));
 });
+
+describe("a resumed selection", () => {
+  function ResumeHarness({
+    selection,
+    onSelectionChange
+  }: {
+    selection: ApiClient.ReferenceSelection;
+    onSelectionChange: (selection: ApiClient.ReferenceSelection) => void;
+  }) {
+    const [layers, setLayers] = useState<ReferenceLayer[]>([]);
+    return (
+      <ReferenceLayerList
+        layers={layers}
+        onChange={setLayers}
+        matchTargetName=""
+        onMatchTargetChange={() => {}}
+        focusBounds={FOCUS}
+        selection={selection}
+        onSelectionChange={onSelectionChange}
+      />
+    );
+  }
+
+  const RESUMED: ApiClient.ReferenceSelection = {
+    preloaded: true,
+    include_lines: true,
+    hidden: ["Station_pl"],
+    removed: ["StationUse"],
+    uploads: ["survey.zip"]
+  };
+
+  test("re-queries 駅データ from the pin, keeps hidden and removed layers, and names lost uploads", async () => {
+    getPreloaded.mockResolvedValue({ available: true, label: "駅データ" });
+    fetchPreloaded.mockResolvedValue([
+      layer("Station_pg", 2, 2),
+      layer("Station_pl", 2, 2),
+      layer("StationUse", 1, 1)
+    ]);
+    const changes = vi.fn();
+    render(<ResumeHarness selection={RESUMED} onSelectionChange={changes} />);
+
+    await waitFor(() => expect(screen.getByText("Station_pg")).toBeInTheDocument());
+    expect(fetchPreloaded).toHaveBeenCalledWith(FOCUS, true, expect.anything());
+    expect(screen.queryByText("StationUse")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show Station_pl" })).toBeInTheDocument();
+    expect(screen.getByText(/Add survey\.zip again/)).toBeInTheDocument();
+    expect(upload).not.toHaveBeenCalled();
+    expect(changes).not.toHaveBeenCalled();
+  });
+
+  test("reports visibility, removal and uploads as they change", async () => {
+    getPreloaded.mockResolvedValue({ available: true, label: "駅データ" });
+    fetchPreloaded.mockResolvedValue([layer("Station_pg", 2, 2), layer("Station_pl", 2, 2)]);
+    upload.mockResolvedValue([layer("parcels", 1, 1)]);
+    const changes = vi.fn();
+    render(<ResumeHarness selection={{ ...RESUMED, uploads: [] }} onSelectionChange={changes} />);
+    await waitFor(() => expect(screen.getByText("Station_pg")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide Station_pg" }));
+    expect(changes).toHaveBeenLastCalledWith(
+      expect.objectContaining({ hidden: ["Station_pl", "Station_pg"] })
+    );
+    addFile();
+    await waitFor(() =>
+      expect(changes).toHaveBeenLastCalledWith(expect.objectContaining({ uploads: ["station.shp"] }))
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Remove parcels" }));
+    expect(changes).toHaveBeenLastCalledWith(
+      expect.objectContaining({ removed: ["StationUse", "parcels"] })
+    );
+  });
+});

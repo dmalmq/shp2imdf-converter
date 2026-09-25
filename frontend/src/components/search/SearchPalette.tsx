@@ -244,7 +244,7 @@ export function SearchPalette() {
   useEffect(() => {
     if (!open) return;
     let live = true;
-    fetchProjects("shapefiles").then(
+    fetchProjects().then(
       (response) => live && setProjects(response.projects),
       () => undefined
     );

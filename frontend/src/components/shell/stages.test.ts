@@ -175,6 +175,7 @@ describe("artwork flow", () => {
 
 test("the Illustrator route is the artwork flow; every other route is shapefiles", () => {
   expect(flowForPath("/illustrator")).toBe("artwork");
+  expect(flowForPath("/a/0123456789abcdef0123456789abcdef")).toBe("artwork");
   expect(flowForPath("/")).toBe("shapefiles");
   expect(flowForPath("/p/s1/check")).toBe("shapefiles");
 });

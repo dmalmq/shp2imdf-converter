@@ -1,19 +1,28 @@
 import type { ProjectLimits, ProjectSummary } from "../api/client";
-import { FLOW_STAGES, projectPath, type ShapefileStageId, type Stage } from "../components/shell/stages";
+import {
+  FLOW_STAGES,
+  artworkPath,
+  projectPath,
+  type ArtworkStageId,
+  type Flow,
+  type ShapefileStageId,
+  type Stage,
+  type StageId
+} from "../components/shell/stages";
 
 /** What the project's card says under its track. */
 export type HubStatus =
   | { kind: "delivered"; at: string }
   | { kind: "to-fix"; count: number }
   | { kind: "ready"; canWait: number }
-  | { kind: "unchecked" };
+  | { kind: "unchecked" }
+  | { kind: "to-place"; count: number }
+  | { kind: "floors-unnamed" };
 
-/**
- * A hub card, derived from one shapefile `ProjectSummary`. Artwork projects
- * are not listed until they can be reopened by URL (phase 14).
- */
+/** A hub card, derived from one `ProjectSummary` of either flow. */
 export type HubProject = {
   id: string;
+  flow: Flow;
   /** Null when the server has no name yet; the card falls back. */
   name: string | null;
   imdfShapefiles: boolean;
@@ -32,10 +41,14 @@ export type HubProject = {
 
 export const ARTWORK_PATH = "/illustrator";
 
-function currentStageId(summary: ProjectSummary): ShapefileStageId {
+function shapefileStageId(summary: ProjectSummary): ShapefileStageId {
   return summary.stage === "set-up" || summary.stage === "check" || summary.stage === "deliver"
     ? summary.stage
     : "bring-in";
+}
+
+function artworkStageId(summary: ProjectSummary): ArtworkStageId {
+  return summary.stage === "place" || summary.stage === "deliver" ? summary.stage : "name-floors";
 }
 
 /** Where Continue goes: the project's own stage, Bring in included, since files there can still need a decision. */
@@ -45,21 +58,28 @@ export function projectHref(id: string, stage: ShapefileStageId): string {
 
 function statusOf(summary: ProjectSummary, finished: boolean): HubStatus {
   if (finished && summary.delivered_at) return { kind: "delivered", at: summary.delivered_at };
+  if (summary.flow === "artwork") {
+    if (summary.stage === "name-floors") return { kind: "floors-unnamed" };
+    if (summary.blockers === 0) return { kind: "ready", canWait: 0 };
+    return { kind: "to-place", count: summary.blockers ?? 0 };
+  }
   if (summary.blockers !== null && summary.blockers > 0) return { kind: "to-fix", count: summary.blockers };
   if (summary.blockers === 0) return { kind: "ready", canWait: summary.can_wait ?? 0 };
   return { kind: "unchecked" };
 }
 
 export function toHubProject(summary: ProjectSummary): HubProject {
-  const stageId = currentStageId(summary);
+  const artwork = summary.flow === "artwork";
+  const stageId: StageId = artwork ? artworkStageId(summary) : shapefileStageId(summary);
   const finished = summary.delivered_at !== null && !summary.changed_since_delivery;
   const status = statusOf(summary, finished);
-  const stages = FLOW_STAGES.shapefiles;
+  const stages = FLOW_STAGES[summary.flow];
   const current = stages.findIndex((stage) => stage.id === stageId);
   const tone = status.kind === "to-fix" ? "danger" : "default";
 
   return {
     id: summary.id,
+    flow: summary.flow,
     name: summary.name?.trim() || null,
     imdfShapefiles: summary.import_profile === "imdf_shapefile",
     stageNumber: current + 1,
@@ -71,7 +91,7 @@ export function toHubProject(summary: ProjectSummary): HubProject {
     status,
     deliveredBeforeChanges: summary.changed_since_delivery ? summary.delivered_at : null,
     lastOpened: summary.last_opened,
-    href: projectHref(summary.id, stageId),
+    href: artwork ? artworkPath(summary.id) : projectHref(summary.id, shapefileStageId(summary)),
     action: finished ? "open" : "continue"
   };
 }

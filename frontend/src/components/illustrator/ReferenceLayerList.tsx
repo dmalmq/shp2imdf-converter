@@ -6,11 +6,13 @@ import {
   getPreloadedReferenceOverlay,
   uploadReferenceLayers,
   type PreloadedReferenceOverlayInfo,
-  type ReferenceLayerItem
+  type ReferenceLayerItem,
+  type ReferenceSelection
 } from "../../api/client";
 import { isBackendUnreachableError, toErrorMessage } from "../../api/errors";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { preferredArtworkMatchTarget } from "../../lib/artworkMatch";
+import { NO_REFERENCES } from "../../lib/artworkDraft";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { DisabledHint } from "../ui/tooltip";
@@ -24,6 +26,9 @@ type Props = {
   matchTargetName: string;
   onMatchTargetChange: (name: string) => void;
   focusBounds?: [number, number, number, number] | null;
+  /** What a resumed placement had loaded; read once, on mount. */
+  selection?: ReferenceSelection;
+  onSelectionChange?: (selection: ReferenceSelection) => void;
 };
 
 /**
@@ -102,7 +107,8 @@ function isAbortError(error: unknown): boolean {
 function mapLoadedLayers(
   loaded: ReferenceLayerItem[],
   colorBase: number,
-  taken: Set<string>
+  taken: Set<string>,
+  hidden: ReadonlySet<string>
 ): { added: ReferenceLayer[]; empty: string[] } {
   const added: ReferenceLayer[] = [];
   const empty: string[] = [];
@@ -119,7 +125,7 @@ function mapLoadedLayers(
       name,
       data: layer.geojson,
       color: REFERENCE_TINTS[(colorBase + added.length) % REFERENCE_TINTS.length],
-      visible: true,
+      visible: !hidden.has(name),
       featureCount: layer.feature_count,
       truncated: layer.truncated
     });
@@ -130,25 +136,31 @@ function mapLoadedLayers(
 /**
  * Existing survey/GIS data drawn under the artwork to align against.
  *
- * Layers live only in this session: they are a visual reference and never
- * take part in an export.
+ * Layers are a visual reference and never take part in an export. The
+ * project keeps which ones were loaded, not their data: 駅データ is queried
+ * again from the pin, and uploaded files have to be added again.
  */
 export function ReferenceLayerList({
   layers,
   onChange,
   matchTargetName,
   onMatchTargetChange,
-  focusBounds
+  focusBounds,
+  selection = NO_REFERENCES,
+  onSelectionChange
 }: Props) {
   const { t } = useUiLanguage();
+  const [resumed] = useState(selection);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const archiveRef = useRef<File[]>([]);
-  const omittedRef = useRef<Set<string>>(new Set());
+  const omittedRef = useRef<Set<string>>(new Set(resumed.removed));
+  const hiddenRef = useRef<Set<string>>(new Set(resumed.hidden));
+  const uploadsRef = useRef<string[]>(resumed.uploads);
   const boundsKeyRef = useRef(focusBounds?.join(",") ?? "");
   const layersRef = useRef(layers);
   layersRef.current = layers;
-  const preloadedActiveRef = useRef(false);
-  const includeLinesRef = useRef(false);
+  const preloadedActiveRef = useRef(resumed.preloaded);
+  const includeLinesRef = useRef(resumed.include_lines);
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -158,9 +170,21 @@ export function ReferenceLayerList({
     available: false,
     label: "駅データ"
   });
-  const [preloadedActive, setPreloadedActive] = useState(false);
-  const [includeLines, setIncludeLines] = useState(false);
+  const [preloadedActive, setPreloadedActive] = useState(resumed.preloaded);
+  const [includeLines, setIncludeLines] = useState(resumed.include_lines);
+  const [uploadsAdded, setUploadsAdded] = useState(false);
   const pinReady = Boolean(focusBounds);
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
+
+  const report = () =>
+    onSelectionChangeRef.current?.({
+      preloaded: preloadedActiveRef.current,
+      include_lines: includeLinesRef.current,
+      hidden: [...hiddenRef.current],
+      removed: [...omittedRef.current],
+      uploads: [...uploadsRef.current]
+    });
 
   useEffect(() => {
     let cancelled = false;
@@ -203,9 +227,19 @@ export function ReferenceLayerList({
           if (extraFiles.length === 0) return "ok";
           const loaded = await uploadReferenceLayers(extraFiles, focusBounds, controller.signal);
           const taken = new Set(layersRef.current.map((layer) => layer.name));
-          const { added, empty } = mapLoadedLayers(loaded, layersRef.current.length, taken);
+          const { added, empty } = mapLoadedLayers(
+            loaded,
+            layersRef.current.length,
+            taken,
+            hiddenRef.current
+          );
           archiveRef.current = [...archiveRef.current, ...extraFiles];
+          uploadsRef.current = [
+            ...new Set([...uploadsRef.current, ...extraFiles.map((file) => file.name)])
+          ];
+          setUploadsAdded(true);
           for (const layer of added) omittedRef.current.delete(layer.name);
+          report();
           emptyNotice(empty);
           if (added.length > 0) onChange([...layersRef.current, ...added]);
           return "ok";
@@ -219,7 +253,7 @@ export function ReferenceLayerList({
             includeLinesRef.current,
             controller.signal
           );
-          const mapped = mapLoadedLayers(loaded, parts.length, taken);
+          const mapped = mapLoadedLayers(loaded, parts.length, taken, hiddenRef.current);
           parts.push(...mapped.added);
           empty.push(...mapped.empty);
         }
@@ -229,7 +263,7 @@ export function ReferenceLayerList({
             focusBounds,
             controller.signal
           );
-          const mapped = mapLoadedLayers(loaded, parts.length, taken);
+          const mapped = mapLoadedLayers(loaded, parts.length, taken, hiddenRef.current);
           parts.push(...mapped.added);
           empty.push(...mapped.empty);
         }
@@ -286,8 +320,16 @@ export function ReferenceLayerList({
         preloadedActiveRef.current = false;
         setPreloadedActive(false);
       }
+      report();
     });
   };
+
+  const reloaded = useRef(false);
+  useEffect(() => {
+    if (reloaded.current || !focusBounds || !resumed.preloaded) return;
+    reloaded.current = true;
+    void refresh("replace");
+  }, [focusBounds, refresh, resumed.preloaded]);
 
   const addButton = (
     <Button
@@ -337,6 +379,7 @@ export function ReferenceLayerList({
                 const next = checked === true;
                 includeLinesRef.current = next;
                 setIncludeLines(next);
+                report();
                 void refresh("replace");
               }}
             />
@@ -419,13 +462,16 @@ export function ReferenceLayerList({
                         : t(`Show ${layer.name}`, `${layer.name} を表示`)
                     }
                     className="mt-0.5 shrink-0 rounded-sm p-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() =>
+                    onClick={() => {
+                      if (layer.visible) hiddenRef.current.add(layer.name);
+                      else hiddenRef.current.delete(layer.name);
+                      report();
                       onChange(
                         layers.map((item, i) =>
                           i === index ? { ...item, visible: !item.visible } : item
                         )
-                      )
-                    }
+                      );
+                    }}
                   >
                     {layer.visible ? (
                       <Eye className="h-3.5 w-3.5" />
@@ -461,6 +507,7 @@ export function ReferenceLayerList({
                     className="mt-0.5 shrink-0 rounded-sm p-0.5 text-muted-foreground transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => {
                       omittedRef.current.add(layer.name);
+                      report();
                       onChange(layers.filter((_, i) => i !== index));
                     }}
                   >
@@ -488,6 +535,14 @@ export function ReferenceLayerList({
         </p>
       ) : null}
       {notice ? <p className="text-xs leading-4 text-warning-foreground">{notice}</p> : null}
+      {resumed.uploads.length > 0 && !uploadsAdded ? (
+        <p className="text-xs leading-4 text-warning-foreground">
+          {t(
+            `Add ${resumed.uploads.join(", ")} again: files you add are not kept with the project.`,
+            `${resumed.uploads.join("、")} をもう一度追加してください。追加したファイルはプロジェクトに保存されません。`
+          )}
+        </p>
+      ) : null}
     </div>
   );
 }

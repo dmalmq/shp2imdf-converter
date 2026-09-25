@@ -4,17 +4,10 @@ import { ErrorBoundary } from "./components/shared/ErrorBoundary";
 import { SessionExpiredDialog } from "./components/shared/SessionExpiredDialog";
 import { ToastProvider } from "./components/shared/ToastProvider";
 import { AppShell } from "./components/shell/AppShell";
+import { ArtworkRoute } from "./pages/ArtworkRoute";
 import { HubPage } from "./pages/HubPage";
-import { IllustratorPage } from "./pages/IllustratorPage";
 import { LegacyStageRedirect, ProjectLayout, ProjectStage } from "./pages/ProjectRoutes";
 import { UploadPage } from "./pages/UploadPage";
-import { useDroppedFiles } from "./hooks/useDroppedFiles";
-
-function IllustratorRoute() {
-  const [dropped] = useDroppedFiles();
-  return <IllustratorPage initialFile={dropped} />;
-}
-
 
 export default function App() {
   return (
@@ -30,7 +23,8 @@ export default function App() {
             </Route>
             <Route path="/wizard" element={<LegacyStageRedirect stage="set-up" />} />
             <Route path="/review" element={<LegacyStageRedirect stage="check" />} />
-            <Route path="/illustrator" element={<IllustratorRoute />} />
+            <Route path="/illustrator" element={<ArtworkRoute />} />
+            <Route path="/a/:conversionId" element={<ArtworkRoute />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </AppShell>
