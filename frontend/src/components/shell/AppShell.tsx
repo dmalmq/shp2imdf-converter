@@ -47,9 +47,11 @@ function ShellFrame({ children }: Props) {
   const location = useLocation();
   const navigate = useNavigate();
   const { primary, page } = useShellSlots();
+  const onHub = location.pathname === "/";
   const stages = useStages(location.pathname, page, primary);
-  const station = useStation(location.pathname, page);
-  const stage = currentStage(stages);
+  const projectStation = useStation(location.pathname, page);
+  const station = onHub ? null : projectStation;
+  const stage = onHub ? undefined : currentStage(stages);
 
   useEffect(() => {
     document.documentElement.lang = uiLanguage;
@@ -125,7 +127,8 @@ function ShellFrame({ children }: Props) {
         {primary ? <PrimaryActionButton action={primary} /> : null}
       </header>
 
-      <StageTrack stages={stages} onSelect={selectStage} />
+      {/* The hub lists every project's track; none of them is the one on screen. */}
+      {onHub ? null : <StageTrack stages={stages} onSelect={selectStage} />}
 
       {/* min-h-0 lets a bounded child own the remaining height; overflow-auto
           keeps every other route scrolling inside the wrapper. */}

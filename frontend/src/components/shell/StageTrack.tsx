@@ -114,3 +114,48 @@ export function StageTrack({ stages, onSelect }: Props) {
     </nav>
   );
 }
+
+const BAR_TONE = {
+  danger: "bg-destructive",
+  warning: "bg-warning-foreground",
+  default: "bg-primary/40"
+} as const;
+
+/** The same four stages as a hub card's compact track (Figma 115:43): one bar each, labelled under it. */
+export function StageBars({ stages }: { stages: Stage[] }) {
+  const { t } = useUiLanguage();
+
+  return (
+    <ol aria-label={t("Stages", "ステージ")} className="flex w-full gap-1.5">
+      {stages.map((stage) => {
+        const current = stage.status === "current";
+        const done = stage.status === "done";
+        return (
+          <li
+            key={stage.id}
+            aria-current={current ? "step" : undefined}
+            className="flex min-w-0 flex-1 flex-col gap-1.5"
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                "h-1.5 w-full rounded-[3px]",
+                done ? "bg-primary" : current ? BAR_TONE[stage.detailTone ?? "default"] : "bg-muted"
+              )}
+            />
+            <span
+              className={cn(
+                "truncate text-xs leading-4",
+                done || current ? "text-foreground" : "text-muted-foreground",
+                current && "font-semibold"
+              )}
+            >
+              {t(stage.label.en, stage.label.ja)}
+              {done ? <span className="sr-only">{t(" (done)", "（完了）")}</span> : null}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}

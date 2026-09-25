@@ -24,6 +24,13 @@ vi.mock("../api/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api/client")>()),
   fetchFeatureTypeCatalog: vi.fn(() => Promise.resolve([])),
   fetchFootprintPreview: vi.fn(() => Promise.resolve({ footprint: null, venue: null, units_bbox: null })),
+  fetchProjects: vi.fn(() =>
+    Promise.resolve({
+      projects: [],
+      total: 0,
+      limits: { sessions: { idle_days: 30, max_projects: 200 }, artwork: { idle_days: 30, max_projects: 200 } }
+    })
+  ),
   fetchSessionFeatures: vi.fn(),
   fetchSessionFiles: vi.fn(),
   fetchWizardState: vi.fn(),
@@ -349,7 +356,7 @@ describe("redirects", () => {
   test.each(["/wizard", "/review"])("%s with no project in memory goes to /", async (from) => {
     renderAt(from);
     await waitFor(() => expect(pathname).toBe("/"));
-    expect(await screen.findByRole("button", { name: "Import & Continue" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Station projects" })).toBeInTheDocument();
   });
 });
 

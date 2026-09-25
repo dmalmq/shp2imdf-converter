@@ -392,6 +392,38 @@ export type ShapefileExportRequest = {
   export_name?: string | null;
 };
 
+/** One project in `GET /api/projects`. Null fields are unknown, not empty. */
+export type ProjectSummary = {
+  id: string;
+  flow: "shapefiles" | "artwork";
+  name: string | null;
+  import_profile: string | null;
+  stage: "bring-in" | "set-up" | "check" | "name-floors" | "place" | "deliver" | null;
+  updated_at: string | null;
+  last_opened: string;
+  /** Validation errors for shapefiles; floors still to place for artwork. */
+  blockers: number | null;
+  /** Validation warnings; always null for artwork. */
+  can_wait: number | null;
+  delivered_at: string | null;
+  changed_since_delivery: boolean;
+  expires_at: string;
+};
+
+export type ProjectLimits = { idle_days: number; max_projects: number };
+
+export type ProjectListResponse = {
+  projects: ProjectSummary[];
+  total: number;
+  limits: { sessions: ProjectLimits; artwork: ProjectLimits };
+};
+
+/** Read-only: listing never counts as opening a project. */
+export async function fetchProjects(limit = 500): Promise<ProjectListResponse> {
+  const response = await fetch(`/api/projects?limit=${limit}`);
+  return handleJson<ProjectListResponse>(response);
+}
+
 export async function importShapefiles(
   files: File[],
   onProgress?: (percent: number) => void
