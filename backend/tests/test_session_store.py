@@ -24,11 +24,13 @@ def _create(manager: SessionManager, stem: str = "sample"):
 @pytest.mark.phase1
 def test_default_session_manager_is_durable_and_roomy(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("SESSION_BACKEND", raising=False)
-    monkeypatch.delenv("MAX_SESSIONS", raising=False)
+    for name in ("MAX_SESSIONS", "SESSION_TTL_HOURS", "MAX_PROJECTS", "PROJECT_IDLE_DAYS"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("SESSION_DATA_DIR", str(tmp_path))
 
     manager = _load_session_manager()
-    assert manager.max_sessions == 50
+    assert manager.max_sessions == 200
+    assert manager.ttl == timedelta(days=30)
     session = _create(manager)
 
     restarted = _load_session_manager()

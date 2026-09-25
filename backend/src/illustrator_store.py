@@ -4,8 +4,9 @@ Parsing a station-sized ``.ai`` costs seconds, and the georeferencing flow needs
 the same geometry twice: once to preview, once to export. Each entry is a
 directory holding the untransformed GeoPackage plus the metadata needed to
 rebuild the bundle, expired after an idle period and capped by count, least
-recently used first. Last use is the mtime of a marker file, so touching an
-entry never rewrites its metadata.
+recently used first but never one used in the last day (``project_limits``).
+Last use is the mtime of a marker file, so touching an entry never rewrites its
+metadata.
 
 Each entry is also an artwork project: ``project.json`` holds its name, last
 change, delivery time and placed-floor count, rewritten under a short per-entry
@@ -34,11 +35,13 @@ from uuid import uuid4
 from backend.src.artwork_projects import (
     ArtworkProject,
     ArtworkStage,
+    delivery_is_current,
     derive_artwork_stage,
     normalise_project_name,
     utc_now_iso,
 )
 from backend.src.illustrator_importer import PARSER_VERSION, _ConversionResult
+from backend.src.project_limits import PROTECTED_SECONDS, describe_duration, select_evictions
 
 _META_NAME = "conversion.json"
 _GPKG_NAME = "artwork.gpkg"
@@ -404,8 +407,28 @@ class ConversionStore:
         surplus = len(entries) - self.max_entries
         if surplus <= 0:
             return
-        for cached in sorted(entries, key=lambda item: item.last_used_at)[:surplus]:
+        evicted = select_evictions(
+            entries,
+            surplus,
+            now=time.time(),
+            last_opened=lambda item: item.last_used_at,
+            delivered_and_unchanged=self._delivered_and_unchanged,
+        )
+        for cached in evicted:
             self._discard(cached.directory)
+        if len(evicted) < surplus:
+            logger.warning(
+                "Keeping %d artwork conversions against a cap of %d: the others were "
+                "opened in the last %s, and those are never evicted",
+                len(entries) - len(evicted),
+                self.max_entries,
+                describe_duration(PROTECTED_SECONDS),
+            )
+
+    @staticmethod
+    def _delivered_and_unchanged(cached: CachedConversion) -> bool:
+        project = _read_project(cached.directory, cached.stem)
+        return delivery_is_current(project.delivered_at, project.content_changed_at)
 
     def _discard(self, directory: Path) -> None:
         # Only ever delete an entry directory: a direct child of the store root.

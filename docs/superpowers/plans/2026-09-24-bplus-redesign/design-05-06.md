@@ -1,7 +1,8 @@
 # Design: project identity, listing and lifetimes (phases 5 and 6)
 
 Back to [overview](overview.md). Status: revised 2026-09-24 after an independent adversarial review (verdict: sound with
-changes; every must-change below is folded in). Lifetime defaults still pending Daniel.
+changes; every must-change below is folded in). Lifetime defaults decided by Daniel 2026-09-25
+([decisions](decisions.md)).
 
 ## Findings that change the plan
 
@@ -142,7 +143,7 @@ Meta v2: `_write_meta` (`session.py:145-151`) writes `meta_version: 2` plus deri
 last_opened desc then id, read-only (no touch, no prune), outside the session lock path,
 snapshotting the index under the backend lock.
 
-## 3. Lifetimes (defaults pending Daniel)
+## 3. Lifetimes (decided 2026-09-25)
 
 `PROJECT_IDLE_DAYS=30`, `MAX_PROJECTS=200` per flow, both stores. Legacy env vars win when set,
 with a startup warning; remove them from `.env.example`; update

@@ -17,6 +17,13 @@ import shutil
 import threading
 from uuid import uuid4
 
+from backend.src.project_limits import (
+    DEFAULT_IDLE_DAYS,
+    DEFAULT_MAX_PROJECTS,
+    PROTECTED_SECONDS,
+    describe_duration,
+    select_evictions,
+)
 from backend.src.projects import ProjectFields, derive_session_project
 from backend.src.schemas import SESSION_RECORD_SCHEMA_VERSION, CleanupSummary, ImportedFile, SessionRecord
 
@@ -43,6 +50,16 @@ class SessionSummary:
             session.upload_artifact_dir,
             derive_session_project(session),
         )
+
+
+def session_delivered_and_unchanged(summary: SessionSummary) -> bool:
+    """Whether a session was delivered and has not changed since, from its meta alone.
+
+    A version-1 meta file carries no delivery state, so that session counts as
+    not delivered until it is next saved.
+    """
+    project = summary.project
+    return project is not None and project.delivered_at is not None and not project.changed_since_delivery
 
 
 class SessionBackend(ABC):
@@ -267,8 +284,8 @@ class SessionManager:
     def __init__(
         self,
         backend: SessionBackend,
-        ttl_hours: int = 24,
-        max_sessions: int = 50,
+        ttl_hours: float = DEFAULT_IDLE_DAYS * 24,
+        max_sessions: int = DEFAULT_MAX_PROJECTS,
     ) -> None:
         self.backend = backend
         self.ttl = timedelta(hours=ttl_hours)
@@ -330,10 +347,26 @@ class SessionManager:
 
     def _evict_if_needed(self) -> None:
         sessions = self.backend.list_summaries()
-        if len(sessions) < self.max_sessions:
+        surplus = len(sessions) - self.max_sessions + 1
+        if surplus <= 0:
             return
-        oldest = sorted(sessions, key=lambda item: item.last_accessed)[0]
-        self._delete_session_record(oldest)
+        evicted = select_evictions(
+            sessions,
+            surplus,
+            now=datetime.now(UTC).timestamp(),
+            last_opened=lambda item: item.last_accessed.timestamp(),
+            delivered_and_unchanged=session_delivered_and_unchanged,
+        )
+        for summary in evicted:
+            self._delete_session_record(summary)
+        if len(evicted) < surplus:
+            logger.warning(
+                "Keeping %d shapefile sessions against a cap of %d: the others were "
+                "opened in the last %s, and those are never evicted",
+                len(sessions) - len(evicted) + 1,
+                self.max_sessions,
+                describe_duration(PROTECTED_SECONDS),
+            )
 
     def _delete_session_record(self, session: SessionSummary) -> None:
         self._remove_upload_artifacts(session.upload_artifact_dir)

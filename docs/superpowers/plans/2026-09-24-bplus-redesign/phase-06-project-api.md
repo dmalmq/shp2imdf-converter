@@ -11,7 +11,8 @@ a hub.
   `delivered_at`, written on save; the list reads meta files only.
 - `ConversionStore` gains a list method and a name.
 - Export endpoints record `delivered_at`.
-- Lifetimes become configuration with defaults Daniel chooses (open decision 1).
+- Lifetimes become configuration: `PROJECT_IDLE_DAYS=30`, `MAX_PROJECTS=200` per flow, nothing
+  opened in the last 24 h evicted (Daniel, 2026-09-25; see [decisions](decisions.md)).
 
 **Data structures.** `ProjectSummary = { id, flow, name, stage, updated_at, last_opened,
 blockers, can_wait, delivered_at? }`.
