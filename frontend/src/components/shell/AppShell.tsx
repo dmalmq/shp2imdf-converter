@@ -124,7 +124,9 @@ function ShellFrame({ children }: Props) {
         >
           {theme === "dark" ? <Sun /> : <Moon />}
         </Button>
-        {primary ? <PrimaryActionButton action={primary} /> : null}
+        {/* Keyed by route: the focus it keeps is for its own page, so the
+            button that navigated away does not stay beside the next page's. */}
+        {primary ? <PrimaryActionButton key={location.pathname} action={primary} /> : null}
       </header>
 
       {onHub ? null : <StageTrack stages={stages} onSelect={selectStage} />}
