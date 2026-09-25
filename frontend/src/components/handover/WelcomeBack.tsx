@@ -7,6 +7,7 @@ import { eventLine, formatDuration, readDismissed, shouldWelcome, writeDismissed
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "../ui/dialog";
 import { HandoverNote } from "./HandoverNote";
+import { cn } from "@/lib/utils";
 
 /**
  * "Last time on 東京駅", shown when a project is opened after an idle gap
@@ -15,7 +16,7 @@ import { HandoverNote } from "./HandoverNote";
  * the visit in this browser.
  */
 export function WelcomeBack({ sessionId, station }: { sessionId: string; station: string }) {
-  const { t, uiLanguage } = useUiLanguage();
+  const { t, uiLanguage, isJapanese } = useUiLanguage();
   const [handover, setHandover] = useState<Handover | null>(null);
   const continueButton = useRef<HTMLButtonElement>(null);
 
@@ -33,6 +34,7 @@ export function WelcomeBack({ sessionId, station }: { sessionId: string; station
     };
   }, [sessionId]);
 
+  const label = cn("text-[11px] font-medium text-muted-foreground", !isJapanese && "font-mono uppercase tracking-[0.06em]");
   const visit = handover?.last_visit;
   if (!handover || !visit) return null;
 
@@ -55,7 +57,7 @@ export function WelcomeBack({ sessionId, station }: { sessionId: string; station
         }}
       >
         <div className="flex flex-col gap-1.5">
-          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
+          <p className={label}>
             {t("Welcome back", "おかえりなさい")}
           </p>
           <DialogTitle className="font-display text-[26px] font-semibold leading-tight text-foreground">
@@ -70,7 +72,7 @@ export function WelcomeBack({ sessionId, station }: { sessionId: string; station
         </div>
 
         <section aria-labelledby="welcome-back-changes" className="flex flex-col gap-2">
-          <h3 id="welcome-back-changes" className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
+          <h3 id="welcome-back-changes" className={label}>
             {t("What changed", "変更内容")}
           </h3>
           <ul className="flex max-h-[240px] flex-col gap-1.5 overflow-y-auto rounded-lg bg-muted p-3.5">
