@@ -12,7 +12,7 @@ import { FLOW_STAGES, NEW_PROJECT_PATH, projectPath, type ShapefileStageId } fro
 import { Button } from "../components/ui/button";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
-import { formatClock } from "../lib/clock";
+import { formatDay } from "../lib/clock";
 import {
   ARTWORK_PATH,
   hubProjects,
@@ -32,14 +32,6 @@ type Listing =
   | { state: "loading" }
   | { state: "failed"; message: string }
   | { state: "loaded"; response: ProjectListResponse };
-
-function formatDay(iso: string, language: "en" | "ja", t: T, now = new Date()): string {
-  const date = new Date(iso);
-  if (date.toDateString() === now.toDateString()) return `${t("Today", "今日")} ${formatClock(date.getTime())}`;
-  const options: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
-  if (date.getFullYear() !== now.getFullYear()) options.year = "numeric";
-  return new Intl.DateTimeFormat(language === "ja" ? "ja-JP" : "en-GB", options).format(date);
-}
 
 /** Home: the station projects kept on this PC, and the ways to start another. */
 export function HubPage() {
