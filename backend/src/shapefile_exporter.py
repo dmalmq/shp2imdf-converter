@@ -1499,6 +1499,11 @@ def build_odc2026_shapefile_export_archive(
     return archive_bytes.getvalue(), f"{base}_odc2026_shapefiles.zip"
 
 
+def qgis_project_names(base: str) -> tuple[str, str]:
+    """The .qgz inside the QGIS download, and the download itself."""
+    return f"{base}_qgis.qgz", f"{base}_qgis_project.zip"
+
+
 def build_qgis_project_archive(
     session: SessionRecord,
     request: ShapefileExportRequest,
@@ -1513,7 +1518,7 @@ def build_qgis_project_archive(
     with tempfile.TemporaryDirectory() as tmpdir:
         out = Path(tmpdir)
         report, base = _write_odc2026_shapefiles(session, request, out)
-        qgz_name = f"{base}_qgis.qgz"
+        qgz_name, archive_name = qgis_project_names(base)
         generate_qgis_project_for_folder(out, out / qgz_name, base)
         archive_bytes = BytesIO()
         with zipfile.ZipFile(archive_bytes, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -1522,7 +1527,7 @@ def build_qgis_project_archive(
                     archive.write(exported_file, arcname=exported_file.name)
             if request.include_report:
                 archive.writestr("export_report.json", json.dumps(report, ensure_ascii=False, indent=2))
-    return archive_bytes.getvalue(), f"{base}_qgis_project.zip"
+    return archive_bytes.getvalue(), archive_name
 
 
 def build_shapefile_export_archive(

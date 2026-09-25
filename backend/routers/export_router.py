@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 from shapely.affinity import translate
@@ -11,10 +13,11 @@ from shapely.ops import nearest_points
 from backend.routers.common import get_session_or_raise, session_manager
 from backend.src.errors import NotFoundError
 from backend.src.autofix import apply_autofix
+from backend.src.export_contents import describe_exports
 from backend.src.exporter import build_export_archive
 from backend.src.feature_undo import finish_fix
 from backend.src.projects import current_validation, mark_changed, mark_delivered, mark_validated
-from backend.src.schemas import AutofixRequest, AutofixResponse, SessionRecord, ShapefileExportRequest, SnapOpeningRequest, SnapOpeningResponse, ValidationResponse
+from backend.src.schemas import AutofixRequest, AutofixResponse, ExportContentsResponse, SessionRecord, ShapefileExportRequest, SnapOpeningRequest, SnapOpeningResponse, ValidationResponse
 from backend.src.shapefile_exporter import build_qgis_project_archive, build_shapefile_export_archive
 from backend.src.validator import annotate_feature_collection_with_validation, validate_feature_collection
 
@@ -98,6 +101,17 @@ def export_imdf(session_id: str, request: Request, ext: str = "imdf") -> Respons
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/export/contents", response_model=ExportContentsResponse)
+def export_contents(
+    session_id: str,
+    request: Request,
+    export_name: str = "",
+    encoding: Literal["preserve_source", "utf-8", "cp932"] = "preserve_source",
+) -> ExportContentsResponse:
+    """What each format would download; builds the archives but saves and records nothing."""
+    return describe_exports(get_session_or_raise(session_id, request), export_name, encoding)
 
 
 @router.post("/snap_opening", response_model=SnapOpeningResponse)
