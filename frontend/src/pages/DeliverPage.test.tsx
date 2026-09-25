@@ -31,11 +31,11 @@ vi.mock("../api/client", () => ({
 const ODC = ["Site", "Building", "B1_Floor", "B1_Space"].map((layer) => `JRTokyoSta_${layer}.shp`);
 
 const CONTENTS: ExportContents[] = [
-  { format: "imdf", filename: "Tokyo_Station.imdf", entries: ["manifest.json", "unit.geojson"], unavailable: null, rows_skipped: [] },
-  { format: "imdf_zip", filename: "Tokyo_Station.zip", entries: ["manifest.json", "unit.geojson"], unavailable: null, rows_skipped: [] },
-  { format: "shapefiles", filename: "Tokyo_Station_shapefiles.zip", entries: ["JRTokyoSta_B1_unit.shp"], unavailable: null, rows_skipped: [] },
-  { format: "odc2026_shapefiles", filename: "JRTokyoSta_odc2026_shapefiles.zip", entries: ODC, unavailable: null, rows_skipped: [] },
-  { format: "qgis_project", filename: "JRTokyoSta_qgis_project.zip", entries: ["JRTokyoSta_qgis.qgz", ...ODC], unavailable: null, rows_skipped: [] }
+  { format: "imdf", filename: "Tokyo_Station.imdf", entries: ["manifest.json", "unit.geojson"], unavailable: null, reason: null, rows_skipped: [] },
+  { format: "imdf_zip", filename: "Tokyo_Station.zip", entries: ["manifest.json", "unit.geojson"], unavailable: null, reason: null, rows_skipped: [] },
+  { format: "shapefiles", filename: "Tokyo_Station_shapefiles.zip", entries: ["JRTokyoSta_B1_unit.shp"], unavailable: null, reason: null, rows_skipped: [] },
+  { format: "odc2026_shapefiles", filename: "JRTokyoSta_odc2026_shapefiles.zip", entries: ODC, unavailable: null, reason: null, rows_skipped: [] },
+  { format: "qgis_project", filename: "JRTokyoSta_qgis_project.zip", entries: ["JRTokyoSta_qgis.qgz", ...ODC], unavailable: null, reason: null, rows_skipped: [] }
 ];
 
 function summary(errors: number, warnings: number): ValidationResponse {
@@ -108,7 +108,7 @@ test("groups the outputs by audience with the names each download gets", async (
   expect(await within(apple).findByText("Tokyo_Station.imdf")).toBeInTheDocument();
   expect(within(screen.getByRole("region", { name: "For GIS and open data" })).getAllByRole("checkbox")).toHaveLength(3);
   expect(checkbox(/IMDF archive/)).toBeChecked();
-  expect(fetchExportContents).toHaveBeenCalledWith("session-123", "JRTokyoSta", "preserve_source");
+  expect(fetchExportContents).toHaveBeenCalledWith("session-123", "", "preserve_source", expect.any(AbortSignal));
   expect(await screen.findByText("Nothing left that blocks delivery.")).toBeInTheDocument();
   expect(screen.getByText("5 can wait")).toBeInTheDocument();
 });
@@ -118,6 +118,7 @@ test("one button in the footer creates every chosen output with the dialog's pay
   await screen.findByText("Tokyo_Station.imdf");
   fireEvent.click(checkbox(/Open Data Contest 2026/));
   fireEvent.click(checkbox(/QGIS project/));
+  fireEvent.change(screen.getByRole("textbox", { name: /File prefix/ }), { target: { value: "JRTokyoSta" } });
 
   const tree = screen.getByRole("list", { name: "Files" });
   expect(within(tree).getByText("└ JRTokyoSta_qgis_project.zip")).toBeInTheDocument();
@@ -142,6 +143,35 @@ test("one button in the footer creates every chosen output with the dialog's pay
   expect(exportSessionQgisProject).toHaveBeenCalledWith("session-123", odc);
   expect(vi.mocked(exportSessionArchive).mock.invocationCallOrder[0]).toBeLessThan(
     vi.mocked(exportSessionQgisProject).mock.invocationCallOrder[0]
+  );
+
+  expect(await screen.findByText("Created 3 files")).toBeInTheDocument();
+  expect(screen.getByText(/If your browser asked, allow multiple downloads/)).toBeInTheDocument();
+  vi.mocked(exportSessionShapefiles).mockClear();
+  fireEvent.click(screen.getByRole("button", { name: "Download JRTokyoSta_odc2026_shapefiles.zip again" }));
+  await waitFor(() => expect(exportSessionShapefiles).toHaveBeenCalledTimes(1));
+  expect(exportSessionQgisProject).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("button", { name: /Download Tokyo_Station_shapefiles\.zip again/ })).toBeNull();
+});
+
+test("requires an explicit prefix for open data export", async () => {
+  useAppStore.setState({ importProfile: "imdf_shapefile" });
+  renderPage();
+  await screen.findByText("Tokyo_Station.imdf");
+  expect(checkbox(/Open Data Contest 2026/)).toBeChecked();
+  const prefix = screen.getByRole("textbox", { name: /File prefix/ });
+  expect(prefix).toHaveValue("");
+  expect(screen.getByRole("button", { name: "Create the output" })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Use JRTokyoSta" }));
+  expect(prefix).toHaveValue("JRTokyoSta");
+  expect(screen.queryByRole("button", { name: "Use JRTokyoSta" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Create the output" }));
+  await waitFor(() =>
+    expect(exportSessionShapefiles).toHaveBeenCalledWith(
+      "session-123",
+      expect.objectContaining({ profile: "odc2026", export_name: "JRTokyoSta" })
+    )
   );
 });
 

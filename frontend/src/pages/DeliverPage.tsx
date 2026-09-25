@@ -65,7 +65,10 @@ function saveBlob(blob: Blob, filename: string) {
 const TONE_ICON: Record<Tone, ReactNode> = {
   ok: <CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0 text-primary" />,
   wait: (
-    <span aria-hidden="true" className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-warning text-[10px] font-bold text-card">
+    <span
+      aria-hidden="true"
+      className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-warning text-[10px] font-bold text-card"
+    >
       !
     </span>
   ),
@@ -87,13 +90,12 @@ export function DeliverPage() {
 
   const geoPackage = files.some((file) => file.source_format === "gpkg");
   const [selected, setSelected] = useState(() => defaultSelection(importProfile, geoPackage));
-  const [options, setOptions] = useState<ShapefileOptions>(() =>
-    defaultShapefileOptions(wizardState, files.map((file) => file.stem))
-  );
+  const [options, setOptions] = useState<ShapefileOptions>(() => defaultShapefileOptions(wizardState));
   const [checks, setChecks] = useState<ValidationSummary | null | undefined>(undefined);
   const [checking, setChecking] = useState(false);
   const [contents, setContents] = useState<ExportContents[] | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
+  const [created, setCreated] = useState<ReadonlySet<ExportFormat>>(() => new Set());
   const anchor = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -113,15 +115,18 @@ export function DeliverPage() {
 
   // The prefix names the ODC files, so the listing follows it once typing pauses.
   useEffect(() => {
-    let active = true;
+    const request = new AbortController();
     const timer = window.setTimeout(() => {
-      fetchExportContents(sessionId, options.prefix.trim(), options.encoding).then(
-        (listed) => active && setContents(listed),
-        (caught: unknown) => active && handleApiError(caught, t("Could not list the files", "ファイル一覧を取得できませんでした"))
+      fetchExportContents(sessionId, options.prefix.trim(), options.encoding, request.signal).then(
+        (listed) => setContents(listed),
+        (caught: unknown) => {
+          if (!request.signal.aborted)
+            handleApiError(caught, t("Could not list the files", "ファイル一覧を取得できませんでした"));
+        }
       );
     }, 400);
     return () => {
-      active = false;
+      request.abort();
       window.clearTimeout(timer);
     };
   }, [sessionId, options.prefix, options.encoding]);
@@ -134,9 +139,10 @@ export function DeliverPage() {
         checks: checks ?? null,
         checking: checking || checks === undefined,
         geoPackage,
-        options
+        options,
+        stems: files.map((file) => file.stem)
       }),
-    [selected, contents, checks, checking, geoPackage, options]
+    [selected, contents, checks, checking, geoPackage, options, files]
   );
   const station = stationName(wizardState, files) ?? "";
   const busy = progress !== null;
@@ -146,33 +152,51 @@ export function DeliverPage() {
     try {
       setChecks((await validateSession(sessionId)).summary);
     } catch (caught) {
-      handleApiError(caught, t("Validation failed", "検証に失敗しました"), { title: t("Check failed", "チェック失敗") });
+      handleApiError(caught, t("Validation failed", "検証に失敗しました"), {
+        title: t("Check failed", "チェック失敗")
+      });
     } finally {
       setChecking(false);
     }
   };
 
-  const create = async () => {
-    if (view.next.blocked || busy) return;
+  // Each output is its own download. After the first, a browser may ask
+  // before saving more, so the toast says what was created, not what landed,
+  // and each created card offers its file again.
+  const create = async (formats: ReadonlyArray<ExportFormat> = view.toCreate) => {
+    if (busy || formats.length === 0) return;
     const made: string[] = [];
     setProgress(0);
     try {
-      for (const format of view.toCreate) {
+      for (const format of formats) {
         const prepared = shapefileRequest(format, options);
         if ("error" in prepared) return;
         const response = await download(format, sessionId, prepared.request);
         saveBlob(response.blob, response.filename);
         made.push(response.filename);
-        setProgress(Math.round((made.length / view.toCreate.length) * 100));
+        setCreated((current) => new Set(current).add(format));
+        setProgress(Math.round((made.length / formats.length) * 100));
       }
       pushToast({
-        title: t("Delivered", "書き出しました"),
-        description: t(`Downloaded ${made.join(", ")}.`, `${made.join("、")} をダウンロードしました。`),
+        title:
+          made.length === 1
+            ? t(`Created ${made[0]}`, `${made[0]} を作成しました`)
+            : t(`Created ${made.length} files`, `${made.length} 個のファイルを作成しました`),
+        description:
+          made.length === 1
+            ? t("It is in your browser’s downloads.", "ブラウザのダウンロードに保存されます。")
+            : t(
+                "If your browser asked, allow multiple downloads. Any file that didn’t arrive can be downloaded again from its card.",
+                "ブラウザに確認された場合は、複数のダウンロードを許可してください。届かなかったファイルは各カードから再ダウンロードできます。"
+              ),
         variant: "success"
       });
     } catch (caught) {
       handleApiError(caught, t("Export failed", "書き出しに失敗しました"), {
-        title: made.length > 0 ? t(`Stopped after ${made.join(", ")}`, `${made.join("、")} の後で停止しました`) : t("Export failed", "書き出しに失敗しました")
+        title:
+          made.length > 0
+            ? t(`Stopped after ${made.join(", ")}`, `${made.join("、")} の後で停止しました`)
+            : t("Export failed", "書き出しに失敗しました")
       });
     } finally {
       setProgress(null);
@@ -181,7 +205,9 @@ export function DeliverPage() {
 
   usePrimaryAction({
     label: t(view.next.action.en, view.next.action.ja),
-    run: () => void create(),
+    run: () => {
+      if (!view.next.blocked) void create();
+    },
     disabledReason: view.next.blocked ? t(view.next.blocked.en, view.next.blocked.ja) : null,
     busy,
     anchor
@@ -223,7 +249,10 @@ export function DeliverPage() {
             ) : (
               <AlertTriangle
                 aria-hidden="true"
-                className={cn("h-[22px] w-[22px] shrink-0", status.tone === "danger" ? "text-destructive" : "text-warning-foreground")}
+                className={cn(
+                  "h-[22px] w-[22px] shrink-0",
+                  status.tone === "danger" ? "text-destructive" : "text-warning-foreground"
+                )}
               />
             )}
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -237,7 +266,9 @@ export function DeliverPage() {
               >
                 {t(status.title.en, status.title.ja)}
               </p>
-              <p className="text-[12.5px] leading-[1.45] text-muted-foreground">{t(status.detail.en, status.detail.ja)}</p>
+              <p className="text-[12.5px] leading-[1.45] text-muted-foreground">
+                {t(status.detail.en, status.detail.ja)}
+              </p>
             </div>
             {status.action ? (
               <Button
@@ -257,17 +288,19 @@ export function DeliverPage() {
           {view.groups.map((group) => (
             <section key={group.id} aria-labelledby={`deliver-${group.id}`} className="flex flex-col gap-2.5">
               <div className="flex items-baseline gap-2.5">
-                <h2
-                  id={`deliver-${group.id}`}
-                  className={cn(label, "text-primary")}
-                >
+                <h2 id={`deliver-${group.id}`} className={cn(label, "text-primary")}>
                   {t(group.label.en, group.label.ja)}
                 </h2>
                 <p className="text-xs text-muted-foreground">{t(group.note.en, group.note.ja)}</p>
               </div>
               <div className="flex items-stretch gap-3">
                 {group.outputs.map((output) => (
-                  <OutputChoice key={output.format} output={output} onToggle={() => toggle(output.format)} />
+                  <OutputChoice
+                    key={output.format}
+                    output={output}
+                    onToggle={() => toggle(output.format)}
+                    onDownloadAgain={created.has(output.format) && !busy ? () => void create([output.format]) : null}
+                  />
                 ))}
               </div>
             </section>
@@ -291,24 +324,48 @@ export function DeliverPage() {
                       )}
                     >
                       {(id) => (
-                        <Input
-                          id={id}
-                          required
-                          value={options.prefix}
-                          placeholder="TokyoSta"
-                          onChange={(event) => setOption({ prefix: event.target.value })}
-                        />
+                        <div className="flex gap-2">
+                          <Input
+                            id={id}
+                            required
+                            value={options.prefix}
+                            placeholder="TokyoSta"
+                            onChange={(event) => setOption({ prefix: event.target.value })}
+                          />
+                          {view.suggestedPrefix ? (
+                            <Button
+                              variant="outline"
+                              className="shrink-0"
+                              onClick={() =>
+                                setOption({
+                                  prefix: view.suggestedPrefix ?? ""
+                                })
+                              }
+                            >
+                              {t(`Use ${view.suggestedPrefix}`, `${view.suggestedPrefix} を使う`)}
+                            </Button>
+                          ) : null}
+                        </div>
                       )}
                     </Field>
                   ) : null}
                   <Field className="flex-1" label={t("Encoding", "文字コード")}>
                     {(id) => (
-                      <Select value={options.encoding} onValueChange={(value) => setOption({ encoding: value as ShapefileExportEncoding })}>
+                      <Select
+                        value={options.encoding}
+                        onValueChange={(value) =>
+                          setOption({
+                            encoding: value as ShapefileExportEncoding
+                          })
+                        }
+                      >
                         <SelectTrigger id={id}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="preserve_source">{t("Preserve source encoding", "元データの文字コードを維持")}</SelectItem>
+                          <SelectItem value="preserve_source">
+                            {t("Preserve source encoding", "元データの文字コードを維持")}
+                          </SelectItem>
                           <SelectItem value="utf-8">UTF-8</SelectItem>
                           <SelectItem value="cp932">CP932 (Shift-JIS)</SelectItem>
                         </SelectContent>
@@ -339,8 +396,8 @@ export function DeliverPage() {
                   <li key={node.filename} className="flex flex-col gap-1">
                     <span className="break-all">└ {node.filename}</span>
                     {node.lines.map((line) => (
-                      <span key={line} className="break-words pl-4 text-[11px] text-muted-foreground">
-                        └ {line}
+                      <span key={line.en} className="break-words pl-4 text-[11px] text-muted-foreground">
+                        └ {t(line.en, line.ja)}
                       </span>
                     ))}
                   </li>
@@ -360,16 +417,18 @@ export function DeliverPage() {
                 {t(".", "。")}
               </p>
             ) : null}
-            <h3 className={cn(label, "text-muted-foreground")}>
-              {t("Last checks", "最終チェック")}
-            </h3>
+            <h3 className={cn(label, "text-muted-foreground")}>{t("Last checks", "最終チェック")}</h3>
             <ul className="flex flex-col gap-2.5">
               {view.lastChecks.map((row) => (
                 <li
                   key={row.text.en}
                   className={cn(
                     "flex items-center gap-2 text-[12.5px]",
-                    row.tone === "wait" ? "text-warning-foreground" : row.tone === "danger" ? "text-destructive" : "text-muted-foreground"
+                    row.tone === "wait"
+                      ? "text-warning-foreground"
+                      : row.tone === "danger"
+                        ? "text-destructive"
+                        : "text-muted-foreground"
                   )}
                 >
                   {TONE_ICON[row.tone]}
@@ -391,52 +450,92 @@ export function DeliverPage() {
   );
 }
 
-function OutputChoice({ output, onToggle }: { output: OutputCard; onToggle: () => void }) {
+function OutputChoice({
+  output,
+  onToggle,
+  onDownloadAgain
+}: {
+  output: OutputCard;
+  onToggle: () => void;
+  /** Set once this output was created on this visit. */
+  onDownloadAgain: (() => void) | null;
+}) {
   const { t } = useUiLanguage();
   const id = `deliver-output-${output.format}`;
   const disabled = output.unavailable !== null;
   return (
-    <label
-      htmlFor={id}
+    <div
       className={cn(
         "flex min-w-0 flex-1 flex-col gap-2 rounded-[14px] border bg-card p-4",
         output.selected ? "border-[1.5px] border-primary" : "border-border",
-        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+        disabled && "opacity-60"
       )}
     >
-      <span className="flex items-start gap-2.5">
-        <Checkbox
-          id={id}
-          className="mt-px h-5 w-5 rounded-[5px]"
-          checked={output.selected}
-          disabled={disabled}
-          onCheckedChange={onToggle}
-        />
-        <span className="text-sm font-semibold text-foreground">{t(output.title.en, output.title.ja)}</span>
-      </span>
-      <span className="text-[12.5px] leading-[1.48] text-muted-foreground">{t(output.note.en, output.note.ja)}</span>
-      <span className="break-all pt-1 font-mono text-[11px] text-muted-foreground">
-        {output.unavailable ? t(output.unavailable.en, output.unavailable.ja) : output.filename ?? "…"}
-      </span>
-      {output.pill ? (
-        <span className="self-start rounded-full bg-info-muted px-2.5 py-[3px] text-[11px] font-medium text-info">
-          {t(output.pill.en, output.pill.ja)}
+      <label
+        htmlFor={id}
+        className={cn("flex flex-1 flex-col gap-2", disabled ? "cursor-not-allowed" : "cursor-pointer")}
+      >
+        <span className="flex items-start gap-2.5">
+          <Checkbox
+            id={id}
+            className="mt-px h-5 w-5 rounded-[5px]"
+            checked={output.selected}
+            disabled={disabled}
+            onCheckedChange={onToggle}
+          />
+          <span className="text-sm font-semibold text-foreground">{t(output.title.en, output.title.ja)}</span>
         </span>
+        <span className="text-[12.5px] leading-[1.48] text-muted-foreground">{t(output.note.en, output.note.ja)}</span>
+        <span className="break-all pt-1 font-mono text-[11px] text-muted-foreground">
+          {output.unavailable
+            ? t(output.unavailable.en, output.unavailable.ja)
+            : output.needsPrefix
+              ? t("Named from the file prefix below", "下のファイル接頭辞から名前が付きます")
+              : (output.filename ?? "…")}
+        </span>
+        {output.pill ? (
+          <span className="self-start rounded-full bg-info-muted px-2.5 py-[3px] text-[11px] font-medium text-info">
+            {t(output.pill.en, output.pill.ja)}
+          </span>
+        ) : null}
+      </label>
+      {onDownloadAgain && output.filename ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-auto self-start px-0 py-0 text-xs text-primary underline-offset-2 font-medium hover:bg-transparent hover:text-primary hover:underline"
+          aria-label={t(`Download ${output.filename} again`, `${output.filename} をもう一度ダウンロード`)}
+          onClick={onDownloadAgain}
+        >
+          {t("Download again", "もう一度ダウンロード")}
+        </Button>
       ) : null}
-    </label>
+    </div>
   );
 }
 
-function FieldOptions({ options, onChange }: { options: ShapefileOptions; onChange: (patch: Partial<ShapefileOptions>) => void }) {
+function FieldOptions({
+  options,
+  onChange
+}: {
+  options: ShapefileOptions;
+  onChange: (patch: Partial<ShapefileOptions>) => void;
+}) {
   const { t } = useUiLanguage();
   const toggleNewField = (checked: boolean) => {
     const source = options.sourceCategoryField.trim();
     const current = options.categoryField.trim().toLowerCase();
     if (checked) {
       const replace = !current || (source && current === source.toLowerCase());
-      onChange({ writeToNewField: true, ...(replace ? { categoryField: "IMDF_CAT" } : {}) });
+      onChange({
+        writeToNewField: true,
+        ...(replace ? { categoryField: "IMDF_CAT" } : {})
+      });
     } else {
-      onChange({ writeToNewField: false, ...(source ? { categoryField: source } : {}) });
+      onChange({
+        writeToNewField: false,
+        ...(source ? { categoryField: source } : {})
+      });
     }
   };
   return (
@@ -447,7 +546,11 @@ function FieldOptions({ options, onChange }: { options: ShapefileOptions; onChan
       </summary>
       <div className="mt-4 flex flex-col gap-4">
         <label className="flex cursor-pointer items-start gap-2 text-[13px] leading-[18px] text-foreground">
-          <Checkbox className="mt-0.5" checked={options.writeToNewField} onCheckedChange={(next) => toggleNewField(next === true)} />
+          <Checkbox
+            className="mt-0.5"
+            checked={options.writeToNewField}
+            onCheckedChange={(next) => toggleNewField(next === true)}
+          />
           <span>
             {t(
               "Write IMDF categories to a new field instead of overwriting the existing code/category field.",

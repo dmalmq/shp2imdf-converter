@@ -1,6 +1,7 @@
 import type {
   ExportContents,
   ExportFormat,
+  ExportUnavailable,
   ShapefileExportEncoding,
   ShapefileExportRequest,
   ValidationSummary,
@@ -19,7 +20,10 @@ type Output = {
   pill?: Bilingual;
 };
 
-const WGS84: Bilingual = { en: "IMDF in WGS 84 (EPSG:4326), as the spec requires", ja: "IMDF は仕様どおり WGS 84（EPSG:4326）" };
+const WGS84: Bilingual = {
+  en: "IMDF in WGS 84 (EPSG:4326), as the spec requires",
+  ja: "IMDF は仕様どおり WGS 84（EPSG:4326）"
+};
 const JGD2011: Bilingual = {
   en: "ODC files in JGD2011 (EPSG:6668), as the GSI spec asks",
   ja: "ODC ファイルは国土地理院仕様どおり JGD2011（EPSG:6668）"
@@ -90,7 +94,10 @@ const GROUPS: ReadonlyArray<{ id: string; label: Bilingual; note: Bilingual; for
   {
     id: "gis",
     label: { en: "For GIS and open data", ja: "GIS・オープンデータ向け" },
-    note: { en: "GSI-spec files and a ready QGIS project", ja: "国土地理院仕様のファイルと、すぐ開ける QGIS プロジェクト" },
+    note: {
+      en: "GSI-spec files and a ready QGIS project",
+      ja: "国土地理院仕様のファイルと、すぐ開ける QGIS プロジェクト"
+    },
     formats: ["odc2026_shapefiles", "qgis_project", "shapefiles"]
   }
 ];
@@ -111,8 +118,12 @@ export type ShapefileOptions = {
   legacyMapText: string;
 };
 
-/** What the export options start from: the dataset's own prefix, and the mapped unit code column. */
-export function defaultShapefileOptions(wizard: WizardState | null, stems: ReadonlyArray<string>): ShapefileOptions {
+/**
+ * What the export options start from: the mapped unit code column, and no
+ * prefix. ODC's file names are the spec's, so the operator types or confirms
+ * the prefix; a fallback to the project name once named every file wrongly.
+ */
+export function defaultShapefileOptions(wizard: WizardState | null): ShapefileOptions {
   const sourceCategoryField = wizard?.mappings.unit.code_column?.trim() ?? "";
   const codeByCategory = new Map<string, string>();
   Object.entries(wizard?.company_mappings ?? {})
@@ -123,7 +134,7 @@ export function defaultShapefileOptions(wizard: WizardState | null, stems: Reado
       if (code && category && !codeByCategory.has(category)) codeByCategory.set(category, code);
     });
   return {
-    prefix: datasetStem(stems) ?? "",
+    prefix: "",
     encoding: "preserve_source",
     categoryField: sourceCategoryField || "IMDF_CAT",
     sourceCategoryField,
@@ -161,7 +172,10 @@ export function shapefileRequest(
 ): { request: ShapefileExportRequest | null } | { error: Bilingual } {
   if (NEEDS_PREFIX.has(format)) {
     const exportName = options.prefix.trim();
-    if (!exportName) return { error: { en: "Enter a file prefix for the ODC files.", ja: "ODC ファイルの接頭辞を入力してください。" } };
+    if (!exportName)
+      return {
+        error: { en: "Enter a file prefix for the ODC files.", ja: "ODC ファイルの接頭辞を入力してください。" }
+      };
     return {
       request: {
         profile: "odc2026",
@@ -169,7 +183,12 @@ export function shapefileRequest(
         encoding: options.encoding,
         include_report: true,
         export_name: exportName,
-        unit: { write_imdf_category: true, imdf_category_field: "IMDF_CAT", overwrite_legacy_code_field: null, legacy_code_map: {} }
+        unit: {
+          write_imdf_category: true,
+          imdf_category_field: "IMDF_CAT",
+          overwrite_legacy_code_field: null,
+          legacy_code_map: {}
+        }
       }
     };
   }
@@ -221,14 +240,33 @@ export function defaultSelection(importProfile: "standard" | "imdf_shapefile", g
   return new Set([importProfile === "imdf_shapefile" && !geoPackage ? "odc2026_shapefiles" : "imdf"]);
 }
 
+/** The server's reason, worded here; its own English text is shown in English only. */
+const UNAVAILABLE: Record<Exclude<ExportUnavailable, "no_prefix">, (detail: string) => Bilingual> = {
+  geopackage: () => ({
+    en: "Not for projects brought in from GeoPackages.",
+    ja: "GeoPackage から取り込んだプロジェクトでは使えません。"
+  }),
+  no_sources: () => ({
+    en: "The uploaded shapefiles are no longer kept for this project.",
+    ja: "このプロジェクトの取り込み元シェープファイルが残っていません。"
+  }),
+  qgis_missing: () => ({
+    en: "QGIS is not installed on this PC.",
+    ja: "この PC に QGIS がインストールされていません。"
+  }),
+  failed: (detail) => ({ en: `Can’t list this output: ${detail}`, ja: "この出力を確認できませんでした。" })
+};
+
 export type OutputCard = Output & {
   selected: boolean;
   filename: string | null;
+  /** Named by the file prefix, which is still blank. */
+  needsPrefix: boolean;
   /** Set when the format cannot be chosen; the card is shown, not hidden, so the reason is visible. */
   unavailable: Bilingual | null;
 };
 
-export type TreeNode = { filename: string; lines: string[] };
+export type TreeNode = { filename: string; lines: Bilingual[] };
 
 export type Tone = "ok" | "wait" | "danger" | "stale";
 
@@ -248,6 +286,8 @@ export type DeliverView = {
   status: DeliverStatus;
   lastChecks: Array<{ tone: Tone; text: Bilingual }>;
   showPrefix: boolean;
+  /** Offered beside an empty prefix: the dataset's shared file stem. */
+  suggestedPrefix: string | null;
   showEncoding: boolean;
   showFieldOptions: boolean;
   next: Omit<NextStep, "goes">;
@@ -262,6 +302,8 @@ export type DeliverInput = {
   checking: boolean;
   geoPackage: boolean;
   options: ShapefileOptions;
+  /** The uploaded files' stems, whose shared start is offered as the prefix. */
+  stems: ReadonlyArray<string>;
 };
 
 const SHAPEFILE_PARTS = /\.(shp|shx|dbf|prj|cpg|qix|sbn|sbx)$/i;
@@ -273,23 +315,29 @@ const REPORT = "export_report.json";
  * line, shapefiles by name without their parts, and ODC's per-floor files as
  * the floors and the layers each one carries.
  */
-export function treeLines(entries: ReadonlyArray<string>): string[] {
-  const stems = [...new Set(entries.filter((name) => SHAPEFILE_PARTS.test(name)).map((name) => name.replace(SHAPEFILE_PARTS, "")))];
-  const features = entries.filter((name) => FEATURE_FILE.test(name) && name !== REPORT).map((name) => name.replace(FEATURE_FILE, ""));
+export function treeLines(entries: ReadonlyArray<string>): Bilingual[] {
+  const stems = [
+    ...new Set(entries.filter((name) => SHAPEFILE_PARTS.test(name)).map((name) => name.replace(SHAPEFILE_PARTS, "")))
+  ];
+  const features = entries
+    .filter((name) => FEATURE_FILE.test(name) && name !== REPORT)
+    .map((name) => name.replace(FEATURE_FILE, ""));
   const others = entries.filter((name) => !SHAPEFILE_PARTS.test(name) && (!FEATURE_FILE.test(name) || name === REPORT));
-  const lines = others.filter((name) => name !== REPORT);
-  if (features.length > 0) lines.push(features.join(" · "));
+  const same = (text: string): Bilingual => ({ en: text, ja: text });
+  const lines = others.filter((name) => name !== REPORT).map(same);
+  if (features.length > 0) lines.push(same(features.join(" · ")));
   lines.push(...shapefileLines(stems));
-  if (others.includes(REPORT)) lines.push(REPORT);
+  if (others.includes(REPORT)) lines.push(same(REPORT));
   return lines;
 }
 
-function shapefileLines(stems: ReadonlyArray<string>): string[] {
+function shapefileLines(stems: ReadonlyArray<string>): Bilingual[] {
+  const same = (text: string): Bilingual => ({ en: text, ja: text });
   if (stems.length === 0) return [];
   const base = stems.length > 1 ? datasetStem(stems) : null;
   const rest = base ? stems.map((stem) => stem.slice(base.length)) : [];
   const perFloor = rest.map((tail) => /^_(.+)_([^_]+)$/.exec(tail));
-  if (!base || !perFloor.some(Boolean)) return [stems.join(" · ")];
+  if (!base || !perFloor.some(Boolean)) return [same(stems.join(" · "))];
   const floors: string[] = [];
   const layers: string[] = [];
   perFloor.forEach((match) => {
@@ -299,8 +347,11 @@ function shapefileLines(stems: ReadonlyArray<string>): string[] {
   });
   const siteWide = rest.filter((_, index) => !perFloor[index]);
   return [
-    ...(siteWide.length > 0 ? [siteWide.join(" · ")] : []),
-    `per floor ×${floors.length} (${floors.join(" · ")}): ${layers.join(" ")}`
+    ...(siteWide.length > 0 ? [same(siteWide.join(" · "))] : []),
+    {
+      en: `per floor ×${floors.length} (${floors.join(" · ")}): ${layers.join(" ")}`,
+      ja: `フロアごと ×${floors.length}（${floors.join(" · ")}）：${layers.join(" ")}`
+    }
   ];
 }
 
@@ -311,7 +362,12 @@ function plural(count: number, one: string, many: string): string {
 function deliverStatus(checks: DeliverInput["checks"], checking: boolean): DeliverStatus {
   if (checks === null) {
     return checking
-      ? { tone: "stale", title: { en: "Checking…", ja: "チェック中…" }, detail: { en: "Running the checks again.", ja: "チェックをやり直しています。" }, action: null }
+      ? {
+          tone: "stale",
+          title: { en: "Checking…", ja: "チェック中…" },
+          detail: { en: "Running the checks again.", ja: "チェックをやり直しています。" },
+          action: null
+        }
       : {
           tone: "stale",
           title: { en: "The checks are out of date.", ja: "チェック結果が古くなっています。" },
@@ -359,11 +415,20 @@ function lastChecks(input: DeliverInput, toCreate: ReadonlyArray<ExportFormat>):
   } else {
     rows.push(
       checks.error_count > 0
-        ? { tone: "danger", text: { en: `${checks.error_count} to fix before delivery`, ja: `書き出し前に要修正 ${checks.error_count} 件` } }
+        ? {
+            tone: "danger",
+            text: {
+              en: `${checks.error_count} to fix before delivery`,
+              ja: `書き出し前に要修正 ${checks.error_count} 件`
+            }
+          }
         : { tone: "ok", text: { en: "Nothing to fix", ja: "修正なし" } }
     );
     if (checks.warning_count > 0) {
-      rows.push({ tone: "wait", text: { en: `${checks.warning_count} can wait`, ja: `後回し ${checks.warning_count} 件` } });
+      rows.push({
+        tone: "wait",
+        text: { en: `${checks.warning_count} can wait`, ja: `後回し ${checks.warning_count} 件` }
+      });
     }
   }
   const skipped = input.contents?.find((item) => item.format === "odc2026_shapefiles")?.rows_skipped.length ?? 0;
@@ -387,14 +452,21 @@ export function buildDeliverView(input: DeliverInput): DeliverView {
     const listed = byFormat.get(format);
     let unavailable: Bilingual | null = null;
     if (geoPackage && OUTPUTS[format].fromShapefiles) {
-      unavailable = { en: "Not for projects brought in from GeoPackages.", ja: "GeoPackage から取り込んだプロジェクトでは使えません。" };
-    } else if (listed?.unavailable && !(NEEDS_PREFIX.has(format) && !options.prefix.trim())) {
       unavailable = {
-        en: `Can’t be made for this project: ${listed.unavailable}`,
-        ja: `このプロジェクトでは作成できません（${listed.unavailable}）`
+        en: "Not for projects brought in from GeoPackages.",
+        ja: "GeoPackage から取り込んだプロジェクトでは使えません。"
       };
+    } else if (listed?.reason && listed.reason !== "no_prefix") {
+      unavailable = UNAVAILABLE[listed.reason](listed.unavailable ?? "");
     }
-    return { ...OUTPUTS[format], selected: selected.has(format) && !unavailable, filename: listed?.filename ?? null, unavailable };
+    const needsPrefix = NEEDS_PREFIX.has(format) && !options.prefix.trim();
+    return {
+      ...OUTPUTS[format],
+      selected: selected.has(format) && !unavailable,
+      filename: needsPrefix ? null : (listed?.filename ?? null),
+      needsPrefix,
+      unavailable
+    };
   };
 
   const groups = GROUPS.map((group) => ({ ...group, outputs: group.formats.map(card) }));
@@ -402,21 +474,27 @@ export function buildDeliverView(input: DeliverInput): DeliverView {
   const chosen = cards.filter((output) => output.selected);
   const toCreate = chosen.map((output) => output.format);
 
+  const suggestion = datasetStem(input.stems);
   const tree = chosen.flatMap((output) => {
     const listed = byFormat.get(output.format);
     return output.filename && listed ? [{ filename: output.filename, lines: treeLines(listed.entries) }] : [];
   });
   const crs = [...new Set(chosen.map((output) => output.crs))];
 
-  const blocked = toCreate.length === 0
-    ? { en: "Pick at least one output.", ja: "出力を1つ以上選んでください。" }
-    : toCreate.map((format) => shapefileRequest(format, options)).find((result) => "error" in result)?.error ?? null;
+  const blocked =
+    toCreate.length === 0
+      ? { en: "Pick at least one output.", ja: "出力を1つ以上選んでください。" }
+      : (toCreate.map((format) => shapefileRequest(format, options)).find((result) => "error" in result)?.error ??
+        null);
   const count = toCreate.length;
   const next: DeliverView["next"] = {
     title:
       count === 0
         ? { en: "Nothing chosen yet", ja: "まだ何も選ばれていません" }
-        : { en: `Downloads ${count} ${plural(count, "file", "files")}`, ja: `${count} 個のファイルをダウンロードします` },
+        : {
+            en: `Downloads ${count} ${plural(count, "file", "files")}`,
+            ja: `${count} 個のファイルをダウンロードします`
+          },
     detail: {
       en: "You can come back and export again at any time — nothing in the project changes.",
       ja: "いつでも戻って書き出し直せます。プロジェクトの内容は変わりません。"
@@ -436,6 +514,7 @@ export function buildDeliverView(input: DeliverInput): DeliverView {
     status: deliverStatus(input.checks, input.checking),
     lastChecks: lastChecks(input, toCreate),
     showPrefix: toCreate.some((format) => NEEDS_PREFIX.has(format)),
+    suggestedPrefix: suggestion && suggestion !== options.prefix.trim() ? suggestion : null,
     showEncoding: chosen.some((output) => output.fromShapefiles),
     showFieldOptions: toCreate.includes("shapefiles"),
     next

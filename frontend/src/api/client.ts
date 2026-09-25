@@ -412,13 +412,16 @@ export type ShapefileExportRequest = {
 
 export type ExportFormat = "imdf" | "imdf_zip" | "shapefiles" | "odc2026_shapefiles" | "qgis_project";
 
+export type ExportUnavailable = "geopackage" | "no_prefix" | "no_sources" | "qgis_missing" | "failed";
+
 /** What one format would download, read from the archive the export builds. */
 export type ExportContents = {
   format: ExportFormat;
   filename: string | null;
   entries: string[];
-  /** Why the format cannot be exported now, as the server words it. */
+  /** Why the format cannot be exported now, as the server words it (English). */
   unavailable: string | null;
+  reason: ExportUnavailable | null;
   /** Rows the ODC writer leaves out because their geometry does not fit the layer. */
   rows_skipped: Array<{ layer?: string; feature_id?: string; geometry_type?: string }>;
 };
@@ -427,10 +430,11 @@ export type ExportContents = {
 export async function fetchExportContents(
   sessionId: string,
   exportName: string,
-  encoding: ShapefileExportEncoding
+  encoding: ShapefileExportEncoding,
+  signal?: AbortSignal
 ): Promise<ExportContents[]> {
   const query = new URLSearchParams({ export_name: exportName, encoding });
-  const response = await fetch(`/api/session/${sessionId}/export/contents?${query}`);
+  const response = await fetch(`/api/session/${sessionId}/export/contents?${query}`, { signal });
   return (await handleJson<{ outputs: ExportContents[] }>(response)).outputs;
 }
 

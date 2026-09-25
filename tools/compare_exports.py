@@ -11,11 +11,12 @@ them, such as the .qgz) are compared by the SHA-256 of every entry. Two fields
 are known to carry the export time and are masked before hashing:
 manifest.json "created", and a .dbf header's last-update date (bytes 1-3).
 The QGIS .qgs is not reproducible even from one commit: QGIS writes
-attributes in hash order, fresh layer UUIDs (which also order some lists), a
-random styles.db name, its save and creation times, and random colours for layers it has no
-style for. It is compared as canonical XML with attributes and children
-sorted and those values masked, so it checks structure, names, sources and
-settings but not colours; the styles.db entry is matched under a masked name.
+attributes in hash order, fresh layer UUIDs (which also order the snapping
+settings list), a random styles.db name, its save and creation times, and
+random colours for layers it has no style for. It is compared as canonical
+XML with attributes sorted and those values masked; element order is kept,
+so a change to the layer tree or layer order is caught, except in the one
+list QGIS orders by UUID. The styles.db entry is matched under a masked name.
 Any other difference is reported as a byte difference.
 """
 
@@ -33,6 +34,7 @@ from pathlib import Path
 
 _UUID = re.compile(r"[0-9a-f]{8}[_-][0-9a-f]{4}[_-][0-9a-f]{4}[_-][0-9a-f]{4}[_-][0-9a-f]{12}")
 _STYLES_DB = re.compile(r"[A-Za-z]{6}_styles\.db")
+_ORDERED_BY_UUID = {"individual-layer-settings"}
 _TIME = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d")
 _COLOUR = re.compile(r"^\d+,\d+,\d+,\d+(,rgb:[0-9.,]+)?$")
 
@@ -45,7 +47,13 @@ def _canonical_xml(element: ET.Element) -> str:
     attrs = {k: clean(v) for k, v in element.attrib.items() if k != "saveDateTime"}
     if _COLOUR.match(attrs.get("value", "")):
         attrs["value"] = "<colour>"
-    inner = "".join(sorted(_canonical_xml(child) for child in element))
+    children = [_canonical_xml(child) for child in element]
+    # QGIS lists snapping settings by layer id, which carries a fresh UUID, so
+    # only that list has no stable order. Every other list, the layer tree
+    # included, is compared in the order it was written.
+    if element.tag in _ORDERED_BY_UUID:
+        children.sort()
+    inner = "".join(children)
     return f"<{element.tag} {sorted(attrs.items())}>{clean(element.text)}{inner}</{element.tag}>{clean(element.tail)}"
 
 
