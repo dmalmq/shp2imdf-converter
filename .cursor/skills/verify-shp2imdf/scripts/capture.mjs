@@ -154,8 +154,18 @@ function makeShooter(page, outDir, manifest) {
   };
 }
 
+async function gotoHub(page) {
+  await page.getByRole("link", { name: "shp2imdf, projects" }).click();
+  await page.getByRole("heading", { name: "Station projects", level: 1 }).waitFor({ timeout: 15000 });
+  await page.locator('[aria-busy="true"]').waitFor({ state: "detached", timeout: 15000 });
+}
+
 async function captureShapefileFlow(page, shoot) {
   await setMode(page, "light", "en");
+  await gotoHub(page);
+  await shoot("hub");
+  await page.getByRole("button", { name: /From floor shapefiles/ }).click();
+  await page.waitForURL("**/p/new", { timeout: 15000 });
   await shoot("upload");
   await queueTokyoStation(page);
   await shoot("upload-queued");
@@ -190,6 +200,9 @@ async function captureShapefileFlow(page, shoot) {
   await page.getByRole("dialog").waitFor({ timeout: 15000 });
   await shoot("review-export-dialog", { wait: 800 });
   await page.keyboard.press("Escape");
+
+  await gotoHub(page);
+  await shoot("hub-projects");
 }
 
 async function captureIllustratorFlow(page, shoot, artwork) {
@@ -245,7 +258,7 @@ async function capture(options) {
   const browser = await chromium.launch({ headless: true });
   try {
     // Separate contexts so the Illustrator route starts from a fresh store,
-    // the way a user arriving from the Import page would.
+    // the way a user arriving from the hub would.
     for (const flow of [
       (page, shoot) => captureShapefileFlow(page, shoot),
       (page, shoot) => captureIllustratorFlow(page, shoot, artwork)
