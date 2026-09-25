@@ -48,10 +48,14 @@ def build_export_archive(session: SessionRecord, extension: str = "imdf") -> tup
         for filename, payload in files.items():
             archive.writestr(filename, json.dumps(payload, ensure_ascii=False, indent=2))
 
+    return output.getvalue(), export_archive_name(session, extension)
+
+
+def export_archive_name(session: SessionRecord, extension: str = "imdf") -> str:
+    """The IMDF download's name. The archive bytes are identical either way; only
+    the extension differs. A plain ".zip" is convenient for the Apple IMDF
+    Sandbox validator."""
     project_name = session.wizard.project.project_name if session.wizard.project else None
     fallback = project_name or session.wizard.project.venue_name if session.wizard.project else session.session_id
-    # The archive bytes are identical either way; only the extension differs. A
-    # plain ".zip" is convenient for the Apple IMDF Sandbox validator.
     safe_ext = "zip" if extension == "zip" else "imdf"
-    filename = f"{_safe_export_name(fallback)}.{safe_ext}"
-    return output.getvalue(), filename
+    return f"{_safe_export_name(fallback)}.{safe_ext}"

@@ -88,8 +88,8 @@ def test_export_contents_say_why_a_format_is_unavailable(test_client, sample_dir
 
     assert outputs["imdf"]["filename"] == "Tokyo_Station.imdf"
     assert outputs["odc2026_shapefiles"]["filename"] is None
-    assert "prefix" in outputs["odc2026_shapefiles"]["unavailable"]
-    assert outputs["qgis_project"]["unavailable"] == outputs["odc2026_shapefiles"]["unavailable"]
+    assert outputs["odc2026_shapefiles"]["reason"] == "no_prefix"
+    assert outputs["qgis_project"]["reason"] == "no_prefix"
 
     with_prefix = {
         item["format"]: item
@@ -98,4 +98,44 @@ def test_export_contents_say_why_a_format_is_unavailable(test_client, sample_dir
         ).json()["outputs"]
     }
     assert with_prefix["odc2026_shapefiles"]["filename"] == "JRTokyoSta_odc2026_shapefiles.zip"
-    assert "QGIS is not installed" in with_prefix["qgis_project"]["unavailable"]
+    assert with_prefix["qgis_project"]["reason"] == "qgis_missing"
+
+
+@pytest.mark.phase5
+def test_a_format_that_fails_to_list_leaves_the_others_listed(test_client, sample_dir: Path, monkeypatch) -> None:
+    _fake_qgis(monkeypatch)
+    session_id = _tokyo_session(test_client, sample_dir)
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr("backend.src.export_contents.build_shapefile_export_archive", broken)
+    response = test_client.get(f"/api/session/{session_id}/export/contents", params={"export_name": "JRTokyoSta"})
+
+    assert response.status_code == 200
+    outputs = {item["format"]: item for item in response.json()["outputs"]}
+    assert outputs["shapefiles"]["reason"] == "failed"
+    assert outputs["shapefiles"]["filename"] is None
+    assert outputs["odc2026_shapefiles"]["filename"] == "JRTokyoSta_odc2026_shapefiles.zip"
+    assert outputs["imdf"]["filename"] == "Tokyo_Station.imdf"
+
+
+@pytest.mark.phase5
+def test_listings_are_built_once_per_content_revision(test_client, sample_dir: Path, monkeypatch) -> None:
+    _fake_qgis(monkeypatch)
+    session_id = _tokyo_session(test_client, sample_dir)
+    import backend.src.export_contents as contents
+
+    calls: list[str] = []
+    real = contents.build_export_archive
+    monkeypatch.setattr(contents, "build_export_archive", lambda *a, **k: calls.append("imdf") or real(*a, **k))
+    url = f"/api/session/{session_id}/export/contents"
+
+    first = test_client.get(url, params={"export_name": "JRTokyoSta"}).json()
+    assert test_client.get(url, params={"export_name": "JRTokyoSta"}).json() == first
+    assert calls == ["imdf"]
+
+    unit = next(item for item in test_client.get(f"/api/session/{session_id}/features").json()["features"] if item["feature_type"] == "unit")
+    assert test_client.patch(f"/api/session/{session_id}/features/{unit['id']}", json={"properties": {**unit["properties"], "category": "room"}}).status_code == 200
+    test_client.get(url, params={"export_name": "JRTokyoSta"})
+    assert calls == ["imdf", "imdf"]
