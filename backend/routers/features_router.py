@@ -26,14 +26,13 @@ from backend.src.feature_types import (
     geometry_kind,
     spec_for,
 )
-from backend.src.feature_undo import changes_anything, finish_fix, restore_features, undo_between
+from backend.src.feature_undo import changes_anything, check_restorable, finish_fix, restore_features, undo_between
 from backend.src.importer import rebuild_normalized_feature_collection
 from backend.src.projects import current_validation, mark_changed, mark_validated
 from backend.src.schemas import (
     BulkPatchFeaturesRequest,
     BulkPatchFeaturesResponse,
     DetectResponse,
-    FeatureUndo,
     FeatureResponse,
     FeatureCollectionResponse,
     ImportedFile,
@@ -396,7 +395,10 @@ def patch_features_bulk(
         raise ValueError("Session feature collection is malformed")
 
     if payload.action == "restore":
-        undo = FeatureUndo(remove_ids=payload.feature_ids, features=payload.features or [])
+        if payload.undo is None:
+            raise ValueError("restore needs the undo a fix returned")
+        undo = payload.undo
+        check_restorable(features, undo)
         restored = restore_features(features, undo)
         session.feature_collection["features"] = restored
         if changes_anything(undo_between(features, restored)):

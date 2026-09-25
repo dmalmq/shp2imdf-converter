@@ -25,3 +25,10 @@ class SessionNotFoundError(NotFoundError):
 
     def __init__(self, detail: str = "Session not found") -> None:
         super().__init__(detail, "SESSION_NOT_FOUND")
+
+
+class UndoRejectedError(ApiError):
+    """An undo that no longer matches the project: something changed what the fix produced."""
+
+    def __init__(self, detail: str, code: str = "UNDO_STALE", status_code: int = 409) -> None:
+        super().__init__(detail, code, status_code)

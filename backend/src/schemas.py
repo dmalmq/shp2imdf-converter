@@ -277,12 +277,18 @@ class ValidationResponse(BaseModel):
 
 class FeatureUndo(BaseModel):
     """Puts back what a fix changed: drop every feature named in ``remove_ids``
-    or ``features``, then restore ``features`` as they were before the fix."""
+    or ``features``, then restore ``features`` as they were before the fix.
+
+    ``fingerprints`` holds, per touched id, a digest of what the fix left
+    there ("" where it deleted the feature); a restore is refused unless the
+    project still holds exactly that. ``digest`` seals the whole payload."""
 
     model_config = ConfigDict(extra="forbid")
 
     remove_ids: list[str] = Field(default_factory=list)
     features: list[dict[str, Any]] = Field(default_factory=list)
+    fingerprints: dict[str, str] = Field(default_factory=dict)
+    digest: str = ""
 
 
 class AutofixRequest(BaseModel):
@@ -630,7 +636,7 @@ class BulkPatchFeaturesRequest(BaseModel):
     feature_type: str | None = None
     action: Literal["patch", "delete", "merge_units", "restore"] = "patch"
     merge_name: str | None = None
-    features: list[dict[str, Any]] | None = None
+    undo: FeatureUndo | None = None
 
 
 class BulkPatchFeaturesResponse(BaseModel):

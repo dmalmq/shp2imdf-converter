@@ -32,10 +32,21 @@ def _counts(validation: dict[str, Any]) -> tuple[int, int]:
     return validation["summary"]["error_count"], validation["summary"]["warning_count"]
 
 
+def _as_a_browser_sends(value: Any) -> Any:
+    """JavaScript has one number type, so 3.0 comes back as 3."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, list):
+        return [_as_a_browser_sends(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _as_a_browser_sends(item) for key, item in value.items()}
+    return value
+
+
 def _undo(client, session_id: str, undo: dict[str, Any]):
     return client.patch(
         f"/api/session/{session_id}/features/bulk",
-        json={"action": "restore", "feature_ids": undo["remove_ids"], "features": undo["features"]},
+        json={"action": "restore", "undo": _as_a_browser_sends(undo)},
     )
 
 
@@ -188,16 +199,71 @@ def test_undoing_an_autofix_restores_the_coordinates(test_client, sample_dir: Pa
     assert _counts(undone["validation"]) == counts
 
 
-def test_a_restore_that_changes_nothing_is_not_an_edit(test_client, sample_dir: Path) -> None:
+def _trimmed(client, session_id: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    keep, clip = _features(client, session_id, "unit")[:2]
+    assert client.patch(
+        f"/api/session/{session_id}/features/{clip['id']}", json={"geometry": _shifted(keep["geometry"], 1e-6)}
+    ).status_code == 200
+    fixed = client.post(
+        f"/api/session/{session_id}/overlaps/resolve",
+        json={"keep_feature_id": keep["id"], "clip_feature_id": clip["id"]},
+    ).json()
+    return keep, clip, fixed["undo"]
+
+
+def test_undo_is_refused_after_a_later_edit_to_what_the_fix_touched(test_client, sample_dir: Path) -> None:
     session_id = _generated_session(test_client, sample_dir)
-    unit = test_client.get(f"/api/session/{session_id}/features").json()["features"][0]
+    _, clip, undo = _trimmed(test_client, session_id)
+    test_client.patch(f"/api/session/{session_id}/features/{clip['id']}", json={"properties": {"name": {"en": "Renamed"}}})
     rev = _rev(test_client, session_id)
 
-    response = _undo(test_client, session_id, {"remove_ids": [], "features": [unit]})
+    response = _undo(test_client, session_id, undo)
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 409
+    assert response.json()["code"] == "UNDO_STALE"
+    assert _content(test_client, session_id)[clip["id"]]["properties"]["name"] == {"en": "Renamed"}
     assert _rev(test_client, session_id) == rev
-    assert response.json()["validation"] is not None
+
+
+def test_undo_is_refused_after_the_trimmed_unit_was_merged_away(test_client, sample_dir: Path) -> None:
+    session_id = _generated_session(test_client, sample_dir)
+    keep, clip, undo = _trimmed(test_client, session_id)
+    merged = test_client.patch(
+        f"/api/session/{session_id}/features/bulk",
+        json={"feature_ids": [keep["id"], clip["id"]], "action": "merge_units"},
+    )
+    assert merged.status_code == 200
+    before = _content(test_client, session_id)
+
+    response = _undo(test_client, session_id, undo)
+
+    assert response.status_code == 409
+    assert _content(test_client, session_id) == before
+
+
+def test_undo_is_refused_twice(test_client, sample_dir: Path) -> None:
+    session_id = _generated_session(test_client, sample_dir)
+    _, _, undo = _trimmed(test_client, session_id)
+
+    assert _undo(test_client, session_id, undo).status_code == 200
+    assert _undo(test_client, session_id, undo).status_code == 409
+
+
+def test_undo_naming_features_the_fix_did_not_touch_is_rejected(test_client, sample_dir: Path) -> None:
+    session_id = _generated_session(test_client, sample_dir)
+    keep, _, undo = _trimmed(test_client, session_id)
+    rows = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    stranger = next(row for row in rows if row["id"] not in undo["fingerprints"])
+
+    widened = {**undo, "remove_ids": [*undo["remove_ids"], stranger["id"]]}
+    swapped = {**undo, "features": [{**undo["features"][0], "properties": {"category": "room"}}]}
+    unsealed = {"remove_ids": undo["remove_ids"], "features": undo["features"]}
+
+    for payload in (widened, swapped, unsealed):
+        response = _undo(test_client, session_id, payload)
+        assert response.status_code == 400, response.text
+        assert response.json()["code"] == "UNDO_INVALID"
+    assert stranger["id"] in _content(test_client, session_id)
 
 
 def test_the_stored_validation_is_returned_only_while_current(test_client, sample_dir: Path) -> None:

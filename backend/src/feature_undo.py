@@ -10,11 +10,14 @@ changes something and the caller revalidates.
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from typing import Any
 
 from shapely.affinity import translate
 from shapely.geometry import mapping, shape
 
+from backend.src.errors import UndoRejectedError
 from backend.src.schemas import FeatureUndo
 from backend.src.validator import _point_in_geometry
 
@@ -23,7 +26,10 @@ _VALIDATION_ANNOTATIONS = frozenset({"status", "issues"})
 
 
 def _as_json(value: Any) -> Any:
-    """Shapely's ``mapping`` writes tuples where a stored record holds lists."""
+    """Content as JSON carries it: Shapely's ``mapping`` writes tuples where a
+    stored record holds lists, and a browser sends 3.0 back as 3."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
     if isinstance(value, (list, tuple)):
         return [_as_json(item) for item in value]
     if isinstance(value, dict):
@@ -104,17 +110,52 @@ def undo_between(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> F
     )
 
 
+def _group_fingerprint(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return ""
+    payload = json.dumps([_content(row) for row in rows], sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _seal(undo: FeatureUndo) -> str:
+    payload = json.dumps(
+        [undo.remove_ids, [[row.get("id"), _content(row)] for row in undo.features], undo.fingerprints],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def finish_fix(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], FeatureUndo]:
-    """Every fix ends here: its features with display points carried along, and what undoes it."""
+    """Every fix ends here: its features with display points carried along, and
+    what undoes it, fingerprinted with what the fix left behind."""
     settled = carry_display_points(before, after)
-    return settled, undo_between(before, settled)
+    undo = undo_between(before, settled)
+    result = _rows_by_id(settled)
+    touched = [*undo.remove_ids, *(str(row.get("id")) for row in undo.features)]
+    undo.fingerprints = {feature_id: _group_fingerprint(result.get(feature_id, [])) for feature_id in touched}
+    undo.digest = _seal(undo)
+    return settled, undo
+
+
+def check_restorable(rows: list[dict[str, Any]], undo: FeatureUndo) -> None:
+    """Refuses an undo that is not a fix's own, or whose features changed since the fix."""
+    touched = set(undo.remove_ids) | {str(row.get("id")) for row in undo.features}
+    if not touched or set(undo.fingerprints) != touched or _seal(undo) != undo.digest:
+        raise UndoRejectedError("This undo does not belong to a fix.", code="UNDO_INVALID", status_code=400)
+    current = _rows_by_id(rows)
+    changed = sorted(
+        feature_id
+        for feature_id, fingerprint in undo.fingerprints.items()
+        if _group_fingerprint(current.get(feature_id, [])) != fingerprint
+    )
+    if changed:
+        raise UndoRejectedError(f"{len(changed)} feature(s) changed since the fix, so it can no longer be undone.")
 
 
 def restore_features(rows: list[dict[str, Any]], undo: FeatureUndo) -> list[dict[str, Any]]:
     """``rows`` with ``undo`` applied. A restored feature takes the place of the
     one it replaces; one the fix deleted goes back at the end."""
-    if any(not isinstance(row.get("id"), str) for row in undo.features):
-        raise ValueError("Every restored feature needs a string id")
     pending = _rows_by_id(undo.features)
     dropped = set(undo.remove_ids) | set(pending)
     restored: list[dict[str, Any]] = []
