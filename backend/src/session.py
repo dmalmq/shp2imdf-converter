@@ -24,6 +24,7 @@ from backend.src.project_limits import (
     describe_duration,
     select_evictions,
 )
+from backend.src.handover import begin_or_continue_visit, record_event
 from backend.src.projects import ProjectFields, derive_session_project
 from backend.src.schemas import SESSION_RECORD_SCHEMA_VERSION, CleanupSummary, ImportedFile, SessionRecord
 
@@ -287,8 +288,16 @@ class FileSystemSessionBackend(SessionBackend):
             return SessionSummary(item.session_id, item.last_accessed, item.upload_artifact_dir, item.project)
 
 
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+# What a touch moves: when the session was last seen, and so where its visit starts and ends.
+_TOUCHED = {"last_accessed": True, "handover": {"visit_started_at": True, "visits": {"__all__": {"ended_at"}}}}
+
+
 def _fingerprint(session: SessionRecord) -> str:
-    text = session.model_dump_json(exclude={"last_accessed"})
+    text = session.model_dump_json(exclude=_TOUCHED)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
@@ -333,6 +342,11 @@ class SessionManager:
             learned_keywords=learned_keywords or {},
             upload_artifact_dir=upload_artifact_dir,
         )
+        begin_or_continue_visit(session.handover, previous=now, now=now)
+        if files:
+            record_event(session.handover, "imported", now, files=len(files))
+        else:
+            record_event(session.handover, "imported", now, features=len(feature_collection.get("features") or []))
         self.backend.save(session)
         return session
 
@@ -341,7 +355,9 @@ class SessionManager:
         if not session:
             return None
         if touch:
-            session.last_accessed = datetime.now(UTC)
+            now = datetime.now(UTC)
+            begin_or_continue_visit(session.handover, previous=_aware(session.last_accessed), now=now)
+            session.last_accessed = now
             self.backend.touch(session)
         return session
 

@@ -25,7 +25,7 @@ def generate_draft(session_id: str, request: Request) -> GenerateResponse:
         unit_categories_path=str(request.app.state.unit_categories_path),
     )
     session.wizard.generation_status = "generated"
-    mark_changed(session)
+    mark_changed(session, "generated")
     manager.save_session(session)
 
     return GenerateResponse(

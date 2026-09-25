@@ -76,7 +76,7 @@ def _venue(name: dict[str, str]) -> dict[str, Any]:
 def _generated(record: SessionRecord) -> SessionRecord:
     record.wizard.project = _project()
     record.wizard.generation_status = "generated"
-    mark_changed(record)
+    mark_changed(record, "features_edited")
     return record
 
 
@@ -87,7 +87,7 @@ def _fresh_import() -> SessionRecord:
 def _project_set() -> SessionRecord:
     record = _record()
     record.wizard.project = _project()
-    mark_changed(record)
+    mark_changed(record, "features_edited")
     return record
 
 
@@ -109,13 +109,13 @@ def _validated_clean() -> SessionRecord:
 
 def _clean_then_feature_edit() -> SessionRecord:
     record = _validated_clean()
-    mark_changed(record)
+    mark_changed(record, "features_edited")
     return record
 
 
 def _clean_then_wizard_edit() -> SessionRecord:
     record = _validated_clean()
-    reset_generation(record)
+    reset_generation(record, "project")
     return record
 
 
@@ -139,13 +139,13 @@ def _delivered_with_errors() -> SessionRecord:
 
 def _delivered_then_edited() -> SessionRecord:
     record = _delivered_with_errors()
-    mark_changed(record)
+    mark_changed(record, "features_edited")
     return record
 
 
 def _delivered_then_wizard_edit() -> SessionRecord:
     record = _delivered_with_errors()
-    reset_generation(record)
+    reset_generation(record, "project")
     return record
 
 
@@ -235,7 +235,7 @@ def test_project_name_wins_over_venue_name() -> None:
 def test_updated_at_follows_content_not_reads() -> None:
     record = _record()
     assert derive_session_project(record).updated_at == record.created_at
-    mark_changed(record)
+    mark_changed(record, "features_edited")
     changed_at = record.content_changed_at
     record.last_accessed = datetime.now(UTC) + timedelta(hours=1)
     mark_validated(record, _validation(errors=0))
@@ -569,10 +569,10 @@ def _delivered_session(manager: SessionManager) -> SessionRecord:
     session = _create(manager)
     session.wizard.project = _project(project_name="Shinjuku")
     session.wizard.generation_status = "generated"
-    mark_changed(session)
+    mark_changed(session, "features_edited")
     mark_validated(session, _validation(errors=1, warnings=4))
     mark_delivered(session, "imdf", 1)
-    mark_changed(session)
+    mark_changed(session, "features_edited")
     manager.save_session(session)
     return session
 
