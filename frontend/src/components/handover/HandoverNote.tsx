@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { saveHandoverNote, type HandoverNote as Note } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import { formatClock } from "../../lib/clock";
+import { formatDay } from "../../lib/clock";
 import { cn } from "@/lib/utils";
 
 type SaveState = "idle" | "saving" | "saved" | "failed";
@@ -24,7 +24,7 @@ export function HandoverNote({
   note: Note | null;
   className?: string;
 }) {
-  const { t } = useUiLanguage();
+  const { t, uiLanguage } = useUiLanguage();
   const id = useId();
   const [text, setText] = useState(note?.text ?? "");
   const [state, setState] = useState<SaveState>("idle");
@@ -71,7 +71,7 @@ export function HandoverNote({
       : state === "failed"
         ? t("Could not save the note. It will try again when you leave the field.", "メモを保存できませんでした。欄を離れると再度保存します。")
         : savedAt && text.trim()
-          ? t(`Saved · ${formatClock(Date.parse(savedAt))}`, `保存済み · ${formatClock(Date.parse(savedAt))}`)
+          ? t(`Saved · ${formatDay(savedAt, uiLanguage, t)}`, `保存済み · ${formatDay(savedAt, uiLanguage, t)}`)
           : t("No names are kept. Anyone who opens this project sees it.", "名前は残りません。このプロジェクトを開いた人全員に表示されます。");
 
   return (

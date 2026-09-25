@@ -36,6 +36,7 @@ test("shows the last visit, newest change first, with the note", async () => {
   const lines = screen.getAllByRole("listitem").map((item) => item.textContent);
   expect(lines).toEqual(["Edited 12 features", "Changed the level mapping", "and 3 earlier changes"]);
   expect(screen.getByRole("textbox")).toHaveValue("屋外 outline still provisional.");
+  await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toHaveFocus());
 });
 
 test("dismissing keeps it away for the rest of the visit", async () => {

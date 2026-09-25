@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { fetchHandover, type Handover } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
@@ -17,6 +17,7 @@ import { HandoverNote } from "./HandoverNote";
 export function WelcomeBack({ sessionId, station }: { sessionId: string; station: string }) {
   const { t, uiLanguage } = useUiLanguage();
   const [handover, setHandover] = useState<Handover | null>(null);
+  const continueButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -45,7 +46,14 @@ export function WelcomeBack({ sessionId, station }: { sessionId: string; station
 
   return (
     <Dialog open onOpenChange={(open) => (open ? undefined : dismiss())}>
-      <DialogContent className="max-w-[520px] gap-5 p-7" aria-describedby="welcome-back-when">
+      <DialogContent
+        className="max-w-[520px] gap-5 p-7"
+        aria-describedby="welcome-back-when"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          continueButton.current?.focus();
+        }}
+      >
         <div className="flex flex-col gap-1.5">
           <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
             {t("Welcome back", "おかえりなさい")}
@@ -86,7 +94,7 @@ export function WelcomeBack({ sessionId, station }: { sessionId: string; station
         <HandoverNote sessionId={sessionId} station={station} note={handover.note} />
 
         <DialogFooter>
-          <Button onClick={dismiss}>{t("Continue", "続ける")}</Button>
+          <Button ref={continueButton} onClick={dismiss}>{t("Continue", "続ける")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
