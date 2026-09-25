@@ -150,7 +150,7 @@ async function mountWizard() {
       </ToastProvider>
     </MemoryRouter>
   );
-  await screen.findByLabelText(/Venue Name/);
+  await screen.findByLabelText(/Venue name/);
   return view;
 }
 
@@ -200,9 +200,9 @@ beforeEach(() => {
 test("venue info typed and left for another section at once reaches the backend", async () => {
   await renderWizard(null);
 
-  type(/Venue Name/, "Tokyo Station");
+  type(/Venue name/, "Tokyo Station");
   type(/Locality/, "Chiyoda");
-  openSection("Summary & Generate");
+  openSection("Summary & generate");
 
   await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(1));
   expect(patchProjectMock.mock.calls[0][1]).toMatchObject({
@@ -212,7 +212,8 @@ test("venue info typed and left for another section at once reaches the backend"
   });
   await waitFor(() => expect(screen.getByRole("button", { name: "Generate & open Review" })).toBeEnabled());
   await sleep(100);
-  expect(screen.getByText("Tokyo Station")).toBeInTheDocument();
+  expect(useAppStore.getState().wizardState?.project?.venue_name).toBe("Tokyo Station");
+  expect(screen.queryByRole("button", { name: "Fix: Venue name" })).toBeNull();
 });
 
 test("a burst of typing is saved once, after the typing stops", async () => {
@@ -221,7 +222,7 @@ test("a burst of typing is saved once, after the typing stops", async () => {
   // Keystrokes 40 ms apart: a gap would have to stretch twentyfold on a busy
   // machine before the debounce could fire mid-burst.
   for (const value of ["T", "To", "Tok", "Toky", "Tokyo"]) {
-    type(/Venue Name/, value);
+    type(/Venue name/, value);
     await sleep(40);
   }
   expect(patchProjectMock).not.toHaveBeenCalled();
@@ -238,7 +239,7 @@ test("a failed save says so and can be retried from the footer", async () => {
   patchProjectMock.mockRejectedValueOnce(new Error("backend unavailable"));
   await renderWizard(COMPLETE_PROJECT);
 
-  type(/Venue Name/, "Tokyo Sta.");
+  type(/Venue name/, "Tokyo Sta.");
   openSection("Buildings");
 
   expect(await screen.findByText(/Could not save/)).toBeInTheDocument();
@@ -253,11 +254,11 @@ test("a failed save says so and can be retried from the footer", async () => {
 test("an incomplete venue is kept as a draft across sections, not sent", async () => {
   await renderWizard(null);
 
-  type(/Venue Name/, "Tokyo Station");
-  openSection("File Classification");
-  openSection("Project & Venue");
+  type(/Venue name/, "Tokyo Station");
+  openSection("Level mapping");
+  openSection("Project & venue");
 
-  expect(await screen.findByLabelText(/Venue Name/)).toHaveValue("Tokyo Station");
+  expect(await screen.findByLabelText(/Venue name/)).toHaveValue("Tokyo Station");
   await sleep(AUTOSAVE_DELAY_MS * 1.5);
   expect(patchProjectMock).not.toHaveBeenCalled();
   expect(screen.getByText(/required to save/)).toBeInTheDocument();
@@ -267,7 +268,7 @@ test("Summary still generates the draft", async () => {
   vi.mocked(generateSessionDraft).mockResolvedValue({} as never);
   await renderWizard(COMPLETE_PROJECT);
 
-  openSection("Summary & Generate");
+  openSection("Summary & generate");
   const generate = await screen.findByRole("button", { name: "Generate & open Review" });
   await waitFor(() => expect(generate).toBeEnabled());
   fireEvent.click(generate);
@@ -302,12 +303,12 @@ test("a saved draft gives way to newer server state and is never sent back", asy
   type(/Building Name/, "North Hall");
   await waitFor(() => expect(patchBuildingsMock).toHaveBeenCalledTimes(1));
 
-  openSection("Attribute Mapping");
+  openSection("Attribute mapping");
   uploadMappings();
   await waitFor(() => expect(fetchWizardState).toHaveBeenCalledTimes(2));
   await sleep(50);
 
-  openSection("Project & Venue");
+  openSection("Project & venue");
   openSection("Buildings");
   expect(await screen.findByLabelText(/Building Name/)).toHaveValue("Main Hall");
   await sleep(AUTOSAVE_DELAY_MS * 1.5);
@@ -335,8 +336,8 @@ test("the refresh after a mappings upload is not overwritten by an earlier save'
     if (seen[seen.length - 1] !== column) seen.push(column);
   });
 
-  type(/Venue Name/, "Tokyo Sta.");
-  openSection("Attribute Mapping");
+  type(/Venue name/, "Tokyo Sta.");
+  openSection("Attribute mapping");
   uploadMappings();
 
   await waitFor(() => expect(fetchWizardState).toHaveBeenCalledTimes(2));
@@ -355,21 +356,21 @@ test("an edit made while a save is in flight is sent after it, and stays on scre
   });
   await renderWizard(COMPLETE_PROJECT);
 
-  type(/Venue Name/, "Tokyo A");
+  type(/Venue name/, "Tokyo A");
   await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(1));
-  type(/Venue Name/, "Tokyo AB");
+  type(/Venue name/, "Tokyo AB");
   await sleep(250);
-  expect(screen.getByLabelText(/Venue Name/)).toHaveValue("Tokyo AB");
+  expect(screen.getByLabelText(/Venue name/)).toHaveValue("Tokyo AB");
 
   await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(2), { timeout: 3000 });
   expect(patchProjectMock.mock.calls[1][1].venue_name).toBe("Tokyo AB");
   await waitFor(() => expect(useAppStore.getState().wizardDrafts.project).toBeNull());
-  expect(screen.getByLabelText(/Venue Name/)).toHaveValue("Tokyo AB");
+  expect(screen.getByLabelText(/Venue name/)).toHaveValue("Tokyo AB");
 });
 
 test("leaving the wizard sends a pending edit and keeps a held one for the session", async () => {
   const first = await renderWizard(COMPLETE_PROJECT);
-  type(/Venue Name/, "Tokyo Station Marunouchi");
+  type(/Venue name/, "Tokyo Station Marunouchi");
   first.unmount();
   await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(1));
   expect(patchProjectMock.mock.calls[0][1].venue_name).toBe("Tokyo Station Marunouchi");
@@ -392,7 +393,7 @@ test("closing the tab asks first while an edit is unsaved, and sends it", async 
   };
   expect(unload()).toBe(false);
 
-  type(/Venue Name/, "Tokyo Yaesu");
+  type(/Venue name/, "Tokyo Yaesu");
   expect(unload()).toBe(true);
   await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(1));
   expect(patchProjectMock.mock.calls[0][1].venue_name).toBe("Tokyo Yaesu");
@@ -401,7 +402,7 @@ test("closing the tab asks first while an edit is unsaved, and sends it", async 
   await waitFor(() => expect(useAppStore.getState().wizardDrafts.project).toBeNull());
   expect(unload()).toBe(false);
 
-  type(/Venue Name/, "Tokyo Yaesu North");
+  type(/Venue name/, "Tokyo Yaesu North");
   openSection("Buildings");
   await waitFor(() => expect(patchProjectMock).toHaveBeenCalledTimes(2));
   expect(patchProjectMock.mock.calls[1][2]).toEqual({ keepalive: false });
@@ -416,7 +417,7 @@ function unloadPrevented() {
 async function failFirstProjectSave() {
   patchProjectMock.mockRejectedValueOnce(new Error("backend unavailable"));
   await renderWizard(COMPLETE_PROJECT);
-  type(/Venue Name/, "Tokyo Sta.");
+  type(/Venue name/, "Tokyo Sta.");
   openSection("Buildings");
   expect(await screen.findByText(/Could not save/)).toBeInTheDocument();
   expect(patchProjectMock).toHaveBeenCalledTimes(1);
@@ -443,8 +444,8 @@ test("Generate sends a failed save first, and stops if it fails again", async ()
   patchProjectMock.mockRejectedValueOnce(new Error("backend unavailable"));
   patchProjectMock.mockRejectedValueOnce(new Error("still unavailable"));
   await renderWizard(COMPLETE_PROJECT);
-  type(/Venue Name/, "Tokyo Sta.");
-  openSection("Summary & Generate");
+  type(/Venue name/, "Tokyo Sta.");
+  openSection("Summary & generate");
   expect(await screen.findByText(/Could not save/)).toBeInTheDocument();
 
   const generate = screen.getByRole("button", { name: "Generate & open Review" });
@@ -460,15 +461,26 @@ test("Generate sends a failed save first, and stops if it fails again", async ()
   expect(server.project?.venue_name).toBe("Tokyo Sta.");
 });
 
+test("Fix on a missing venue field opens Venue info with the cursor in that field", async () => {
+  await renderWizard(null);
+  openSection("Summary & generate");
+  expect(await screen.findByText(/^\d+ things left$/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Fix: Locality" }));
+  const locality = await screen.findByLabelText(/Locality/);
+  await waitFor(() => expect(locality).toHaveFocus());
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Venue info");
+});
+
 test("Enter on a focused button is that button's, not Generate's", async () => {
   vi.mocked(generateSessionDraft).mockResolvedValue({} as never);
   await renderWizard(COMPLETE_PROJECT);
 
-  openSection("Summary & Generate");
+  openSection("Summary & generate");
   const generate = await screen.findByRole("button", { name: "Generate & open Review" });
   await waitFor(() => expect(generate).toBeEnabled());
 
-  const nav = screen.getByRole("button", { name: /Summary & Generate/ });
+  const nav = screen.getByRole("button", { name: /Summary & generate/ });
   nav.focus();
   fireEvent.keyDown(nav, { key: "Enter" });
   await sleep(50);
@@ -490,12 +502,12 @@ test("the top bar's save status agrees with the footer while a draft is held", a
       </ToastProvider>
     </MemoryRouter>
   );
-  await screen.findByLabelText(/Venue Name/);
+  await screen.findByLabelText(/Venue name/);
   act(() => useAppStore.getState().setWizardSaveStatus("saved"));
   const topBar = screen.getByRole("banner");
   expect(within(topBar).getByRole("status")).toHaveTextContent(/^Saved ·/);
 
-  type(/Venue Name/, "Tokyo Station");
+  type(/Venue name/, "Tokyo Station");
 
   expect(await within(topBar).findByText("Not saved yet")).toBeInTheDocument();
   expect(within(topBar).queryByText(/^Saved/)).toBeNull();

@@ -14,12 +14,15 @@ export function Field({
   label,
   required,
   hint,
+  code,
   className,
   children
 }: {
   label: string;
   required?: boolean;
   hint?: string;
+  /** The value as IMDF writes it, under a control that shows it in words. */
+  code?: string | null;
   className?: string;
   /** Receives the generated id so the label points at the real control. */
   children: (id: string) => React.ReactNode;
@@ -35,6 +38,7 @@ export function Field({
         {required ? <span className="ml-0.5 text-muted-foreground">*</span> : null}
       </label>
       {children(id)}
+      {code ? <p className="font-mono text-[11px] leading-[14px] text-muted-foreground">{code}</p> : null}
       {hint ? <p className="text-xs leading-4 text-muted-foreground">{hint}</p> : null}
     </div>
   );

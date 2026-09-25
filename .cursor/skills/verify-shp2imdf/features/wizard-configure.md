@@ -22,10 +22,10 @@ Preconditions:
 - Tokyo Station fixtures were the source (stems `JRTokyoSta_*` auto-classify as unit/opening with levels).
 - One-shot: `node .cursor/skills/verify-shp2imdf/scripts/control.mjs drive wizard-configure`.
 
-- **Venue name.** Fill `Venue Name *` with `Tokyo Station`. Run `getByLabel(/Venue Name/).fill('Tokyo Station')`.
+- **Venue name.** Fill `Venue name *` with `Tokyo Station`. Run `getByLabel(/Venue name/).fill('Tokyo Station')`.
 - **Locality.** Fill `Locality *` with `Chiyoda-ku`. Run `getByLabel(/Locality/).first().fill('Chiyoda-ku')`. Country stays `JP`; category defaults to `transitstation`.
 - **Save venue.** Nothing to click: the section autosaves 800 ms after typing stops. Wait for the footer text `Saved · HH:MM`.
-- **Open summary.** Choose `Summary & Generate` in `Sections`. Run `getByRole('button', { name: 'Summary & Generate' }).click()`. Heading `Summary & Generate` appears and lists venue `Tokyo Station`.
+- **Open summary.** Choose `Summary & generate` in `Sections`. Run `getByRole('button', { name: 'Summary & generate' }).click()`. Heading `Summary & generate` appears; `Before you generate` has no `Fix` left and `Generate & open Review` is enabled.
 - **Generate.** Choose `Generate & open Review`. Run `getByRole('button', { name: 'Generate & open Review' }).click()`. Wait until the URL is `/p/<sessionId>/check`.
 - **Proof.** Capture review with `Export` visible. Write `artifacts/verify-shp2imdf/wizard-configure/`.
 

@@ -3,8 +3,6 @@ import { useNavigate } from "react-router-dom";
 
 import {
   autofillWizardAddressFromGeometry,
-  detectAllFiles,
-  fetchSessionFeatures,
   fetchSessionFiles,
   fetchWizardState,
   generateSessionDraft,
@@ -30,23 +28,24 @@ import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
 import { BuildingStep, canSaveBuildings, normalizeBuildingsForSave } from "../components/wizard/BuildingStep";
 import { DetailMapStep } from "../components/wizard/DetailMapStep";
-import { FileClassStep } from "../components/wizard/FileClassStep";
 import { FixtureMapStep } from "../components/wizard/FixtureMapStep";
 import { FootprintStep } from "../components/wizard/FootprintStep";
 import { LevelMapStep } from "../components/wizard/LevelMapStep";
 import { OpeningMapStep } from "../components/wizard/OpeningMapStep";
 import { ProjectInfoStep, isProjectComplete, normalizeProjectForSave } from "../components/wizard/ProjectInfoStep";
-import { SectionNav, type SectionDef } from "../components/wizard/SectionNav";
+import { SectionNav } from "../components/wizard/SectionNav";
 import { SummaryStep } from "../components/wizard/SummaryStep";
 import { UnitMapStep } from "../components/wizard/UnitMapStep";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore, useSessionAction, type WizardDrafts } from "../store/useAppStore";
-import { Button, DisabledHint } from "../components/ui";
+import { Button } from "../components/ui";
 import { useInShell, usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
+import type { Bilingual } from "../components/shell/stages";
 import { projectPath } from "../components/shell/stages";
 import { LEVEL_REQUIRED_TYPES } from "../lib/bringIn";
 import { formatClock } from "../lib/clock";
+import { setUpView, type ChecklistItem, type ProjectField, type SectionId } from "../lib/setUp";
 import { WizardFooterProvider, sameAsSaved, useAutosave, useWizardFooterState } from "../components/wizard/wizardSave";
 
 const EMPTY_UNIT_MAPPING: UnitMappingState = {
@@ -82,11 +81,14 @@ const EMPTY_FOOTPRINT: FootprintWizardState = {
   level_gap_fill_m: 0.1
 };
 
-const SECTION_HELP: Record<string, { en: string; ja: string }> = {
-  project: {
-    en: "Set venue basics like name, category, and address. These become your IMDF venue and address records.",
-    ja: "会場名・カテゴリ・住所などの基本情報を設定します。"
-  },
+const VENUE_HELP: Bilingual = {
+  en: "Set venue basics like name, category, and address. These become your IMDF venue and address records.",
+  ja: "会場名・カテゴリ・住所などの基本情報を設定します。"
+};
+
+const SECTION_HELP: Record<SectionId, Bilingual> = {
+  project: VENUE_HELP,
+  "project-info": VENUE_HELP,
   building: {
     en: "Group level files into buildings and optionally define building-specific addresses.",
     ja: "レベルファイルを建物ごとに割り当てます。"
@@ -95,13 +97,13 @@ const SECTION_HELP: Record<string, { en: string; ja: string }> = {
     en: "Pick how footprint and venue outlines are derived from your source geometry.",
     ja: "元データから footprint / venue 外形を作る方法を選択します。"
   },
-  files: {
-    en: "Confirm each source file type. Correct classification keeps later mapping accurate.",
-    ja: "各ファイルの種別を確認します。"
-  },
   levels: {
     en: "Set floor levels and names so every feature is assigned to the correct level.",
     ja: "各ファイルの階層（レベル）と名称を設定します。"
+  },
+  attributes: {
+    en: "Map source attribute columns onto IMDF fields, one feature type at a time.",
+    ja: "元データの属性列を IMDF の項目へ、フィーチャー種別ごとに対応付けます。"
   },
   unit: {
     en: "Choose how unit attributes map to IMDF categories and names.",
@@ -118,14 +120,6 @@ const SECTION_HELP: Record<string, { en: string; ja: string }> = {
   detail: {
     en: "Detail features are exported as lightweight line features linked to levels only.",
     ja: "detail は level のみを持つ軽量な線要素として出力されます。"
-  },
-  "project-info": {
-    en: "Set venue basics like name, category, and address. These become your IMDF venue and address records.",
-    ja: "会場名・カテゴリ・住所などの基本情報を設定します。"
-  },
-  attributes: {
-    en: "Map source attribute columns onto IMDF fields, one feature type at a time.",
-    ja: "元データの属性列を IMDF の項目へ、フィーチャー種別ごとに対応付けます。"
   },
   summary: {
     en: "Review configuration, then generate draft IMDF features and continue to review.",
@@ -175,7 +169,7 @@ function isFormTarget(target: EventTarget | null): boolean {
 
 function WizardStepSkeleton() {
   return (
-    <section className="rounded-lg border border-border bg-card p-5">
+    <section className="rounded-[14px] border border-border bg-card p-5">
       <SkeletonBlock className="h-6 w-56" />
       <div className="mt-4 space-y-3">
         <SkeletonBlock className="h-10 w-full" />
@@ -197,23 +191,17 @@ export function WizardPage() {
   const wizardState = useAppStore((state) => state.wizardState);
   const setFiles = useSessionAction(sessionId, (state) => state.setFiles);
   const setWizardState = useSessionAction(sessionId, (state) => state.setWizardState);
-  const selectedFileStem = useAppStore((state) => state.selectedFileStem);
-  const setSelectedFileStem = useAppStore((state) => state.setSelectedFileStem);
-  const hoveredFileStem = useAppStore((state) => state.hoveredFileStem);
-  const setHoveredFileStem = useAppStore((state) => state.setHoveredFileStem);
   const wizardSaveStatus = useAppStore((state) => state.wizardSaveStatus);
   const wizardSaveError = useAppStore((state) => state.wizardSaveError);
   const setWizardSaveStatus = useSessionAction(sessionId, (state) => state.setWizardSaveStatus);
   const wizardSavedAt = useAppStore((state) => state.wizardSavedAt);
   const wizardSaveRetry = useAppStore((state) => state.wizardSaveRetry);
-  const learningSuggestion = useAppStore((state) => state.learningSuggestion);
-  const setLearningSuggestion = useSessionAction(sessionId, (state) => state.setLearningSuggestion);
   const setSessionExpiredMessage = useSessionAction(sessionId, (state) => state.setSessionExpiredMessage);
   const handleApiError = useApiErrorHandler(sessionId);
   const pushToast = useToast();
-  const { t, isJapanese } = useUiLanguage();
+  const { t } = useUiLanguage();
 
-  const [activeSection, setActiveSection] = useState("project");
+  const [activeSection, setActiveSection] = useState<SectionId>("project");
   const { action: footerAction, setAction: setFooterAction } = useWizardFooterState();
   // The form sections' edits live in the store rather than in the steps so
   // they outlive a section switch: a draft the backend cannot take yet (a venue
@@ -223,19 +211,7 @@ export function WizardPage() {
   );
   const setWizardDraft = useSessionAction(sessionId, (state) => state.setWizardDraft);
   const [loading, setLoading] = useState(false);
-  const [features, setFeatures] = useState<
-    {
-      type: string;
-      feature_type?: string;
-      geometry?: { type: string; coordinates: unknown } | null;
-      properties?: { source_file?: string; [key: string]: unknown };
-    }[]
-  >([]);
 
-  const hasOpeningFiles = useMemo(() => files.some((f) => f.detected_type === "opening"), [files]);
-  const hasFixtureFiles = useMemo(() => files.some((f) => f.detected_type === "fixture"), [files]);
-  const hasDetailFiles = useMemo(() => files.some((f) => f.detected_type === "detail"), [files]);
-  const hasUnitFiles = useMemo(() => files.some((f) => f.detected_type === "unit"), [files]);
   const allFileStems = useMemo(() => files.map((f) => f.stem), [files]);
 
   const project = projectDraft ?? wizardState?.project ?? null;
@@ -244,92 +220,9 @@ export function WizardPage() {
   const projectHeld = projectDraft !== null && !isProjectComplete(projectDraft);
   const buildingsHeld = buildingsDraft !== null && !canSaveBuildings(buildingsDraft, allFileStems);
 
-  // ─── Validation ─────────────────────────────────────────────────────
-
-  const projectComplete = isProjectComplete(project);
-
-  const allClassified = useMemo(() => files.every((f) => Boolean(f.detected_type)), [files]);
-
-  const levelsComplete = useMemo(() => {
-    const required = files.filter((f) => LEVEL_REQUIRED_TYPES.has(f.detected_type ?? ""));
-    return required.length === 0 || required.every((f) => f.detected_level !== null);
-  }, [files]);
-
-  const buildingsComplete = useMemo(() => {
-    const required = files.filter((f) => LEVEL_REQUIRED_TYPES.has(f.detected_type ?? ""));
-    if (required.length === 0) return true;
-    if (buildingsHeld || buildings.length === 0) return false;
-    const assigned = new Set(buildings.flatMap((b) => b.file_stems));
-    const allAssigned = required.every((f) => assigned.has(f.stem));
-    const venueName = project?.venue_name?.trim();
-    const allNamed = buildings.every((b) => Boolean(b.name?.trim() || venueName));
-    const addressesValid = buildings.every((b) => {
-      if (b.address_mode !== "different_address") return true;
-      return Boolean(b.address?.locality?.trim() && b.address?.country?.trim());
-    });
-    return allAssigned && allNamed && addressesValid;
-  }, [files, buildings, buildingsHeld, project]);
-
-  const unitMappingComplete = useMemo(
-    () => !hasUnitFiles || Boolean(wizardState?.mappings.unit.code_column),
-    [hasUnitFiles, wizardState]
-  );
-
-  const projectSectionValid = projectComplete && buildingsComplete;
-  const attributeSectionValid = unitMappingComplete;
-  const canGenerate = projectSectionValid && allClassified && levelsComplete && attributeSectionValid;
-
-  // ─── Section definitions ────────────────────────────────────────────
-
-  const sections: SectionDef[] = useMemo(
-    () => [
-      {
-        id: "project",
-        labelEn: "Project & Venue",
-        labelJa: "プロジェクト & 会場",
-        valid: projectSectionValid,
-        children: [
-          { id: "project-info", labelEn: "Venue Info", labelJa: "会場情報", valid: projectComplete },
-          { id: "building", labelEn: "Buildings", labelJa: "建物", valid: buildingsComplete },
-          { id: "footprint", labelEn: "Footprint", labelJa: "Footprint", valid: true }
-        ]
-      },
-      {
-        id: "files",
-        labelEn: "File Classification",
-        labelJa: "ファイル分類",
-        valid: allClassified
-      },
-      {
-        id: "levels",
-        labelEn: "Level Mapping",
-        labelJa: "レベル対応付け",
-        valid: levelsComplete
-      },
-      {
-        id: "attributes",
-        labelEn: "Attribute Mapping",
-        labelJa: "属性対応付け",
-        valid: attributeSectionValid,
-        children: [
-          { id: "unit", labelEn: "Unit Mapping", labelJa: "Unit 対応付け", valid: unitMappingComplete, hidden: !hasUnitFiles },
-          { id: "opening", labelEn: "Opening Mapping", labelJa: "Opening 対応付け", valid: true, hidden: !hasOpeningFiles },
-          { id: "fixture", labelEn: "Fixture Mapping", labelJa: "Fixture 対応付け", valid: true, hidden: !hasFixtureFiles },
-          { id: "detail", labelEn: "Detail Mapping", labelJa: "Detail 設定", valid: true, hidden: !hasDetailFiles }
-        ]
-      },
-      {
-        id: "summary",
-        labelEn: "Summary & Generate",
-        labelJa: "概要 & 生成",
-        valid: projectSectionValid && allClassified && levelsComplete && attributeSectionValid
-      }
-    ],
-    [
-      projectSectionValid, projectComplete, buildingsComplete, allClassified,
-      levelsComplete, attributeSectionValid, unitMappingComplete,
-      hasUnitFiles, hasOpeningFiles, hasFixtureFiles, hasDetailFiles
-    ]
+  const view = useMemo(
+    () => setUpView({ files, project, buildings, buildingsHeld, wizard: wizardState }),
+    [files, project, buildings, buildingsHeld, wizardState]
   );
 
   // ─── Data loading ───────────────────────────────────────────────────
@@ -344,29 +237,14 @@ export function WizardPage() {
     const load = async () => {
       try {
         setLoading(true);
-        const [fileResponse, featureResponse, wizardResponse] = await Promise.all([
+        const [fileResponse, wizardResponse] = await Promise.all([
           fetchSessionFiles(sessionId),
-          fetchSessionFeatures(sessionId),
           fetchWizardState(sessionId)
         ]);
         if (!active) return;
         setSessionExpiredMessage(null);
         setFiles(fileResponse.files);
         setWizardState(wizardResponse.wizard);
-        setFeatures(
-          (featureResponse.features as Array<Record<string, unknown>>).map((item) => ({
-            type: String(item.type || "Feature"),
-            feature_type: typeof item.feature_type === "string" ? item.feature_type : undefined,
-            geometry:
-              item.geometry && typeof item.geometry === "object"
-                ? (item.geometry as { type: string; coordinates: unknown })
-                : null,
-            properties:
-              item.properties && typeof item.properties === "object"
-                ? (item.properties as { source_file?: string; [key: string]: unknown })
-                : {}
-          }))
-        );
       } catch (error) {
         const message = handleApiError(error, t("Failed to load wizard state", "ウィザード情報の読み込みに失敗しました"), {
           title: t("Failed to load wizard", "ウィザード読み込み失敗")
@@ -381,25 +259,6 @@ export function WizardPage() {
   }, [handleApiError, navigate, sessionId, setFiles, setSessionExpiredMessage, setWizardSaveStatus, setWizardState]);
 
   // ─── API actions ────────────────────────────────────────────────────
-
-  const refreshFeatures = async () => {
-    if (!sessionId) return;
-    const featureResponse = await fetchSessionFeatures(sessionId);
-    setFeatures(
-      (featureResponse.features as Array<Record<string, unknown>>).map((item) => ({
-        type: String(item.type || "Feature"),
-        feature_type: typeof item.feature_type === "string" ? item.feature_type : undefined,
-        geometry:
-          item.geometry && typeof item.geometry === "object"
-            ? (item.geometry as { type: string; coordinates: unknown })
-            : null,
-        properties:
-          item.properties && typeof item.properties === "object"
-            ? (item.properties as { source_file?: string; [key: string]: unknown })
-            : {}
-      }))
-    );
-  };
 
   const refreshWizard = async () => {
     if (!sessionId) return;
@@ -426,24 +285,6 @@ export function WizardPage() {
     setWizardState(response.wizard);
   };
   const syncLevels = () => serialize(pushLevels);
-
-  const runDetectAll = () =>
-    persist(
-      async () => {
-        if (!sessionId) return;
-        const response = await detectAllFiles(sessionId);
-        setFiles(response.files);
-        await refreshFeatures();
-        setLearningSuggestion(null);
-        pushToast({
-          title: t("Detection complete", "検出完了"),
-          description: t("File types were refreshed.", "ファイル種別を更新しました。"),
-          variant: "success"
-        });
-      },
-      t("Detect all failed", "一括検出に失敗しました"),
-      t("Detection failed", "検出失敗")
-    );
 
   // Once the server holds what a draft says, the draft goes, so whatever the
   // server has next is what the form shows. A draft edited again while its
@@ -490,15 +331,9 @@ export function WizardPage() {
         if (!sessionId) return;
         const response = await updateSessionFile(sessionId, stem, payload);
         setFiles(response.files);
-        if (response.learning_suggestion) {
-          setLearningSuggestion(response.learning_suggestion);
-        } else if (payload.apply_learning) {
-          setLearningSuggestion(null);
-        }
-        await refreshFeatures();
       },
-      t("Failed to save file mapping", "ファイル分類の保存に失敗しました"),
-      t("Failed to save classification", "分類保存失敗")
+      t("Failed to save level", "レベルの保存に失敗しました"),
+      t("Failed to save level", "レベル保存失敗")
     );
 
   const saveProject = (payload: ProjectWizardState, retry: () => void) => {
@@ -615,10 +450,26 @@ export function WizardPage() {
   const autosaves = [projectAutosave, buildingsAutosave, footprintAutosave];
   const flushDrafts = () => autosaves.forEach((autosave) => autosave.flush());
 
-  const selectSection = (id: string) => {
+  const selectSection = (id: SectionId) => {
     flushDrafts();
     setActiveSection(id);
   };
+
+  const focusField = useRef<ProjectField | null>(null);
+  const fix = ({ fix: target, field }: Pick<ChecklistItem, "fix" | "field">) => {
+    if (target === "bring-in") {
+      if (sessionId) navigate(projectPath(sessionId, "bring-in"));
+      return;
+    }
+    focusField.current = field ?? null;
+    selectSection(target);
+  };
+  useEffect(() => {
+    const field = focusField.current;
+    if (!field || loading) return;
+    focusField.current = null;
+    document.querySelector<HTMLElement>(`[data-field="${field}"]`)?.focus();
+  }, [activeSection, loading]);
 
   // Closing or reloading the tab ends the session's in-memory drafts and can
   // cut off a save still being sent, so the browser is asked to confirm while
@@ -644,21 +495,6 @@ export function WizardPage() {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, []);
 
-  const applyLearningSuggestion = async () => {
-    if (!sessionId || !learningSuggestion) return;
-    const targetStem = learningSuggestion.source_stem;
-    if (!targetStem) {
-      setLearningSuggestion(null);
-      return;
-    }
-    await patchFile(targetStem, {
-      detected_type: learningSuggestion.feature_type,
-      apply_learning: true,
-      learning_keyword: learningSuggestion.keyword
-    });
-    setLearningSuggestion(null);
-  };
-
   const uploadMappingsFile = (file: File) =>
     persist(
       async () => {
@@ -676,7 +512,7 @@ export function WizardPage() {
     );
 
   const confirmSummary = async () => {
-    if (!sessionId || !canGenerate) return;
+    if (!sessionId || !view.canGenerate) return;
     // Generation reads the server's copy, so every edit has to be there first.
     // A save that fails again leaves its error and Retry in the footer.
     const stored = await Promise.all(autosaves.map((autosave) => autosave.settle()));
@@ -686,7 +522,6 @@ export function WizardPage() {
       await serialize(async () => {
         await pushLevels();
         await generateSessionDraft(sessionId);
-        await refreshFeatures();
       });
       setCurrentScreen("review");
       setWizardSaveStatus("saved");
@@ -706,17 +541,17 @@ export function WizardPage() {
 
   // ─── Section rendering ──────────────────────────────────────────────
 
-  const helpText = SECTION_HELP[activeSection] ?? SECTION_HELP["project"];
+  const helpText = SECTION_HELP[activeSection];
 
   // The heading names the section the rail is on, so the two never disagree.
   const activeSectionLabel = useMemo(() => {
-    for (const section of sections) {
-      if (section.id === activeSection) return t(section.labelEn, section.labelJa);
+    for (const section of view.sections) {
+      if (section.id === activeSection) return t(section.label.en, section.label.ja);
       const child = section.children?.find((item) => item.id === activeSection);
-      if (child) return t(child.labelEn, child.labelJa);
+      if (child) return t(child.label.en, child.label.ja);
     }
-    return t("Configure", "設定");
-  }, [sections, activeSection, t]);
+    return t("Set up", "設定");
+  }, [view.sections, activeSection, t]);
 
   const showSection = () => {
     switch (activeSection) {
@@ -747,23 +582,6 @@ export function WizardPage() {
           <FootprintStep
             footprint={footprint}
             onChange={(next) => setWizardDraft("footprint", next)}
-          />
-        );
-
-      case "files":
-        return (
-          <FileClassStep
-            files={files}
-            features={features}
-            selectedStem={selectedFileStem}
-            hoveredStem={hoveredFileStem}
-            loading={wizardSaveStatus === "saving"}
-            onDetectAll={() => void runDetectAll()}
-            onChangeType={(stem, nextType) =>
-              void patchFile(stem, { detected_type: nextType || null })
-            }
-            onSelectStem={setSelectedFileStem}
-            onHoverStem={setHoveredFileStem}
           />
         );
 
@@ -816,16 +634,14 @@ export function WizardPage() {
       case "summary":
         return (
           <SummaryStep
+            view={view}
             files={files}
             cleanupSummary={cleanupSummary}
             wizard={wizardState}
-            disabled={!canGenerate}
+            onFix={fix}
             onConfirm={() => void confirmSummary()}
           />
         );
-
-      default:
-        return null;
     }
   };
 
@@ -854,7 +670,6 @@ export function WizardPage() {
 
   const inShell = useInShell();
   const footerButtonRef = useRef<HTMLDivElement>(null);
-  const incompleteSections = sections.filter((section) => section.id !== "summary" && !section.valid).length;
   usePrimaryAction(
     footerAction
       ? {
@@ -862,7 +677,7 @@ export function WizardPage() {
           run: () => footerAction.run(),
           disabledReason: footerAction.enabled ? null : (footerAction.blockedReason ?? null),
           busy: wizardSaveStatus === "saving",
-          blockers: footerAction.enabled ? null : incompleteSections,
+          blockers: footerAction.enabled ? null : view.left,
           anchor: footerButtonRef
         }
       : null
@@ -872,104 +687,78 @@ export function WizardPage() {
   // ─── Render ─────────────────────────────────────────────────────────
 
   return (
-    <main className="mx-auto flex w-full max-w-[1850px] flex-col gap-5 px-4 py-5 md:px-6 xl:px-8">
-      <div className="grid gap-5 lg:grid-cols-[17rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)]">
-        <SectionNav
-          sections={sections}
-          activeSection={activeSection}
-          onSelect={selectSection}
-        />
+    <div className="flex min-h-0 flex-1">
+      <SectionNav sections={view.sections} activeSection={activeSection} onSelect={selectSection} />
 
-        <div className="flex flex-col gap-4">
-          {/* Section help was a bordered, icon-led box of its own; it is one
-              sentence about the heading right above it, so it reads as one. */}
-          <div className="flex flex-col gap-1">
-            <h1 className="text-lg font-semibold leading-7 tracking-tight text-foreground">
-              {activeSectionLabel}
-            </h1>
-            <p className="text-[13px] leading-[18px] text-muted-foreground">
-              {isJapanese ? helpText.ja : helpText.en}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <main className="flex flex-1 flex-col gap-4 overflow-auto px-10 pb-6 pt-7">
+          <div className="flex flex-col gap-1.5">
+            <h1 className="font-display text-[30px] font-semibold leading-tight text-foreground">{activeSectionLabel}</h1>
+            <p className="max-w-[46rem] text-[15px] leading-[1.55] text-muted-foreground">
+              {t(helpText.en, helpText.ja)}
             </p>
           </div>
 
-          {/* Section content */}
           <WizardFooterProvider onAction={setFooterAction}>
             {loading ? <WizardStepSkeleton /> : showSection()}
           </WizardFooterProvider>
+        </main>
 
-          {/* Learning suggestion banner */}
-          {learningSuggestion ? (
-            <div className="rounded-lg border border-warning/30 bg-warning-surface p-3 text-[13px] leading-[18px] text-warning-foreground">
-              <p>{learningSuggestion.message}</p>
-              <div className="mt-2 flex gap-2">
-                <Button variant="default" size="sm" onClick={() => void applyLearningSuggestion()}>
-                  {t("Apply Learning", "学習ルールを適用")}
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setLearningSuggestion(null)}>
-                  {t("Dismiss", "閉じる")}
-                </Button>
-              </div>
+        {/* Every section saves as you edit, so the bar reports rather than
+            asks. The one button it can carry is Summary's Generate. */}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-card px-10 py-3.5">
+          <span
+            className="flex items-center gap-2 text-xs leading-4 text-muted-foreground"
+            role={wizardSaveStatus === "error" ? "alert" : undefined}
+          >
+            {wizardSaveStatus === "saving" ? (
+              t("Saving…", "保存中…")
+            ) : wizardSaveStatus === "error" ? (
+              <>
+                <span className="text-destructive">
+                  {t("Could not save", "保存できませんでした")}
+                  {wizardSaveError ? ` — ${wizardSaveError}` : ""}
+                </span>
+                {wizardSaveRetry ? (
+                  <Button variant="outline" size="sm" onClick={() => wizardSaveRetry()}>
+                    {t("Retry", "再試行")}
+                  </Button>
+                ) : null}
+              </>
+            ) : projectHeld ? (
+              t(
+                "Venue info not saved yet: venue name, category, locality and country are required to save.",
+                "会場情報は未保存です。保存には会場名・カテゴリ・市区町村・国が必要です。"
+              )
+            ) : buildingsHeld ? (
+              t(
+                "Buildings not saved yet: each assigned file must be a known file, assigned once, to save.",
+                "建物は未保存です。保存するには、割り当てファイルを既存のファイル名で重複なく指定してください。"
+              )
+            ) : wizardSaveStatus === "saved" && wizardSavedAt !== null && !inShell ? (
+              <>
+                {t("Saved", "保存済み")} · <span className="font-mono">{formatClock(wizardSavedAt)}</span>
+              </>
+            ) : footerAction ? null : (
+              t("Changes are saved as you edit.", "編集内容は自動的に保存されます。")
+            )}
+          </span>
+
+          {footerAction ? (
+            <div ref={footerButtonRef} className="flex items-center gap-3">
+              {footerAction.enabled ? null : (
+                <span className="text-[13px] text-muted-foreground">{footerAction.blockedReason}</span>
+              )}
+              <Button
+                disabled={!footerAction.enabled || wizardSaveStatus === "saving"}
+                onClick={() => footerAction.run()}
+              >
+                {footerAction.label}
+              </Button>
             </div>
           ) : null}
-
-          {/* Every section saves as you edit, so the footer reports rather than
-              asks. The one button it can carry is Summary's Generate. */}
-          <div className="sticky bottom-0 z-10 -mb-5 flex items-center justify-between gap-3 border-t border-border bg-background py-3">
-            <span
-              className="flex items-center gap-2 text-xs leading-4 text-muted-foreground"
-              role={wizardSaveStatus === "error" ? "alert" : undefined}
-            >
-              {wizardSaveStatus === "saving" ? (
-                t("Saving…", "保存中…")
-              ) : wizardSaveStatus === "error" ? (
-                <>
-                  <span className="text-destructive">
-                    {t("Could not save", "保存できませんでした")}
-                    {wizardSaveError ? ` — ${wizardSaveError}` : ""}
-                  </span>
-                  {wizardSaveRetry ? (
-                    <Button variant="outline" size="sm" onClick={() => wizardSaveRetry()}>
-                      {t("Retry", "再試行")}
-                    </Button>
-                  ) : null}
-                </>
-              ) : projectHeld ? (
-                t(
-                  "Venue info not saved yet: venue name, category, locality and country are required to save.",
-                  "会場情報は未保存です。保存には会場名・カテゴリ・市区町村・国が必要です。"
-                )
-              ) : buildingsHeld ? (
-                t(
-                  "Buildings not saved yet: each assigned file must be a known file, assigned once, to save.",
-                  "建物は未保存です。保存するには、割り当てファイルを既存のファイル名で重複なく指定してください。"
-                )
-              ) : wizardSaveStatus === "saved" && wizardSavedAt !== null && !inShell ? (
-                <>
-                  {t("Saved", "保存済み")} · <span className="font-mono">{formatClock(wizardSavedAt)}</span>
-                </>
-              ) : footerAction ? null : (
-                t("Changes are saved as you edit.", "編集内容は自動的に保存されます。")
-              )}
-            </span>
-
-            {footerAction ? (
-              <div ref={footerButtonRef}>
-                <DisabledHint
-                  className="w-auto"
-                  hint={footerAction.enabled ? null : (footerAction.blockedReason ?? null)}
-                >
-                  <Button
-                    disabled={!footerAction.enabled || wizardSaveStatus === "saving"}
-                    onClick={() => footerAction.run()}
-                  >
-                    {footerAction.label}
-                  </Button>
-                </DisabledHint>
-              </div>
-            ) : null}
-          </div>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

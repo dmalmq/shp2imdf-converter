@@ -541,13 +541,13 @@ async function importTokyoStation(page) {
   await page.getByRole("button", { name: "Read the files" }).first().click();
   await page.waitForURL("**/p/*/bring-in", { timeout: 60000 });
   await continueToSetUp(page);
-  await page.getByLabel(/Venue Name/).waitFor({ timeout: 30000 });
+  await page.getByLabel(/Venue name/).waitFor({ timeout: 30000 });
 }
 
 // The wizard autosaves 800 ms after typing stops; Summary reads the server's
 // copy, so wait for the footer to confirm the save before moving on.
 async function fillVenue(page) {
-  await page.getByLabel(/Venue Name/).fill("Tokyo Station");
+  await page.getByLabel(/Venue name/).fill("Tokyo Station");
   await page.getByLabel(/Locality/).first().fill("Chiyoda-ku");
   await page.getByText(/^Saved ·/).waitFor({ timeout: 20000 });
 }
@@ -556,7 +556,7 @@ async function generateReview(page) {
   const generate = page.getByRole("button", { name: "Generate & open Review" });
   await generate.waitFor({ timeout: 15000 });
   if (await generate.isDisabled()) {
-    throw new Error("Generate & open Review is disabled — venue/classification/levels/unit mapping incomplete");
+    throw new Error("Generate & open Review is disabled — the Before you generate checklist still has items left");
   }
   await generate.click();
   await page.waitForURL("**/p/*/check", { timeout: 60000 });
@@ -569,11 +569,11 @@ async function driveImportShapefiles() {
     await writeEvidence("import-shapefiles", page, {
       entry: "Hub From floor shapefiles → Bring in dropzone + Read the files → Continue to Set up",
       notes: `header ${APP_HEADER}; landed on /p/<id>/set-up`,
-      body: "Expected: Standard import of tokyo_station fixtures navigates to the wizard Venue Info section."
+      body: "Expected: Standard import of tokyo_station fixtures navigates to the wizard Venue info section."
     });
     const text = await page.locator("body").innerText();
-    if (!text.includes(APP_HEADER) || !text.includes("Venue Name")) {
-      throw new Error("import-shapefiles proof missing Venue Info form or app header");
+    if (!text.includes(APP_HEADER) || !text.includes("Venue name")) {
+      throw new Error("import-shapefiles proof missing Venue info form or app header");
     }
     console.log("drive import-shapefiles OK");
   });
@@ -583,11 +583,11 @@ async function driveWizardConfigure() {
   await withPage(async (page) => {
     await importTokyoStation(page);
     await fillVenue(page);
-    await page.getByRole("button", { name: "Summary & Generate" }).click();
-    await page.getByRole("heading", { name: "Summary & Generate", level: 1 }).waitFor({ timeout: 15000 });
+    await page.getByRole("button", { name: "Summary & generate" }).click();
+    await page.getByRole("heading", { name: "Summary & generate", level: 1 }).waitFor({ timeout: 15000 });
     await generateReview(page);
     await writeEvidence("wizard-configure", page, {
-      entry: "wizard Venue Info → Summary & Generate",
+      entry: "wizard Venue info → Summary & generate",
       notes: "generated draft and opened review",
       body: "Expected: review chrome with Export enabled after Generate & open Review."
     });

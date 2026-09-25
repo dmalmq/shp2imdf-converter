@@ -80,8 +80,8 @@ Stable handles (do not use click coordinates):
 | Open archive | hub card `Reopen an IMDF archive` / `#imdf-file-input` |
 | Illustrator entry | hub card `From Illustrator artwork`; then `Choose file` / `#illustrator-georef-input` |
 | New shapefile project | hub card `From floor shapefiles` → `/p/new`; the hub's drop zone input is `[data-testid=hub-drop-input]` |
-| Wizard sections | `Sections` nav buttons, e.g. `Venue Info`, `Summary & Generate`; the h1 names the section |
-| Venue | textbox named `Venue Name*`; `Locality*` (autosaves; the top bar shows `Saved · HH:MM`, or `Not saved yet` while a required field is missing) |
+| Wizard sections | `Sections` nav buttons, e.g. `Venue info`, `Summary & generate`; the h1 names the section |
+| Venue | textbox named `Venue name*`; `Locality*` (autosaves; the top bar shows `Saved · HH:MM`, or `Not saved yet` while a required field is missing) |
 | Generate | button `Generate & open Review` |
 | Review | buttons `Validate`, `Export`, `Download .imdf` |
 
@@ -108,7 +108,7 @@ Proof standards:
 node .cursor/skills/verify-shp2imdf/scripts/capture.mjs --label baseline [--frontend-port 5420 --backend-port 8420] [--cleanup]
 ```
 
-Screenshots every screen in light/dark × EN/日本語 for before/after review: the hub (as found, and again listing the project the run created), Bring in (empty, queued), each wizard section with Project & Venue filled, Summary, Review (map, after Validate, export dialog), and the Illustrator route (bring in, name floors from a generated three-page `.ai`, place, export tab). Launches or attaches like `launch`; `--cleanup` then stops only what the pair's state file owns, also when launch fails. Output replaces `artifacts/captures/<label>/` (gitignored, `--out` overrides), but only a folder that is new, empty or carries the script's `.capture-output` marker; anything else is refused: `<screen>.<theme>.<lang>.png` plus `manifest.json`, an array of `{ screen, theme, lang, path }` with `path` relative to the manifest. Theme and language are switched with the app's own toggles (theme falls back to the `.dark` class); toasts are dismissed before each shot. It creates a real import session and an Illustrator conversion, and never saves a placement.
+Screenshots every screen in light/dark × EN/日本語 for before/after review: the hub (as found, and again listing the project the run created), Bring in (empty, queued), each wizard section with Project & venue filled, Summary, Review (map, after Validate, export dialog), and the Illustrator route (bring in, name floors from a generated three-page `.ai`, place, export tab). Launches or attaches like `launch`; `--cleanup` then stops only what the pair's state file owns, also when launch fails. Output replaces `artifacts/captures/<label>/` (gitignored, `--out` overrides), but only a folder that is new, empty or carries the script's `.capture-output` marker; anything else is refused: `<screen>.<theme>.<lang>.png` plus `manifest.json`, an array of `{ screen, theme, lang, path }` with `path` relative to the manifest. Theme and language are switched with the app's own toggles (theme falls back to the `.dark` class); toasts are dismissed before each shot. It creates a real import session and an Illustrator conversion, and never saves a placement.
 
 ## Cleanup
 
