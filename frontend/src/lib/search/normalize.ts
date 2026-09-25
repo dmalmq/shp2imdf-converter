@@ -30,6 +30,20 @@ export function splitScripts(term: string): string[] {
   return parts;
 }
 
+const FLOOR = String.raw`\d+(?:\.\d+)?(?:f|階)|(?:b|地下)\d+(?:f|階)?|(?:m|中)\d+(?:f|階)?|rf|屋上`;
+
+/** A normalised floor spelling on its own: `1f`, `1階`, `b1`, `地下1階`, `m2f`, `rf`. */
+export const FLOOR_WORD = new RegExp(`^(?:${FLOOR})$`);
+
+const FLOOR_SUFFIX = new RegExp(`^(.*?)(${FLOOR})$`);
+
+/** A term typed without a space: a trailing floor comes off whole (`東京駅1階`), otherwise scripts split. */
+export function splitTerm(term: string): string[] {
+  const match = FLOOR_SUFFIX.exec(term);
+  if (!match) return splitScripts(term);
+  return match[1] ? [...splitScripts(match[1]), match[2]] : [term];
+}
+
 const ALNUM = /[a-z0-9]/;
 
 /** Whether a match of `key` ending at `end` stops at a boundary in `text`. */

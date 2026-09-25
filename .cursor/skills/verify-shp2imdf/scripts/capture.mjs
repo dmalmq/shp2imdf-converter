@@ -156,6 +156,22 @@ function makeShooter(page, outDir, manifest) {
   };
 }
 
+// The search panel stays open across the shooter's theme and language
+// toggles: they are DOM clicks, with no pointer-down to close it.
+async function openSearch(page, query) {
+  const box = page.getByRole("combobox").first();
+  if ((await box.getAttribute("aria-expanded")) !== "true") await page.keyboard.press("Control+K");
+  await box.fill(query);
+  await page.getByRole("listbox").waitFor({ timeout: 10000 });
+}
+
+async function closeSearch(page) {
+  const box = page.getByRole("combobox").first();
+  for (let i = 0; i < 3 && (await box.getAttribute("aria-expanded")) === "true"; i += 1) {
+    await box.press("Escape");
+  }
+}
+
 async function gotoHub(page) {
   await page.getByRole("link", { name: "shp2imdf, projects" }).click();
   await page.getByRole("heading", { name: "Station projects", level: 1 }).waitFor({ timeout: 15000 });
@@ -201,6 +217,22 @@ async function captureShapefileFlow(page, shoot) {
   if (/^Validation failed/.test(await outcome.first().innerText())) throw new Error("validation failed on review");
   await shoot("review-validated", { wait: 1500 });
 
+  // Ctrl K on Check: the empty panel, a search, and a command built by
+  // completion (the first level, onto the last floor offered).
+  await dismissToasts(page);
+  await openSearch(page, "");
+  await shoot("search-check-empty", { wait: 600 });
+  await openSearch(page, "overlap");
+  await shoot("search-overlap", { wait: 600 });
+  await openSearch(page, "assign ");
+  for (const key of ["Tab", "ArrowUp", "Enter"]) {
+    await page.waitForTimeout(400);
+    await page.keyboard.press(key);
+  }
+  await page.getByRole("region", { name: "What this command does" }).waitFor({ timeout: 10000 });
+  await shoot("search-command", { wait: 1200 });
+  await closeSearch(page);
+
   // The first thing on the to-do list, opened on the map.
   await dismissToasts(page);
   const todo = page.getByRole("list", { name: "Must fix" }).getByRole("button");
@@ -221,6 +253,11 @@ async function captureShapefileFlow(page, shoot) {
 
   await gotoHub(page);
   await shoot("hub-projects");
+  await openSearch(page, "");
+  await shoot("search-hub-empty", { wait: 600 });
+  await openSearch(page, "Tokyo");
+  await shoot("search-hub-results", { wait: 600 });
+  await closeSearch(page);
   await captureWelcomeBack(page, shoot);
 }
 

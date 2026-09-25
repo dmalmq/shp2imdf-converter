@@ -1,4 +1,4 @@
-import { norm, splitScripts, words } from "./normalize";
+import { norm, splitTerm, words } from "./normalize";
 import type { SearchItem, SearchKind } from "./types";
 
 export const KIND_ORDER: ReadonlyArray<SearchKind> = ["station", "floor", "issue", "file", "action"];
@@ -33,7 +33,7 @@ function units(query: string, items: readonly SearchItem[]): string[] {
   return norm(query)
     .split(" ")
     .filter(Boolean)
-    .flatMap((term) => (items.some((item) => best(term, item) > 0) ? [term] : splitScripts(term)));
+    .flatMap((term) => (items.some((item) => best(term, item) > 0) ? [term] : splitTerm(term)));
 }
 
 type Scored = { item: SearchItem; covered: number; quality: number; order: number };

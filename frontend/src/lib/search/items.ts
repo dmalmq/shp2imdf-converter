@@ -6,7 +6,8 @@ import { featureLabel, type CheckGroup } from "../check";
 import { issueCopy } from "../checkCopy";
 import { ARTWORK_PATH, toHubProject } from "../hub";
 import { termsOf } from "./match";
-import { floorAliases } from "./normalize";
+import { FLOOR_WORD, floorAliases, norm, splitTerm } from "./normalize";
+import { canonicalFloor } from "./parse";
 import type { CheckSource } from "./source";
 import type { FloorRef, SearchItem } from "./types";
 
@@ -314,4 +315,35 @@ export function buildItems(input: ItemsInput): Items {
     recents: stations.slice(0, RECENTS),
     actions: actions.filter((item) => item.tone !== "help" && !item.id.startsWith("action:resolve"))
   };
+}
+
+/**
+ * `東京駅 1F` for a station that is not loaded: its floors are unknown here,
+ * so the item opens its Check at that floor and Check says if there is none.
+ */
+export function stationFloorItems(
+  query: string,
+  projects: readonly ProjectSummary[],
+  loadedSessionId: string | null
+): SearchItem[] {
+  const terms = norm(query).split(" ").filter(Boolean).flatMap(splitTerm);
+  const floorTerm = terms.find((term) => FLOOR_WORD.test(term));
+  if (!floorTerm) return [];
+  const floor = canonicalFloor(floorTerm);
+  const others = terms.filter((term) => term !== floorTerm);
+  return projects.flatMap((project) => {
+    const name = project.name?.trim();
+    if (!name || project.id === loadedSessionId || !others.some((term) => norm(name).includes(term))) return [];
+    return [
+      {
+        id: `floor:${project.id}:${floor}`,
+        kind: "floor",
+        label: { en: `${name} · ${floor}`, ja: `${name} · ${floor}` },
+        detail: { en: "Opens its Check at this floor", ja: "このフロアでチェックを開く" },
+        hint: { en: "Open on the map", ja: "地図で開く" },
+        run: { kind: "navigate", to: `${projectPath(project.id, "check")}?floor=${encodeURIComponent(floor)}` },
+        terms: termsOf(name, ...floorAliases(floor))
+      } satisfies SearchItem
+    ];
+  });
 }

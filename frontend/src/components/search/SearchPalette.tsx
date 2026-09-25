@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { fetchProjects, type ProjectSummary } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { toHubProject } from "../../lib/hub";
-import { buildItems } from "../../lib/search/items";
+import { buildItems, stationFloorItems } from "../../lib/search/items";
 import { KIND_ORDER, search, type ResultGroup } from "../../lib/search/match";
 import { parse } from "../../lib/search/parse";
 import { preview as previewOf, type PreviewContext } from "../../lib/search/preview";
@@ -178,9 +178,9 @@ export function SearchPalette() {
   );
   const results = useMemo(() => {
     if (parsed.mode !== "search" || !deferredQuery.trim()) return null;
-    const found = search(items.all, deferredQuery);
+    const found = search([...items.all, ...stationFloorItems(deferredQuery, projects, sessionId)], deferredQuery);
     return allStations ? { ...found, groups: found.groups.filter((group) => group.kind === "station") } : found;
-  }, [parsed, deferredQuery, items, allStations]);
+  }, [parsed, deferredQuery, items, allStations, projects, sessionId]);
 
   const sections: Section[] = useMemo(() => {
     const asOptions = (list: SearchItem[]) => list.map((item) => ({ id: item.id, item }));
@@ -474,7 +474,7 @@ export function SearchPalette() {
           if (event.target instanceof Node && anchorRef.current?.contains(event.target)) event.preventDefault();
         }}
       >
-        <span role="status" aria-live="polite" className="sr-only">
+        <span role="status" className="sr-only">
           {status}
         </span>
 
