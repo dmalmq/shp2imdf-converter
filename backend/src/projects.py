@@ -9,12 +9,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 import os
-from typing import Any, Literal
+from typing import Any, get_args
 
-from backend.src.schemas import DeliveryRecord, SessionRecord, ValidationResponse
+from backend.src.schemas import DeliveryRecord, SessionRecord, SessionStage as Stage, ValidationResponse
 
-Stage = Literal["bring-in", "set-up", "check", "deliver"]
-STAGES: tuple[str, ...] = ("bring-in", "set-up", "check", "deliver")
+STAGES: tuple[str, ...] = get_args(Stage)
 
 
 @dataclass(frozen=True)

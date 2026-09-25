@@ -33,6 +33,10 @@ _SESSION_ID_PATTERN = re.compile(r"[A-Za-z0-9-]+")
 META_VERSION = 2
 
 
+def is_session_id(value: str) -> bool:
+    return isinstance(value, str) and _SESSION_ID_PATTERN.fullmatch(value) is not None
+
+
 @dataclass
 class SessionSummary:
     session_id: str
@@ -86,6 +90,9 @@ class SessionBackend(ABC):
 
     def list_summaries(self) -> list[SessionSummary]:
         return [SessionSummary.of(session) for session in self.list_all()]
+
+    def summary(self, session_id: str) -> SessionSummary | None:
+        return next((item for item in self.list_summaries() if item.session_id == session_id), None)
 
 
 class MemorySessionBackend(SessionBackend):
@@ -271,6 +278,13 @@ class FileSystemSessionBackend(SessionBackend):
                 SessionSummary(item.session_id, item.last_accessed, item.upload_artifact_dir, item.project)
                 for item in self._index.values()
             ]
+
+    def summary(self, session_id: str) -> SessionSummary | None:
+        with self._lock:
+            item = self._index.get(session_id)
+            if item is None:
+                return None
+            return SessionSummary(item.session_id, item.last_accessed, item.upload_artifact_dir, item.project)
 
 
 def _fingerprint(session: SessionRecord) -> str:
