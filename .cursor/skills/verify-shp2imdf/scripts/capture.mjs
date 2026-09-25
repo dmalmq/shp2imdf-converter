@@ -193,13 +193,22 @@ async function captureShapefileFlow(page, shoot) {
   // reloaded; waiting for the busy label to vanish can pass before the
   // request has even started.
   await dismissToasts(page);
-  await page.getByRole("button", { name: "Validate", exact: true }).click();
+  await page.getByRole("button", { name: "Check again", exact: true }).click();
   const outcome = page.getByRole("status").filter({ hasText: /^(Validation complete|Validation failed)/ });
   await outcome.first().waitFor({ timeout: 60000 });
   if (/^Validation failed/.test(await outcome.first().innerText())) throw new Error("validation failed on review");
   await shoot("review-validated", { wait: 1500 });
 
-  await page.getByRole("button", { name: "Export", exact: true }).click();
+  // The first thing on the to-do list, opened on the map.
+  await dismissToasts(page);
+  const todo = page.getByRole("list", { name: "Must fix" }).getByRole("button");
+  const later = page.getByRole("region", { name: "Can wait" }).getByRole("button").first();
+  await ((await todo.count()) > 0 ? todo.first() : later).click();
+  await page.getByRole("dialog").first().waitFor({ timeout: 15000 });
+  await shoot("check-issue", { wait: 1500 });
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("banner").getByRole("button", { name: /^Deliver/ }).click();
   await page.getByRole("dialog").waitFor({ timeout: 15000 });
   await shoot("review-export-dialog", { wait: 800 });
   await page.keyboard.press("Escape");

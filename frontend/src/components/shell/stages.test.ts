@@ -98,6 +98,18 @@ describe("shapefile flow", () => {
     expect(stages[2].detailTone).toBe("default");
   });
 
+  test("Check counts what can wait beside what must be fixed", () => {
+    const stages = shapefileStages({
+      ...base,
+      pathname: "/p/s1/check",
+      sessionId: "s1",
+      reviewReached: true,
+      page: { checkErrors: 3, checkWarnings: 5 }
+    });
+    expect(stages[2].detail).toEqual({ en: "3 to fix · 5 can wait", ja: "要修正 3 件 · 後回し 5 件" });
+    expect(stages[2].detailTone).toBe("danger");
+  });
+
   test("an open export dialog makes Deliver current", () => {
     const stages = shapefileStages({
       ...base,

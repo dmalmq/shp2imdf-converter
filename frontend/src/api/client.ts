@@ -291,16 +291,32 @@ export type FeaturePatchRequest = {
 
 export type BulkFeaturePatchRequest = {
   feature_ids: string[];
-  action?: "patch" | "delete" | "merge_units";
+  action?: "patch" | "delete" | "merge_units" | "restore";
   properties?: Record<string, unknown>;
   merge_name?: string | null;
   feature_type?: string;
+  /** `restore` only: the undo a fix returned, sent back unchanged. */
+  undo?: FeatureUndo;
 };
 
 export type BulkFeaturePatchResponse = {
   updated_count: number;
   deleted_count: number;
   merged_feature_id: string | null;
+  /** Set by `restore`, which revalidates. */
+  validation?: ValidationResponse | null;
+};
+
+/**
+ * What puts back a fix: drop `remove_ids` and the ids in `features`, then
+ * restore `features`. The server refuses it (409 UNDO_STALE) once anything
+ * the fix touched has changed, which `fingerprints` records.
+ */
+export type FeatureUndo = {
+  remove_ids: string[];
+  features: Record<string, unknown>[];
+  fingerprints: Record<string, string>;
+  digest: string;
 };
 
 export type ValidationIssue = {
@@ -358,6 +374,7 @@ export type AutofixResponse = {
   total_fixed: number;
   total_requiring_confirmation: number;
   revalidation: ValidationResponse;
+  undo: FeatureUndo;
 };
 
 export type ResolveUnitOverlapsResponse = {
@@ -367,6 +384,7 @@ export type ResolveUnitOverlapsResponse = {
   deleted_count: number;
   skipped_count: number;
   validation: ValidationResponse;
+  undo: FeatureUndo;
 };
 
 export type ExportArchiveResponse = {
@@ -801,6 +819,18 @@ export async function generateSessionDraft(sessionId: string): Promise<GenerateR
   return handleJson<GenerateResponse>(response);
 }
 
+/** The last validation, or null when the project has changed since it ran. */
+export async function fetchStoredValidation(sessionId: string): Promise<ValidationResponse | null> {
+  const response = await fetch(`/api/session/${sessionId}/validation`);
+  return handleJson<ValidationResponse | null>(response);
+}
+
+export async function restoreSessionFeatures(sessionId: string, undo: FeatureUndo): Promise<ValidationResponse> {
+  const response = await patchSessionFeaturesBulk(sessionId, { action: "restore", feature_ids: [], undo });
+  if (!response.validation) throw new Error("Restore returned no validation");
+  return response.validation;
+}
+
 export async function validateSession(sessionId: string): Promise<ValidationResponse> {
   const response = await fetch(`/api/session/${sessionId}/validate`, {
     method: "POST"
@@ -847,6 +877,7 @@ export async function resolveSessionUnitOverlapsSafe(sessionId: string): Promise
 export type SnapOpeningResponse = {
   session_id: string;
   validation: ValidationResponse;
+  undo: FeatureUndo;
 };
 
 export async function snapOpening(sessionId: string, openingId: string, unitId: string): Promise<SnapOpeningResponse> {

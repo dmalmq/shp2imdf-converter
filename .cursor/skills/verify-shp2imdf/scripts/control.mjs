@@ -560,7 +560,7 @@ async function generateReview(page) {
   }
   await generate.click();
   await page.waitForURL("**/p/*/check", { timeout: 60000 });
-  await page.getByRole("button", { name: "Export", exact: true }).waitFor({ timeout: 30000 });
+  await page.getByRole("heading", { name: "Before you can deliver" }).waitFor({ timeout: 30000 });
 }
 
 async function driveImportShapefiles() {

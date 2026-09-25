@@ -1,29 +1,16 @@
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { featureTypeColor } from "../shared/featureColors";
-import {
-  Checkbox,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "../ui";
+import { Checkbox } from "../ui";
 import { layerKeyLabel } from "./types";
 import { cn } from "@/lib/utils";
-
-/** Radix Select has no empty-string value, so "all floors" needs a sentinel. */
-const ALL_FLOORS = "__all__";
 
 type Props = {
   featureTypes: string[];
   layerVisibility: Record<string, boolean>;
-  floorFilter: string;
-  floorOptions: Array<{ id: string; label: string }>;
   validationLoaded: boolean;
   overlayVisibility: Record<string, boolean>;
   showBasemap: boolean;
   onLayerVisibilityChange: (next: Record<string, boolean>) => void;
-  onFloorFilterChange: (next: string) => void;
   onOverlayVisibilityChange: (next: Record<string, boolean>) => void;
   onShowBasemapChange: (next: boolean) => void;
 };
@@ -59,13 +46,10 @@ function ToggleRow({
 export function LayerTree({
   featureTypes,
   layerVisibility,
-  floorFilter,
-  floorOptions,
   validationLoaded,
   overlayVisibility,
   showBasemap,
   onLayerVisibilityChange,
-  onFloorFilterChange,
   onOverlayVisibilityChange,
   onShowBasemapChange
 }: Props) {
@@ -73,28 +57,6 @@ export function LayerTree({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1.5">
-        <span className="font-mono text-[10px] font-medium uppercase leading-[13px] tracking-[0.06em] text-muted-foreground">
-          {t("Floor", "フロア")}
-        </span>
-        <Select
-          value={floorFilter || ALL_FLOORS}
-          onValueChange={(value) => onFloorFilterChange(value === ALL_FLOORS ? "" : value)}
-        >
-          <SelectTrigger aria-label={t("Floor filter", "フロアフィルター")}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_FLOORS}>{t("All floors", "すべてのフロア")}</SelectItem>
-            {floorOptions.map((option) => (
-              <SelectItem key={option.id} value={option.id}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
       <div className="flex flex-col gap-1.5">
         <span className="font-mono text-[10px] font-medium uppercase leading-[13px] tracking-[0.06em] text-muted-foreground">
           {t("Feature layers", "フィーチャーレイヤー")}

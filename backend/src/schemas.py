@@ -275,6 +275,22 @@ class ValidationResponse(BaseModel):
     summary: ValidationSummary = Field(default_factory=ValidationSummary)
 
 
+class FeatureUndo(BaseModel):
+    """Puts back what a fix changed: drop every feature named in ``remove_ids``
+    or ``features``, then restore ``features`` as they were before the fix.
+
+    ``fingerprints`` holds, per touched id, a digest of what the fix left
+    there ("" where it deleted the feature); a restore is refused unless the
+    project still holds exactly that. ``digest`` seals the whole payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    remove_ids: list[str] = Field(default_factory=list)
+    features: list[dict[str, Any]] = Field(default_factory=list)
+    fingerprints: dict[str, str] = Field(default_factory=dict)
+    digest: str = ""
+
+
 class AutofixRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -310,6 +326,7 @@ class AutofixResponse(BaseModel):
     total_fixed: int = 0
     total_requiring_confirmation: int = 0
     revalidation: ValidationResponse
+    undo: FeatureUndo = Field(default_factory=FeatureUndo)
 
 
 SESSION_RECORD_SCHEMA_VERSION = 2
@@ -617,8 +634,9 @@ class BulkPatchFeaturesRequest(BaseModel):
     feature_ids: list[str] = Field(default_factory=list)
     properties: dict[str, Any] | None = None
     feature_type: str | None = None
-    action: Literal["patch", "delete", "merge_units"] = "patch"
+    action: Literal["patch", "delete", "merge_units", "restore"] = "patch"
     merge_name: str | None = None
+    undo: FeatureUndo | None = None
 
 
 class BulkPatchFeaturesResponse(BaseModel):
@@ -627,6 +645,7 @@ class BulkPatchFeaturesResponse(BaseModel):
     updated_count: int = 0
     deleted_count: int = 0
     merged_feature_id: str | None = None
+    validation: ValidationResponse | None = None
 
 
 class ResolveUnitOverlapRequest(BaseModel):
@@ -645,6 +664,7 @@ class ResolveUnitOverlapsResponse(BaseModel):
     deleted_count: int = 0
     skipped_count: int = 0
     validation: ValidationResponse
+    undo: FeatureUndo = Field(default_factory=FeatureUndo)
 
 
 class ImportImdfResponse(BaseModel):
@@ -666,6 +686,7 @@ class SnapOpeningResponse(BaseModel):
 
     session_id: str
     validation: ValidationResponse
+    undo: FeatureUndo = Field(default_factory=FeatureUndo)
 
 
 class ErrorResponse(BaseModel):

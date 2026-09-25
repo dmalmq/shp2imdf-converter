@@ -35,6 +35,7 @@ vi.mock("../api/client", async (importOriginal) => ({
   ),
   fetchSessionFeatures: vi.fn(),
   fetchSessionFiles: vi.fn(),
+  fetchStoredValidation: vi.fn(() => Promise.resolve(null)),
   fetchWizardState: vi.fn(),
   generateSessionDraft: vi.fn(),
   importShapefiles: vi.fn(),
@@ -290,7 +291,7 @@ describe("reload on a stage", () => {
 
   test("Check renders Review", async () => {
     renderAt("/p/shinjuku/check");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Export" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Deliver/ })).toBeEnabled());
     expect(pathname).toBe("/p/shinjuku/check");
     const track = screen.getByRole("navigation", { name: "Stages" });
     expect(within(track).getByText("3 · Check").closest("[aria-current]")).toHaveAttribute("aria-current", "step");
@@ -409,7 +410,7 @@ test("a project that is no longer kept opens the dialog, which leads back to /",
 describe("switching project in the same tab", () => {
   test("keeps nothing of the previous project", async () => {
     renderAt("/p/ueno/check");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Export" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Deliver/ })).toBeEnabled());
     act(() => {
       useAppStore.setState({
         selectedFeatureIds: ["ueno-level"],
@@ -510,9 +511,9 @@ describe("switching project in the same tab", () => {
 describe("history", () => {
   test("closing an export dialog opened from Check, also after Forward, leaves no extra entry", async () => {
     renderAt(["/p/shinjuku/set-up", "/p/shinjuku/check"]);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Export" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Deliver/ })).toBeEnabled());
 
-    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Deliver/ }));
     await screen.findByRole("dialog");
     expect(pathname).toBe("/p/shinjuku/deliver");
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));

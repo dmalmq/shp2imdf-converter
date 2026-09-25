@@ -57,6 +57,8 @@ export type PageStages = {
   nextBlockedReason?: Bilingual | null;
   /** Errors the Check stage has found; null or undefined when not yet checked. */
   checkErrors?: number | null;
+  /** Warnings the Check stage has found, which do not block delivery. */
+  checkWarnings?: number | null;
   /** Files Bring in could not place on its own; null or undefined when nothing is read yet. */
   bringInNeeds?: number | null;
 };
@@ -184,10 +186,13 @@ export function shapefileStages({
     }
 
     if (id === "check" && typeof errors === "number") {
+      const fix: Bilingual =
+        errors > 0 ? { en: `${errors} to fix`, ja: `要修正 ${errors} 件` } : { en: "Nothing to fix", ja: "修正なし" };
+      const waiting = page?.checkWarnings;
       stage.detail =
-        errors > 0
-          ? { en: `${errors} to fix`, ja: `要修正 ${errors} 件` }
-          : { en: "Nothing to fix", ja: "修正なし" };
+        typeof waiting === "number" && waiting > 0
+          ? { en: `${fix.en} · ${waiting} can wait`, ja: `${fix.ja} · 後回し ${waiting} 件` }
+          : fix;
       stage.detailTone = errors > 0 ? "danger" : "default";
     }
 
