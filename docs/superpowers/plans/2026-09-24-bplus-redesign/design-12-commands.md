@@ -353,7 +353,7 @@ panel would count as opening it: it would reorder the hub and extend 新宿's 30
   the user moves through results. Each group is `role="group"` with `aria-labelledby` pointing
   at its heading. Each row is `role="option"` with `aria-selected`, and the kind chip is part of
   the option's name.
-- **Keys.** ↑ and ↓ move and wrap; Home and End jump to the ends; Enter runs the active item;
+- **Keys.** ↑ and ↓ move and wrap; Home and End stay with the text, as the editable-combobox pattern expects; Enter runs the active item;
   Esc closes the panel and returns focus to where it was before Ctrl K. In command mode, Enter is
   Apply and Esc is Cancel, which clears the command but keeps the panel open; a second Esc
   closes it. Tab completes the current slot with the first completion when there is one, and
@@ -387,6 +387,8 @@ panel would count as opening it: it would reorder the hub and extend 新宿's 30
 - Station matching uses `ProjectSummary.name` only, so `tokyo` does not find 東京駅.
 - No Japanese command words (`割り当て`, `移動`). 119:193 keeps the commands in English.
 - The "Understood as" chip shows `move` when the colleague typed `move`, and `assign` otherwise.
+- There is no "Then you'll see" toast sample beside Apply. The toast is worded from the server's reply (§5), so the preview cannot know it in advance.
+- The IME guard ignores an Enter or Tab that arrives within 100 ms of `compositionend`. A flag cleared only by the next key would swallow a deliberate Enter in Chrome, which sends no confirming Enter at all.
 
 ## 9. Tests
 

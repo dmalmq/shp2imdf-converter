@@ -7,8 +7,10 @@ import {
   fetchFeatureTypeCatalog,
   fetchSessionFeatures,
   fetchSessionFiles,
+  fetchProjects,
   fetchStoredValidation,
   generateSessionDraft,
+  patchFeaturesGuarded,
   patchSessionFeature,
   patchSessionFeaturesBulk,
   resolveSessionUnitOverlap,
@@ -29,8 +31,10 @@ vi.mock("../api/client", () => ({
   fetchFeatureTypeCatalog: vi.fn(),
   fetchSessionFeatures: vi.fn(),
   fetchSessionFiles: vi.fn(),
+  fetchProjects: vi.fn(),
   fetchStoredValidation: vi.fn(),
   generateSessionDraft: vi.fn(),
+  patchFeaturesGuarded: vi.fn(),
   patchSessionFeature: vi.fn(),
   patchSessionFeaturesBulk: vi.fn(),
   resolveSessionUnitOverlap: vi.fn(),
@@ -621,4 +625,128 @@ test("an Undo the server refuses says why and is withdrawn", async () => {
 
   expect(await screen.findByText("Can’t undo — changed since")).toBeInTheDocument();
   await waitFor(() => expect(screen.queryByRole("region", { name: "Done" })).not.toBeInTheDocument());
+});
+
+describe("typed commands on Check", () => {
+  const levels = {
+    type: "FeatureCollection" as const,
+    content_rev: 4,
+    features: [
+      { type: "Feature", id: "l0", feature_type: "level", geometry: null, properties: { name: { ja: "屋外" }, short_name: { ja: "0F" }, ordinal: 0, outdoor: false } },
+      { type: "Feature", id: "l1", feature_type: "level", geometry: null, properties: { name: { ja: "1F" }, short_name: { ja: "1F" }, ordinal: 1 } },
+      { type: "Feature", id: "u1", feature_type: "unit", geometry: null, properties: { level_id: "l0" } }
+    ]
+  };
+  const undo = { remove_ids: [], features: [{ id: "l0" }], fingerprints: { l0: "x" }, digest: "d" };
+
+  function Toggle() {
+    const [shown, setShown] = React.useState(true);
+    return (
+      <>
+        <button type="button" onClick={() => setShown(false)}>
+          leave check
+        </button>
+        {shown ? <ReviewPage /> : null}
+      </>
+    );
+  }
+
+  async function typeCommand(text: string) {
+    const box = screen.getByRole("combobox");
+    act(() => {
+      box.focus();
+    });
+    fireEvent.change(box, { target: { value: text } });
+    await screen.findByText(/Move the 屋外 level onto floor 1F/, { selector: "p" });
+    fireEvent.keyDown(box, { key: "Enter" });
+  }
+
+  beforeEach(() => {
+    vi.mocked(fetchProjects).mockResolvedValue({
+      projects: [],
+      total: 0,
+      limits: { sessions: { idle_days: 30, max_projects: 200 }, artwork: { idle_days: 30, max_projects: 200 } }
+    });
+    fetchSessionFeaturesMock.mockResolvedValue(levels);
+    vi.mocked(patchFeaturesGuarded).mockResolvedValue({
+      updated_count: 1,
+      undo,
+      validation: validationOf([], []),
+      content_rev: 5
+    });
+    restoreSessionFeaturesMock.mockResolvedValue(validationOf([], []));
+  });
+
+  test("assign sends the preview's revision, records a Done row, and the toast's Undo restores it", async () => {
+    render(
+      <MemoryRouter initialEntries={["/p/session-123/check"]}>
+        <ToastProvider>
+          <AppShell>
+            <ReviewPage />
+          </AppShell>
+        </ToastProvider>
+      </MemoryRouter>
+    );
+    await screen.findByRole("button", { name: /0F/ });
+
+    await typeCommand("assign 屋外 to 1F outdoor");
+
+    await waitFor(() =>
+      expect(patchFeaturesGuarded).toHaveBeenCalledWith(
+        "session-123",
+        ["l0"],
+        { ordinal: 1, short_name: { ja: "1F" }, outdoor: true },
+        4
+      )
+    );
+    const doneList = await screen.findByRole("region", { name: "Done" });
+    expect(within(doneList).getByText("Moved 屋外 to 1F")).toBeInTheDocument();
+    expect(await screen.findByText("Moved 屋外 to 1F.")).toBeInTheDocument();
+
+    const toastUndo = screen.getAllByRole("button", { name: "Undo" }).find((button) => !doneList.contains(button))!;
+    fireEvent.click(toastUndo);
+
+    await waitFor(() => expect(restoreSessionFeaturesMock).toHaveBeenCalledWith("session-123", undo));
+  });
+
+  test("a refused revision reloads the features and says the preview changed", async () => {
+    vi.mocked(patchFeaturesGuarded).mockRejectedValue(new ApiClientError(409, "REVISION_STALE", "changed", true));
+    render(
+      <MemoryRouter initialEntries={["/p/session-123/check"]}>
+        <ToastProvider>
+          <AppShell>
+            <ReviewPage />
+          </AppShell>
+        </ToastProvider>
+      </MemoryRouter>
+    );
+    await screen.findByRole("button", { name: /0F/ });
+    const loads = fetchSessionFeaturesMock.mock.calls.length;
+
+    await typeCommand("assign 屋外 to 1F");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("This changed since you looked");
+    expect(fetchSessionFeaturesMock.mock.calls.length).toBeGreaterThan(loads);
+    expect(screen.queryByRole("region", { name: "Done" })).not.toBeInTheDocument();
+  });
+
+  test("leaving Check withdraws the toast's Undo", async () => {
+    render(
+      <MemoryRouter initialEntries={["/p/session-123/check"]}>
+        <ToastProvider>
+          <AppShell>
+            <Toggle />
+          </AppShell>
+        </ToastProvider>
+      </MemoryRouter>
+    );
+    await screen.findByRole("button", { name: /0F/ });
+    await typeCommand("assign 屋外 to 1F");
+    expect(await screen.findByText("Moved 屋外 to 1F.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "leave check" }));
+
+    expect(screen.getByText("Moved 屋外 to 1F.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+  });
 });

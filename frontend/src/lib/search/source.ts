@@ -82,7 +82,7 @@ export function levelRefs(features: readonly ReviewFeature[], floors: readonly F
 /** Floors as Set up maps them, for a project Check is not showing. */
 export function wizardFloors(wizard: WizardState | null): FloorRef[] {
   const found = new Map<string, FloorRef>();
-  for (const item of wizard?.levels.items ?? []) {
+  for (const item of wizard?.levels?.items ?? []) {
     const label = item.short_name?.trim() || item.name?.trim();
     if (!label || found.has(label)) continue;
     found.set(label, { label, ordinal: item.ordinal ?? 0, levelIds: [], shortName: label });

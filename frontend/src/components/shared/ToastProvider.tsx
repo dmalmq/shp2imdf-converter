@@ -7,6 +7,10 @@ type ToastInput = {
   description?: string;
   variant?: ToastVariant;
   durationMs?: number;
+  /** A button on the toast; it closes the toast when pressed. */
+  action?: { label: string; run: () => void };
+  /** Toasts sharing a group can have their actions withdrawn together. */
+  group?: string;
 };
 
 type ToastRecord = ToastInput & {
@@ -16,6 +20,7 @@ type ToastRecord = ToastInput & {
 
 type ToastContextValue = {
   pushToast: (toast: ToastInput) => void;
+  withdrawActions: (group: string) => void;
 };
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -57,7 +62,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [startExit]
   );
 
-  const contextValue = useMemo<ToastContextValue>(() => ({ pushToast }), [pushToast]);
+  const withdrawActions = useCallback((group: string) => {
+    setToasts((previous) =>
+      previous.some((item) => item.group === group && item.action)
+        ? previous.map((item) => (item.group === group ? { ...item, action: undefined } : item))
+        : previous
+    );
+  }, []);
+
+  const contextValue = useMemo<ToastContextValue>(() => ({ pushToast, withdrawActions }), [pushToast, withdrawActions]);
 
   return (
     <ToastContext.Provider value={contextValue}>
@@ -81,6 +94,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   <p className="text-sm font-semibold">{toast.title}</p>
                   {toast.description ? <p className="mt-0.5 text-xs opacity-80">{toast.description}</p> : null}
                 </div>
+                {toast.action ? (
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-sm px-1.5 py-0.5 text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => {
+                      toast.action?.run();
+                      startExit(toast.id);
+                    }}
+                  >
+                    {toast.action.label}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="shrink-0 rounded-sm px-1.5 py-0.5 text-[11px] opacity-60 transition-opacity hover:opacity-100"
@@ -105,4 +130,13 @@ export function useToast() {
     throw new Error("useToast must be used within ToastProvider");
   }
   return context.pushToast;
+}
+
+/** Withdraws the actions of every toast in a group, e.g. an Undo whose page has gone. */
+export function useWithdrawToastActions() {
+  const context = useContext(ToastContext);
+  if (!context) {
+    throw new Error("useWithdrawToastActions must be used within ToastProvider");
+  }
+  return context.withdrawActions;
 }

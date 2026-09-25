@@ -25,6 +25,8 @@ type Props = {
   activeIssue?: ReviewIssue | null;
   /** Drawn at a point on the map: the active issue's marker. */
   pin?: { lngLat: [number, number]; content: ReactNode } | null;
+  /** Outlined while a command's preview is open: what the change would touch. */
+  previewIds?: readonly string[] | null;
   onSelectFeature: (id: string, multi?: boolean) => void;
 };
 
@@ -101,6 +103,16 @@ const HIGHLIGHT_POINT_LAYER: LayerProps = {
     "circle-stroke-width": 2
   }
 };
+
+const PREVIEW_LINE_LAYER: LayerProps = {
+  id: "review-preview-line",
+  type: "line",
+  paint: {
+    "line-color": ["case", ["==", ["get", "_theme"], "dark"], "#8fb8dc", "#2f5f8a"],
+    "line-width": 2.5,
+    "line-dasharray": [2, 1.5]
+  }
+} as unknown as LayerProps;
 
 const ERROR_OUTLINE_LAYER: LayerProps = {
   id: "review-error-outline",
@@ -265,6 +277,7 @@ export function MapPanel({
   showBasemap,
   activeIssue,
   pin,
+  previewIds,
   onSelectFeature
 }: Props) {
   const mapRef = useRef<MapRef | null>(null);
@@ -548,6 +561,22 @@ export function MapPanel({
     }
   }, [activeIssue, features]);
 
+  const previewData = useMemo(() => {
+    const ids = new Set(previewIds ?? []);
+    return {
+      type: "FeatureCollection" as const,
+      features: features
+        .filter((feature) => ids.has(feature.id) && isLocatedFeature(feature))
+        .map((feature) => ({ ...toGeoJsonFeature(feature), properties: { _theme: theme } }))
+    };
+  }, [features, previewIds, theme]);
+
+  useEffect(() => {
+    if (!previewIds || previewIds.length === 0 || !mapRef.current) return;
+    const bounds = computeBounds(features.filter((feature) => previewIds.includes(feature.id)));
+    if (bounds) mapRef.current.fitBounds(bounds, { padding: 80, duration: 400, maxZoom: BASEMAP_MAX_ZOOM });
+  }, [previewIds, features]);
+
   const onMapClick = (event: MapLayerMouseEvent) => {
     const hit = event.features?.[0];
     if (!hit) {
@@ -637,6 +666,9 @@ export function MapPanel({
             )}
           </Source>
         ) : null}
+        <Source id="review-preview-source" type="geojson" data={previewData}>
+          <Layer {...PREVIEW_LINE_LAYER} />
+        </Source>
         {pin ? (
           <Marker longitude={pin.lngLat[0]} latitude={pin.lngLat[1]} anchor="center">
             {pin.content}
