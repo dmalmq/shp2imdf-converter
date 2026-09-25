@@ -20,7 +20,7 @@ function SectionMark({ done }: { done: boolean }) {
 }
 
 export function SectionNav({ sections, activeSection, onSelect }: Props) {
-  const { t } = useUiLanguage();
+  const { t, isJapanese } = useUiLanguage();
   const visible = sections.filter((section) => !section.hidden);
   const done = visible.filter((section) => section.done).length;
 
@@ -30,7 +30,7 @@ export function SectionNav({ sections, activeSection, onSelect }: Props) {
       <li key={section.id}>
         <button
           type="button"
-          aria-current={active ? "step" : undefined}
+          aria-current={active ? "true" : undefined}
           onClick={() => onSelect(section.id)}
           className={cn(
             "flex w-full items-center gap-2.5 rounded-md text-left transition-colors",
@@ -53,7 +53,12 @@ export function SectionNav({ sections, activeSection, onSelect }: Props) {
       className="flex w-[264px] shrink-0 flex-col gap-3 overflow-auto border-r border-border bg-card px-4 py-5"
     >
       <div className="flex items-baseline justify-between gap-2 px-1">
-        <h2 className="font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+        <h2
+          className={cn(
+            "text-[11px] font-medium text-muted-foreground",
+            !isJapanese && "font-mono uppercase tracking-[0.06em]"
+          )}
+        >
           {t("Sections", "セクション")}
         </h2>
         <span className="font-mono text-[11px] text-muted-foreground">

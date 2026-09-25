@@ -90,7 +90,7 @@ type Props = {
 };
 
 const TIME_INPUT =
-  "h-7 w-[5.5rem] rounded-md border border-input bg-card px-1.5 font-mono text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  "h-7 w-[7.5rem] rounded-md border border-input bg-card px-1.5 font-mono text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 export function HoursEditor({ value, onChange }: Props) {
   const { t } = useUiLanguage();
