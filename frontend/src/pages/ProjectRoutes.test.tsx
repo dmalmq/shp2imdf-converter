@@ -280,7 +280,7 @@ afterEach(async () => {
 describe("reload on a stage", () => {
   test("Set up hydrates the store from the URL", async () => {
     renderAt("/p/tokyo/set-up");
-    await screen.findByLabelText(/Venue Name/);
+    await screen.findByLabelText(/Venue name/);
     const state = useAppStore.getState();
     expect(state.sessionId).toBe("tokyo");
     expect(state.files.map((item) => item.stem)).toEqual(["Tokyo_B1_Space"]);
@@ -384,7 +384,7 @@ describe("redirects", () => {
     useAppStore.getState().switchProject("shinjuku");
     renderAt("/wizard");
     await waitFor(() => expect(pathname).toBe("/p/shinjuku/set-up"));
-    await screen.findByLabelText(/Venue Name/);
+    await screen.findByLabelText(/Venue name/);
     act(() => navigate("/review"));
     await waitFor(() => expect(pathname).toBe("/p/shinjuku/check"));
   });
@@ -422,7 +422,7 @@ describe("switching project in the same tab", () => {
     });
 
     act(() => navigate("/p/tokyo/set-up"));
-    await screen.findByLabelText(/Venue Name/);
+    await screen.findByLabelText(/Venue name/);
 
     const state = useAppStore.getState();
     expect(state.sessionId).toBe("tokyo");
@@ -448,7 +448,7 @@ describe("switching project in the same tab", () => {
     });
 
     renderAt("/p/tokyo/set-up");
-    const venue = await screen.findByLabelText(/Venue Name/);
+    const venue = await screen.findByLabelText(/Venue name/);
     fireEvent.change(venue, { target: { value: "Tokyo Station East" } });
     await sleep(AUTOSAVE_DELAY_MS / 4);
     expect(patchWizardProject).not.toHaveBeenCalled();
@@ -469,7 +469,7 @@ describe("switching project in the same tab", () => {
     expect(state.wizardState?.project?.venue_name).toBe("Shinjuku");
     expect(state.files.map((item) => item.stem)).toEqual(["Shinjuku_1_Space"]);
     expect(state.wizardSaveStatus).not.toBe("saved");
-    expect(screen.getByLabelText(/Venue Name/)).toHaveValue("Shinjuku");
+    expect(screen.getByLabelText(/Venue name/)).toHaveValue("Shinjuku");
   });
 
   test("Back returns to the first project with its own data", async () => {
@@ -492,7 +492,7 @@ describe("switching project in the same tab", () => {
         })
     );
     renderAt("/p/tokyo/set-up");
-    const venue = await screen.findByLabelText(/Venue Name/);
+    const venue = await screen.findByLabelText(/Venue name/);
     fireEvent.change(venue, { target: { value: "Tokyo Station East" } });
     act(() => navigate("/p/shinjuku/set-up"));
     await waitFor(() => expect(patchWizardProject).toHaveBeenCalledTimes(1));
@@ -525,7 +525,7 @@ describe("history", () => {
     await waitFor(() => expect(pathname).toBe("/p/shinjuku/check"));
 
     act(() => navigate(-1));
-    await screen.findByLabelText(/Venue Name/);
+    await screen.findByLabelText(/Venue name/);
     expect(pathname).toBe("/p/shinjuku/set-up");
   });
 

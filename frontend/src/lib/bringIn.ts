@@ -44,6 +44,9 @@ export type BringInRow = {
   shapeGuess: string | null;
   floor: RowFloor;
   shapes: number;
+  geometry: string;
+  /** The GeoPackage layer the file was read from. */
+  layer: string | null;
   reasons: NeedReason[];
   warnings: string[];
 };
@@ -86,6 +89,8 @@ export function toRow(file: ImportedFile): BringInRow {
     shapeGuess: named ? null : file.detected_type,
     floor,
     shapes: file.feature_count,
+    geometry: file.geometry_type,
+    layer: file.source_format === "gpkg" ? file.source_layer : null,
     reasons,
     warnings: file.warnings
   };

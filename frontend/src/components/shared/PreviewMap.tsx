@@ -6,7 +6,7 @@ import { featureColorMatchExpr, featureColorMatchTail } from "./featureColors";
 import { buildUnitFillColorExpr, buildUnitLineColorExpr, buildUnitOpacityExpr } from "./unitCategoryColors";
 
 
-type BasicFeature = {
+export type BasicFeature = {
   type: string;
   feature_type?: string;
   geometry?: {
@@ -179,7 +179,7 @@ export function PreviewMap({ features, selectedStem, hoveredStem }: Props) {
   useEffect(() => { fitToAll(); }, [features]);
 
   return (
-    <div className="h-[58vh] min-h-[430px] max-h-[760px] overflow-hidden rounded border">
+    <div className="h-[300px] overflow-hidden rounded-[10px] border border-border">
       <MapView
         ref={mapRef}
         initialViewState={{

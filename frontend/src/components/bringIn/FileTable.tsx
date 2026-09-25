@@ -17,6 +17,8 @@ import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue }
 const DETECTED_COLUMNS = "grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_7.5rem_4.5rem]";
 const QUEUED_COLUMNS = "grid-cols-[minmax(0,1.3fr)_8rem_5rem_minmax(0,1fr)]";
 const LOOK_RIGHT_SHOWN = 8;
+// Radix Select has no empty-string value, so clearing a type needs a sentinel.
+const NO_TYPE = "__unknown__";
 
 type T = (english: string, japanese: string) => string;
 
@@ -55,34 +57,50 @@ function GroupHeading({ tone, children }: { tone: "danger" | "ok"; children: Rea
   );
 }
 
-function Row({ columns, needsYou, children }: { columns: string; needsYou: boolean; children: ReactNode }) {
+function Row({
+  columns,
+  needsYou,
+  children,
+  ...hover
+}: {
+  columns: string;
+  needsYou: boolean;
+  children: ReactNode;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+}) {
   return (
-    <li className={cn("grid items-center gap-4 border-b border-border px-5 py-2.5 last:border-b-0", columns, needsYou && "bg-destructive-muted/50")}>
+    <li
+      {...hover}
+      className={cn("grid items-center gap-4 border-b border-border px-5 py-2.5 last:border-b-0", columns, needsYou && "bg-destructive-muted/50")}
+    >
       {children}
     </li>
   );
 }
 
-function FileName({ name, note, tone }: { name: string; note?: string | null; tone?: "danger" | "muted" }) {
+function FileName({
+  name,
+  detail,
+  note,
+  tone
+}: {
+  name: string;
+  detail?: string | null;
+  note?: string | null;
+  tone?: "danger" | "muted";
+}) {
   return (
     <span className="flex min-w-0 flex-col gap-[3px]">
       <span className="truncate font-mono text-[12.5px] text-foreground" title={name}>
         {name}
       </span>
+      {detail ? <span className="truncate font-mono text-[11px] text-muted-foreground">{detail}</span> : null}
       {note ? (
         <span className={cn("text-xs leading-[1.4]", tone === "danger" ? "text-destructive" : "text-muted-foreground")}>
           {note}
         </span>
       ) : null}
-    </span>
-  );
-}
-
-function Known({ children }: { children: ReactNode }) {
-  return (
-    <span className="flex min-w-0 items-center gap-2 text-[13px] text-foreground">
-      <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-primary" />
-      <span className="truncate">{children}</span>
     </span>
   );
 }
@@ -107,10 +125,23 @@ type DetectedProps = {
   /** Files with a choice on its way to the server. */
   saving: ReadonlySet<string>;
   onResolve: (stem: string, payload: UpdateFileRequest) => void;
+  /** The file shown alone on the map, if any. */
+  selected?: string | null;
+  onHover?: (stem: string | null) => void;
+  onSelect?: (stem: string | null) => void;
 };
 
 /** What was read from each file, the ones that need a decision first. */
-export function DetectedTable({ needsYou, looksRight, floorChoices, saving, onResolve }: DetectedProps) {
+export function DetectedTable({
+  needsYou,
+  looksRight,
+  floorChoices,
+  saving,
+  onResolve,
+  selected = null,
+  onHover,
+  onSelect
+}: DetectedProps) {
   const { t } = useUiLanguage();
   const [expanded, setExpanded] = useState(false);
   const shown = expanded ? looksRight : looksRight.slice(0, LOOK_RIGHT_SHOWN);
@@ -142,26 +173,58 @@ export function DetectedTable({ needsYou, looksRight, floorChoices, saving, onRe
     );
   };
 
-  const typeCell = (row: BringInRow) =>
-    row.type ? (
-      <Known>{typeLabel(row.type, t)}</Known>
-    ) : (
-      <Select
-        value=""
-        disabled={saving.has(row.stem)}
-        onValueChange={(value) => onResolve(row.stem, { detected_type: value })}
+  const typeCell = (row: BringInRow) => (
+    <Select
+      value={row.type ?? ""}
+      disabled={saving.has(row.stem)}
+      onValueChange={(value) => onResolve(row.stem, { detected_type: value === NO_TYPE ? null : value })}
+    >
+      <SelectTrigger
+        className={cn(
+          "h-8 text-[13px]",
+          row.type ? "-ml-2 gap-2 border-transparent bg-transparent px-2 shadow-none hover:border-border hover:bg-card" : "bg-card"
+        )}
+        aria-label={t(`What ${row.stem} is`, `${row.stem} の種類`)}
       >
-        <SelectTrigger className="h-8 bg-card text-[13px]" aria-label={t(`What ${row.stem} is`, `${row.stem} の種類`)}>
+        {row.type ? <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-primary" /> : null}
+        <span className="min-w-0 flex-1 truncate text-left">
           <SelectValue placeholder={t("Choose what this is…", "種類を選択…")} />
-        </SelectTrigger>
-        <SelectContent>
-          {TYPE_OPTIONS.map((option) => (
-            <SelectItem key={option} value={option}>
-              {typeLabel(option, t)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        </span>
+      </SelectTrigger>
+      <SelectContent>
+        {TYPE_OPTIONS.map((option) => (
+          <SelectItem key={option} value={option}>
+            {typeLabel(option, t)}
+          </SelectItem>
+        ))}
+        <SelectItem value={NO_TYPE}>{t("Unknown — decide later", "不明（あとで決める）")}</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+
+  const rowDetail = (row: BringInRow) =>
+    row.layer ? t(`${row.geometry} · layer ${row.layer}`, `${row.geometry} · レイヤー ${row.layer}`) : row.geometry;
+
+  const rowProps = (row: BringInRow) => ({
+    onMouseEnter: onHover ? () => onHover(row.stem) : undefined,
+    onMouseLeave: onHover ? () => onHover(null) : undefined
+  });
+  const nameCell = (row: BringInRow, note: string | null | undefined, tone: "danger" | "muted") =>
+    onSelect ? (
+      <button
+        type="button"
+        aria-pressed={selected === row.stem}
+        title={t("Show only this file on the map", "このファイルだけを地図に表示")}
+        onClick={() => onSelect(selected === row.stem ? null : row.stem)}
+        className={cn(
+          "min-w-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          selected === row.stem && "underline decoration-primary decoration-2 underline-offset-4"
+        )}
+      >
+        <FileName name={row.stem} detail={rowDetail(row)} note={note} tone={tone} />
+      </button>
+    ) : (
+      <FileName name={row.stem} detail={rowDetail(row)} note={note} tone={tone} />
     );
 
   return (
@@ -173,8 +236,8 @@ export function DetectedTable({ needsYou, looksRight, floorChoices, saving, onRe
           <GroupHeading tone="danger">{t(`Needs you · ${needsYou.length}`, `要確認 · ${needsYou.length}`)}</GroupHeading>
           <ul>
             {needsYou.map((row) => (
-              <Row key={row.stem} columns={DETECTED_COLUMNS} needsYou>
-                <FileName name={row.stem} note={reasonText(row, t)} tone="danger" />
+              <Row key={row.stem} columns={DETECTED_COLUMNS} needsYou {...rowProps(row)}>
+                {nameCell(row, reasonText(row, t), "danger")}
                 {typeCell(row)}
                 {floorCell(row)}
                 <span className="font-mono text-xs text-muted-foreground">{row.shapes}</span>
@@ -188,9 +251,9 @@ export function DetectedTable({ needsYou, looksRight, floorChoices, saving, onRe
           <GroupHeading tone="ok">{t(`Look right · ${looksRight.length}`, `問題なし · ${looksRight.length}`)}</GroupHeading>
           <ul>
             {shown.map((row) => (
-              <Row key={row.stem} columns={DETECTED_COLUMNS} needsYou={false}>
-                <FileName name={row.stem} note={row.warnings[0]} tone="muted" />
-                {row.type ? <Known>{typeLabel(row.type, t)}</Known> : <span />}
+              <Row key={row.stem} columns={DETECTED_COLUMNS} needsYou={false} {...rowProps(row)}>
+                {nameCell(row, row.warnings[0], "muted")}
+                {typeCell(row)}
                 {floorCell(row)}
                 <span className="font-mono text-xs text-muted-foreground">{row.shapes}</span>
               </Row>

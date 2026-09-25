@@ -44,14 +44,13 @@ const THEME_TOGGLE = 'button[aria-label="Switch theme"], button[aria-label="テ�
 const LANG_TOGGLE = '[data-language-switch] button[aria-pressed="false"], button[title="Switch UI language"], button[title="表示言語を切り替え"]';
 
 const WIZARD_SECTIONS = [
-  { screen: "wizard-venue-info", nav: ["Project & Venue", "Venue Info"] },
-  { screen: "wizard-buildings", nav: ["Project & Venue", "Buildings"] },
-  { screen: "wizard-footprint", nav: ["Project & Venue", "Footprint"] },
-  { screen: "wizard-file-classification", nav: ["File Classification"] },
-  { screen: "wizard-level-mapping", nav: ["Level Mapping"] },
-  { screen: "wizard-unit-mapping", nav: ["Attribute Mapping", "Unit Mapping"] },
-  { screen: "wizard-opening-mapping", nav: ["Attribute Mapping", "Opening Mapping"] },
-  { screen: "wizard-summary", nav: ["Summary & Generate"] }
+  { screen: "wizard-venue-info", nav: ["Project & venue", "Venue info"] },
+  { screen: "wizard-buildings", nav: ["Project & venue", "Buildings"] },
+  { screen: "wizard-footprint", nav: ["Project & venue", "Footprint"] },
+  { screen: "wizard-level-mapping", nav: ["Level mapping"] },
+  { screen: "wizard-unit-mapping", nav: ["Attribute mapping", "Unit mapping"] },
+  { screen: "wizard-opening-mapping", nav: ["Attribute mapping", "Opening mapping"] },
+  { screen: "wizard-summary", nav: ["Summary & generate"] }
 ];
 
 function parseArgs(argv) {
@@ -175,7 +174,7 @@ async function captureShapefileFlow(page, shoot) {
   await page.getByRole("region", { name: "Look right" }).waitFor({ timeout: 30000 });
   await shoot("bring-in");
   await continueToSetUp(page);
-  await page.getByLabel(/Venue Name/).waitFor({ timeout: 30000 });
+  await page.getByLabel(/Venue name/).waitFor({ timeout: 30000 });
   await fillVenue(page);
 
   for (const { screen, nav } of WIZARD_SECTIONS) {

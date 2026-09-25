@@ -29,9 +29,9 @@ Preconditions:
 - **Queue fixtures.** Set the dropzone input to every `tokyo_station` shapefile sidecar. Run `locator('input[type="file"]:not(#imdf-file-input)').first().setInputFiles(<paths>)`. A row `JRTokyoSta_B1_Space` appears under `Ready to read` (also `JRTokyoSta_B1_Opening`, `JRTokyoSta_GF_Space`).
 - **Import.** Run `getByRole('button', { name: 'Read the files' }).first().click()`. Wait until the URL is `/p/<sessionId>/bring-in`: the files are grouped `Needs you` / `Look right` with type and floor, and `Floors we found` lists them.
 - **Continue.** Run `getByRole('button', { name: 'Continue to Set up' }).first().click()` (disabled while any file needs you). Wait until the URL is `/p/<sessionId>/set-up`.
-- **Land on wizard.** Heading `Project & Venue` and the `Venue Name*` field are visible (do not treat the section skeleton as done — Vite StrictMode remounts the wizard once).
+- **Land on wizard.** Heading `Project & venue` and the `Venue name` field are visible (do not treat the section skeleton as done — Vite StrictMode remounts the wizard once).
 - **Empty control.** Reload `/p/new` with no files. The `Read the files` button is disabled.
-- **Proof.** Capture wizard Project & Venue. Write `artifacts/verify-shp2imdf/import-shapefiles/result.png`, `result.aria.txt`, and `report.md`. Artifacts show `IMDF Converter` and `Venue Name`.
+- **Proof.** Capture wizard Project & venue. Write `artifacts/verify-shp2imdf/import-shapefiles/result.png`, `result.aria.txt`, and `report.md`. Artifacts show `IMDF Converter` and `Venue name`.
 
 ## Gotchas
 

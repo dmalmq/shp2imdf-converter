@@ -1,4 +1,29 @@
-import { parseOsmHours, toOsmHours } from "./HoursEditor";
+import React from "react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+
+import { HoursEditor, parseOsmHours, toOsmHours } from "./HoursEditor";
+
+test("Open and Closed set a day, and Copy Monday to all copies its hours", () => {
+  const onChange = vi.fn();
+  render(<HoursEditor value="Mo 05:00-23:30" onChange={onChange} />);
+
+  const tuesday = screen.getByRole("group", { name: "Tuesday" });
+  expect(within(tuesday).getByRole("button", { name: "Closed" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(within(tuesday).getByRole("button", { name: "Open" }));
+  expect(onChange).toHaveBeenLastCalledWith("Mo 05:00-23:30; Tu 09:00-17:00");
+
+  fireEvent.click(screen.getByRole("button", { name: "Copy Monday to all" }));
+  expect(onChange).toHaveBeenLastCalledWith("Mo-Su 05:00-23:30; PH 05:00-23:30");
+});
+
+test("Copy Monday to all is off while Monday is closed, so it cannot erase the other days", () => {
+  const onChange = vi.fn();
+  render(<HoursEditor value="Tu-Fr 09:00-17:00" onChange={onChange} />);
+  const copy = screen.getByRole("button", { name: "Copy Monday to all" });
+  expect(copy).toBeDisabled();
+  fireEvent.click(copy);
+  expect(onChange).not.toHaveBeenCalled();
+});
 
 test("PH is emitted as a separate token, never merged into a weekday range", () => {
   const state = parseOsmHours("");

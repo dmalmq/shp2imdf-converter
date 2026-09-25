@@ -2,18 +2,29 @@ import React from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
-import { importImdfShapefiles, importShapefiles, updateSessionFile, type ImportedFile } from "../api/client";
+import {
+  detectAllFiles,
+  fetchSessionFeatures,
+  importImdfShapefiles,
+  importShapefiles,
+  updateSessionFile,
+  type ImportedFile
+} from "../api/client";
 import { ApiClientError } from "../api/errors";
 import { ToastProvider } from "../components/shared/ToastProvider";
 import { useAppStore } from "../store/useAppStore";
 import { UploadPage } from "./UploadPage";
 
 vi.mock("../api/client", () => ({
+  detectAllFiles: vi.fn(),
+  fetchSessionFeatures: vi.fn(),
   importImdfShapefiles: vi.fn(),
   importShapefiles: vi.fn(),
   updateSessionFile: vi.fn()
 }));
 
+const detectAllFilesMock = vi.mocked(detectAllFiles);
+vi.mocked(fetchSessionFeatures).mockResolvedValue({ type: "FeatureCollection", features: [] });
 const importImdfShapefilesMock = vi.mocked(importImdfShapefiles);
 const importShapefilesMock = vi.mocked(importShapefiles);
 const updateSessionFileMock = vi.mocked(updateSessionFile);
@@ -288,5 +299,65 @@ describe("a project's Bring in", () => {
     expect(screen.queryByRole("region", { name: "Needs you" })).not.toBeInTheDocument();
     fireEvent.click(nextButton(/Continue to Check/));
     expect(screen.getByTestId("where")).toHaveTextContent("/p/s1/check");
+  });
+
+  test("a file that looks right can still change type, and a suggested keyword can be remembered", async () => {
+    const opening = brought[1];
+    const suggestion = {
+      source_stem: opening.stem,
+      keyword: "Opening",
+      feature_type: "fixture",
+      affected_stems: ["JRTokyoSta_B1_Opening"],
+      message: "Apply suffix 'Opening' as fixture keyword to 1 other files?"
+    };
+    updateSessionFileMock.mockResolvedValueOnce({ ...saved({ ...opening, detected_type: "fixture" }), learning_suggestion: suggestion });
+    renderPage(true, "/p/s1/bring-in");
+
+    await choose(`What ${opening.stem} is`, "Fixtures");
+    expect(updateSessionFileMock).toHaveBeenCalledWith("s1", opening.stem, { detected_type: "fixture" });
+    expect(await screen.findByText(/Read names ending in “Opening” as Fixtures from now on\? That changes 1 other file/)).toBeInTheDocument();
+
+    expect(screen.getByRole("region", { name: "Needs you" })).toHaveTextContent("Needs you · 1");
+    const relearned = brought.map((item) =>
+      item.stem === opening.stem || item.stem === "qwzx"
+        ? { ...item, detected_type: "fixture", confidence: "green" as const, detected_level: 0 }
+        : item
+    );
+    updateSessionFileMock.mockResolvedValueOnce({ ...saved(relearned[1]), files: relearned });
+    fireEvent.click(screen.getByRole("button", { name: "Remember it" }));
+    expect(updateSessionFileMock).toHaveBeenLastCalledWith("s1", opening.stem, {
+      detected_type: "fixture",
+      apply_learning: true,
+      learning_keyword: "Opening"
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Remember it" })).not.toBeInTheDocument());
+    const types = useAppStore.getState().files.map((item) => [item.stem, item.detected_type]);
+    expect(types).toContainEqual(["qwzx", "fixture"]);
+    expect(screen.queryByRole("region", { name: "Needs you" })).not.toBeInTheDocument();
+    expect(nextButton(/Continue to Set up/)).toBeEnabled();
+  });
+
+  test("a type can be cleared, and each file says its geometry and GeoPackage layer", async () => {
+    useAppStore.setState({
+      files: [...brought, file("stations", { source_format: "gpkg", source_layer: "Station_pg", geometry_type: "MultiPolygon" })]
+    });
+    updateSessionFileMock.mockResolvedValueOnce(saved({ ...brought[0], detected_type: null, confidence: "red" }));
+    renderPage(true, "/p/s1/bring-in");
+    expect(screen.getByText("MultiPolygon · layer Station_pg")).toBeInTheDocument();
+    expect(screen.getAllByText("LineString")).toHaveLength(1);
+
+    await choose("What JRTokyoSta_B1_Space is", "Unknown — decide later");
+    expect(updateSessionFileMock).toHaveBeenCalledWith("s1", "JRTokyoSta_B1_Space", { detected_type: null });
+    await waitFor(() =>
+      expect(within(screen.getByRole("region", { name: "Needs you" })).getByText("JRTokyoSta_B1_Space")).toBeInTheDocument()
+    );
+  });
+
+  test("guessing the types again takes the server's new reading of every file", async () => {
+    detectAllFilesMock.mockResolvedValueOnce({ session_id: "s1", files: brought.map((item) => ({ ...item, confidence: "green", detected_level: 0 })) });
+    renderPage(true, "/p/s1/bring-in");
+    fireEvent.click(screen.getByRole("button", { name: "Guess the types again" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Needs you" })).not.toBeInTheDocument());
+    expect(detectAllFilesMock).toHaveBeenCalledWith("s1");
   });
 });

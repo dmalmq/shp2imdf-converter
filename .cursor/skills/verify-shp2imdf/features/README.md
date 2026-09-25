@@ -35,7 +35,7 @@ Each feature file starts with an H1 title and one paragraph, then exactly four H
 ## Features
 
 - [Import shapefiles](./import-shapefiles.md) covers standard shapefile import into the wizard.
-- [Configure wizard](./wizard-configure.md) covers venue info, classification, and generating a draft.
+- [Configure wizard](./wizard-configure.md) covers venue info and generating a draft; file types are set in Bring in.
 - [Review and export](./review-export.md) covers validation and IMDF download.
 - [Place Illustrator artwork](./illustrator-place.md) covers opening the georeference screen.
 - [Open IMDF archive](./open-imdf-archive.md) covers re-opening a previous `.imdf` export.

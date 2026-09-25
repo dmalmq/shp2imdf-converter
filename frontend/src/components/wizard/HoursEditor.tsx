@@ -15,7 +15,7 @@ const DAYS: { key: string; label: string; labelJa: string }[] = [
   { key: "Fr", label: "Friday",          labelJa: "金曜日" },
   { key: "Sa", label: "Saturday",        labelJa: "土曜日" },
   { key: "Su", label: "Sunday",          labelJa: "日曜日" },
-  { key: "PH", label: "Public Holidays", labelJa: "祝日" },
+  { key: "PH", label: "Public holidays", labelJa: "祝日" },
 ];
 
 const DEFAULT_FROM = "09:00";
@@ -89,6 +89,9 @@ type Props = {
   onChange: (value: string | null) => void;
 };
 
+const TIME_INPUT =
+  "h-7 w-[7.5rem] rounded-md border border-input bg-card px-1.5 font-mono text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
 export function HoursEditor({ value, onChange }: Props) {
   const { t } = useUiLanguage();
   const [days, setDays] = useState<Record<string, DayState>>(() =>
@@ -99,57 +102,75 @@ export function HoursEditor({ value, onChange }: Props) {
     setDays(parseOsmHours(value ?? ""));
   }, [value]);
 
-  function update(key: string, patch: Partial<DayState>) {
-    setDays((prev) => {
-      const next = { ...prev, [key]: { ...prev[key], ...patch } };
-      onChange(toOsmHours(next));
-      return next;
-    });
+  function commit(next: Record<string, DayState>) {
+    setDays(next);
+    onChange(toOsmHours(next));
   }
 
+  const update = (key: string, patch: Partial<DayState>) => commit({ ...days, [key]: { ...days[key], ...patch } });
+  const copyMonday = () => commit(Object.fromEntries(DAYS.map(({ key }) => [key, { ...days.Mo }])));
+
   return (
-    <div className="space-y-1 rounded border border-border bg-muted p-2">
-      {DAYS.map(({ key, label, labelJa }) => {
-        const day = days[key];
-        return (
-          <div key={key} className="flex items-center gap-2 text-sm">
-            <button
-              type="button"
-              onClick={() => update(key, { open: !day.open })}
-              className={`w-5 h-5 flex-shrink-0 rounded border text-xs font-bold transition-colors ${
-                day.open
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-card text-muted-foreground"
-              }`}
-              aria-label={day.open ? `Close ${label}` : `Open ${label}`}
-            >
-              {day.open ? "✓" : ""}
-            </button>
-            <span className={`w-32 flex-shrink-0 ${day.open ? "text-foreground" : "text-muted-foreground"}`}>
-              {t(label, labelJa)}
-            </span>
-            {day.open ? (
-              <div className="flex items-center gap-1">
-                <input
-                  type="time"
-                  value={day.from}
-                  onChange={(e) => update(key, { from: e.target.value })}
-                  className="rounded border border-border px-1 py-0.5 text-xs"
-                />
-                <span className="text-muted-foreground">–</span>
-                <input
-                  type="time"
-                  value={day.to}
-                  onChange={(e) => update(key, { to: e.target.value })}
-                  className="rounded border border-border px-1 py-0.5 text-xs"
-                />
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-[13px] font-semibold leading-[18px] text-foreground">{t("Opening hours", "営業時間")}</h3>
+        <button
+          type="button"
+          onClick={copyMonday}
+          disabled={!days.Mo.open}
+          title={days.Mo.open ? undefined : t("Open Monday first to copy its hours", "コピーするには月曜日を営業にしてください")}
+          className="rounded-sm text-xs leading-4 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-muted-foreground"
+        >
+          {t("Copy Monday to all", "月曜日を全曜日にコピー")}
+        </button>
+      </div>
+      <ul className="grid gap-x-6 gap-y-2 md:grid-flow-col md:grid-cols-2 md:grid-rows-4">
+        {DAYS.map(({ key, label, labelJa }) => {
+          const day = days[key];
+          const name = t(label, labelJa);
+          return (
+            <li key={key} className="flex h-8 items-center gap-3">
+              <span className={`w-16 shrink-0 text-[13px] md:w-28 ${day.open ? "text-foreground" : "text-muted-foreground"}`}>
+                {name}
+              </span>
+              <div role="group" aria-label={name} className="inline-flex shrink-0 rounded-md bg-muted p-0.5">
+                {[true, false].map((open) => (
+                  <button
+                    key={String(open)}
+                    type="button"
+                    aria-pressed={day.open === open}
+                    onClick={() => update(key, { open })}
+                    className={`rounded-[5px] px-2 py-0.5 text-xs leading-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      day.open === open ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {open ? t("Open", "営業") : t("Closed", "休業")}
+                  </button>
+                ))}
               </div>
-            ) : (
-              <span className="text-xs text-muted-foreground">{t("Closed", "休業")}</span>
-            )}
-          </div>
-        );
-      })}
+              {day.open ? (
+                <span className="flex items-center gap-1.5">
+                  <input
+                    type="time"
+                    value={day.from}
+                    aria-label={t(`${label} opens`, `${labelJa}の開始`)}
+                    onChange={(e) => update(key, { from: e.target.value })}
+                    className={TIME_INPUT}
+                  />
+                  <span className="font-mono text-xs text-muted-foreground">-</span>
+                  <input
+                    type="time"
+                    value={day.to}
+                    aria-label={t(`${label} closes`, `${labelJa}の終了`)}
+                    onChange={(e) => update(key, { to: e.target.value })}
+                    className={TIME_INPUT}
+                  />
+                </span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

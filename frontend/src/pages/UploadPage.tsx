@@ -1,11 +1,19 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useDropzone } from "react-dropzone";
 import { Link, useNavigate } from "react-router-dom";
 
-import { importImdfShapefiles, importShapefiles, updateSessionFile, type UpdateFileRequest } from "../api/client";
+import {
+  detectAllFiles,
+  fetchSessionFeatures,
+  importImdfShapefiles,
+  importShapefiles,
+  updateSessionFile,
+  type UpdateFileRequest
+} from "../api/client";
 import { DetectedTable, QueuedTable } from "../components/bringIn/FileTable";
 import { NextBar } from "../components/bringIn/NextBar";
-import { FloorsFound, ProfileChoice, WhyGuesses } from "../components/bringIn/Rail";
+import { FloorsFound, OnTheMap, ProfileChoice, WhyGuesses } from "../components/bringIn/Rail";
+import type { BasicFeature } from "../components/shared/PreviewMap";
 import { useToast } from "../components/shared/ToastProvider";
 import { usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
 import { NEW_PROJECT_PATH, projectPath } from "../components/shell/stages";
@@ -15,6 +23,7 @@ import { useDroppedFiles } from "../hooks/useDroppedFiles";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import {
   ACCEPTED_EXTENSIONS,
+  TYPE_LABELS,
   addToQueue,
   bringInView,
   datasetKey,
@@ -255,11 +264,31 @@ function BroughtIn() {
   const files = useAppStore((state) => state.files);
   const profile = useAppStore((state) => state.importProfile);
   const upsertFile = useSessionAction(sessionId, (state) => state.upsertFile);
+  const setFiles = useSessionAction(sessionId, (state) => state.setFiles);
+  const learning = useAppStore((state) => state.learningSuggestion);
+  const setLearning = useSessionAction(sessionId, (state) => state.setLearningSuggestion);
   const handleApiError = useApiErrorHandler();
   const { t } = useUiLanguage();
   const [saving, setSaving] = useState<ReadonlySet<string>>(() => new Set());
   const latest = useRef(new Map<string, number>());
   const sent = useRef(0);
+  const [features, setFeatures] = useState<BasicFeature[] | null>(null);
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [guessing, setGuessing] = useState(false);
+
+  const loadFeatures = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const response = await fetchSessionFeatures(sessionId);
+      setFeatures(response.features as BasicFeature[]);
+    } catch {
+      setFeatures([]);
+    }
+  }, [sessionId]);
+  useEffect(() => {
+    void loadFeatures();
+  }, [loadFeatures]);
 
   const view = useMemo(() => {
     const read = bringInView(files);
@@ -275,7 +304,17 @@ function BroughtIn() {
     setSaving((previous) => new Set(previous).add(stem));
     try {
       const response = await updateSessionFile(sessionId, stem, payload);
-      if (latest.current.get(stem) === request) upsertFile(response.file);
+      if (payload.apply_learning) {
+        const pendingElsewhere = (other: string) => latest.current.has(other) && latest.current.get(other) !== request;
+        const current = new Map(useAppStore.getState().files.map((item) => [item.stem, item]));
+        setFiles(response.files.map((item) => (pendingElsewhere(item.stem) ? (current.get(item.stem) ?? item) : item)));
+      } else if (latest.current.get(stem) === request) {
+        upsertFile(response.file);
+      }
+      if ("detected_type" in payload) {
+        setLearning(response.learning_suggestion);
+        void loadFeatures();
+      }
     } catch (caught) {
       handleApiError(caught, t("Could not save that choice", "選択を保存できませんでした"), {
         title: t("Not saved", "保存されませんでした")
@@ -289,6 +328,23 @@ function BroughtIn() {
           return next;
         });
       }
+    }
+  };
+
+  const guessAgain = async () => {
+    if (!sessionId) return;
+    setGuessing(true);
+    try {
+      const response = await detectAllFiles(sessionId);
+      setFiles(response.files);
+      setLearning(null);
+      void loadFeatures();
+    } catch (caught) {
+      handleApiError(caught, t("Could not guess the types again", "種類を推定し直せませんでした"), {
+        title: t("Not guessed", "推定できませんでした")
+      });
+    } finally {
+      setGuessing(false);
     }
   };
 
@@ -327,7 +383,39 @@ function BroughtIn() {
             floorChoices={floorChoices(view.floors)}
             saving={saving}
             onResolve={(stem, payload) => void resolve(stem, payload)}
+            selected={selected}
+            onHover={setHovered}
+            onSelect={setSelected}
           />
+          {learning?.source_stem ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-[10px] bg-warning-surface p-3 text-[13px] text-warning-foreground">
+              <p className="min-w-0 flex-1">
+                {(() => {
+                  const type = TYPE_LABELS[learning.feature_type] ?? { en: learning.feature_type, ja: learning.feature_type };
+                  const others = learning.affected_stems.length;
+                  return t(
+                    `Read names ending in “${learning.keyword}” as ${type.en} from now on? That changes ${others} other ${others === 1 ? "file" : "files"} here too.`,
+                    `今後「${learning.keyword}」で終わる名前を${type.ja}として読みますか？ここにあるほかの ${others} 件のファイルも変わります。`
+                  );
+                })()}
+              </p>
+              <Button
+                size="sm"
+                onClick={() =>
+                  void resolve(learning.source_stem as string, {
+                    detected_type: learning.feature_type,
+                    apply_learning: true,
+                    learning_keyword: learning.keyword
+                  })
+                }
+              >
+                {t("Remember it", "覚えさせる")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setLearning(null)}>
+                {t("Dismiss", "閉じる")}
+              </Button>
+            </div>
+          ) : null}
           <p className="text-[13px] text-muted-foreground">
             {t("Other files are a new project: ", "別のファイルは新しいプロジェクトになります：")}
             <Link to={NEW_PROJECT_PATH} className="font-medium text-primary hover:underline">
@@ -340,7 +428,8 @@ function BroughtIn() {
         <>
           <ProfileChoice value={profile} />
           <FloorsFound floors={view.floors} />
-          <WhyGuesses />
+          <OnTheMap features={features} hovered={hovered} selected={selected} />
+          <WhyGuesses onGuessAgain={() => void guessAgain()} guessing={guessing} />
         </>
       }
       bar={

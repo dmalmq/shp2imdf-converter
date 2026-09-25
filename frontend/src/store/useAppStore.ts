@@ -76,8 +76,6 @@ type AppState = {
   files: ImportedFile[];
   cleanupSummary: CleanupSummary | null;
   wizardState: WizardState | null;
-  selectedFileStem: string | null;
-  hoveredFileStem: string | null;
   wizardSaveStatus: SaveStatus;
   wizardSaveError: string | null;
   /** When the last save succeeded, for the footer's "Saved · HH:MM". */
@@ -116,8 +114,6 @@ type AppState = {
   pushEditHistory: (entry: Record<string, unknown>) => void;
   popEditHistory: () => Record<string, unknown> | null;
   upsertFile: (file: ImportedFile) => void;
-  setSelectedFileStem: (stem: string | null) => void;
-  setHoveredFileStem: (stem: string | null) => void;
   setWizardSaveStatus: (status: SaveStatus, error?: string | null, retry?: (() => void) | null) => void;
   setLearningSuggestion: (suggestion: LearningSuggestion | null) => void;
 };
@@ -165,8 +161,6 @@ const INITIAL_STATE = {
   files: [] as ImportedFile[],
   cleanupSummary: null as CleanupSummary | null,
   wizardState: null as WizardState | null,
-  selectedFileStem: null as string | null,
-  hoveredFileStem: null as string | null,
   wizardSaveStatus: "idle" as SaveStatus,
   wizardSaveError: null as string | null,
   wizardSavedAt: null as number | null,
@@ -273,8 +267,6 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       files: state.files.map((item) => (item.stem === file.stem ? file : item))
     })),
-  setSelectedFileStem: (selectedFileStem) => set({ selectedFileStem }),
-  setHoveredFileStem: (hoveredFileStem) => set({ hoveredFileStem }),
   setWizardSaveStatus: (wizardSaveStatus, wizardSaveError = null, wizardSaveRetry = null) =>
     set((state) => ({
       wizardSaveStatus,
