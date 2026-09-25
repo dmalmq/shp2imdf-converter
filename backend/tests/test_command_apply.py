@@ -139,3 +139,17 @@ def test_a_single_edit_reports_the_revision_it_left_so_the_next_guarded_change_a
 
     deleted = test_client.delete(f"/api/session/{session_id}/features/{unit['id']}")
     assert deleted.json()["content_rev"] == _features(test_client, session_id)["content_rev"]
+
+
+def test_an_edit_that_changes_nothing_reports_the_same_revision(test_client, sample_dir: Path) -> None:
+    session_id = _generated_session(test_client, sample_dir)
+    unit = next(row for row in _features(test_client, session_id)["features"] if row["feature_type"] == "unit")
+    rev = _features(test_client, session_id)["content_rev"]
+
+    same = test_client.patch(
+        f"/api/session/{session_id}/features/{unit['id']}", json={"properties": unit["properties"]}
+    )
+    unchanged = _move(test_client, session_id, _a_level(test_client, session_id)["id"], with_undo=True, base_rev=rev)
+
+    assert same.json()["content_rev"] == rev
+    assert unchanged.status_code == 200, unchanged.text

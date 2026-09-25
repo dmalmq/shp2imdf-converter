@@ -499,8 +499,8 @@ def patch_features_bulk(
     if payload.with_undo:
         next_features, undo = finish_fix(features, next_features)
         session.feature_collection["features"] = next_features
-        if changes_anything(undo):
-            mark_changed(session)
+        if changed:
+            mark_changed(session, "features_edited", changed)
         validation = _revalidate_session(session)
         manager.save_session(session)
         return BulkPatchWithUndoResponse(
