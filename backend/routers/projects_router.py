@@ -17,7 +17,13 @@ from backend.src.artwork_projects import delivery_is_current
 from backend.src.errors import SessionNotFoundError
 from backend.src.illustrator_store import ConversionStore, ConversionSummary
 from backend.src.project_limits import FlowLimits, ProjectLimits
-from backend.src.schemas import ProjectFlow, ProjectListLimits, ProjectListResponse, ProjectSummary
+from backend.src.schemas import (
+    ProjectFlow,
+    ProjectLimitsByFlow,
+    ProjectListLimits,
+    ProjectListResponse,
+    ProjectSummary,
+)
 from backend.src.session import SessionManager, SessionSummary, is_session_id
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -37,7 +43,7 @@ def list_projects(
     return ProjectListResponse(
         projects=projects[:limit],
         total=len(projects),
-        limits=_effective_limits(request, flow),
+        limits=_effective_limits(request),
     )
 
 
@@ -56,28 +62,23 @@ def _collect(request: Request, flow: ProjectFlow | None) -> list[ProjectSummary]
     projects: list[ProjectSummary] = []
     if flow in (None, "shapefiles"):
         manager = _sessions(request)
-        projects.extend(_session_project(item, manager) for item in manager.backend.list_summaries())
+        now = datetime.now(UTC)
+        # Past its lifetime a session is gone at the next prune, so it is not offered,
+        # matching the conversion store, which skips its expired entries.
+        projects.extend(
+            project
+            for project in (_session_project(item, manager) for item in manager.backend.list_summaries())
+            if project.expires_at > now
+        )
     if flow in (None, "artwork"):
         projects.extend(_artwork_project(item) for item in _conversions(request).list_summaries())
     return projects
 
 
-def _effective_limits(request: Request, flow: ProjectFlow | None) -> ProjectListLimits:
-    """The limits the stores were built with, legacy overrides included.
-
-    With both flows listed, the stricter of each is what the hub can promise.
-    """
+def _effective_limits(request: Request) -> ProjectLimitsByFlow:
+    """The limits the stores were built with, legacy overrides included, per flow."""
     limits: ProjectLimits = request.app.state.project_limits
-    per_flow = {
-        "shapefiles": _list_limits(limits.sessions),
-        "artwork": _list_limits(limits.artwork),
-    }
-    if flow is not None:
-        return per_flow[flow]
-    return ProjectListLimits(
-        idle_days=min(item.idle_days for item in per_flow.values()),
-        max_projects=min(item.max_projects for item in per_flow.values()),
-    )
+    return ProjectLimitsByFlow(sessions=_list_limits(limits.sessions), artwork=_list_limits(limits.artwork))
 
 
 def _list_limits(flow: FlowLimits) -> ProjectListLimits:

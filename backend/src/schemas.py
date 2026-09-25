@@ -13,6 +13,8 @@ from typing import get_origin
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.src.artwork_projects import ArtworkStage
+
 
 class DroppedRow(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -989,6 +991,7 @@ class IllustratorSurveySnapResponse(BaseModel):
 
 
 ProjectFlow = Literal["shapefiles", "artwork"]
+SessionStage = Literal["bring-in", "set-up", "check", "deliver"]
 
 
 class ProjectSummary(BaseModel):
@@ -1000,7 +1003,7 @@ class ProjectSummary(BaseModel):
     flow: ProjectFlow
     name: str | None
     import_profile: str | None
-    stage: Literal["bring-in", "set-up", "check", "deliver", "name-floors", "place"] | None
+    stage: SessionStage | ArtworkStage | None
     updated_at: datetime | None
     last_opened: datetime
     blockers: int | None
@@ -1017,9 +1020,16 @@ class ProjectListLimits(BaseModel):
     max_projects: int
 
 
+class ProjectLimitsByFlow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sessions: ProjectListLimits
+    artwork: ProjectListLimits
+
+
 class ProjectListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     projects: list[ProjectSummary]
     total: int
-    limits: ProjectListLimits
+    limits: ProjectLimitsByFlow

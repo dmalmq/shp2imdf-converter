@@ -168,31 +168,72 @@ def test_flow_filter_limit_and_total(test_client, sample_dir: Path) -> None:
 
 
 def test_limits_report_what_the_stores_were_built_with(test_client) -> None:
-    limits: ProjectLimits = test_client.app.state.project_limits
     manager: SessionManager = test_client.app.state.session_manager
     store: ConversionStore = test_client.app.state.illustrator_store
 
-    shapefiles = test_client.get("/api/projects", params={"flow": "shapefiles"}).json()["limits"]
-    artwork = test_client.get("/api/projects", params={"flow": "artwork"}).json()["limits"]
+    for params in ({}, {"flow": "shapefiles"}, {"flow": "artwork"}):
+        limits = test_client.get("/api/projects", params=params).json()["limits"]
+        assert limits["sessions"]["idle_days"] * 86400 == pytest.approx(manager.ttl.total_seconds())
+        assert limits["sessions"]["max_projects"] == manager.max_sessions
+        assert limits["artwork"]["idle_days"] * 86400 == pytest.approx(store.ttl_seconds)
+        assert limits["artwork"]["max_projects"] == store.max_entries
 
-    assert shapefiles["idle_days"] * 86400 == pytest.approx(manager.ttl.total_seconds())
-    assert shapefiles["max_projects"] == manager.max_sessions == limits.sessions.max_projects
-    assert artwork["idle_days"] * 86400 == pytest.approx(store.ttl_seconds)
-    assert artwork["max_projects"] == store.max_entries == limits.artwork.max_projects
 
-
-def test_limits_follow_legacy_overrides_and_take_the_stricter_flow(test_client) -> None:
+def test_a_legacy_setting_for_one_flow_leaves_the_other_flows_limits_alone(test_client) -> None:
     test_client.app.state.project_limits = ProjectLimits.from_env(
         {"PROJECT_IDLE_DAYS": "30", "MAX_PROJECTS": "200", "ILLUSTRATOR_CACHE_TTL_MINUTES": "120"}
     )
 
-    shapefiles = test_client.get("/api/projects", params={"flow": "shapefiles"}).json()["limits"]
-    artwork = test_client.get("/api/projects", params={"flow": "artwork"}).json()["limits"]
-    both = test_client.get("/api/projects").json()["limits"]
+    limits = test_client.get("/api/projects").json()["limits"]
 
-    assert shapefiles == {"idle_days": 30, "max_projects": 200}
-    assert artwork == {"idle_days": pytest.approx(2 / 24), "max_projects": 200}
-    assert both == artwork
+    assert limits == {
+        "sessions": {"idle_days": 30, "max_projects": 200},
+        "artwork": {"idle_days": pytest.approx(2 / 24), "max_projects": 200},
+    }
+
+
+@pytest.mark.parametrize("params", [{}, {"flow": "shapefiles"}, {"flow": "artwork"}])
+def test_empty_stores_list_nothing(test_client, params: dict) -> None:
+    response = test_client.get("/api/projects", params=params)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["projects"] == []
+    assert body["total"] == 0
+    assert set(body["limits"]) == {"sessions", "artwork"}
+
+
+def test_a_filtered_flow_with_nothing_in_it_is_empty(test_client, sample_dir: Path) -> None:
+    _session(test_client, sample_dir)
+
+    body = test_client.get("/api/projects", params={"flow": "artwork"}).json()
+
+    assert body["projects"] == []
+    assert body["total"] == 0
+
+
+def test_an_expired_session_is_not_listed_but_opens_until_pruned(test_client, sample_dir: Path) -> None:
+    expired, live = _session(test_client, sample_dir), _session(test_client, sample_dir)
+    manager: SessionManager = test_client.app.state.session_manager
+    _set_last_opened(test_client, expired, datetime.now(UTC) - manager.ttl - timedelta(minutes=1))
+
+    body = test_client.get("/api/projects").json()
+    assert [item["id"] for item in body["projects"]] == [live]
+    assert body["total"] == 1
+
+    assert test_client.get(f"/api/projects/shapefiles/{expired}").status_code == 200
+    manager.prune_expired()
+    assert test_client.get(f"/api/projects/shapefiles/{expired}").json()["code"] == "SESSION_NOT_FOUND"
+
+
+def test_by_id_answers_an_unpruned_expired_session_as_the_session_route_does(test_client, sample_dir: Path) -> None:
+    expired = _session(test_client, sample_dir)
+    manager: SessionManager = test_client.app.state.session_manager
+    _set_last_opened(test_client, expired, datetime.now(UTC) - manager.ttl - timedelta(minutes=1))
+
+    by_id = test_client.get(f"/api/projects/shapefiles/{expired}")
+
+    assert by_id.status_code == test_client.get(f"/api/session/{expired}/files").status_code == 200
 
 
 def test_single_project_summaries_for_both_flows(test_client, sample_dir: Path) -> None:
