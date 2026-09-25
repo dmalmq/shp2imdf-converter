@@ -13,11 +13,15 @@ from urllib.parse import quote
 import zipfile
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
 from backend.routers.common import session_manager
+from backend.src.artwork_draft import MAX_DRAFT_BYTES, SaveDraftRequest
 from backend.src.artwork_projects import ArtworkProject, derive_artwork_stage
+from backend.src.errors import ApiError
 from backend.src.detector import sync_feature_types
 from backend.src.illustrator_export import (
     ExportFloor,
@@ -70,6 +74,7 @@ from backend.src.schemas import (
     ReferenceLayerItem,
     ReferenceLayersResponse,
     RenameConversionRequest,
+    SaveDraftResponse,
     IllustratorRegionMatchRequest,
     IllustratorShapeMatchRequest,
     IllustratorShapeMatchResponse,
@@ -404,11 +409,47 @@ def get_illustrator_conversion(
     """Reopen a stored conversion: its preview, floor assignment and project."""
     store = _illustrator_store(request)
     cached = store.get(conversion_id)
+    stored = store.draft(cached)
     return IllustratorConversionResponse(
         conversion_id=cached.conversion_id,
         preview=_preview_response(cached, build_preview(cached)),
         floors=cached.floors,
         project=_project_payload(cached, store.project(cached)),
+        draft=stored.draft,
+        draft_revision=stored.revision,
+    )
+
+
+_DRAFT_TOO_LARGE = ApiError(
+    f"A placement draft can be at most {MAX_DRAFT_BYTES // 1024} KB.", "DRAFT_TOO_LARGE", 413
+)
+
+
+@router.put("/convert/illustrator/{conversion_id}/draft", response_model=SaveDraftResponse)
+async def save_illustrator_draft(conversion_id: str, request: Request) -> SaveDraftResponse:
+    """Autosave the placement draft; an unchanged draft is not an edit."""
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > MAX_DRAFT_BYTES:
+        raise _DRAFT_TOO_LARGE
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_DRAFT_BYTES:
+            raise _DRAFT_TOO_LARGE
+    try:
+        payload = SaveDraftRequest.model_validate_json(bytes(body))
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from None
+    return await run_in_threadpool(_save_draft, request, conversion_id, payload)
+
+
+def _save_draft(request: Request, conversion_id: str, payload: SaveDraftRequest) -> SaveDraftResponse:
+    store = _illustrator_store(request)
+    saved = store.save_draft(conversion_id, payload.draft, payload.base_revision)
+    return SaveDraftResponse(
+        revision=saved.revision,
+        changed=saved.changed,
+        project=_project_payload(store.get(conversion_id), saved.project),
     )
 
 
@@ -554,7 +595,8 @@ def assign_illustrator_floors(
                 )
 
     floors = [floor.model_dump() for floor in payload.floors]
-    _illustrator_store(request).assign(conversion_id, floors)
+    store = _illustrator_store(request)
+    assigned = store.assign(conversion_id, floors)
     summaries, unassigned = compute_assignment_summary(
         cached,
         [
@@ -572,6 +614,7 @@ def assign_illustrator_floors(
         floors=[AssignFloorSummary(**summary) for summary in summaries],
         unassigned_count=unassigned,
         total_features=cached.report["total_features"],
+        draft_revision=store.draft(assigned).revision,
     )
 
 

@@ -35,6 +35,7 @@ from backend.src.illustrator_store import (
     ConversionBusyError,
     ConversionExpiredError,
     ConversionStore,
+    DraftConflictError,
     migrate_legacy_conversions,
 )
 from backend.src.placements import DuplicatePlacementError, PlacementStore
@@ -337,6 +338,12 @@ async def conversion_expired_handler(_: Request, exc: ConversionExpiredError) ->
 async def conversion_busy_handler(_: Request, exc: ConversionBusyError) -> JSONResponse:
     payload = ErrorResponse(detail=str(exc), code="CONVERSION_BUSY")
     return JSONResponse(status_code=503, content=payload.model_dump())
+
+
+@app.exception_handler(DraftConflictError)
+async def draft_conflict_handler(_: Request, exc: DraftConflictError) -> JSONResponse:
+    payload = ErrorResponse(detail=str(exc), code="DRAFT_CONFLICT")
+    return JSONResponse(status_code=409, content=payload.model_dump())
 
 
 @app.exception_handler(FloorExportError)
