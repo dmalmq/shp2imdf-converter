@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request
 
 from backend.routers.common import get_session_or_raise, session_manager
 from backend.src.generator import generate_feature_collection
+from backend.src.projects import mark_changed
 from backend.src.schemas import GenerateResponse
 from backend.src.wizard import seed_wizard_state
 
@@ -24,6 +25,7 @@ def generate_draft(session_id: str, request: Request) -> GenerateResponse:
         unit_categories_path=str(request.app.state.unit_categories_path),
     )
     session.wizard.generation_status = "generated"
+    mark_changed(session)
     manager.save_session(session)
 
     return GenerateResponse(

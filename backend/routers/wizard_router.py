@@ -24,6 +24,7 @@ from backend.src.mapper import (
     normalize_company_mappings_payload,
     normalize_unit_category_overrides,
 )
+from backend.src.projects import reset_generation_if_changed, setup_snapshot
 from backend.src.schemas import (
     AddressAutofillResponse,
     AddressSearchResponse,
@@ -441,6 +442,13 @@ def _refresh_unit_preview(session: SessionRecord, request: Request) -> tuple[int
     return len(preview), unresolved
 
 
+def _same_or_new(existing: dict[str, Any] | None, built: dict[str, Any]) -> dict[str, Any]:
+    """Keep the stored address feature, id included, when a re-sent section rebuilds it unchanged."""
+    if existing is not None and {**existing, "id": None} == {**built, "id": None}:
+        return existing
+    return built
+
+
 @router.get("/wizard", response_model=WizardStateResponse)
 def get_wizard_state(session_id: str, request: Request) -> WizardStateResponse:
     manager = session_manager(request)
@@ -527,6 +535,7 @@ def patch_wizard_project(session_id: str, payload: ProjectWizardRequest, request
     manager = session_manager(request)
     session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
+    before = setup_snapshot(session)
 
     if not payload.venue_name.strip():
         raise ValueError("venue_name is required")
@@ -538,14 +547,17 @@ def patch_wizard_project(session_id: str, payload: ProjectWizardRequest, request
         raise ValueError("address.country is required")
 
     session.wizard.project = payload
-    session.wizard.venue_address_feature = build_address_feature(payload.address, fallback_name=payload.venue_name)
+    session.wizard.venue_address_feature = _same_or_new(
+        session.wizard.venue_address_feature,
+        build_address_feature(payload.address, fallback_name=payload.venue_name),
+    )
     if not (payload.address.address or "").strip():
         session.wizard.warnings = [
             "Venue street address is blank; venue name will be used as the address line."
         ]
     else:
         session.wizard.warnings = []
-    session.wizard.generation_status = "not_started"
+    reset_generation_if_changed(session, before)
 
     manager.save_session(session)
     return ProjectWizardResponse(
@@ -560,8 +572,19 @@ def patch_wizard_levels(session_id: str, payload: LevelsWizardRequest, request: 
     manager = session_manager(request)
     session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
+    before = setup_snapshot(session)
 
+    # The wizard builds this payload from its file list, whose names stay null
+    # until someone types one; null keeps the stored name, as it does for files.
+    current = {item.stem: item for item in session.wizard.levels.items}
+    for item in payload.items:
+        stored = current.get(item.stem)
+        if stored is not None and item.name is None:
+            item.name = stored.name
+        if stored is not None and item.short_name is None:
+            item.short_name = stored.short_name
     session.wizard.levels.items = payload.items
+    seed_wizard_state(session)
 
     by_stem = {item.stem: item for item in payload.items}
     updated_files = []
@@ -581,7 +604,7 @@ def patch_wizard_levels(session_id: str, payload: LevelsWizardRequest, request: 
         updated.level_category = item.category or "unspecified"
         updated_files.append(updated)
     session.files = updated_files
-    session.wizard.generation_status = "not_started"
+    reset_generation_if_changed(session, before)
 
     manager.save_session(session)
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
@@ -596,6 +619,7 @@ def patch_wizard_buildings(
     manager = session_manager(request)
     session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
+    before = setup_snapshot(session)
 
     ids = [item.id for item in payload.buildings]
     duplicate_ids = [identifier for identifier, count in Counter(ids).items() if count > 1]
@@ -605,6 +629,8 @@ def patch_wizard_buildings(
 
     project = session.wizard.project
     venue_name = project.venue_name if project else None
+    previous_features = {str(item.get("id")): item for item in session.wizard.building_address_features}
+    previous_feature_ids = {item.id: item.address_feature_id for item in session.wizard.buildings}
     building_rows = []
     address_features: list[dict[str, Any]] = []
     for building in payload.buildings:
@@ -612,7 +638,10 @@ def patch_wizard_buildings(
         if updated.address_mode == "different_address":
             if updated.address is None:
                 raise ValueError(f"Building '{updated.id}' requires an address when address_mode=different_address")
-            feature = build_address_feature(updated.address, fallback_name=updated.name or venue_name)
+            feature = _same_or_new(
+                previous_features.get(previous_feature_ids.get(updated.id)),
+                build_address_feature(updated.address, fallback_name=updated.name or venue_name),
+            )
             updated.address_feature_id = str(feature["id"])
             address_features.append(feature)
         else:
@@ -622,7 +651,7 @@ def patch_wizard_buildings(
 
     session.wizard.buildings = building_rows
     session.wizard.building_address_features = address_features
-    session.wizard.generation_status = "not_started"
+    reset_generation_if_changed(session, before)
 
     manager.save_session(session)
     return BuildingsWizardResponse(
@@ -641,6 +670,7 @@ def patch_wizard_mappings(
     manager = session_manager(request)
     session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
+    before = setup_snapshot(session)
 
     if payload.unit is not None:
         session.wizard.mappings.unit = payload.unit
@@ -656,7 +686,7 @@ def patch_wizard_mappings(
         session.wizard.company_mappings.update(overrides)
 
     _refresh_unit_preview(session, request)
-    session.wizard.generation_status = "not_started"
+    reset_generation_if_changed(session, before)
     manager.save_session(session)
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
 
@@ -670,8 +700,9 @@ def patch_wizard_footprint(
     manager = session_manager(request)
     session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
+    before = setup_snapshot(session)
     session.wizard.footprint = payload
-    session.wizard.generation_status = "not_started"
+    reset_generation_if_changed(session, before)
     manager.save_session(session)
     return WizardStateResponse(session_id=session_id, wizard=session.wizard)
 
@@ -762,6 +793,7 @@ def _apply_company_mappings(session_id: str, request: Request, payload_raw: byte
     manager = session_manager(request)
     session = get_session_or_raise(session_id, request)
     seed_wizard_state(session)
+    before = setup_snapshot(session)
 
     if not payload_raw:
         raise ValueError("Uploaded company mappings file is empty")
@@ -779,7 +811,7 @@ def _apply_company_mappings(session_id: str, request: Request, payload_raw: byte
     session.wizard.company_mappings = mappings
     session.wizard.company_default_category = default_category
     _, unresolved_count = _refresh_unit_preview(session, request)
-    session.wizard.generation_status = "not_started"
+    reset_generation_if_changed(session, before)
 
     manager.save_session(session)
     return CompanyMappingsUploadResponse(
