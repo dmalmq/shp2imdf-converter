@@ -32,3 +32,10 @@ class UndoRejectedError(ApiError):
 
     def __init__(self, detail: str, code: str = "UNDO_STALE", status_code: int = 409) -> None:
         super().__init__(detail, code, status_code)
+
+
+class RevisionStaleError(ApiError):
+    """A change previewed against an older revision of the project than the one stored."""
+
+    def __init__(self, detail: str = "The project changed since this was previewed.") -> None:
+        super().__init__(detail, "REVISION_STALE", 409)

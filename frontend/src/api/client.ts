@@ -679,11 +679,16 @@ export async function updateSessionFile(
   return handleJson<UpdateFileResponse>(response);
 }
 
-export async function fetchSessionFeatures(
-  sessionId: string
-): Promise<{ type: "FeatureCollection"; features: Record<string, unknown>[] }> {
+export type SessionFeatureCollection = {
+  type: "FeatureCollection";
+  features: Record<string, unknown>[];
+  /** The revision these features are at; a guarded change sends it back as `base_rev`. */
+  content_rev?: number | null;
+};
+
+export async function fetchSessionFeatures(sessionId: string): Promise<SessionFeatureCollection> {
   const response = await fetch(`/api/session/${sessionId}/features`);
-  return handleJson<{ type: "FeatureCollection"; features: Record<string, unknown>[] }>(response);
+  return handleJson<SessionFeatureCollection>(response);
 }
 
 export async function fetchFeatureTypeCatalog(): Promise<FeatureTypeOption[]> {
@@ -724,6 +729,31 @@ export async function patchSessionFeaturesBulk(
     body: JSON.stringify(payload)
   });
   return handleJson<BulkFeaturePatchResponse>(response);
+}
+
+export type GuardedPatchResponse = {
+  updated_count: number;
+  undo: FeatureUndo;
+  validation: ValidationResponse;
+  content_rev: number;
+};
+
+/**
+ * A property patch that returns its own undo and revalidates. Refused with
+ * 409 REVISION_STALE when the project is no longer at `baseRev`.
+ */
+export async function patchFeaturesGuarded(
+  sessionId: string,
+  featureIds: string[],
+  properties: Record<string, unknown>,
+  baseRev: number
+): Promise<GuardedPatchResponse> {
+  const response = await fetch(`/api/session/${sessionId}/features/bulk`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ feature_ids: featureIds, properties, base_rev: baseRev, with_undo: true })
+  });
+  return handleJson<GuardedPatchResponse>(response);
 }
 
 export async function deleteSessionFeature(
@@ -950,8 +980,12 @@ export async function resolveSessionUnitOverlap(
   return handleJson<ResolveUnitOverlapsResponse>(response);
 }
 
-export async function resolveSessionUnitOverlapsSafe(sessionId: string): Promise<ResolveUnitOverlapsResponse> {
-  const response = await fetch(`/api/session/${sessionId}/overlaps/fix-safe`, {
+export async function resolveSessionUnitOverlapsSafe(
+  sessionId: string,
+  baseRev?: number
+): Promise<ResolveUnitOverlapsResponse> {
+  const query = baseRev === undefined ? "" : `?base_rev=${baseRev}`;
+  const response = await fetch(`/api/session/${sessionId}/overlaps/fix-safe${query}`, {
     method: "POST"
   });
   return handleJson<ResolveUnitOverlapsResponse>(response);
