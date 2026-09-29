@@ -67,6 +67,8 @@ export type PageStages = {
   bringInNeeds?: number | null;
   /** Artwork floors whose status is Aligned, of all floors; null before floors are named. */
   floorsAligned?: { aligned: number; total: number } | null;
+  /** The converted artwork's page count, and its floors once they are named. */
+  artworkRead?: { pages: number; floors: number | null } | null;
 };
 
 const SHAPEFILE_STAGE_IDS: ReadonlyArray<ShapefileStageId> = ["bring-in", "set-up", "check", "deliver"];
@@ -231,6 +233,20 @@ export function artworkStages({ illustratorStage, page }: ArtworkInput): Stage[]
     const status = statusFor(index, current);
     const stage: Stage = { id, label, status };
     if (status !== "current") stage.target = pageTarget(page, id);
+    const read = page?.artworkRead;
+    if (id === "bring-in-artwork" && read) {
+      stage.detail =
+        read.pages === 1 ? { en: "1 page read", ja: "1 ページ読み込み済み" } : { en: `${read.pages} pages read`, ja: `${read.pages} ページ読み込み済み` };
+    }
+    if (id === "name-floors" && read) {
+      stage.detail =
+        read.floors === null
+          ? { en: "Say which floor each page is", ja: "各ページのフロアを指定" }
+          : {
+              en: `${read.floors} ${read.floors === 1 ? "floor" : "floors"} from ${read.pages} ${read.pages === 1 ? "page" : "pages"}`,
+              ja: `${read.pages} ページから ${read.floors} フロア`
+            };
+    }
     if (id === "place" && floors) {
       stage.detail =
         left > 0

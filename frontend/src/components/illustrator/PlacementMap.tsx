@@ -1386,7 +1386,7 @@ export function PlacementMap({
       {/* Tools, not geometry: things you reach for occasionally sit opposite the
           floor switcher as icons. The basemap had four always-visible chips in
           the prime corner — it is chosen once per session. */}
-      <div style={{ right: toolsInset }} className="absolute top-3 z-20 flex gap-0.5 rounded-md bg-popover/95 p-1 text-popover-foreground shadow-md">
+      <div style={{ right: toolsInset }} className="absolute bottom-3 z-20 flex gap-0.5 rounded-md bg-popover/95 p-1 text-popover-foreground shadow-md">
         <Popover open={basemapOpen} onOpenChange={setBasemapOpen}>
           <PopoverTrigger asChild>
             <Button
