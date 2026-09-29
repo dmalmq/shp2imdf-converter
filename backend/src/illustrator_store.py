@@ -250,12 +250,19 @@ class ConversionStore:
         return _read_draft(cached.directory)
 
     def save_draft(
-        self, conversion_id: str, draft: PlacementDraft, base_revision: int
+        self,
+        conversion_id: str,
+        draft: PlacementDraft,
+        base_revision: int,
+        *,
+        baseline: bool = False,
     ) -> DraftSaved:
         """Store ``draft`` if it was built on the current revision and assignment.
 
         An identical draft writes nothing. A changed view is saved without
-        touching the project; changed placement work is an edit.
+        touching the project; changed placement work is an edit. With no draft
+        stored yet, a ``baseline`` draft (the page's starting placement, which
+        no one has edited) is recorded without counting as an edit.
         """
         cached = self.get(conversion_id)
         with self._lock_for(conversion_id):
@@ -274,9 +281,10 @@ class ConversionStore:
                 )
             if stored.draft is not None and canonical(stored.draft) == canonical(draft):
                 return DraftSaved(stored.revision, False, _read_project(cached.directory, cached.stem))
-            work_changed = stored.draft is None or canonical(stored.draft.placement) != canonical(
-                draft.placement
-            )
+            if stored.draft is None:
+                work_changed = not baseline
+            else:
+                work_changed = canonical(stored.draft.placement) != canonical(draft.placement)
             project = _read_project(cached.directory, cached.stem, strict=work_changed)
             revision = stored.revision + 1
             _write_json(
@@ -596,8 +604,30 @@ def _read_draft(directory: Path, *, strict: bool = False) -> StoredDraft:
     try:
         return StoredDraft(revision, PlacementDraft.model_validate(raw))
     except ValidationError as exc:
-        logger.warning("Placement draft for %s no longer fits the schema: %s", directory.name, exc)
+        logger.warning("Placement draft for %s does not fit schema v1: %s", directory.name, exc)
+        if strict:
+            _set_draft_aside(path, raw)
         return StoredDraft(revision, None)
+
+
+def _set_draft_aside(path: Path, raw: object) -> None:
+    """Keep a draft this build cannot read beside the entry before anything replaces it.
+
+    Only a ``strict`` reader does this: it holds the per-id lock and is about
+    to write, so the file it renames is the one it read.
+    """
+    version = raw.get("version") if isinstance(raw, dict) else None
+    tag = f"v{version}" if isinstance(version, int) and not isinstance(version, bool) else "unreadable"
+    target = path.with_name(f"placement.{tag}.json")
+    for attempt in range(2, 100):
+        if not target.exists():
+            break
+        target = path.with_name(f"placement.{tag}.{attempt}.json")
+    try:
+        os.replace(path, target)
+    except OSError as exc:
+        raise ConversionBusyError(_BUSY) from exc
+    logger.warning("Kept the unreadable placement draft for %s as %s", path.parent.name, target.name)
 
 
 def _write_json(path: Path, payload: object) -> None:

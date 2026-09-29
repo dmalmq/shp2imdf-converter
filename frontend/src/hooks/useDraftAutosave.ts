@@ -5,6 +5,12 @@ import { isApiClientError } from "../api/errors";
 
 export const AUTOSAVE_DELAY_MS = 800;
 const RETRY_DELAY_MS = 5000;
+/**
+ * Browsers refuse a `keepalive` request whose body passes 64 KB. A larger draft
+ * sent while the page is going away is an ordinary request and may not arrive;
+ * the debounced save and the flush when the tab is hidden are what keep it.
+ */
+export const KEEPALIVE_LIMIT_BYTES = 60_000;
 
 /**
  * `conflict`: another tab saved first, or the floors were assigned again;
@@ -34,6 +40,7 @@ export function stableJson(value: unknown): string {
 export function useDraftAutosave(
   draft: PlacementDraft | null,
   initial: { conversionId: string; revision: number; saved: PlacementDraft | null } | null = null,
+  baseline = false,
   delayMs = AUTOSAVE_DELAY_MS
 ) {
   const [status, setStatus] = useState<DraftSaveStatus>("idle");
@@ -46,7 +53,7 @@ export function useDraftAutosave(
         }
       : null
   );
-  const latest = useRef<{ draft: PlacementDraft; json: string } | null>(null);
+  const latest = useRef<{ draft: PlacementDraft; json: string; baseline: boolean } | null>(null);
   const inFlight = useRef(false);
   const again = useRef(false);
   const timer = useRef<number | null>(null);
@@ -82,8 +89,10 @@ export function useDraftAutosave(
     inFlight.current = true;
     setStatus("saving");
     try {
+      const small = new TextEncoder().encode(current.json).length < KEEPALIVE_LIMIT_BYTES;
       const response = await saveIllustratorDraft(target.conversionId, target.revision, current.draft, {
-        keepalive
+        keepalive: keepalive && small,
+        baseline: current.baseline
       });
       if (base.current !== target) return;
       target.revision = response.revision;
@@ -116,9 +125,9 @@ export function useDraftAutosave(
   }, [delayMs, schedule]);
 
   useEffect(() => {
-    latest.current = draft ? { draft, json: stableJson(draft) } : null;
+    latest.current = draft ? { draft, json: stableJson(draft), baseline } : null;
     if (unsaved()) schedule(delayMs);
-  }, [draft, delayMs, schedule]);
+  }, [draft, baseline, delayMs, schedule]);
 
   useEffect(() => {
     const sendNow = () => {

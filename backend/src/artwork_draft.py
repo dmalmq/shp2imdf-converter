@@ -131,6 +131,8 @@ class PlacementDraft(_Strict):
 class SaveDraftRequest(_Strict):
     base_revision: Annotated[int, Field(ge=0)]
     draft: PlacementDraft
+    # The page's starting placement, before any edit; see ``ConversionStore.save_draft``.
+    baseline: bool = False
 
 
 @dataclass(frozen=True, slots=True)

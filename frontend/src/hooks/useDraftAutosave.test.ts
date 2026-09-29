@@ -95,14 +95,14 @@ test("a change is saved once, debounced, on the revision it builds on", async ()
     await vi.advanceTimersByTimeAsync(1000);
   });
   expect(save).toHaveBeenCalledTimes(1);
-  expect(save).toHaveBeenLastCalledWith("c1", 3, draft(12), { keepalive: false });
+  expect(save).toHaveBeenLastCalledWith("c1", 3, draft(12), { keepalive: false, baseline: false });
   expect(result.current.status).toBe("saved");
 
   rerender({ current: draft(13) });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1000);
   });
-  expect(save).toHaveBeenLastCalledWith("c1", 4, draft(13), { keepalive: false });
+  expect(save).toHaveBeenLastCalledWith("c1", 4, draft(13), { keepalive: false, baseline: false });
 });
 
 test("a conflict stops saving", async () => {
@@ -134,7 +134,7 @@ test("nothing is saved until a conversion is tracked, then the new assignment's 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1000);
   });
-  expect(save).toHaveBeenCalledWith("c2", 1, draft(0), { keepalive: false });
+  expect(save).toHaveBeenCalledWith("c2", 1, draft(0), { keepalive: false, baseline: false });
 });
 
 test("an unsaved change goes out with keepalive when the page is hidden", async () => {
@@ -147,5 +147,34 @@ test("an unsaved change goes out with keepalive when the page is hidden", async 
   await act(async () => {
     window.dispatchEvent(new Event("pagehide"));
   });
-  expect(save).toHaveBeenCalledWith("c1", 3, draft(11), { keepalive: true });
+  expect(save).toHaveBeenCalledWith("c1", 3, draft(11), { keepalive: true, baseline: false });
+});
+
+test("a draft too large for keepalive is still sent on pagehide, as an ordinary request", async () => {
+  save.mockResolvedValue({ revision: 4, changed: true, project: PROJECT });
+  const large = draft(11);
+  large.placement.floors[0].control_points = Array.from({ length: 900 }, (_, n) => ({
+    id: `point-${n}`,
+    artwork: [n + 0.123456789, n + 0.987654321],
+    map: [139.7 + n / 1e6, 35.6 + n / 1e6]
+  }));
+  const { rerender } = renderHook(
+    ({ current }) => useDraftAutosave(current, { conversionId: "c1", revision: 3, saved: draft(10) }),
+    { initialProps: { current: draft(10) } }
+  );
+  rerender({ current: large });
+  await act(async () => {
+    window.dispatchEvent(new Event("pagehide"));
+  });
+  expect(new TextEncoder().encode(JSON.stringify(large)).length).toBeGreaterThan(60_000);
+  expect(save).toHaveBeenCalledWith("c1", 3, large, { keepalive: false, baseline: false });
+});
+
+test("a save before any edit is marked as the baseline", async () => {
+  save.mockResolvedValue({ revision: 1, changed: true, project: PROJECT });
+  renderHook(() => useDraftAutosave(draft(5), { conversionId: "c1", revision: 0, saved: draft(0) }, true));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(save).toHaveBeenCalledWith("c1", 0, draft(5), { keepalive: false, baseline: true });
 });

@@ -269,6 +269,8 @@ function initialStateFromAssignment(
   };
 }
 
+const DEFAULT_FORMATS: ExportFormatsPayload = { geopackage: false, shapefile: true, qgis: false };
+
 const DEFAULT_STATE: PlacementState = {
   frame: { rotationDeg: 0, metresPerPoint: DEFAULT_METRES_PER_POINT, workingCrs: "EPSG:6677" },
   activeFloorLabel: "artwork",
@@ -286,7 +288,27 @@ const DEFAULT_STATE: PlacementState = {
   ]
 };
 
-/** A reopened project: its stored assignment, and its placement if one was saved. */
+/**
+ * The saved floors that still belong to the assignment, in its order. A saved
+ * floor under a label the assignment no longer has is dropped; an assigned
+ * floor the draft does not hold starts from the assignment.
+ */
+export function reconcileFloors(saved: PlacementState, assigned: PlacementState): PlacementState {
+  const floors = assigned.floors.map(
+    (floor) => saved.floors.find((item) => item.label === floor.label) ?? floor
+  );
+  const active = floors.some((floor) => floor.label === saved.activeFloorLabel)
+    ? saved.activeFloorLabel
+    : assigned.activeFloorLabel;
+  return { ...saved, floors, activeFloorLabel: active };
+}
+
+/**
+ * A reopened project: its stored assignment, and its placement if one was
+ * saved. `serverCopy` is what autosave compares against, so opening a project
+ * sends nothing: the stored draft, or with none, the placement the page starts
+ * from.
+ */
 function resume(restored: IllustratorConversionResponse | undefined) {
   if (!restored) return null;
   const assignment: AssignedRegion[] | null =
@@ -296,16 +318,27 @@ function resume(restored: IllustratorConversionResponse | undefined) {
       pages: floor.pages,
       layer_names: floor.layer_names
     })) ?? null;
+  const assigned = initialStateFromAssignment(restored.preview, assignment ?? []);
   const saved = restored.draft && assignment ? fromDraft(restored.draft) : null;
+  const state = saved ? reconcileFloors(saved.state, assigned) : assigned;
+  const startingView: DraftView = {
+    mode: "group",
+    tab: "fit",
+    outputCrs: assigned.frame.workingCrs,
+    formats: DEFAULT_FORMATS,
+    located: { kind: "none" },
+    references: NO_REFERENCES
+  };
   return {
     preview: restored.preview,
     assignment,
-    state: saved?.state ?? initialStateFromAssignment(restored.preview, assignment ?? []),
-    view: saved?.view ?? null
+    state,
+    view: saved?.view ?? null,
+    serverCopy: restored.draft ?? (assignment ? toDraft(assigned, startingView) : null),
+    startingCrs: assignment ? state.frame.workingCrs : null
   };
 }
 
-const DEFAULT_FORMATS: ExportFormatsPayload = { geopackage: false, shapefile: true, qgis: false };
 
 function saveProblem(status: DraftSaveStatus, t: (en: string, ja: string) => string): string | null {
   if (status === "conflict") {
@@ -349,7 +382,9 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
   const [shapeMatch, setShapeMatch] = useState<ShapeMatchState>(EMPTY_SHAPE_MATCH);
   const [inspectedMatch, setInspectedMatch] =
     useState<IllustratorShapeMatchSuggestion | null>(null);
-  const [outputCrs, setOutputCrs] = useState(resumed?.view?.outputCrs ?? "EPSG:4326");
+  const [outputCrs, setOutputCrs] = useState(
+    resumed?.view?.outputCrs ?? resumed?.startingCrs ?? "EPSG:4326"
+  );
   // Shapefile only by default. This route's job is Illustrator -> shapefiles;
   // defaulting all three handed the user two artifacts they never asked for.
   const [formats, setFormats] = useState<ExportFormatsPayload>(
@@ -450,7 +485,16 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
   }, [preview, assignment, state, adjustmentMode, placementTab, outputCrs, formats, located, referenceSelection]);
   const autosave = useDraftAutosave(
     draft,
-    restored ? { conversionId: restored.conversion_id, revision: restored.draft_revision, saved: restored.draft } : null
+    restored
+      ? {
+          conversionId: restored.conversion_id,
+          revision: restored.draft_revision,
+          saved: resumed?.serverCopy ?? null
+        }
+      : null,
+    // Nothing undoable has happened: this is where the page started (the
+    // assignment, then the filename lookup), not an edit anyone made.
+    history.past.length === 0
   );
 
   // Publish the stage so the header rail can show THIS route's progress. Derived
@@ -543,7 +587,7 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
   );
 
   // A resumed output CRS is the user's choice; only a later zone change replaces it.
-  const syncedCrs = useRef(resumed?.view ? state.frame.workingCrs : null);
+  const syncedCrs = useRef(resumed?.startingCrs ?? null);
   useEffect(() => {
     if (syncedCrs.current === state.frame.workingCrs) return;
     syncedCrs.current = state.frame.workingCrs;

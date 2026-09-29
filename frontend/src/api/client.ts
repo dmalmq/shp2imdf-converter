@@ -1248,17 +1248,21 @@ export async function fetchIllustratorConversion(
 
 export type SaveDraftResponse = { revision: number; changed: boolean; project: ArtworkProjectPayload };
 
-/** `keepalive` lets a save sent while the page unloads still reach the server. */
+/**
+ * `keepalive` lets a save sent while the page unloads still reach the server.
+ * `baseline` says no one has edited this placement yet, so a first save of it
+ * is not an edit of the project.
+ */
 export async function saveIllustratorDraft(
   conversionId: string,
   baseRevision: number,
   draft: PlacementDraft,
-  options: { keepalive?: boolean } = {}
+  options: { keepalive?: boolean; baseline?: boolean } = {}
 ): Promise<SaveDraftResponse> {
   const response = await fetch(`/api/convert/illustrator/${encodeURIComponent(conversionId)}/draft`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ base_revision: baseRevision, draft }),
+    body: JSON.stringify({ base_revision: baseRevision, draft, baseline: options.baseline ?? false }),
     keepalive: options.keepalive
   });
   return handleJson<SaveDraftResponse>(response);

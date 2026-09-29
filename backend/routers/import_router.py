@@ -446,7 +446,9 @@ async def save_illustrator_draft(conversion_id: str, request: Request) -> SaveDr
 
 def _save_draft(request: Request, conversion_id: str, payload: SaveDraftRequest) -> SaveDraftResponse:
     store = _illustrator_store(request)
-    saved = store.save_draft(conversion_id, payload.draft, payload.base_revision)
+    saved = store.save_draft(
+        conversion_id, payload.draft, payload.base_revision, baseline=payload.baseline
+    )
     return SaveDraftResponse(
         revision=saved.revision,
         changed=saved.changed,

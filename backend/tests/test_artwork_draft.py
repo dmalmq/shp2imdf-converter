@@ -248,6 +248,79 @@ def test_an_unreadable_draft_reads_as_none(store: ConversionStore) -> None:
     reread = store.draft(cached)
     assert reread.draft is None
     assert reread.revision == saved.revision
+    assert path.is_file(), "reading alone must not move the file"
+
+    resaved = store.save_draft(cached.conversion_id, _model(_draft()), saved.revision)
+    kept = cached.directory / "placement.v99.json"
+    assert json.loads(kept.read_text(encoding="utf-8")) == stored
+    assert resaved.revision == saved.revision + 1
+    assert store.draft(cached).draft.model_dump(mode="json") == _draft()
+
+
+def test_a_second_unreadable_draft_is_kept_beside_the_first(store: ConversionStore) -> None:
+    cached = _assigned(store)
+    path = cached.directory / "placement.json"
+    for revision in (store.draft(cached).revision, None):
+        current = store.draft(cached).revision if revision is None else revision
+        path.write_text(json.dumps({"revision": current, "draft": {"version": 2}}), encoding="utf-8")
+        store.save_draft(cached.conversion_id, _model(_draft()), current)
+    assert (cached.directory / "placement.v2.json").is_file()
+    assert (cached.directory / "placement.v2.2.json").is_file()
+
+
+def test_assigning_again_keeps_an_unreadable_draft(store: ConversionStore) -> None:
+    cached = _assigned(store)
+    (cached.directory / "placement.json").write_text(
+        json.dumps({"revision": 7, "draft": {"version": "next"}}), encoding="utf-8"
+    )
+    store.assign(cached.conversion_id, _FLOORS)
+    assert (cached.directory / "placement.unreadable.json").is_file()
+    assert store.draft(cached).revision == 8
+
+
+def test_a_baseline_first_save_is_not_an_edit(store: ConversionStore) -> None:
+    cached = _assigned(store)
+    _, snapshot = store.open_for_export(cached.conversion_id)
+    store.mark_delivered(cached.conversion_id, 2, snapshot)
+    before = (cached.directory / "project.json").read_bytes()
+
+    saved = store.save_draft(
+        cached.conversion_id, _model(_draft()), store.draft(cached).revision, baseline=True
+    )
+
+    assert saved.changed
+    assert (cached.directory / "project.json").read_bytes() == before
+    assert store.summary(cached.conversion_id).stage == "deliver"
+    assert store.draft(cached).draft is not None
+
+
+def test_baseline_only_matters_before_the_first_draft(store: ConversionStore) -> None:
+    cached = _assigned(store)
+    first = store.save_draft(cached.conversion_id, _model(_draft()), store.draft(cached).revision)
+    before = _project_json(cached.directory)
+    moved = _draft()
+    moved["placement"]["frame"]["rotation_deg"] = 40.0
+
+    store.save_draft(cached.conversion_id, _model(moved), first.revision, baseline=True)
+
+    assert _project_json(cached.directory)["content_changed_at"] > before["content_changed_at"]
+
+
+def test_a_fresh_store_on_the_same_directory_reads_the_draft_identically(
+    store: ConversionStore,
+) -> None:
+    cached = _assigned(store)
+    saved = store.save_draft(cached.conversion_id, _model(_draft()), store.draft(cached).revision)
+    project = store.summary(cached.conversion_id)
+
+    restarted = ConversionStore(root=store.root, ttl_seconds=3600, max_entries=10)
+    reopened = restarted.get(cached.conversion_id)
+    stored = restarted.draft(reopened)
+
+    assert stored.revision == saved.revision
+    assert stored.draft.model_dump(mode="json") == _draft()
+    assert restarted.summary(cached.conversion_id).content_changed_at == project.content_changed_at
+    assert not restarted.save_draft(cached.conversion_id, _model(_draft()), saved.revision).changed
 
 
 @pytest.mark.parametrize("bad_id", INVALID_IDS)
@@ -489,3 +562,29 @@ def test_a_hostile_id_is_404_even_with_a_body_that_would_not_validate(
     )
     assert response.status_code == 404, response.text
     assert response.json()["code"] == "CONVERSION_EXPIRED"
+
+
+def test_a_delivered_project_opened_without_a_draft_stays_delivered(test_client) -> None:
+    conversion_id, revision = _assigned_client(test_client)
+    transform = {
+        "artwork_anchor": [100.0, 100.0],
+        "map_anchor": [139.7671, 35.6812],
+        "rotation_deg": 0.0,
+        "metres_per_point": 0.35,
+        "working_crs": "EPSG:6677",
+    }
+    body = {"floors": [{"label": label, "transform": transform} for label in ("1F", "2F")]}
+    assert test_client.post(
+        f"/api/convert/illustrator/{conversion_id}/export", json=body
+    ).status_code == 200
+    delivered = test_client.get(f"/api/convert/illustrator/{conversion_id}").json()["project"]
+
+    response = test_client.put(
+        f"/api/convert/illustrator/{conversion_id}/draft",
+        json={"base_revision": revision, "draft": _draft(), "baseline": True},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["project"]["content_changed_at"] == delivered["content_changed_at"]
+    listed = test_client.get("/api/projects?flow=artwork").json()["projects"][0]
+    assert listed["stage"] == "deliver"
+    assert listed["changed_since_delivery"] is False

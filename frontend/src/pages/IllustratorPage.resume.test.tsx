@@ -207,11 +207,46 @@ test("an edit after reopening is saved on the stored revision", async () => {
   expect(sent.placement.floors[1]).toEqual(DRAFT.placement.floors[1]);
 });
 
-test("an assignment with no saved placement opens placement from the assignment", () => {
+test("an assignment with no saved placement opens placement from the assignment and sends nothing", async () => {
   render(<IllustratorPage restored={conversion({ draft: null })} />);
   expect(screen.getByTestId("rotation")).toHaveTextContent("0");
   expect(screen.getByTestId("active")).toHaveTextContent("1F");
   expect(screen.getByTestId("tab")).toHaveTextContent("fit");
+  expect(screen.getByTestId("output-crs")).toHaveTextContent("EPSG:6677");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  expect(save).not.toHaveBeenCalled();
+});
+
+test("with no saved placement, the first edit is saved as an edit, not a baseline", async () => {
+  render(<IllustratorPage restored={conversion({ draft: null })} />);
+  fireEvent.click(screen.getByRole("button", { name: "Rotate" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(save.mock.calls[0][3]).toEqual({ keepalive: false, baseline: false });
+});
+
+test("saved floors the assignment no longer has are dropped, and missing ones start from it", async () => {
+  const stale: PlacementDraft = {
+    ...DRAFT,
+    placement: {
+      ...DRAFT.placement,
+      floors: [DRAFT.placement.floors[1], { ...DRAFT.placement.floors[0], label: "B1" }]
+    },
+    view: { ...DRAFT.view, active_floor_label: "B1" }
+  };
+  render(<IllustratorPage restored={conversion({ draft: stale })} />);
+  expect(screen.getByTestId("active")).toHaveTextContent("1F");
+  expect(screen.getByTestId("anchor-2F")).toHaveTextContent("[139.76723456789,35.68134567891]");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  const sent = save.mock.calls[0][2];
+  expect(sent.placement.floors.map((floor) => floor.label)).toEqual(["1F", "2F"]);
+  expect(sent.placement.floors[1]).toEqual(DRAFT.placement.floors[1]);
 });
 
 test("a project with no floors yet opens on naming them", () => {
