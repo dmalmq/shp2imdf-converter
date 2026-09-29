@@ -89,8 +89,8 @@ type MapProps = {
   onRegionDrawn?: (corners: [number, number][]) => void;
 };
 
-vi.mock("../components/illustrator/PlacementSidebar", () => ({
-  PlacementSidebar: ({ state, shapeMatch, onReferenceLayersChange }: SidebarProps) => {
+vi.mock("../components/illustrator/AlignPanel", () => ({
+  AlignPanel: ({ state, shapeMatch, onReferenceLayersChange }: SidebarProps) => {
     const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
     const metres =
       !active || active.linked

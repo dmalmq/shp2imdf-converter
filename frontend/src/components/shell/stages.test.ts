@@ -176,6 +176,13 @@ describe("artwork flow", () => {
     expect([all[2].detail?.en, all[3].detail]).toEqual(["3 of 3 aligned", undefined]);
   });
 
+  test("the first two artwork stages say what was read and named", () => {
+    const naming = artworkStages({ illustratorStage: 2, page: { artworkRead: { pages: 3, floors: null } } });
+    expect([naming[0].detail?.en, naming[1].detail?.en]).toEqual(["3 pages read", "Say which floor each page is"]);
+    const placing = artworkStages({ illustratorStage: 3, page: { artworkRead: { pages: 3, floors: 2 } } });
+    expect(placing[1].detail?.en).toBe("2 floors from 3 pages");
+  });
+
   test("stages are links only where the page can switch to them", () => {
     expect(targets(artworkStages({ illustratorStage: 2 }))).toEqual([null, null, null, null]);
     const placing = artworkStages({ illustratorStage: 3, page: { targets: ["deliver"] } });

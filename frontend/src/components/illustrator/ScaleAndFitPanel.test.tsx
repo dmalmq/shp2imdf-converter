@@ -7,7 +7,6 @@ import {
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
-import type { ShapeMatchPanelModel } from "./ShapeMatchPanel";
 
 const STATE: PlacementState = {
   frame: { rotationDeg: 0, metresPerPoint: DEFAULT_METRES_PER_POINT, workingCrs: "EPSG:6677" },
@@ -24,45 +23,9 @@ const STATE: PlacementState = {
   }))
 };
 
-const noop = () => {};
-
-const SHAPE_MATCH: ShapeMatchPanelModel = {
-  referenceName: "",
-  referenceFloorLabel: "",
-  selecting: false,
-  selection: null,
-  matches: [],
-  previewRank: null,
-  loading: false,
-  searched: false,
-  error: null,
-  onReferenceChange: noop,
-  onMatchTargetChange: noop,
-  onToggleSelection: noop,
-  sourceFloorLabel: "",
-  regionStage: null,
-  hasSourceRegion: false,
-  hasTargetRegion: false,
-  onToggleRegions: noop,
-  onFind: noop,
-  onPreview: noop,
-  onInspect: noop,
-  onApply: noop,
-  onClear: noop,
-  onCancel: noop
-};
-
 function renderPanel(dispatch: (action: PlacementAction) => void) {
   render(
-    <ScaleAndFitPanel
-      state={STATE}
-      dispatch={dispatch}
-      pickStage={null}
-      mode="individual"
-      onTogglePicking={() => {}}
-      referenceLayers={[]}
-      shapeMatch={SHAPE_MATCH}
-    />
+    <ScaleAndFitPanel state={STATE} dispatch={dispatch} mode="individual" />
   );
   fireEvent.click(screen.getByRole("button", { name: /Advanced/ }));
 }

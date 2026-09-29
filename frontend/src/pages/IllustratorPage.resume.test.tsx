@@ -10,7 +10,6 @@ import {
 } from "../api/client";
 import type * as ApiClient from "../api/client";
 import type { ReferenceLayer } from "../components/illustrator/PlacementMap";
-import type { PlacementTab } from "../components/illustrator/PlacementSidebar";
 import { type PlacementAction, type PlacementState } from "../hooks/useIllustratorPlacement";
 import { IllustratorPage } from "./IllustratorPage";
 
@@ -24,9 +23,7 @@ vi.mock("../api/client", async (importOriginal) => ({
 type SidebarProps = {
   state: PlacementState;
   dispatch: Dispatch<PlacementAction>;
-  tab: PlacementTab;
   mode: string;
-  outputCrs: string;
   onReferenceLayersChange: (layers: ReferenceLayer[]) => void;
 };
 
@@ -51,8 +48,8 @@ const STATION_PG: ReferenceLayer = {
   truncated: false
 };
 
-vi.mock("../components/illustrator/PlacementSidebar", () => ({
-  PlacementSidebar: ({ state, dispatch, tab, mode, outputCrs, onReferenceLayersChange }: SidebarProps) => (
+vi.mock("../components/illustrator/AlignPanel", () => ({
+  AlignPanel: ({ state, dispatch, mode, onReferenceLayersChange }: SidebarProps) => (
     <section>
       <button type="button" onClick={() => dispatch({ type: "rotateFrame", rotationDeg: 45 })}>
         Rotate
@@ -63,9 +60,27 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
       <output data-testid="rotation">{state.frame.rotationDeg}</output>
       <output data-testid="active">{state.activeFloorLabel}</output>
       <output data-testid="anchor-2F">{JSON.stringify(state.floors.find((f) => f.label === "2F")?.mapAnchor)}</output>
-      <output data-testid="tab">{tab}</output>
       <output data-testid="mode">{mode}</output>
+    </section>
+  )
+}));
+
+vi.mock("../components/illustrator/ArtworkDeliver", () => ({
+  ArtworkDeliver: ({
+    outputCrs,
+    onExport,
+    error
+  }: {
+    outputCrs: string;
+    onExport: () => void;
+    error: string | null;
+  }) => (
+    <section data-testid="deliver">
+      <button type="button" onClick={onExport}>
+        Export
+      </button>
       <output data-testid="output-crs">{outputCrs}</output>
+      <output data-testid="sidebar-error">{error ?? ""}</output>
     </section>
   )
 }));
@@ -182,7 +197,7 @@ test("reopening restores the placement and view, sends nothing, and never re-sna
   expect(screen.getByTestId("rotation")).toHaveTextContent("30");
   expect(screen.getByTestId("active")).toHaveTextContent("2F");
   expect(screen.getByTestId("anchor-2F")).toHaveTextContent("[139.76723456789,35.68134567891]");
-  expect(screen.getByTestId("tab")).toHaveTextContent("export");
+  expect(screen.getByTestId("deliver").closest("[hidden]")).toBeNull();
   expect(screen.getByTestId("mode")).toHaveTextContent("individual");
   expect(screen.getByTestId("output-crs")).toHaveTextContent("EPSG:4326");
 
@@ -212,7 +227,7 @@ test("an assignment with no saved placement opens placement from the assignment 
   render(<IllustratorPage restored={conversion({ draft: null })} />);
   expect(screen.getByTestId("rotation")).toHaveTextContent("0");
   expect(screen.getByTestId("active")).toHaveTextContent("1F");
-  expect(screen.getByTestId("tab")).toHaveTextContent("fit");
+  expect(screen.getByTestId("deliver").closest("[hidden]")).not.toBeNull();
   expect(screen.getByTestId("output-crs")).toHaveTextContent("EPSG:6677");
   await act(async () => {
     await vi.advanceTimersByTimeAsync(3000);
