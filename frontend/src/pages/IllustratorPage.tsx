@@ -55,6 +55,8 @@ import {
 } from "../lib/placementPose";
 import { fromDraft, NO_REFERENCES, toDraft, type DraftView } from "../lib/artworkDraft";
 import { saveBlob } from "../lib/download";
+import { floorStatuses, recommendedAlignment } from "../lib/floorStatus";
+import type { AlignMethod } from "../components/illustrator/ScaleAndFitPanel";
 import { siteNameFromFilename, stationQueryFromFilename } from "../lib/siteName";
 import { usePageShell } from "../components/shell/ShellContext";
 import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
@@ -230,6 +232,9 @@ function boundsFor(
   );
 }
 
+/** Where floors start before a lookup moves them (Tokyo Station); not a guess about the drawing. */
+const DEFAULT_MAP_ANCHOR: [number, number] = [139.7671, 35.6812];
+
 function initialStateFromAssignment(
   preview: IllustratorPreviewResponse,
   assignment: AssignedRegion[],
@@ -259,7 +264,7 @@ function initialStateFromAssignment(
         pinned: false,
         artworkMatch: needsMatch,
         artworkAnchor: [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2],
-        mapAnchor: [139.7671, 35.6812],
+        mapAnchor: DEFAULT_MAP_ANCHOR,
         controlPoints: [],
         artworkBounds: bounds,
         ...(needsMatch
@@ -282,7 +287,7 @@ const DEFAULT_STATE: PlacementState = {
       linked: true,
       pinned: false,
       artworkAnchor: [50, 50],
-      mapAnchor: [139.7671, 35.6812],
+      mapAnchor: DEFAULT_MAP_ANCHOR,
       controlPoints: [],
       artworkBounds: [0, 0, 100, 100]
     }
@@ -490,7 +495,8 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
       ? {
           conversionId: restored.conversion_id,
           revision: restored.draft_revision,
-          saved: resumed?.serverCopy ?? null
+          saved: resumed?.serverCopy ?? null,
+          savedAt: restored.project.updated_at ? Date.parse(restored.project.updated_at) : null
         }
       : null,
     // Nothing undoable has happened: this is where the page started (the
@@ -553,12 +559,39 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
 
   const sourceName = preview?.report?.source_name ?? "";
   const placing = Boolean(preview) && assignment !== null;
+  const statuses = useMemo(() => floorStatuses(state), [state]);
+  const alignedFloors = [...statuses.values()].filter((status) => status.kind === "aligned").length;
   usePageShell({
     station: siteNameFromFilename(sourceName) || sourceName.replace(/\.[^.]+$/, "") || null,
     current: placing && placementTab === "export" ? "deliver" : null,
     targets: placing ? [placementTab === "export" ? "place" : "deliver"] : [],
-    go: { place: () => setPlacementTab("fit"), deliver: () => setPlacementTab("export") }
+    go: { place: () => setPlacementTab("fit"), deliver: () => setPlacementTab("export") },
+    floorsAligned: placing ? { aligned: alignedFloors, total: state.floors.length } : null,
+    save: placing
+      ? {
+          state:
+            autosave.status === "conflict" || autosave.status === "gone"
+              ? "stopped"
+              : autosave.status,
+          savedAt: autosave.savedAt
+        }
+      : null
   });
+
+  // A floor that did not stack opens on its recommended method; the other stays one click away.
+  const [alignMethod, setAlignMethod] = useState<AlignMethod>("points");
+  const recommendFor = (label: string | null) => {
+    const floor = state.floors.find((item) => item.label === label);
+    if (!floor || statuses.get(floor.label)?.kind === "aligned") return;
+    setAlignMethod(recommendedAlignment(state, floor).kind === "match-floor" ? "shape" : "points");
+  };
+  useEffect(() => recommendFor(state.activeFloorLabel), [state.activeFloorLabel, placing]);
+
+  const reviewFloor = (label: string) => {
+    if (label !== state.activeFloorLabel) dispatch({ type: "setActiveFloor", label });
+    else recommendFor(label);
+    setPlacementTab("fit");
+  };
 
   const floorLayers: FloorLayer[] = useMemo(() => {
     if (!preview) return [];
@@ -640,7 +673,7 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
     locateSettled,
     snapMatchesCurrent
   });
-  const snapToSurvey = async (reference: FeatureCollection) => {
+  const snapToSurvey = async (reference: FeatureCollection, chosen = false) => {
     // A group apply moves the linked floors through the active floor, so an
     // unlinked active floor hands the anchor to the first floor still linked.
     const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
@@ -676,7 +709,8 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
       dispatch({
         type: "applySimilarity",
         mode: "group",
-        transform: similarityTransform(match.transform)
+        transform: similarityTransform(match.transform),
+        ...(chosen ? { alignedTo: { kind: "reference" as const } } : {})
       });
       const percent = Math.round(match.overlap_iou * 100);
       setSurveyNotice(
@@ -713,7 +747,7 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
     layerName: surveyName,
     notice: surveyNotice,
     onSnap: () => {
-      if (surveyCollection) void snapToSurvey(surveyCollection);
+      if (surveyCollection) void snapToSurvey(surveyCollection, true);
     }
   };
 
@@ -1014,7 +1048,10 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
       dispatch({
         type: "applySimilarity",
         mode: shapeMatch.referenceFloorLabel ? "individual" : adjustmentMode,
-        transform: selectedShapeMatchPreview.transform
+        transform: selectedShapeMatchPreview.transform,
+        alignedTo: shapeMatch.referenceFloorLabel
+          ? { kind: "floor", floor: shapeMatch.referenceFloorLabel }
+          : { kind: "reference" }
       });
       setInspectedMatch(null);
       setShapeMatch((current) => keptMatchTarget(current));
@@ -1262,6 +1299,10 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
           });
         }}
         shapeMatch={shapeMatchModel}
+        alignMethod={alignMethod}
+        onAlignMethodChange={setAlignMethod}
+        statuses={statuses}
+        onReviewFloor={reviewFloor}
         surveySnap={surveySnapModel}
         referenceLayers={referenceLayers}
         onReferenceLayersChange={updateReferenceLayers}
@@ -1288,6 +1329,27 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
             {state.stationPin
               ? t("Snapping to Station_pg…", "Station_pg に合わせています…")
               : t("Locating the station…", "駅を検索しています…")}
+          </p>
+        ) : null}
+        {(located.kind === "not-found" || located.kind === "unavailable") &&
+        state.floors.some(
+          (floor) =>
+            floor.mapAnchor[0] === DEFAULT_MAP_ANCHOR[0] && floor.mapAnchor[1] === DEFAULT_MAP_ANCHOR[1]
+        ) ? (
+          <p
+            role="status"
+            data-testid="lookup-failed"
+            className="absolute inset-x-0 top-16 z-30 mx-auto w-fit max-w-[70%] rounded-md border border-warning bg-warning-surface px-3 py-1.5 text-xs leading-4 text-warning-foreground shadow-sm"
+          >
+            {located.kind === "not-found"
+              ? t(
+                  `No place called “${located.query}” was found, so the drawing sits at a default spot in central Tokyo. Search for the building, or drag the drawing onto it.`,
+                  `「${located.query}」に当たる場所が見つからないため、図面は東京都心の仮の位置にあります。建物を検索するか、図面を建物までドラッグしてください。`
+                )
+              : t(
+                  `Could not look up “${located.query}”, so the drawing sits at a default spot in central Tokyo. Search for the building, or drag the drawing onto it.`,
+                  `「${located.query}」を検索できなかったため、図面は東京都心の仮の位置にあります。建物を検索するか、図面を建物までドラッグしてください。`
+                )}
           </p>
         ) : null}
         {saveProblem(autosave.status, t) ? (
