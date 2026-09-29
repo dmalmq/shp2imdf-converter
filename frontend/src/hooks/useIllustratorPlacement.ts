@@ -38,6 +38,24 @@ export type ControlPoint = {
   map: [number, number];
 };
 
+/** Where a floor sits on the ground; the working CRS moves nothing, so it is left out. */
+export type Pose = Pick<
+  SimilarityTransform,
+  "artworkAnchor" | "mapAnchor" | "rotationDeg" | "metresPerPoint"
+>;
+
+/** What an accepted alignment was made against. */
+export type AlignmentBasis =
+  /** A fit to the pairs `pointIds` on `floor`. */
+  | { kind: "points"; floor: string; pointIds: string[] }
+  /** A shape match or snap against reference data. */
+  | { kind: "reference" }
+  /** A match to another floor, where that floor was at the time. */
+  | { kind: "floor"; floor: string; pose: Pose };
+
+/** The pose a floor was aligned at. Its status is derived from this, never stored. */
+export type FloorAlignment = { pose: Pose; basis: AlignmentBasis };
+
 export type FloorPlacement = {
   label: string;
   /** True: scale/rotation follow the frame and the anchor is derived. */
@@ -53,6 +71,7 @@ export type FloorPlacement = {
   metresPerPoint?: number;
   /** True when convert could not stack this floor onto the others. */
   artworkMatch?: boolean;
+  alignment?: FloorAlignment;
 };
 
 export type PlacementState = {
@@ -99,7 +118,13 @@ export type PlacementAction =
   | { type: "addControlPoint"; point: ControlPoint }
   | { type: "removeControlPoint"; id: string }
   | { type: "fitControlPoints"; mode: AdjustmentMode }
-  | { type: "applySimilarity"; mode: AdjustmentMode; transform: SimilarityTransform }
+  | {
+      type: "applySimilarity";
+      mode: AdjustmentMode;
+      transform: SimilarityTransform;
+      /** Set when the user accepted this as an alignment; unset, the floors only move. */
+      alignedTo?: { kind: "reference" } | { kind: "floor"; floor: string };
+    }
   | { type: "applyFloors"; floors: { label: string; transform: TransformPayload }[] }
   /** Install a whole new floor set (new file or new assignment), labels included. */
   | { type: "resetPlacement"; state: PlacementState }
@@ -131,6 +156,40 @@ export function resolvedTransform(
         : (floor.metresPerPoint ?? state.frame.metresPerPoint),
     workingCrs: state.frame.workingCrs
   };
+}
+
+export function poseOf(state: PlacementState, floor: FloorPlacement): Pose {
+  const { artworkAnchor, mapAnchor, rotationDeg, metresPerPoint } = resolvedTransform(state, floor);
+  return { artworkAnchor, mapAnchor, rotationDeg, metresPerPoint };
+}
+
+function markAligned(
+  state: PlacementState,
+  labels: string[],
+  basis: AlignmentBasis
+): PlacementState {
+  return {
+    ...state,
+    floors: state.floors.map((f) =>
+      labels.includes(f.label) ? { ...f, alignment: { pose: poseOf(state, f), basis } } : f
+    )
+  };
+}
+
+function alignedBasis(
+  state: PlacementState,
+  to: NonNullable<Extract<PlacementAction, { type: "applySimilarity" }>["alignedTo"]>
+): AlignmentBasis {
+  if (to.kind === "reference") return to;
+  const reference = state.floors.find((f) => f.label === to.floor);
+  return reference
+    ? { kind: "floor", floor: to.floor, pose: poseOf(state, reference) }
+    : { kind: "reference" };
+}
+
+/** The floors a frame-wide operation moves. */
+function framedLabels(state: PlacementState): string[] {
+  return state.floors.filter((f) => f.linked && !f.pinned).map((f) => f.label);
 }
 
 function activeFloor(state: PlacementState): FloorPlacement | null {
@@ -540,6 +599,11 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
         if (error instanceof SimilarityError) return state;
         throw error;
       }
+      const basis: AlignmentBasis = {
+        kind: "points",
+        floor: active.label,
+        pointIds: active.controlPoints.map((p) => p.id)
+      };
       if (frameFit) {
         // The frame takes the fitted rotation and scale; the active floor's
         // anchor is set to where ITS artwork anchor lands under the fit (not
@@ -558,7 +622,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
           lon0,
           lat0
         );
-        return recomputeLinked({
+        const fittedFrame = recomputeLinked({
           ...state,
           frame: {
             ...state.frame,
@@ -569,12 +633,13 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
             f.label === active.label ? { ...f, mapAnchor: [lon, lat] } : f
           )
         });
+        return markAligned(fittedFrame, framedLabels(fittedFrame), basis);
       }
       // Individual fit: the fit owns this floor's full transform, including
       // its own anchor; keeping the region-centroid anchor would make
       // residuals wrong. The floor unlinks so the frame never fights the fit.
       const [lon, lat] = enuToLngLat(fitted.mapAnchor[0], fitted.mapAnchor[1], lon0, lat0);
-      return {
+      const fittedFloor: PlacementState = {
         ...state,
         floors: state.floors.map((f) =>
           f.label === active.label
@@ -590,6 +655,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
             : f
         )
       };
+      return markAligned(fittedFloor, [active.label], basis);
     }
 
     case "applySimilarity": {
@@ -613,7 +679,7 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
           active.artworkAnchor[0],
           active.artworkAnchor[1]
         );
-        return recomputeLinked({
+        const moved = recomputeLinked({
           ...state,
           frame: {
             ...state.frame,
@@ -624,12 +690,15 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
             f.label === active.label ? { ...f, mapAnchor: [lon, lat] } : f
           )
         });
+        return action.alignedTo
+          ? markAligned(moved, framedLabels(moved), alignedBasis(moved, action.alignedTo))
+          : moved;
       }
       const metresPerPoint = state.scaleLocked
         ? resolvedTransform(state, active).metresPerPoint
         : transform.metresPerPoint;
       if (!(metresPerPoint > 0)) return state;
-      return {
+      const moved: PlacementState = {
         ...state,
         floors: state.floors.map((f) =>
           f.label === active.label
@@ -645,6 +714,9 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
             : f
         )
       };
+      return action.alignedTo
+        ? markAligned(moved, [active.label], alignedBasis(moved, action.alignedTo))
+        : moved;
     }
 
     case "applyFloors":

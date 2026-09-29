@@ -575,7 +575,8 @@ def test_export_sets_delivered_at(test_client) -> None:
 
     after = test_client.get(f"/api/convert/illustrator/{conversion_id}").json()["project"]
     assert after["delivered_at"] is not None
-    assert (after["floors_total"], after["floors_placed"]) == (2, 2)
+    # Exporting is not aligning: the count stays what the draft says.
+    assert (after["floors_total"], after["floors_placed"]) == (2, 0)
     assert (after["stage"], after["blockers"]) == ("deliver", 0)
 
 

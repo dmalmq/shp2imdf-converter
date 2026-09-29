@@ -690,7 +690,7 @@ def export_illustrator(
     )
     try:
         _illustrator_store(request).mark_delivered(
-            conversion_id, floors_placed=len(floors), snapshot=snapshot
+            conversion_id, floors_exported=len(floors), snapshot=snapshot
         )
     except Exception:
         # The archive is already built; losing the delivery mark must not lose the download.

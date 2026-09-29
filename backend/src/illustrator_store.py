@@ -321,11 +321,11 @@ class ConversionStore:
         return cached, ContentSnapshot(project.content_changed_at, project.floors_total)
 
     def mark_delivered(
-        self, conversion_id: str, floors_placed: int, snapshot: ContentSnapshot
+        self, conversion_id: str, floors_exported: int, snapshot: ContentSnapshot
     ) -> ArtworkProject | None:
         """Record an export built from ``snapshot``; ``None`` if the content moved on since.
 
-        Every exported floor carried a transform, so each counts as placed.
+        Exporting a floor does not align it: the placed count stays the draft's.
         """
         cached = self.get(conversion_id)
         with self._lock_for(conversion_id):
@@ -340,8 +340,7 @@ class ConversionStore:
                 )
                 return None
             now = utc_now_iso()
-            project.floors_total = max(project.floors_total, floors_placed)
-            project.floors_placed = floors_placed
+            project.floors_total = max(project.floors_total, floors_exported)
             project.delivered_at = now
             project.updated_at = now
             _write_json(cached.directory / _PROJECT_NAME, project.to_dict())
