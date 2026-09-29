@@ -20,11 +20,10 @@ type SidebarProps = {
   state: PlacementState;
   dispatch: Dispatch<PlacementAction>;
   mode: AdjustmentMode;
-  outputCrs: string;
 };
 
-vi.mock("../components/illustrator/PlacementSidebar", () => ({
-  PlacementSidebar: ({ state, dispatch, outputCrs }: SidebarProps) => (
+vi.mock("../components/illustrator/AlignPanel", () => ({
+  AlignPanel: ({ state, dispatch }: SidebarProps) => (
     <section>
       <button
         type="button"
@@ -40,7 +39,26 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
         Pin Hakodate
       </button>
       <output data-testid="working-crs">{state.frame.workingCrs}</output>
+    </section>
+  )
+}));
+
+vi.mock("../components/illustrator/ArtworkDeliver", () => ({
+  ArtworkDeliver: ({
+    outputCrs,
+    onExport,
+    error
+  }: {
+    outputCrs: string;
+    onExport: () => void;
+    error: string | null;
+  }) => (
+    <section data-testid="deliver">
+      <button type="button" onClick={onExport}>
+        Export
+      </button>
       <output data-testid="output-crs">{outputCrs}</output>
+      <output data-testid="sidebar-error">{error ?? ""}</output>
     </section>
   )
 }));
