@@ -7,7 +7,7 @@ import type {
   ReferenceSelection
 } from "../api/client";
 import type { Located, Place } from "../components/illustrator/locateChrome";
-import type { PlacementTab } from "../components/illustrator/PlacementSidebar";
+import type { PlacementTab } from "../components/illustrator/AlignPanel";
 import type {
   AdjustmentMode,
   FloorAlignment,

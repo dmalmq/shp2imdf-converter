@@ -12,53 +12,25 @@ import {
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { Input } from "../ui/input";
-import { SectionHeader } from "../ui/section-header";
-import { Separator } from "../ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { cn } from "@/lib/utils";
-import { ControlPointList } from "./ControlPointList";
 import { PlacementScopeNote } from "./PlacementScopeNote";
-import type { ReferenceLayer } from "./PlacementMap";
-import { ShapeMatchPanel, type ShapeMatchPanelModel } from "./ShapeMatchPanel";
 
 type Props = {
   state: PlacementState;
   dispatch: (action: PlacementAction) => void;
-  /** Pair-picking stage, forwarded to the control-point list. */
-  pickStage: "artwork" | "map" | null;
-  /** What fits, scale and calibration act on. */
+  /** What scale and calibration act on. */
   mode: AdjustmentMode;
-  onTogglePicking: () => void;
-  referenceLayers: ReferenceLayer[];
-  shapeMatch: ShapeMatchPanelModel;
-  method: AlignMethod;
-  onMethodChange: (method: AlignMethod) => void;
 };
 
-export type AlignMethod = "points" | "shape";
+/** How the Align panel's three methods are named; `move` is rough placement by hand. */
+export type AlignMethod = "move" | "points" | "shape";
 
 /**
- * How the artwork gets aligned.
- *
- * Control points and shape match are alternatives — the old panel had both
- * expanded at once, with the only hint being an 11px "Alternative to control
- * points" caption, so they read as two things to do rather than one to choose.
- *
- * The numeric drawing scale and the pt-to-metre calibration sit behind
- * "Advanced": they are how you'd bootstrap a placement without a reference, not
- * something a first-time user should meet before the map.
+ * The numeric drawing scale and the pt-to-metre calibration, behind
+ * "Advanced": they are how you'd bootstrap a placement without a reference,
+ * not something a first-time user should meet before the map.
  */
-export function ScaleAndFitPanel({
-  state,
-  dispatch,
-  pickStage,
-  mode,
-  onTogglePicking,
-  referenceLayers,
-  shapeMatch,
-  method,
-  onMethodChange
-}: Props) {
+export function ScaleAndFitPanel({ state, dispatch, mode }: Props) {
   const { t } = useUiLanguage();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [denominator, setDenominator] = useState(String(DEFAULT_DRAWING_SCALE));
@@ -72,42 +44,6 @@ export function ScaleAndFitPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      <SectionHeader title={t("Alignment", "位置合わせ")} />
-
-      {/* One choice, not two open sections. Both stay mounted: each holds
-          selection state that a switch must not discard. */}
-      <Tabs value={method} onValueChange={(value) => onMethodChange(value as AlignMethod)}>
-        <TabsList className="w-full">
-          <TabsTrigger value="points" className="flex-1">
-            {t("Control points", "対応点")}
-          </TabsTrigger>
-          <TabsTrigger value="shape" className="flex-1">
-            {t("Shape match", "形状マッチ")}
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="points" forceMount hidden={method !== "points"} className="pt-3">
-          <ControlPointList
-            state={state}
-            dispatch={dispatch}
-            pickStage={pickStage}
-            mode={mode}
-            onTogglePicking={onTogglePicking}
-          />
-        </TabsContent>
-
-        <TabsContent value="shape" forceMount hidden={method !== "shape"} className="pt-3">
-          <ShapeMatchPanel
-            state={state}
-            mode={mode}
-            referenceLayers={referenceLayers}
-            model={shapeMatch}
-          />
-        </TabsContent>
-      </Tabs>
-
-      <Separator />
-
       <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
         <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 rounded-sm py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <span className="flex flex-col gap-0.5">

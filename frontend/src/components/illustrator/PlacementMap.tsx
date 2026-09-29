@@ -8,7 +8,7 @@ import type {
   MultiPolygon,
   Polygon
 } from "geojson";
-import { Pin } from "lucide-react";
+import { Check, Pin } from "lucide-react";
 import {
   Layer,
   Marker,
@@ -22,6 +22,7 @@ import { MapView } from "../shared/MapView";
 
 import type { IllustratorShapeMatchSuggestion } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import type { FloorStatus } from "../../lib/floorStatus";
 import {
   resolvedTransform,
   type ControlPoint,
@@ -418,6 +419,10 @@ type Props = {
   onRegionDrawn?: (corners: RegionCorners) => void;
   /** False while the pin or Station_pg snap is still in flight. */
   artworkVisible?: boolean;
+  /** Each floor's alignment status, for the floor picker. */
+  statuses?: Map<string, FloorStatus>;
+  /** Pixels between the map tools and the right edge, clear of a panel floating there. */
+  toolsInset?: number;
 };
 
 /**
@@ -445,7 +450,9 @@ export function PlacementMap({
   regionSource = null,
   regionTarget = null,
   onRegionDrawn,
-  artworkVisible = true
+  artworkVisible = true,
+  statuses,
+  toolsInset = 12
 }: Props) {
   const { t } = useUiLanguage();
   const mapRef = useRef<MapRef | null>(null);
@@ -532,6 +539,33 @@ export function PlacementMap({
   );
 
   const activeLabel = activeFloor?.label ?? null;
+
+  // A floor out of the shared frame (dragged free or pinned) is outlined dashed,
+  // so the map says which floors a group move will leave behind.
+  const ownFrames = useMemo<FeatureCollection>(() => {
+    if (state.floors.length < 2) return EMPTY_FEATURE_COLLECTION;
+    return {
+      type: "FeatureCollection",
+      features: state.floors
+        .filter((floor) => !floor.linked || floor.pinned)
+        .map((floor) => {
+          const transform = resolvedTransform(state, floor);
+          const [minX, minY, maxX, maxY] = floor.artworkBounds;
+          const ring = [
+            [minX, minY],
+            [maxX, minY],
+            [maxX, maxY],
+            [minX, maxY],
+            [minX, minY]
+          ].map(([x, y]) => artworkToLngLat(transform, x, y));
+          return {
+            type: "Feature" as const,
+            properties: { label: floor.label },
+            geometry: { type: "LineString" as const, coordinates: ring }
+          };
+        })
+    };
+  }, [state]);
 
   // Keep the active floor on top of the ghosts without remounting sources.
   // moveLayer is a no-op when the layer is already in place.
@@ -804,6 +838,16 @@ export function PlacementMap({
             </Source>
           );
         })}
+
+        <Source id="placement-own-frames" type="geojson" data={ownFrames}>
+          <Layer
+            id="placement-own-frame-lines"
+            type="line"
+            beforeId={OVERLAY_SLOT_LAYER_ID}
+            layout={{ visibility: artworkVisible ? "visible" : "none" }}
+            paint={{ "line-color": ARTWORK_TINT, "line-width": 1.5, "line-dasharray": [3, 2] }}
+          />
+        </Source>
 
         {pendingMarkerLngLat && activeFloor ? (
           <Marker
@@ -1091,29 +1135,45 @@ export function PlacementMap({
               : linked
                 ? ""
                 : t("(unlinked)", "（非連動）");
+            const aligned = statuses?.get(floor.label)?.kind === "aligned";
+            const active = floor.label === state.activeFloorLabel;
+            const tag = pinned ? t("pinned", "固定") : linked ? t("linked", "リンク") : t("unlinked", "非連動");
+            const name = [floor.label, status, aligned ? t("aligned", "位置合わせ済み") : ""]
+              .filter(Boolean)
+              .join(" ");
             return (
               <div key={floor.label} className="flex items-center gap-0.5">
                 <Button
                   size="sm"
-                  variant={floor.label === state.activeFloorLabel ? "default" : "ghost"}
+                  variant={active ? "default" : "ghost"}
                   className={cn(
-                    floor.label === state.activeFloorLabel &&
-                      "bg-artwork text-artwork-foreground hover:bg-artwork/90"
+                    "gap-1",
+                    active && "bg-artwork text-artwork-foreground hover:bg-artwork/90",
+                    !linked && "border border-dashed border-artwork"
                   )}
-                  aria-pressed={floor.label === state.activeFloorLabel}
+                  aria-pressed={active}
                   onClick={() => dispatch({ type: "setActiveFloor", label: floor.label })}
-                  aria-label={status ? `${floor.label} ${status}` : undefined}
-                  title={status ? `${floor.label} ${status}` : floor.label}
+                  aria-label={name !== floor.label ? name : undefined}
+                  title={name}
                 >
-                  {pinned ? (
-                    <Pin aria-hidden="true" size={10} className="mr-0.5 fill-current" />
-                  ) : linked ? null : (
-                    <span
+                  {aligned ? (
+                    <Check
                       aria-hidden="true"
-                      className="mr-1 inline-block h-1 w-1 rounded-full bg-current"
+                      className={cn(
+                        "h-3.5 w-3.5 rounded-full p-0.5",
+                        active ? "bg-artwork-foreground text-artwork" : "bg-primary text-primary-foreground"
+                      )}
+                      strokeWidth={3}
                     />
-                  )}
+                  ) : pinned ? (
+                    <Pin aria-hidden="true" size={10} className="fill-current" />
+                  ) : null}
                   {floor.label}
+                  {floors.length > 1 && !aligned ? (
+                    <span aria-hidden="true" className="font-mono text-[10px] font-normal opacity-75">
+                      {tag}
+                    </span>
+                  ) : null}
                 </Button>
                 <Button
                   size="icon"
@@ -1326,7 +1386,7 @@ export function PlacementMap({
       {/* Tools, not geometry: things you reach for occasionally sit opposite the
           floor switcher as icons. The basemap had four always-visible chips in
           the prime corner — it is chosen once per session. */}
-      <div className="absolute right-3 top-3 z-20 flex gap-0.5 rounded-md bg-popover/95 p-1 text-popover-foreground shadow-md">
+      <div style={{ right: toolsInset }} className="absolute top-3 z-20 flex gap-0.5 rounded-md bg-popover/95 p-1 text-popover-foreground shadow-md">
         <Popover open={basemapOpen} onOpenChange={setBasemapOpen}>
           <PopoverTrigger asChild>
             <Button

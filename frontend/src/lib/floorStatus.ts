@@ -1,4 +1,5 @@
 import {
+  floorResiduals,
   poseOf,
   type AlignmentBasis,
   type FloorPlacement,
@@ -116,6 +117,19 @@ export function floorStatuses(
 
 export function alignedCount(state: PlacementState, references: CurrentReferences): number {
   return state.floors.filter((floor) => floorStatus(state, floor, references).kind === "aligned").length;
+}
+
+/** RMSE in metres of the pairs an Aligned floor was fitted to, when they are its own. */
+export function floorFit(
+  state: PlacementState,
+  floor: FloorPlacement,
+  references: CurrentReferences
+): number | null {
+  const status = floorStatus(state, floor, references);
+  if (status.kind !== "aligned" || status.basis.kind !== "points" || status.basis.floor !== floor.label) {
+    return null;
+  }
+  return floorResiduals(state, floor)?.rmse ?? null;
 }
 
 /** A floor that did not stack is matched to a floor that did; any other starts with pairs. */
