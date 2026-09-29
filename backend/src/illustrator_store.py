@@ -12,6 +12,8 @@ Each entry is also an artwork project: ``project.json`` holds its name, last
 change, delivery time and placed-floor count, rewritten under a short per-entry
 lock so a rename and an assignment arriving together both survive. Listing reads
 metadata only and never touches, so the project list does not keep entries alive.
+``placement.json`` holds the placement draft (``artwork_draft``); listing never
+reads it.
 
 Deliberately not built on ``SessionManager``: that store is shaped around IMDF
 ``SessionRecord`` objects, and a conversion is an unrelated bag of coloured
@@ -32,6 +34,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
+from pydantic import ValidationError
+
+from backend.src.artwork_draft import (
+    PlacementDraft,
+    StoredDraft,
+    canonical,
+    placed_floor_count,
+)
 from backend.src.artwork_projects import (
     ArtworkProject,
     ArtworkStage,
@@ -48,6 +58,7 @@ _GPKG_NAME = "artwork.gpkg"
 _FLOORS_NAME = "floors.json"
 _LAST_USED_NAME = "last_used"
 _PROJECT_NAME = "project.json"
+_DRAFT_NAME = "placement.json"
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +76,17 @@ class ConversionExpiredError(Exception):
 
 class ConversionBusyError(Exception):
     """Raised when a sidecar stays locked by another process past a short retry."""
+
+
+class DraftConflictError(Exception):
+    """Raised when a draft was built on a revision or an assignment that has moved on."""
+
+
+@dataclass(frozen=True, slots=True)
+class DraftSaved:
+    revision: int
+    changed: bool
+    project: ArtworkProject
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,7 +232,9 @@ class ConversionStore:
         cached = self.get(conversion_id)  # raises ConversionExpiredError for unknown ids
         with self._lock_for(conversion_id):
             project = _read_project(cached.directory, cached.stem, strict=True)
+            stored = _read_draft(cached.directory, strict=True)
             _write_json(cached.directory / _FLOORS_NAME, floors)
+            _write_json(cached.directory / _DRAFT_NAME, {"revision": stored.revision + 1, "draft": None})
             now = utc_now_iso()
             project.floors_total = len(floors)
             project.floors_placed = 0
@@ -221,6 +245,59 @@ class ConversionStore:
 
     def project(self, cached: CachedConversion) -> ArtworkProject:
         return _read_project(cached.directory, cached.stem)
+
+    def draft(self, cached: CachedConversion) -> StoredDraft:
+        return _read_draft(cached.directory)
+
+    def save_draft(
+        self,
+        conversion_id: str,
+        draft: PlacementDraft,
+        base_revision: int,
+        *,
+        baseline: bool = False,
+    ) -> DraftSaved:
+        """Store ``draft`` if it was built on the current revision and assignment.
+
+        An identical draft writes nothing. A changed view is saved without
+        touching the project; changed placement work is an edit. With no draft
+        stored yet, a ``baseline`` draft (the page's starting placement, which
+        no one has edited) is recorded without counting as an edit.
+        """
+        cached = self.get(conversion_id)
+        with self._lock_for(conversion_id):
+            floors = _read_floors(cached.directory)
+            if floors is None:
+                raise DraftConflictError("Assign the floors before placing them.")
+            stored_labels = sorted(str(floor.get("label")) for floor in floors)
+            if sorted(floor.label for floor in draft.placement.floors) != stored_labels:
+                raise DraftConflictError(
+                    "The floors were assigned again since this placement was opened. Reload to continue."
+                )
+            stored = _read_draft(cached.directory, strict=True)
+            if stored.revision != base_revision:
+                raise DraftConflictError(
+                    "This placement was changed in another tab. Reload to continue."
+                )
+            if stored.draft is not None and canonical(stored.draft) == canonical(draft):
+                return DraftSaved(stored.revision, False, _read_project(cached.directory, cached.stem))
+            if stored.draft is None:
+                work_changed = not baseline
+            else:
+                work_changed = canonical(stored.draft.placement) != canonical(draft.placement)
+            project = _read_project(cached.directory, cached.stem, strict=work_changed)
+            revision = stored.revision + 1
+            _write_json(
+                cached.directory / _DRAFT_NAME,
+                {"revision": revision, "draft": draft.model_dump(mode="json")},
+            )
+            if work_changed:
+                now = utc_now_iso()
+                project.floors_placed = placed_floor_count(draft.placement)
+                project.updated_at = now
+                project.content_changed_at = now
+                _write_json(cached.directory / _PROJECT_NAME, project.to_dict())
+        return DraftSaved(revision, True, project)
 
     def rename(self, conversion_id: str, name: str) -> ArtworkProject:
         cached = self.get(conversion_id)
@@ -357,8 +434,7 @@ class ConversionStore:
             return lock
 
     def _directory_for(self, conversion_id: str) -> Path:
-        if not isinstance(conversion_id, str) or not _CONVERSION_ID_PATTERN.fullmatch(conversion_id):
-            raise ConversionExpiredError(_UNAVAILABLE)
+        require_conversion_id(conversion_id)
         directory = self.root / conversion_id
         if directory.resolve().parent != self.root.resolve():
             raise ConversionExpiredError(_UNAVAILABLE)
@@ -449,6 +525,12 @@ class ConversionStore:
         shutil.rmtree(target, ignore_errors=True)
 
 
+def require_conversion_id(conversion_id: object) -> None:
+    """Reject anything ``put`` could not have generated, before it can name a path."""
+    if not isinstance(conversion_id, str) or not _CONVERSION_ID_PATTERN.fullmatch(conversion_id):
+        raise ConversionExpiredError(_UNAVAILABLE)
+
+
 _LOCKED_FILE_ATTEMPTS = 5
 
 
@@ -478,6 +560,74 @@ def _read_project(directory: Path, stem: str, *, strict: bool = False) -> Artwor
             logger.warning("Project sidecar for %s is corrupt; using defaults", directory.name)
             break
     return ArtworkProject.from_dict(payload, stem)
+
+
+def _read_floors(directory: Path) -> list[dict] | None:
+    try:
+        floors = json.loads((directory / _FLOORS_NAME).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    return floors if isinstance(floors, list) else None
+
+
+def _read_draft(directory: Path, *, strict: bool = False) -> StoredDraft:
+    """Read the draft leniently: an unreadable one is no draft, at the revision it had.
+
+    A ``strict`` caller is about to write the next revision, so a file that
+    stays locked raises ``ConversionBusyError`` rather than reading as revision 0.
+    """
+    path = directory / _DRAFT_NAME
+    payload = None
+    for attempt in range(_LOCKED_FILE_ATTEMPTS):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            break
+        except FileNotFoundError:
+            return StoredDraft(0, None)
+        except PermissionError:
+            if attempt < _LOCKED_FILE_ATTEMPTS - 1:
+                time.sleep(0.02 * (attempt + 1))
+                continue
+            if strict:
+                raise ConversionBusyError(_BUSY) from None
+            return StoredDraft(0, None)
+        except (OSError, ValueError) as exc:
+            logger.warning("Placement draft for %s could not be read: %s", directory.name, exc)
+            return StoredDraft(0, None)
+    if not isinstance(payload, dict):
+        return StoredDraft(0, None)
+    revision = payload.get("revision")
+    revision = revision if isinstance(revision, int) and not isinstance(revision, bool) else 0
+    raw = payload.get("draft")
+    if raw is None:
+        return StoredDraft(revision, None)
+    try:
+        return StoredDraft(revision, PlacementDraft.model_validate(raw))
+    except ValidationError as exc:
+        logger.warning("Placement draft for %s does not fit schema v1: %s", directory.name, exc)
+        if strict:
+            _set_draft_aside(path, raw)
+        return StoredDraft(revision, None)
+
+
+def _set_draft_aside(path: Path, raw: object) -> None:
+    """Keep a draft this build cannot read beside the entry before anything replaces it.
+
+    Only a ``strict`` reader does this: it holds the per-id lock and is about
+    to write, so the file it renames is the one it read.
+    """
+    version = raw.get("version") if isinstance(raw, dict) else None
+    tag = f"v{version}" if isinstance(version, int) and not isinstance(version, bool) else "unreadable"
+    target = path.with_name(f"placement.{tag}.json")
+    for attempt in range(2, 100):
+        if not target.exists():
+            break
+        target = path.with_name(f"placement.{tag}.{attempt}.json")
+    try:
+        os.replace(path, target)
+    except OSError as exc:
+        raise ConversionBusyError(_BUSY) from exc
+    logger.warning("Kept the unreadable placement draft for %s as %s", path.parent.name, target.name)
 
 
 def _write_json(path: Path, payload: object) -> None:

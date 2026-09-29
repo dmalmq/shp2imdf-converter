@@ -42,7 +42,7 @@ export function HubPage() {
   useEffect(() => {
     let active = true;
     setListing({ state: "loading" });
-    fetchProjects("shapefiles").then(
+    fetchProjects().then(
       (response) => {
         if (active) setListing({ state: "loaded", response });
       },
@@ -195,6 +195,7 @@ function ProjectList({ response }: { response: ProjectListResponse }) {
 }
 
 function flowPill(project: HubProject, t: T): string {
+  if (project.flow === "artwork") return t("Illustrator artwork → shapefiles", "Illustrator 図面 → シェープファイル");
   if (project.imdfShapefiles) return t("IMDF shapefiles → ODC 2026", "IMDF シェープファイル → ODC 2026");
   return t("Shapefiles → IMDF", "シェープファイル → IMDF");
 }
@@ -222,6 +223,13 @@ function StatusLine({ project }: { project: HubProject }) {
       `${status.count} ${status.count === 1 ? "thing" : "things"} to fix before you can deliver`,
       `書き出し前に修正が必要な項目 ${status.count} 件`
     );
+  } else if (status.kind === "to-place") {
+    text =
+      status.count === 1
+        ? t("1 floor to place before you can deliver", "書き出し前に配置が必要なフロア 1 件")
+        : t(`${status.count} floors to place before you can deliver`, `書き出し前に配置が必要なフロア ${status.count} 件`);
+  } else if (status.kind === "floors-unnamed") {
+    text = t("Floors not named yet", "まだフロア名を付けていません");
   } else if (status.kind === "ready") {
     tone = "text-primary";
     dot = "bg-primary";

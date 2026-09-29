@@ -1,6 +1,6 @@
 import type { Dispatch } from "react";
 
-import type { ExportFormatsPayload } from "../../api/client";
+import type { ExportFormatsPayload, ReferenceSelection } from "../../api/client";
 import type { AdjustmentMode, PlacementAction, PlacementState } from "../../hooks/useIllustratorPlacement";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import { workingCrsLabel } from "../../lib/workingCrs";
@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { DisabledHint } from "../ui/tooltip";
 import { ExportPanel } from "./ExportPanel";
 import { LocateControl } from "./LocateControl";
+import type { Located } from "./locateChrome";
 import type { ReferenceLayer } from "./PlacementMap";
 import { ReferenceLayerList } from "./ReferenceLayerList";
 import { ScaleAndFitPanel } from "./ScaleAndFitPanel";
@@ -36,6 +37,10 @@ type Props = {
   conversionId: string;
   onLocate: (lngLat: [number, number]) => void;
   onLookupSettled?: () => void;
+  restoredLocation?: Located;
+  onLocatedChange?: (located: Located) => void;
+  referenceSelection?: ReferenceSelection;
+  onReferenceSelectionChange?: (selection: ReferenceSelection) => void;
   canUndo: boolean;
   canRedo: boolean;
   tab: PlacementTab;
@@ -66,6 +71,10 @@ export function PlacementSidebar({
   conversionId,
   onLocate,
   onLookupSettled,
+  restoredLocation,
+  onLocatedChange,
+  referenceSelection,
+  onReferenceSelectionChange,
   canUndo,
   canRedo,
   tab,
@@ -109,6 +118,8 @@ export function PlacementSidebar({
           dispatch={dispatch}
           onLocate={onLocate}
           onLookupSettled={onLookupSettled}
+          restored={restoredLocation}
+          onLocatedChange={onLocatedChange}
         />
         <TransformPanel
           state={state}
@@ -165,6 +176,8 @@ export function PlacementSidebar({
                 matchTargetName={shapeMatch.referenceName}
                 onMatchTargetChange={shapeMatch.onReferenceChange}
                 focusBounds={focusBounds}
+                selection={referenceSelection}
+                onSelectionChange={onReferenceSelectionChange}
               />
               <div className="flex flex-col gap-1.5">
                 <DisabledHint

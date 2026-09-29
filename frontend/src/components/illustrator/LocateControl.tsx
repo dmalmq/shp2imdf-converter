@@ -12,6 +12,7 @@ import {
   preferStationHits,
   samePlace,
   toPlace,
+  type Located,
   type Place
 } from "./locateChrome";
 
@@ -21,6 +22,9 @@ type Props = {
   onLocate: (lngLat: [number, number]) => void;
   /** Filename lookup finished without a pin, or there was nothing to look up. */
   onLookupSettled?: () => void;
+  /** Where a resumed placement had been located; set, the filename is not looked up again. */
+  restored?: Located;
+  onLocatedChange?: (located: Located) => void;
 };
 
 const FIELD = "w-full rounded-md border px-2 py-1";
@@ -34,18 +38,40 @@ function positionFromPlace(place: Place, baseline: boolean): PlacementAction {
   };
 }
 
-export function LocateControl({ siteName, dispatch, onLocate, onLookupSettled }: Props) {
+export function LocateControl({
+  siteName,
+  dispatch,
+  onLocate,
+  onLookupSettled,
+  restored,
+  onLocatedChange
+}: Props) {
   const { t, uiLanguage } = useUiLanguage();
-  const [locate, send] = useReducer(locateReducer, INITIAL_LOCATE);
+  const [locate, send] = useReducer(locateReducer, restored, (located): typeof INITIAL_LOCATE =>
+    located ? { located, search: { kind: "collapsed" } } : INITIAL_LOCATE
+  );
   const locateRef = useRef(locate);
   locateRef.current = locate;
   const searchedFor = useRef<string | null>(null);
+  const resumed = useRef(restored !== undefined);
   const queryInput = useRef<HTMLInputElement>(null);
   const onLookupSettledRef = useRef(onLookupSettled);
   onLookupSettledRef.current = onLookupSettled;
+  const onLocatedChangeRef = useRef(onLocatedChange);
+  onLocatedChangeRef.current = onLocatedChange;
+
+  useEffect(() => {
+    onLocatedChangeRef.current?.(locate.located);
+  }, [locate.located]);
 
   useEffect(() => {
     const name = siteName.trim();
+    if (resumed.current) {
+      resumed.current = false;
+      searchedFor.current = name;
+      onLookupSettledRef.current?.();
+      return;
+    }
     if (!name) {
       onLookupSettledRef.current?.();
       return;

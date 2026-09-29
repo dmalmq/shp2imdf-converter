@@ -10,13 +10,16 @@ import {
   snapIllustratorSurvey,
   type AssignFloorsResponse,
   type ExportFormatsPayload,
+  type IllustratorConversionResponse,
   type IllustratorPreviewResponse,
+  type ReferenceSelection,
   type ArtworkRegion,
   type IllustratorShapeMatchSuggestion,
   type TransformPayload
 } from "../api/client";
 import { isApiClientError, isBackendUnreachableError, toErrorMessage } from "../api/errors";
 import { ArtworkDropzone } from "../components/illustrator/ArtworkDropzone";
+import type { Located } from "../components/illustrator/locateChrome";
 import { AssignmentPanel } from "../components/illustrator/AssignmentPanel";
 import { PageAssignmentPanel } from "../components/illustrator/PageAssignmentPanel";
 import {
@@ -50,6 +53,7 @@ import {
   type SurveyPose,
   type SurveySnapTarget
 } from "../lib/placementPose";
+import { fromDraft, NO_REFERENCES, toDraft, type DraftView } from "../lib/artworkDraft";
 import { siteNameFromFilename, stationQueryFromFilename } from "../lib/siteName";
 import { usePageShell } from "../components/shell/ShellContext";
 import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
@@ -65,6 +69,7 @@ import {
   type AdjustmentMode,
   type PlacementState
 } from "../hooks/useIllustratorPlacement";
+import { useDraftAutosave, type DraftSaveStatus } from "../hooks/useDraftAutosave";
 import { usePlacementShortcuts } from "../hooks/usePlacementShortcuts";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import {
@@ -264,6 +269,8 @@ function initialStateFromAssignment(
   };
 }
 
+const DEFAULT_FORMATS: ExportFormatsPayload = { geopackage: false, shapefile: true, qgis: false };
+
 const DEFAULT_STATE: PlacementState = {
   frame: { rotationDeg: 0, metresPerPoint: DEFAULT_METRES_PER_POINT, workingCrs: "EPSG:6677" },
   activeFloorLabel: "artwork",
@@ -281,11 +288,93 @@ const DEFAULT_STATE: PlacementState = {
   ]
 };
 
-/** `initialFile` is converted on arrival: the file dropped on the hub. */
-export function IllustratorPage({ initialFile }: { initialFile?: File } = {}) {
+/**
+ * The saved floors that still belong to the assignment, in its order. A saved
+ * floor under a label the assignment no longer has is dropped; an assigned
+ * floor the draft does not hold starts from the assignment.
+ */
+export function reconcileFloors(saved: PlacementState, assigned: PlacementState): PlacementState {
+  const floors = assigned.floors.map(
+    (floor) => saved.floors.find((item) => item.label === floor.label) ?? floor
+  );
+  const active = floors.some((floor) => floor.label === saved.activeFloorLabel)
+    ? saved.activeFloorLabel
+    : assigned.activeFloorLabel;
+  return { ...saved, floors, activeFloorLabel: active };
+}
+
+/**
+ * A reopened project: its stored assignment, and its placement if one was
+ * saved. `serverCopy` is what autosave compares against, so opening a project
+ * sends nothing: the stored draft, or with none, the placement the page starts
+ * from.
+ */
+function resume(restored: IllustratorConversionResponse | undefined) {
+  if (!restored) return null;
+  const assignment: AssignedRegion[] | null =
+    restored.floors?.map((floor) => ({
+      label: floor.label,
+      box: floor.box,
+      pages: floor.pages,
+      layer_names: floor.layer_names
+    })) ?? null;
+  const assigned = initialStateFromAssignment(restored.preview, assignment ?? []);
+  const saved = restored.draft && assignment ? fromDraft(restored.draft) : null;
+  const state = saved ? reconcileFloors(saved.state, assigned) : assigned;
+  const startingView: DraftView = {
+    mode: "group",
+    tab: "fit",
+    outputCrs: assigned.frame.workingCrs,
+    formats: DEFAULT_FORMATS,
+    located: { kind: "none" },
+    references: NO_REFERENCES
+  };
+  return {
+    preview: restored.preview,
+    assignment,
+    state,
+    view: saved?.view ?? null,
+    serverCopy: restored.draft ?? (assignment ? toDraft(assigned, startingView) : null),
+    startingCrs: assignment ? state.frame.workingCrs : null
+  };
+}
+
+
+function saveProblem(status: DraftSaveStatus, t: (en: string, ja: string) => string): string | null {
+  if (status === "conflict") {
+    return t(
+      "This project was changed in another tab. Reload the page before carrying on; changes here are no longer saved.",
+      "このプロジェクトは別のタブで変更されました。続ける前にページを再読み込みしてください。ここでの変更は保存されません。"
+    );
+  }
+  if (status === "gone") {
+    return t(
+      "This project is no longer on this PC, so changes here are not saved.",
+      "このプロジェクトはこの PC に残っていないため、ここでの変更は保存されません。"
+    );
+  }
+  if (status === "failed") {
+    return t("Could not save the placement. Retrying…", "配置を保存できませんでした。再試行しています…");
+  }
+  return null;
+}
+
+type Props = {
+  /** Converted on arrival: the file dropped on the hub. */
+  initialFile?: File;
+  /** A stored conversion to reopen where it was left. */
+  restored?: IllustratorConversionResponse;
+  /** Called with each conversion this page creates, so the URL can name it. */
+  onConversion?: (conversionId: string) => void;
+};
+
+export function IllustratorPage({ initialFile, restored, onConversion }: Props = {}) {
   const { t } = useUiLanguage();
-  const [preview, setPreview] = useState<IllustratorPreviewResponse | null>(null);
-  const [assignment, setAssignment] = useState<AssignedRegion[] | null>(null);
+  const [resumed] = useState(() => resume(restored));
+  const [preview, setPreview] = useState<IllustratorPreviewResponse | null>(resumed?.preview ?? null);
+  const [assignment, setAssignment] = useState<AssignedRegion[] | null>(
+    resumed?.assignment ?? null
+  );
   const [lastFile, setLastFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -293,23 +382,27 @@ export function IllustratorPage({ initialFile }: { initialFile?: File } = {}) {
   const [shapeMatch, setShapeMatch] = useState<ShapeMatchState>(EMPTY_SHAPE_MATCH);
   const [inspectedMatch, setInspectedMatch] =
     useState<IllustratorShapeMatchSuggestion | null>(null);
-  const [outputCrs, setOutputCrs] = useState("EPSG:4326");
+  const [outputCrs, setOutputCrs] = useState(
+    resumed?.view?.outputCrs ?? resumed?.startingCrs ?? "EPSG:4326"
+  );
   // Shapefile only by default. This route's job is Illustrator -> shapefiles;
   // defaulting all three handed the user two artifacts they never asked for.
-  const [formats, setFormats] = useState<ExportFormatsPayload>({
-    geopackage: false,
-    shapefile: true,
-    qgis: false
-  });
+  const [formats, setFormats] = useState<ExportFormatsPayload>(
+    resumed?.view?.formats ?? DEFAULT_FORMATS
+  );
   const [history, dispatch] = useReducer(
     placementHistoryReducer,
-    DEFAULT_STATE,
+    resumed?.state ?? DEFAULT_STATE,
     initialPlacementHistory
   );
   const state = history.present;
   const [recenterTo, setRecenterTo] = useState<[number, number] | null>(null);
   const [referenceLayers, setReferenceLayers] = useState<ReferenceLayer[]>([]);
-  const [placementTab, setPlacementTab] = useState<PlacementTab>("fit");
+  const [placementTab, setPlacementTab] = useState<PlacementTab>(resumed?.view?.tab ?? "fit");
+  const [located, setLocated] = useState<Located>(resumed?.view?.located ?? { kind: "none" });
+  const [referenceSelection, setReferenceSelection] = useState<ReferenceSelection>(
+    resumed?.view?.references ?? NO_REFERENCES
+  );
   const [surveyNotice, setSurveyNotice] = useState<string | null>(null);
   const [surveyPose, setSurveyPose] = useState<SurveyPose>("idle");
   const [locateSettled, setLocateSettled] = useState(false);
@@ -368,10 +461,41 @@ export function IllustratorPage({ initialFile }: { initialFile?: File } = {}) {
   // newer snap or a new conversion.
   const snappedRef = useRef<SurveySnapTarget | null>(null);
   const surveySnapGen = useRef(0);
+  // A resumed placement was already snapped (or deliberately moved after); the
+  // survey layer re-queried for its pin must not snap it again.
+  const resumedPin = useRef(resumed?.view ? (resumed.state.stationPin ?? null) : null);
   // Floors start grouped: the whole building is aligned first, then the user
   // switches to individual mode for final per-floor nudges. UI-level only —
   // never an undo step.
-  const [adjustmentMode, setAdjustmentMode] = useState<AdjustmentMode>("group");
+  const [adjustmentMode, setAdjustmentMode] = useState<AdjustmentMode>(
+    resumed?.view?.mode ?? "group"
+  );
+
+  const draft = useMemo(() => {
+    if (!preview || assignment === null) return null;
+    const view: DraftView = {
+      mode: adjustmentMode,
+      tab: placementTab,
+      outputCrs,
+      formats,
+      located,
+      references: referenceSelection
+    };
+    return toDraft(state, view);
+  }, [preview, assignment, state, adjustmentMode, placementTab, outputCrs, formats, located, referenceSelection]);
+  const autosave = useDraftAutosave(
+    draft,
+    restored
+      ? {
+          conversionId: restored.conversion_id,
+          revision: restored.draft_revision,
+          saved: resumed?.serverCopy ?? null
+        }
+      : null,
+    // Nothing undoable has happened: this is where the page started (the
+    // assignment, then the filename lookup), not an edit anyone made.
+    history.past.length === 0
+  );
 
   // Publish the stage so the header rail can show THIS route's progress. Derived
   // rather than stored so it can never disagree with what is on screen.
@@ -462,7 +586,11 @@ export function IllustratorPage({ initialFile }: { initialFile?: File } = {}) {
     [state.stationPin]
   );
 
+  // A resumed output CRS is the user's choice; only a later zone change replaces it.
+  const syncedCrs = useRef(resumed?.startingCrs ?? null);
   useEffect(() => {
+    if (syncedCrs.current === state.frame.workingCrs) return;
+    syncedCrs.current = state.frame.workingCrs;
     setOutputCrs(state.frame.workingCrs);
   }, [state.frame.workingCrs]);
 
@@ -569,6 +697,12 @@ export function IllustratorPage({ initialFile }: { initialFile?: File } = {}) {
   useEffect(() => {
     if (!preview || assignment === null || !state.stationPin || !state.scaleLocked) return;
     if (!surveyCollection || surveyCollection.features.length === 0) return;
+    const pin = resumedPin.current;
+    if (!snappedRef.current && pin && pin[0] === state.stationPin[0] && pin[1] === state.stationPin[1]) {
+      snappedRef.current = { collection: surveyCollection, pin: state.stationPin };
+      setSurveyPose("ready");
+      return;
+    }
     if (sameSurveySnap(snappedRef.current, surveyCollection, state.stationPin)) return;
     if (surveySnapAwaitingRetrim(snappedRef.current, surveyCollection, state.stationPin)) return;
     void snapToSurvey(surveyCollection);
@@ -898,12 +1032,16 @@ export function IllustratorPage({ initialFile }: { initialFile?: File } = {}) {
     setSurveyNotice(null);
     setSurveyPose("idle");
     setLocateSettled(false);
+    setLocated({ kind: "none" });
+    setReferenceSelection(NO_REFERENCES);
     snappedRef.current = null;
+    resumedPin.current = null;
     surveySnapGen.current += 1;
     setLastFile(file);
     setOutputCrs(response.suggested_crs);
     // New conversions start locked at 1:1000; assignment reset does the same.
     dispatch({ type: "resetPlacement", state: initialStateFromAssignment(response, []) });
+    onConversion?.(response.conversion_id);
   };
 
   const convert = async (file: File) => {
@@ -949,14 +1087,17 @@ export function IllustratorPage({ initialFile }: { initialFile?: File } = {}) {
       install(fresh, file);
       return null;
     }
+    let summary: AssignFloorsResponse;
     try {
-      await assignFloors(fresh.conversion_id, regions);
+      summary = await assignFloors(fresh.conversion_id, regions);
     } catch (error) {
       if (isBackendUnreachableError(error)) throw error;
       install(fresh, file);
       return null;
     }
     setPreview(fresh);
+    autosave.track(fresh.conversion_id, summary.draft_revision, null);
+    onConversion?.(fresh.conversion_id);
     return fresh;
   };
 
@@ -1021,6 +1162,7 @@ export function IllustratorPage({ initialFile }: { initialFile?: File } = {}) {
       }));
       try {
         const summary = await assignFloors(preview.conversion_id, regions);
+        autosave.track(preview.conversion_id, summary.draft_revision, null);
         setAssignment(regions);
         dispatch({
           type: "resetPlacement",
@@ -1101,6 +1243,10 @@ export function IllustratorPage({ initialFile }: { initialFile?: File } = {}) {
         conversionId={preview.conversion_id}
         onLocate={setRecenterTo}
         onLookupSettled={() => setLocateSettled(true)}
+        restoredLocation={resumed?.view ? resumed.view.located : undefined}
+        onLocatedChange={setLocated}
+        referenceSelection={resumed?.view?.references}
+        onReferenceSelectionChange={setReferenceSelection}
         canUndo={history.past.length > 0}
         canRedo={history.future.length > 0}
         tab={placementTab}
@@ -1148,6 +1294,15 @@ export function IllustratorPage({ initialFile }: { initialFile?: File } = {}) {
             {state.stationPin
               ? t("Snapping to Station_pg…", "Station_pg に合わせています…")
               : t("Locating the station…", "駅を検索しています…")}
+          </p>
+        ) : null}
+        {saveProblem(autosave.status, t) ? (
+          <p
+            role="status"
+            data-testid="draft-save-problem"
+            className="absolute inset-x-0 bottom-3 z-30 mx-auto w-fit max-w-[80%] rounded-md border border-border bg-popover/95 px-3 py-1 text-xs leading-4 text-destructive shadow-sm"
+          >
+            {saveProblem(autosave.status, t)}
           </p>
         ) : null}
         <PlacementMap

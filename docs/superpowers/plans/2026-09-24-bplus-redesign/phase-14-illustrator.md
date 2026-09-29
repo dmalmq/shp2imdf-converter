@@ -20,6 +20,13 @@ Back to [overview](overview.md).
 - **Draft autosave and resume at `/a/:id`.** Store assignments, per-floor transforms, control points, references and status with the artwork project, so reopening restores them. This is what lets the hub list artwork cards again (see decisions.md, "Artwork on the hub before `/a/:id`").
 - **Template mismatch before apply.** The placement library shows the floor-mapping and drawing differences before it applies a saved template, not after.
 
+**Part a (persistence and routes) landed first.** `/a/:id`, the versioned `PlacementDraft` in `placement.json`, debounced autosave, and artwork cards on the hub. Choices are in [decisions](decisions.md). Left for 14b:
+- Rejoining a floor to the group (`relinkFloor`) drops its own scale: it clears `metresPerPoint` and the floor takes the frame's. Noted in #86; not changed in 14a.
+- Replace the draft's placed-floor rule (pinned, or enough control points) with the per-floor "Aligned" status.
+- The template mismatch is still shown after apply.
+- Save status in the top bar; 14a only shows a notice over the map when a save fails or conflicts.
+- Undo history is not kept across a reload.
+
 **After this phase.** These are small, independent follow-ups:
 - a nudge step selector (0.01 / 0.1 / 1 / 10 m);
 - coordinate readouts labelled as geographic or projected, and as cursor, anchor or centre;

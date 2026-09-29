@@ -43,7 +43,12 @@ export const FLOW_STAGES: Record<Flow, ReadonlyArray<{ id: StageId; label: Bilin
 };
 
 export function flowForPath(pathname: string): Flow {
-  return pathname === "/illustrator" ? "artwork" : "shapefiles";
+  return pathname === "/illustrator" || pathname.startsWith("/a/") ? "artwork" : "shapefiles";
+}
+
+/** An artwork project: the conversion id is the project. */
+export function artworkPath(conversionId: string): string {
+  return `/a/${encodeURIComponent(conversionId)}`;
 }
 
 /** What the page on screen has told the shell about its own stages. */

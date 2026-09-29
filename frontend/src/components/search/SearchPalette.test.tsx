@@ -187,6 +187,6 @@ describe("SearchPalette", () => {
     fireEvent.change(box(), { target: { value: "東京駅 1F" } });
     fireEvent.change(box(), { target: { value: "overlap" } });
     await waitFor(() => expect(fetchProjects).toHaveBeenCalledTimes(1));
-    expect(fetchProjects).toHaveBeenCalledWith("shapefiles");
+    expect(fetchProjects).toHaveBeenCalledWith();
   });
 });

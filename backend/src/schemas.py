@@ -13,6 +13,7 @@ from typing import get_origin
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.src.artwork_draft import PlacementDraft
 from backend.src.artwork_projects import ArtworkStage
 
 
@@ -946,6 +947,16 @@ class IllustratorConversionResponse(BaseModel):
     preview: IllustratorPreviewResponse
     floors: list[FloorRegionPayload] | None = None
     project: ArtworkProjectPayload
+    draft: PlacementDraft | None = None
+    draft_revision: int = 0
+
+
+class SaveDraftResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int
+    changed: bool
+    project: ArtworkProjectPayload
 
 
 class RenameConversionRequest(BaseModel):
@@ -977,6 +988,7 @@ class AssignFloorsResponse(BaseModel):
     floors: list[AssignFloorSummary] = Field(default_factory=list)
     unassigned_count: int
     total_features: int
+    draft_revision: int = 0
 
 
 class ReferenceLayerItem(BaseModel):

@@ -76,9 +76,9 @@ Stable handles (do not use click coordinates):
 | Import profile | radios `Standard · recommended`, `IMDF schema` (read-only on a project's Bring in) |
 | Shapefile file input | `input[type=file]:not(#imdf-file-input)` |
 | Import | next-bar button `Read the files` (standard, lands on `/p/<id>/bring-in`) or `Import to Check` (IMDF schema); then `Continue to Set up` |
-| Hub | `/`: h1 `Station projects`, list `Projects` (one card per shapefile project, button `Continue <name>` or `Open <name>`), filters `All` / `In progress` / `Delivered`; empty state `No projects on this PC yet` |
+| Hub | `/`: h1 `Station projects`, list `Projects` (one card per project of either flow; an artwork card opens `/a/<conversion id>`; button `Continue <name>` or `Open <name>`), filters `All` / `In progress` / `Delivered`; empty state `No projects on this PC yet` |
 | Open archive | hub card `Reopen an IMDF archive` / `#imdf-file-input` |
-| Illustrator entry | hub card `From Illustrator artwork`; then `Choose file` / `#illustrator-georef-input` |
+| Illustrator entry | hub card `From Illustrator artwork`; then `Choose file` / `#illustrator-georef-input`; once converted the URL is replaced with `/a/<conversion id>`, which reopens the placement on reload |
 | New shapefile project | hub card `From floor shapefiles` → `/p/new`; the hub's drop zone input is `[data-testid=hub-drop-input]` |
 | Wizard sections | nav `Sections` holding buttons named by section, e.g. `Venue info`, `Summary & generate` (the open one has `aria-current="true"`); children show only while their parent is open; the h1 names the section |
 | Venue | textbox named exactly `Venue name` and `Locality` (the `*` is outside the label); they render only while Project & venue or Venue info is open (autosaves; the top bar shows `Saved · HH:MM`, or `Not saved yet` while a required field is missing) |

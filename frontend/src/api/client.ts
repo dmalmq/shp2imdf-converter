@@ -520,11 +520,8 @@ export type ProjectListResponse = {
 };
 
 /** Read-only: listing never counts as opening a project. */
-export async function fetchProjects(
-  flow: ProjectSummary["flow"],
-  limit = 500
-): Promise<ProjectListResponse> {
-  const response = await fetch(`/api/projects?flow=${flow}&limit=${limit}`);
+export async function fetchProjects(limit = 500): Promise<ProjectListResponse> {
+  const response = await fetch(`/api/projects?limit=${limit}`);
   return handleJson<ProjectListResponse>(response);
 }
 
@@ -1146,6 +1143,8 @@ export type AssignFloorsResponse = {
   floors: AssignFloorSummary[];
   unassigned_count: number;
   total_features: number;
+  /** A new assignment drops the draft; the next save builds on this revision. */
+  draft_revision: number;
 };
 
 export async function assignFloors(
@@ -1163,6 +1162,110 @@ export async function assignFloors(
     body: JSON.stringify({ floors })
   });
   return handleJson<AssignFloorsResponse>(response);
+}
+
+export type DraftPlace = { name: string; lng_lat: [number, number]; working_crs?: string | null };
+
+/** `backend/src/artwork_draft.py`: what `/a/:id` resumes from. Version 1. */
+export type PlacementDraft = {
+  version: 1;
+  placement: {
+    frame: { rotation_deg: number; metres_per_point: number; working_crs: string };
+    floors: {
+      label: string;
+      linked: boolean;
+      pinned: boolean;
+      artwork_anchor: [number, number];
+      map_anchor: [number, number];
+      artwork_bounds: [number, number, number, number];
+      rotation_deg: number | null;
+      metres_per_point: number | null;
+      artwork_match: boolean;
+      control_points: { id: string; artwork: [number, number]; map: [number, number] }[];
+    }[];
+    scale_locked: boolean;
+    output_crs: string;
+    formats: ExportFormatsPayload;
+  };
+  view: {
+    active_floor_label: string | null;
+    mode: "group" | "individual";
+    tab: "fit" | "reference" | "export";
+    station_pin: [number, number] | null;
+    location: {
+      kind: "guessed" | "chosen";
+      query: string;
+      place: DraftPlace;
+      candidates: DraftPlace[];
+    } | null;
+    references: ReferenceSelection;
+  };
+};
+
+/** Which reference layers were loaded, by identity; uploaded files are only named. */
+export type ReferenceSelection = {
+  preloaded: boolean;
+  include_lines: boolean;
+  hidden: string[];
+  removed: string[];
+  uploads: string[];
+};
+
+export type ArtworkProjectPayload = {
+  name: string;
+  updated_at: string | null;
+  content_changed_at: string | null;
+  delivered_at: string | null;
+  floors_total: number;
+  floors_placed: number;
+  stage: "name-floors" | "place" | "deliver";
+  blockers: number | null;
+};
+
+export type IllustratorConversionResponse = {
+  conversion_id: string;
+  preview: IllustratorPreviewResponse;
+  floors:
+    | {
+        label: string;
+        box: [number, number, number, number] | null;
+        pages: number[] | null;
+        layer_names: string[] | null;
+      }[]
+    | null;
+  project: ArtworkProjectPayload;
+  draft: PlacementDraft | null;
+  draft_revision: number;
+};
+
+/** Reopen a stored conversion. Opening is not an edit. */
+export async function fetchIllustratorConversion(
+  conversionId: string
+): Promise<IllustratorConversionResponse> {
+  const response = await fetch(`/api/convert/illustrator/${encodeURIComponent(conversionId)}`);
+  return handleJson<IllustratorConversionResponse>(response);
+}
+
+export type SaveDraftResponse = { revision: number; changed: boolean; project: ArtworkProjectPayload };
+
+/**
+ * `keepalive` lets a save sent while the page unloads still reach the server.
+ * `baseline` says no one has edited this placement yet, so a first save of it
+ * is not an edit of the project.
+ */
+export async function saveIllustratorDraft(
+  conversionId: string,
+  baseRevision: number,
+  draft: PlacementDraft,
+  options: { keepalive?: boolean; baseline?: boolean } = {}
+): Promise<SaveDraftResponse> {
+  const response = await fetch(`/api/convert/illustrator/${encodeURIComponent(conversionId)}/draft`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ base_revision: baseRevision, draft, baseline: options.baseline ?? false }),
+    keepalive: options.keepalive
+  });
+  return handleJson<SaveDraftResponse>(response);
 }
 
 export type ShapeMatchResidualVector = {

@@ -92,6 +92,46 @@ test("a working_crs on the hit is applied with the pin", async () => {
   ]);
 });
 
+test("a resumed placement keeps where it was located and does not look the filename up", () => {
+  const settled = vi.fn();
+  const changes = vi.fn();
+  const place = { name: oimachiStaWire.display_name, lngLat: [139.7286, 35.6063] as [number, number] };
+  const restored = { kind: "chosen" as const, query: "大井町", place, candidates: [place] as [typeof place] };
+  const seen: PlacementAction[] = [];
+  render(
+    <LocateControl
+      siteName="大井町駅"
+      dispatch={(action) => seen.push(action)}
+      onLocate={() => {}}
+      onLookupSettled={settled}
+      restored={restored}
+      onLocatedChange={changes}
+    />
+  );
+  expect(geocodeSearch).not.toHaveBeenCalled();
+  expect(seen).toEqual([]);
+  expect(settled).toHaveBeenCalledOnce();
+  expect(changes).toHaveBeenLastCalledWith(restored);
+
+  fireEvent.click(screen.getByRole("button", { name: /大井町駅/ }));
+  expect(screen.getByRole("button", { name: oimachiStaWire.display_name })).toBeInTheDocument();
+});
+
+test("a resumed placement that was never located stays unlocated", () => {
+  const settled = vi.fn();
+  render(
+    <LocateControl
+      siteName="大井町駅"
+      dispatch={() => {}}
+      onLocate={() => {}}
+      onLookupSettled={settled}
+      restored={{ kind: "none" }}
+    />
+  );
+  expect(geocodeSearch).not.toHaveBeenCalled();
+  expect(settled).toHaveBeenCalledOnce();
+});
+
 test("filename auto-locate places the first hit without opening the list", async () => {
   vi.mocked(geocodeSearch).mockResolvedValue([oimachiStaWire, oimachiTownWire]);
   const { seen, recenter } = renderLocate("大井町");

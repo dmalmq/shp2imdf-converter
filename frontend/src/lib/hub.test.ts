@@ -76,6 +76,32 @@ test("filters split delivered from in progress", () => {
   expect(matchesFilter(delivered, "all")).toBe(true);
 });
 
+describe("artwork projects", () => {
+  const artwork = (overrides: Parameters<typeof summary>[0] = {}) =>
+    summary({ id: "a".repeat(32), flow: "artwork", import_profile: null, can_wait: null, ...overrides });
+
+  test("continue at /a/:id on the artwork track", () => {
+    const project = toHubProject(artwork({ stage: "place", blockers: 2 }));
+    expect(project.href).toBe(`/a/${"a".repeat(32)}`);
+    expect(project.flow).toBe("artwork");
+    expect(project.track.map((stage) => stage.id)).toEqual(["bring-in-artwork", "name-floors", "place", "deliver"]);
+    expect(statuses(project)).toEqual(["done", "done", "current", "todo"]);
+    expect(project.status).toEqual({ kind: "to-place", count: 2 });
+  });
+
+  test("floors not named yet sit on Name floors", () => {
+    const project = toHubProject(artwork({ stage: "name-floors", blockers: null }));
+    expect(project.stageNumber).toBe(2);
+    expect(project.status).toEqual({ kind: "floors-unnamed" });
+  });
+
+  test("every floor placed is ready to deliver; a current delivery is Open", () => {
+    expect(toHubProject(artwork({ stage: "deliver", blockers: 0 })).status).toEqual({ kind: "ready", canWait: 0 });
+    const delivered = toHubProject(artwork({ stage: "deliver", blockers: 0, delivered_at: "2026-09-12T03:00:00Z" }));
+    expect(delivered.action).toBe("open");
+  });
+});
+
 test("lifetimes under a day are stated in hours", () => {
   expect(lifetime({ idle_days: 30, max_projects: 200 })).toEqual({ unit: "days", value: 30 });
   expect(lifetime({ idle_days: 2 / 24, max_projects: 20 })).toEqual({ unit: "hours", value: 2 });
