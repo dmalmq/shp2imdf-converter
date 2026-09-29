@@ -615,6 +615,9 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
     targets: placing ? [placementTab === "export" ? "place" : "deliver"] : [],
     go: { place: () => setPlacementTab("fit"), deliver: () => setPlacementTab("export") },
     floorsAligned: placing ? { aligned: alignedFloors, total: state.floors.length } : null,
+    artworkRead: preview
+      ? { pages: preview.pages.length, floors: placing ? state.floors.length : null }
+      : null,
     save: placing
       ? {
           state:
@@ -1302,49 +1305,30 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
     };
 
     return (
-      <div className="mx-auto w-full max-w-[1120px] px-10 py-10">
-        {/* Two different jobs behind one stage: naming pages, or drawing boxes on
-            a single sheet. The heading has to say which one you are doing. */}
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold leading-9 tracking-tight text-foreground">
-            {preview.pages.length > 1
-              ? t("Name each floor", "フロア名を入力")
-              : t("Mark each floor", "フロアを囲む")}
-          </h1>
-          {preview.pages.length > 1 ? (
-            <p className="text-sm leading-5 text-muted-foreground">
-              {t(
-                "Pages given the same name become one floor. Untick a cover sheet or legend to leave it out.",
-                "同じ名前を付けたページは1つのフロアになります。表紙や凡例は除外してください。"
-              )}
-            </p>
-          ) : null}
-        </div>
-        <div className="mt-5">
-          {preview.pages.length > 1 ? (
-            <PageAssignmentPanel
-              preview={preview.preview}
-              pages={preview.pages}
-              layerSummaries={preview.layers}
-              alignment={preview.report.page_alignment ?? []}
-              onSkip={() => void commitAssignment([wholeArtwork])}
-              onAssigned={commitAssignment}
-            />
-          ) : (
-            <AssignmentPanel
-              preview={preview.preview}
-              artworkBounds={preview.artwork_bounds}
-              layerSummaries={preview.layers}
-              onSkip={() => void commitAssignment([wholeArtwork])}
-              onAssigned={commitAssignment}
-            />
-          )}
-        </div>
+      <div className="flex min-h-0 flex-1 flex-col">
         {error ? (
-          <p role="alert" className="mt-3 text-[13px] leading-[18px] text-destructive">
+          <p role="alert" className="border-b border-border bg-destructive-muted px-14 py-2 text-[13px] leading-[18px] text-destructive">
             {error}
           </p>
         ) : null}
+        {preview.pages.length > 1 ? (
+          <PageAssignmentPanel
+            preview={preview.preview}
+            pages={preview.pages}
+            layerSummaries={preview.layers}
+            alignment={preview.report.page_alignment ?? []}
+            onSkip={() => void commitAssignment([wholeArtwork])}
+            onAssigned={commitAssignment}
+          />
+        ) : (
+          <AssignmentPanel
+            preview={preview.preview}
+            artworkBounds={preview.artwork_bounds}
+            layerSummaries={preview.layers}
+            onSkip={() => void commitAssignment([wholeArtwork])}
+            onAssigned={commitAssignment}
+          />
+        )}
       </div>
     );
   }

@@ -283,7 +283,7 @@ async function captureIllustratorFlow(page, shoot, artwork) {
   await shoot("illustrator-bring-in");
 
   await page.locator("#illustrator-georef-input").setInputFiles(artwork);
-  await page.getByRole("heading", { name: "Name each floor", level: 1 }).waitFor({ timeout: 60000 });
+  await page.getByRole("heading", { name: /Name each page|Mark each floor/, level: 1 }).waitFor({ timeout: 60000 });
   await shoot("illustrator-name-floors", { wait: 800 });
 
   await page.getByRole("button", { name: "Done assigning", exact: true }).click();

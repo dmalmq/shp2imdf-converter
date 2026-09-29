@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FeatureCollection } from "geojson";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
@@ -8,9 +8,9 @@ import {
   partitionByFloors,
   type PartitionFloor
 } from "../../lib/svgPreview";
+import { NextBar } from "../bringIn/NextBar";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { DisabledHint } from "../ui/tooltip";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -21,20 +21,23 @@ type Props = {
   onSkip: () => void;
   /** When drilling into one page of a multi-page file, tag boxes with it. */
   page?: number | null;
-  /** Renders a back button when set (drill-in mode). */
-  onCancel?: () => void;
   /**
    * Boxes this page already has (re-entering "Edit boxes…" after a split).
    * Seeded into drafts on mount, coloured from BOX_COLORS by index like a
    * freshly drawn set. Omitted or empty starts from a blank canvas.
    */
   initialDrafts?: PartitionFloor[];
+  /**
+   * Inside the page list of a multi-page file: no heading or next bar of its
+   * own, and every change to the boxes is reported as it happens.
+   */
+  embedded?: boolean;
+  onChange?: (floors: PartitionFloor[]) => void;
 };
 
-// Mirrors the `layer-1..4` tokens: draft boxes are data the operator is
-// defining, so they stay cool and distinguishable, and leave the warm accent to
-// the placed artwork.
-const BOX_COLORS = ["#2563eb", "#0891b2", "#65a30d", "#57534e"];
+// Boxes mark the operator's own artwork, so they are plum like it (page 112:2),
+// dashed and told apart by the label on each.
+const BOX_COLORS = ["hsl(var(--artwork))"];
 
 type DraftFloor = {
   label: string;
@@ -58,8 +61,9 @@ export function AssignmentPanel({
   onAssigned,
   onSkip,
   page = null,
-  onCancel,
-  initialDrafts
+  initialDrafts,
+  embedded = false,
+  onChange
 }: Props) {
   const { t } = useUiLanguage();
   const [drafts, setDrafts] = useState<DraftFloor[]>(() => {
@@ -150,6 +154,14 @@ export function AssignmentPanel({
     [preview, drafts, pageTag]
   );
 
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  useEffect(() => {
+    onChangeRef.current?.(
+      drafts.map((d) => ({ label: d.label, box: d.box, pages: pageTag, layerNames: d.layerNames }))
+    );
+  }, [drafts, pageTag]);
+
   const toggleLayer = (index: number, layer: string) => {
     setDrafts((prev) =>
       prev.map((draft, i) => {
@@ -163,33 +175,11 @@ export function AssignmentPanel({
     );
   };
 
-  const doneButton = (
-    <Button
-      disabled={drafts.length === 0}
-      onClick={() =>
-        onAssigned(
-          drafts.map((d) => ({
-            label: d.label,
-            box: d.box,
-            pages: pageTag,
-            layerNames: d.layerNames
-          }))
-        )
-      }
-    >
-      {t("Done assigning", "割り当て完了")}
-    </Button>
-  );
+  const floors = drafts.map((d) => ({ label: d.label, box: d.box, pages: pageTag, layerNames: d.layerNames }));
 
-  return (
+  const body = (
     <div className="flex flex-col gap-3">
-      <p className="text-xs leading-4 text-muted-foreground">
-        {t(
-          "Draw a box around each floor plan. Boxes touching artwork edges may count differently at export, which uses the full geometry.",
-          "各階の平面図を囲むように四角を描いてください。端に触れる四角は、書き出し時（完全な形状で判定）と数が異なる場合があります。"
-        )}
-      </p>
-      <div className="relative overflow-hidden rounded-lg border border-border bg-card">
+      <div className="relative overflow-hidden rounded-xl border border-border bg-card">
         <svg
           ref={svgRef}
           viewBox={viewBox}
@@ -217,9 +207,10 @@ export function AssignmentPanel({
                 width={draft.box[2] - draft.box[0]}
                 height={draft.box[3] - draft.box[1]}
                 fill={draft.color}
-                fillOpacity={0.15}
+                fillOpacity={0.08}
                 stroke={draft.color}
-                strokeWidth={1}
+                strokeWidth={markerRadius / 2}
+                strokeDasharray={`${markerRadius * 2} ${markerRadius}`}
               />
             ))}
             {drawing ? (
@@ -244,6 +235,17 @@ export function AssignmentPanel({
               </>
             ) : null}
           </g>
+          {drafts.map((draft) => (
+            <text
+              key={`${draft.label}-label`}
+              x={draft.box[0] + markerRadius}
+              y={miny + maxy - draft.box[3] + markerRadius * 3}
+              fontSize={markerRadius * 3}
+              className="fill-artwork font-semibold"
+            >
+              {`${draft.label} · ${perFloor.get(draft.label)?.length ?? 0}`}
+            </text>
+          ))}
         </svg>
 
         {/* The canvas used to be a blank field with one line of grey text far
@@ -324,32 +326,53 @@ export function AssignmentPanel({
         )}
       </p>
 
-      <div className="flex items-center gap-2">
-        {onCancel ? (
-          <Button variant="outline" onClick={onCancel}>
-            {t("Back to pages", "ページ一覧へ戻る")}
-          </Button>
-        ) : (
+    </div>
+  );
+
+  if (embedded) return body;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-14 pb-6 pt-7">
+        <div className="flex flex-col gap-1">
+          <h1 className="font-display text-[30px] font-semibold leading-tight text-foreground">
+            {t("Mark each floor", "フロアを囲む")}
+          </h1>
+          <p className="text-[13px] leading-5 text-muted-foreground">
+            {t(
+              "Drag a box around each floor plan. A shape joins a box when its centre is inside, and boxes are checked again when you export.",
+              "各階の平面図をドラッグで囲んでください。中心が範囲内にある図形がそのフロアになり、書き出し時にもう一度確かめます。"
+            )}
+          </p>
+        </div>
+        {body}
+      </div>
+      <NextBar
+        step={{
+          title:
+            floors.length > 0
+              ? {
+                  en: `Done assigning: ${floors.length} ${floors.length === 1 ? "floor" : "floors"} — ${floors.map((f) => f.label).join(", ")}`,
+                  ja: `割り当て完了：${floors.length} フロア — ${floors.map((f) => f.label).join("、")}`
+                }
+              : { en: "No floors marked yet", ja: "まだフロアを囲んでいません" },
+          detail: {
+            en: "One floor per box. You can come back and change this.",
+            ja: "範囲ごとに1フロア。後から戻って変更できます。"
+          },
+          action: { en: "Done assigning", ja: "割り当て完了" },
+          blocked:
+            floors.length === 0
+              ? { en: "Draw at least one box, or skip", ja: "四角を1つ以上描くか、スキップしてください" }
+              : null
+        }}
+        secondary={
           <Button variant="ghost" onClick={onSkip}>
             {t("Skip — one floor for everything", "スキップ — 全図形を1フロアに")}
           </Button>
-        )}
-        <div className="ml-auto">
-          <DisabledHint
-            className="w-auto"
-            hint={
-              drafts.length === 0
-                ? t(
-                    "Draw at least one box, or skip",
-                    "四角を1つ以上描くか、スキップしてください"
-                  )
-                : null
-            }
-          >
-            {doneButton}
-          </DisabledHint>
-        </div>
-      </div>
+        }
+        onGo={() => onAssigned(floors)}
+      />
     </div>
   );
 }
