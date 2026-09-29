@@ -53,7 +53,6 @@ type Props = {
   focusBounds?: [number, number, number, number] | null;
 };
 
-const MONO_LABEL = "font-mono text-[11px] uppercase leading-[14px] tracking-[0.04em] text-muted-foreground";
 
 /**
  * The one floating panel that places the active floor: Move by hand, fit
@@ -86,7 +85,12 @@ export function AlignPanel({
   onReferenceLayersChange,
   focusBounds
 }: Props) {
-  const { t } = useUiLanguage();
+  const { t, uiLanguage } = useUiLanguage();
+  // Geist Mono has no CJK, so Japanese labels stay in the sans face.
+  const MONO_LABEL =
+    uiLanguage === "ja"
+      ? "text-[11px] font-medium leading-[14px] text-muted-foreground"
+      : "font-mono text-[11px] uppercase leading-[14px] tracking-[0.04em] text-muted-foreground";
   const active = state.floors.find((floor) => floor.label === state.activeFloorLabel) ?? state.floors[0];
   const label = active?.label ?? "";
   const aligned = active ? statuses.get(active.label)?.kind === "aligned" : false;

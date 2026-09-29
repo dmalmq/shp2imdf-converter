@@ -101,7 +101,7 @@ function frameTag(floor: FloorPlacement, state: PlacementState, t: T): string | 
 
 /** The left column of Place on map: what is left before Deliver, and what is done. */
 export function PlacementTodo({ state, dispatch, statuses, references, onAlign, artworkBounds, notes }: Props) {
-  const { t } = useUiLanguage();
+  const { t, uiLanguage } = useUiLanguage();
   const [libraryOpen, setLibraryOpen] = useState(false);
   const total = state.floors.length;
   const aligned = state.floors.filter((floor) => statuses.get(floor.label)?.kind === "aligned");
@@ -226,7 +226,12 @@ export function PlacementTodo({ state, dispatch, statuses, references, onAlign, 
 
       {aligned.length > 0 ? (
         <section className="flex flex-col gap-2">
-          <p className="font-mono text-[11px] uppercase leading-[14px] tracking-[0.06em] text-muted-foreground">
+          <p
+            className={cn(
+              "text-[11px] leading-[14px] text-muted-foreground",
+              uiLanguage === "ja" ? "font-medium" : "font-mono uppercase tracking-[0.06em]"
+            )}
+          >
             {t(`Done · ${aligned.length}`, `完了 · ${aligned.length}`)}
           </p>
           <ul className="flex flex-col gap-1.5">

@@ -99,7 +99,7 @@ export function PageAssignmentPanel({
   initialBoxesByPage,
   alignment = []
 }: Props) {
-  const { t } = useUiLanguage();
+  const { t, uiLanguage } = useUiLanguage();
   const byPage = useMemo(() => splitByPage(preview), [preview]);
   const [cards, setCards] = useState<PageCard[]>(() =>
     pages.map((page, position) => ({
@@ -413,7 +413,7 @@ export function PageAssignmentPanel({
                 {thumbnail(selectedPage, "h-[56vh] min-h-[360px] w-full")}
               </div>
             )}
-            <p className="font-mono text-[11px] text-muted-foreground">
+            <p className={cn("text-[11px] text-muted-foreground", uiLanguage !== "ja" && "font-mono")}>
               {t(
                 "Boxes are checked again from the full drawing when you export.",
                 "範囲は書き出し時に元の図面でもう一度確かめます。"
