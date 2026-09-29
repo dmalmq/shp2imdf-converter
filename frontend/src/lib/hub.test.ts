@@ -86,7 +86,7 @@ describe("artwork projects", () => {
     expect(project.flow).toBe("artwork");
     expect(project.track.map((stage) => stage.id)).toEqual(["bring-in-artwork", "name-floors", "place", "deliver"]);
     expect(statuses(project)).toEqual(["done", "done", "current", "todo"]);
-    expect(project.status).toEqual({ kind: "to-place", count: 2 });
+    expect(project.status).toEqual({ kind: "to-align", count: 2 });
   });
 
   test("floors not named yet sit on Name floors", () => {

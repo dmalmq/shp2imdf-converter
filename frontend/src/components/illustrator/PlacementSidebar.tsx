@@ -3,6 +3,7 @@ import type { Dispatch } from "react";
 import type { ExportFormatsPayload, ReferenceSelection } from "../../api/client";
 import type { AdjustmentMode, PlacementAction, PlacementState } from "../../hooks/useIllustratorPlacement";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
+import type { CurrentReferences, FloorStatus } from "../../lib/floorStatus";
 import { workingCrsLabel } from "../../lib/workingCrs";
 import { Button } from "../ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
@@ -12,7 +13,7 @@ import { LocateControl } from "./LocateControl";
 import type { Located } from "./locateChrome";
 import type { ReferenceLayer } from "./PlacementMap";
 import { ReferenceLayerList } from "./ReferenceLayerList";
-import { ScaleAndFitPanel } from "./ScaleAndFitPanel";
+import { ScaleAndFitPanel, type AlignMethod } from "./ScaleAndFitPanel";
 import type { ShapeMatchPanelModel } from "./ShapeMatchPanel";
 import { TransformPanel } from "./TransformPanel";
 
@@ -48,6 +49,11 @@ type Props = {
   pickStage: "artwork" | "map" | null;
   onTogglePicking: () => void;
   shapeMatch: ShapeMatchPanelModel;
+  alignMethod: AlignMethod;
+  onAlignMethodChange: (method: AlignMethod) => void;
+  statuses: Map<string, FloorStatus>;
+  onReviewFloor: (label: string) => void;
+  references: CurrentReferences;
   surveySnap: SurveySnapModel;
   referenceLayers: ReferenceLayer[];
   onReferenceLayersChange: (layers: ReferenceLayer[]) => void;
@@ -82,6 +88,11 @@ export function PlacementSidebar({
   pickStage,
   onTogglePicking,
   shapeMatch,
+  alignMethod,
+  onAlignMethodChange,
+  statuses,
+  onReviewFloor,
+  references,
   surveySnap,
   referenceLayers,
   onReferenceLayersChange,
@@ -127,6 +138,7 @@ export function PlacementSidebar({
           mode={mode}
           canUndo={canUndo}
           canRedo={canRedo}
+          references={references}
         />
       </div>
 
@@ -164,6 +176,8 @@ export function PlacementSidebar({
               onTogglePicking={onTogglePicking}
               referenceLayers={referenceLayers}
               shapeMatch={shapeMatch}
+              method={alignMethod}
+              onMethodChange={onAlignMethodChange}
             />
           </TabsContent>
 
@@ -213,6 +227,9 @@ export function PlacementSidebar({
               formats={formats}
               onFormatsChange={onFormatsChange}
               onExport={onExport}
+              statuses={statuses}
+              onReviewFloor={onReviewFloor}
+              references={references}
               previewFeatures={previewFeatures}
               totalFeatures={totalFeatures}
               error={error}

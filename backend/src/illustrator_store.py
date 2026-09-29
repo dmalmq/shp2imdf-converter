@@ -286,6 +286,7 @@ class ConversionStore:
             else:
                 work_changed = canonical(stored.draft.placement) != canonical(draft.placement)
             project = _read_project(cached.directory, cached.stem, strict=work_changed)
+            placed = placed_floor_count(draft)
             revision = stored.revision + 1
             _write_json(
                 cached.directory / _DRAFT_NAME,
@@ -293,9 +294,16 @@ class ConversionStore:
             )
             if work_changed:
                 now = utc_now_iso()
-                project.floors_placed = placed_floor_count(draft.placement)
+                project.floors_placed = placed
                 project.updated_at = now
                 project.content_changed_at = now
+                _write_json(cached.directory / _PROJECT_NAME, project.to_dict())
+            elif stored.draft is not None and placed != project.floors_placed:
+                # A reference change in the view can reopen a floor; the count
+                # follows it without the view change becoming an edit. A baseline
+                # first save is the page's starting point and writes nothing here.
+                project = _read_project(cached.directory, cached.stem, strict=True)
+                project.floors_placed = placed
                 _write_json(cached.directory / _PROJECT_NAME, project.to_dict())
         return DraftSaved(revision, True, project)
 
@@ -321,11 +329,11 @@ class ConversionStore:
         return cached, ContentSnapshot(project.content_changed_at, project.floors_total)
 
     def mark_delivered(
-        self, conversion_id: str, floors_placed: int, snapshot: ContentSnapshot
+        self, conversion_id: str, floors_exported: int, snapshot: ContentSnapshot
     ) -> ArtworkProject | None:
         """Record an export built from ``snapshot``; ``None`` if the content moved on since.
 
-        Every exported floor carried a transform, so each counts as placed.
+        Exporting a floor does not align it: the placed count stays the draft's.
         """
         cached = self.get(conversion_id)
         with self._lock_for(conversion_id):
@@ -340,8 +348,7 @@ class ConversionStore:
                 )
                 return None
             now = utc_now_iso()
-            project.floors_total = max(project.floors_total, floors_placed)
-            project.floors_placed = floors_placed
+            project.floors_total = max(project.floors_total, floors_exported)
             project.delivered_at = now
             project.updated_at = now
             _write_json(cached.directory / _PROJECT_NAME, project.to_dict())

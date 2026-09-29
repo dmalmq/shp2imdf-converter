@@ -195,7 +195,7 @@ function ProjectList({ response }: { response: ProjectListResponse }) {
 }
 
 function flowPill(project: HubProject, t: T): string {
-  if (project.flow === "artwork") return t("Illustrator artwork → shapefiles", "Illustrator 図面 → シェープファイル");
+  if (project.flow === "artwork") return t("Artwork → Shapefiles", "図面 → シェープファイル");
   if (project.imdfShapefiles) return t("IMDF shapefiles → ODC 2026", "IMDF シェープファイル → ODC 2026");
   return t("Shapefiles → IMDF", "シェープファイル → IMDF");
 }
@@ -223,11 +223,11 @@ function StatusLine({ project }: { project: HubProject }) {
       `${status.count} ${status.count === 1 ? "thing" : "things"} to fix before you can deliver`,
       `書き出し前に修正が必要な項目 ${status.count} 件`
     );
-  } else if (status.kind === "to-place") {
+  } else if (status.kind === "to-align") {
     text =
       status.count === 1
-        ? t("1 floor to place before you can deliver", "書き出し前に配置が必要なフロア 1 件")
-        : t(`${status.count} floors to place before you can deliver`, `書き出し前に配置が必要なフロア ${status.count} 件`);
+        ? t("1 floor still needs alignment", "位置合わせが必要なフロア 1 件")
+        : t(`${status.count} floors still need alignment`, `位置合わせが必要なフロア ${status.count} 件`);
   } else if (status.kind === "floors-unnamed") {
     text = t("Floors not named yet", "まだフロア名を付けていません");
   } else if (status.kind === "ready") {
@@ -279,7 +279,7 @@ function ProjectCard({ project, latest }: { project: HubProject; latest: boolean
           {project.name ? null : <span className="font-mono">{project.id.slice(0, 8)} · </span>}
           {stageLine}
         </p>
-        <span className="mt-1.5 self-start rounded-full bg-muted px-2.5 py-[3px] text-[11px] font-medium text-foreground/80">
+        <span className="mt-1.5 self-start whitespace-nowrap rounded-full bg-muted px-2.5 py-[3px] text-[11px] font-medium text-foreground/80">
           {flowPill(project, t)}
         </span>
       </div>

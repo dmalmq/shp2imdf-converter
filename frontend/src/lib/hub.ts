@@ -16,7 +16,7 @@ export type HubStatus =
   | { kind: "to-fix"; count: number }
   | { kind: "ready"; canWait: number }
   | { kind: "unchecked" }
-  | { kind: "to-place"; count: number }
+  | { kind: "to-align"; count: number }
   | { kind: "floors-unnamed" };
 
 /** A hub card, derived from one `ProjectSummary` of either flow. */
@@ -61,7 +61,7 @@ function statusOf(summary: ProjectSummary, finished: boolean): HubStatus {
   if (summary.flow === "artwork") {
     if (summary.stage === "name-floors") return { kind: "floors-unnamed" };
     if (summary.blockers === 0) return { kind: "ready", canWait: 0 };
-    return { kind: "to-place", count: summary.blockers ?? 0 };
+    return { kind: "to-align", count: summary.blockers ?? 0 };
   }
   if (summary.blockers !== null && summary.blockers > 0) return { kind: "to-fix", count: summary.blockers };
   if (summary.blockers === 0) return { kind: "ready", canWait: summary.can_wait ?? 0 };

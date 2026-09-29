@@ -39,11 +39,17 @@ export function stableJson(value: unknown): string {
  */
 export function useDraftAutosave(
   draft: PlacementDraft | null,
-  initial: { conversionId: string; revision: number; saved: PlacementDraft | null } | null = null,
+  initial: {
+    conversionId: string;
+    revision: number;
+    saved: PlacementDraft | null;
+    savedAt?: number | null;
+  } | null = null,
   baseline = false,
   delayMs = AUTOSAVE_DELAY_MS
 ) {
   const [status, setStatus] = useState<DraftSaveStatus>("idle");
+  const [savedAt, setSavedAt] = useState<number | null>(initial?.savedAt ?? null);
   const base = useRef<Base | null>(
     initial
       ? {
@@ -98,6 +104,7 @@ export function useDraftAutosave(
       target.revision = response.revision;
       target.savedJson = current.json;
       setStatus("saved");
+      setSavedAt(Date.now());
     } catch (error) {
       if (base.current !== target) return;
       if (isApiClientError(error) && (error.code === "DRAFT_CONFLICT" || error.code === "CONVERSION_EXPIRED")) {
@@ -147,5 +154,5 @@ export function useDraftAutosave(
     };
   }, []);
 
-  return { status, track };
+  return { status, savedAt, track };
 }

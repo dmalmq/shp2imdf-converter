@@ -1,12 +1,19 @@
 import type {
+  DraftAlignment,
   DraftPlace,
+  DraftPose,
   ExportFormatsPayload,
   PlacementDraft,
   ReferenceSelection
 } from "../api/client";
 import type { Located, Place } from "../components/illustrator/locateChrome";
 import type { PlacementTab } from "../components/illustrator/PlacementSidebar";
-import type { AdjustmentMode, PlacementState } from "../hooks/useIllustratorPlacement";
+import type {
+  AdjustmentMode,
+  FloorAlignment,
+  PlacementState,
+  Pose
+} from "../hooks/useIllustratorPlacement";
 
 /** What the placement page keeps beside the reducer state, and saves with it. */
 export type DraftView = {
@@ -50,7 +57,71 @@ function fromPlace(place: DraftPlace): Place {
   };
 }
 
+function toPose(pose: Pose): DraftPose {
+  return {
+    artwork_anchor: [pose.artworkAnchor[0], pose.artworkAnchor[1]],
+    map_anchor: [pose.mapAnchor[0], pose.mapAnchor[1]],
+    rotation_deg: pose.rotationDeg,
+    metres_per_point: pose.metresPerPoint
+  };
+}
+
+function fromPose(pose: DraftPose): Pose {
+  return {
+    artworkAnchor: [pose.artwork_anchor[0], pose.artwork_anchor[1]],
+    mapAnchor: [pose.map_anchor[0], pose.map_anchor[1]],
+    rotationDeg: pose.rotation_deg,
+    metresPerPoint: pose.metres_per_point
+  };
+}
+
+function toAlignment(alignment: FloorAlignment | undefined): DraftAlignment | null {
+  if (!alignment) return null;
+  const { basis } = alignment;
+  return {
+    pose: toPose(alignment.pose),
+    basis:
+      basis.kind === "points"
+        ? { kind: "points", floor: basis.floor, point_ids: [...basis.pointIds] }
+        : basis.kind === "floor"
+          ? { kind: "floor", floor: basis.floor, pose: toPose(basis.pose) }
+          : {
+              kind: "reference",
+              reference: {
+                layer: clip(basis.reference.layer),
+                preloaded: basis.reference.preloaded,
+                uploads: clipNames(basis.reference.uploads),
+                pin: basis.reference.pin ? [basis.reference.pin[0], basis.reference.pin[1]] : null
+              }
+            }
+  };
+}
+
+function fromAlignment(alignment: DraftAlignment): FloorAlignment {
+  const { basis } = alignment;
+  return {
+    pose: fromPose(alignment.pose),
+    basis:
+      basis.kind === "points"
+        ? { kind: "points", floor: basis.floor, pointIds: [...basis.point_ids] }
+        : basis.kind === "floor"
+          ? { kind: "floor", floor: basis.floor, pose: fromPose(basis.pose) }
+          : {
+              kind: "reference",
+              reference: {
+                layer: basis.reference.layer,
+                preloaded: basis.reference.preloaded,
+                uploads: [...basis.reference.uploads],
+                pin: basis.reference.pin ? [basis.reference.pin[0], basis.reference.pin[1]] : null
+              }
+            }
+  };
+}
+
 function toLocation(located: Located): PlacementDraft["view"]["location"] {
+  if (located.kind === "not-found" || located.kind === "unavailable") {
+    return { kind: located.kind, query: clip(located.query) };
+  }
   if (located.kind !== "guessed" && located.kind !== "chosen") return null;
   return {
     kind: located.kind,
@@ -61,6 +132,9 @@ function toLocation(located: Located): PlacementDraft["view"]["location"] {
 }
 
 function fromLocation(location: PlacementDraft["view"]["location"]): Located {
+  if (location && (location.kind === "not-found" || location.kind === "unavailable")) {
+    return { kind: location.kind, query: location.query };
+  }
   if (!location || location.candidates.length === 0) return { kind: "none" };
   const [first, ...rest] = location.candidates.map(fromPlace);
   return {
@@ -94,7 +168,8 @@ export function toDraft(state: PlacementState, view: DraftView): PlacementDraft 
           id: point.id,
           artwork: [point.artwork[0], point.artwork[1]],
           map: [point.map[0], point.map[1]]
-        }))
+        })),
+        alignment: toAlignment(floor.alignment)
       })),
       scale_locked: state.scaleLocked,
       output_crs: view.outputCrs,
@@ -140,7 +215,8 @@ export function fromDraft(draft: PlacementDraft): { state: PlacementState; view:
         })),
         ...(floor.rotation_deg === null ? {} : { rotationDeg: floor.rotation_deg }),
         ...(floor.metres_per_point === null ? {} : { metresPerPoint: floor.metres_per_point }),
-        ...(floor.artwork_match ? { artworkMatch: true } : {})
+        ...(floor.artwork_match ? { artworkMatch: true } : {}),
+        ...(floor.alignment ? { alignment: fromAlignment(floor.alignment) } : {})
       })),
       activeFloorLabel: view.active_floor_label,
       scaleLocked: placement.scale_locked,

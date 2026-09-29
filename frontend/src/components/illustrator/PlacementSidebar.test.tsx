@@ -85,6 +85,11 @@ function SidebarHarness({
         onClear: () => {}
       }}
       surveySnap={{ layerName: "", notice: null, onSnap: () => {} }}
+      alignMethod="points"
+      onAlignMethodChange={() => {}}
+      statuses={new Map()}
+      onReviewFloor={() => {}}
+      references={{ preloaded: false, uploads: [], removed: [], pin: null }}
       referenceLayers={[]}
       onReferenceLayersChange={() => {}}
       bounds={[0, 0, 100, 100]}
@@ -207,7 +212,7 @@ test("the export CRS list follows the pin's working CRS, not the Tokyo seed", ()
 test("Nominatim hits stay out of the document until the locate row is opened", async () => {
   vi.mocked(geocodeSearch).mockResolvedValue([oimachiStaWire, oimachiTownWire]);
   render(<SidebarHarness siteName="大井町" />);
-  await waitFor(() => expect(screen.getByText(/first match/i)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText(/suggested · approximate/i)).toBeInTheDocument());
   expect(screen.queryByRole("listitem")).toBeNull();
   expect(screen.queryByText(oimachiStaWire.display_name)).toBeNull();
   expect(screen.getByRole("tab", { name: "Place" })).toBeInTheDocument();

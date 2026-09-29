@@ -1,0 +1,3136 @@
+{
+ "cases": [
+  {
+   "name": "as aligned: D is 5e-10 degrees off and stays, E is 5e-9 off and reopens",
+   "draft": {
+    "version": 1,
+    "placement": {
+     "frame": {
+      "rotation_deg": 12.5,
+      "metres_per_point": 0.3527777777777778,
+      "working_crs": "EPSG:6677"
+     },
+     "floors": [
+      {
+       "label": "A",
+       "linked": true,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7671,
+        35.6812
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": null,
+       "metres_per_point": null,
+       "artwork_match": false,
+       "control_points": [
+        {
+         "id": "p1",
+         "artwork": [
+          0.0,
+          0.0
+         ],
+         "map": [
+          139.7665,
+          35.6808
+         ]
+        },
+        {
+         "id": "p2",
+         "artwork": [
+          200.0,
+          160.0
+         ],
+         "map": [
+          139.7677,
+          35.6816
+         ]
+        }
+       ],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7671,
+          35.6812
+         ],
+         "rotation_deg": 12.5,
+         "metres_per_point": 0.3527777777777778
+        },
+        "basis": {
+         "kind": "points",
+         "floor": "A",
+         "point_ids": [
+          "p1",
+          "p2"
+         ]
+        }
+       }
+      },
+      {
+       "label": "B",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "floor",
+         "floor": "A",
+         "pose": {
+          "artwork_anchor": [
+           100.0,
+           80.0
+          ],
+          "map_anchor": [
+           139.7671,
+           35.6812
+          ],
+          "rotation_deg": 12.5,
+          "metres_per_point": 0.3527777777777778
+         }
+        }
+       }
+      },
+      {
+       "label": "C",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "D",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672000005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "E",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.767200005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      }
+     ],
+     "scale_locked": true,
+     "output_crs": "EPSG:6677",
+     "formats": {
+      "geopackage": false,
+      "shapefile": true,
+      "qgis": false
+     }
+    },
+    "view": {
+     "active_floor_label": "A",
+     "mode": "group",
+     "tab": "fit",
+     "station_pin": [
+      139.7671,
+      35.6812
+     ],
+     "location": null,
+     "references": {
+      "preloaded": true,
+      "include_lines": false,
+      "hidden": [],
+      "removed": [],
+      "uploads": []
+     }
+    }
+   },
+   "expected": {
+    "A": "aligned",
+    "B": "aligned",
+    "C": "aligned",
+    "D": "aligned",
+    "E": "needs-alignment"
+   }
+  },
+  {
+   "name": "station pin moved",
+   "draft": {
+    "version": 1,
+    "placement": {
+     "frame": {
+      "rotation_deg": 12.5,
+      "metres_per_point": 0.3527777777777778,
+      "working_crs": "EPSG:6677"
+     },
+     "floors": [
+      {
+       "label": "A",
+       "linked": true,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7671,
+        35.6812
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": null,
+       "metres_per_point": null,
+       "artwork_match": false,
+       "control_points": [
+        {
+         "id": "p1",
+         "artwork": [
+          0.0,
+          0.0
+         ],
+         "map": [
+          139.7665,
+          35.6808
+         ]
+        },
+        {
+         "id": "p2",
+         "artwork": [
+          200.0,
+          160.0
+         ],
+         "map": [
+          139.7677,
+          35.6816
+         ]
+        }
+       ],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7671,
+          35.6812
+         ],
+         "rotation_deg": 12.5,
+         "metres_per_point": 0.3527777777777778
+        },
+        "basis": {
+         "kind": "points",
+         "floor": "A",
+         "point_ids": [
+          "p1",
+          "p2"
+         ]
+        }
+       }
+      },
+      {
+       "label": "B",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "floor",
+         "floor": "A",
+         "pose": {
+          "artwork_anchor": [
+           100.0,
+           80.0
+          ],
+          "map_anchor": [
+           139.7671,
+           35.6812
+          ],
+          "rotation_deg": 12.5,
+          "metres_per_point": 0.3527777777777778
+         }
+        }
+       }
+      },
+      {
+       "label": "C",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "D",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672000005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "E",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.767200005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      }
+     ],
+     "scale_locked": true,
+     "output_crs": "EPSG:6677",
+     "formats": {
+      "geopackage": false,
+      "shapefile": true,
+      "qgis": false
+     }
+    },
+    "view": {
+     "active_floor_label": "A",
+     "mode": "group",
+     "tab": "fit",
+     "station_pin": [
+      139.767101,
+      35.6812
+     ],
+     "location": null,
+     "references": {
+      "preloaded": true,
+      "include_lines": false,
+      "hidden": [],
+      "removed": [],
+      "uploads": []
+     }
+    }
+   },
+   "expected": {
+    "A": "aligned",
+    "B": "aligned",
+    "C": "needs-alignment",
+    "D": "needs-alignment",
+    "E": "needs-alignment"
+   }
+  },
+  {
+   "name": "station pin cleared",
+   "draft": {
+    "version": 1,
+    "placement": {
+     "frame": {
+      "rotation_deg": 12.5,
+      "metres_per_point": 0.3527777777777778,
+      "working_crs": "EPSG:6677"
+     },
+     "floors": [
+      {
+       "label": "A",
+       "linked": true,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7671,
+        35.6812
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": null,
+       "metres_per_point": null,
+       "artwork_match": false,
+       "control_points": [
+        {
+         "id": "p1",
+         "artwork": [
+          0.0,
+          0.0
+         ],
+         "map": [
+          139.7665,
+          35.6808
+         ]
+        },
+        {
+         "id": "p2",
+         "artwork": [
+          200.0,
+          160.0
+         ],
+         "map": [
+          139.7677,
+          35.6816
+         ]
+        }
+       ],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7671,
+          35.6812
+         ],
+         "rotation_deg": 12.5,
+         "metres_per_point": 0.3527777777777778
+        },
+        "basis": {
+         "kind": "points",
+         "floor": "A",
+         "point_ids": [
+          "p1",
+          "p2"
+         ]
+        }
+       }
+      },
+      {
+       "label": "B",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "floor",
+         "floor": "A",
+         "pose": {
+          "artwork_anchor": [
+           100.0,
+           80.0
+          ],
+          "map_anchor": [
+           139.7671,
+           35.6812
+          ],
+          "rotation_deg": 12.5,
+          "metres_per_point": 0.3527777777777778
+         }
+        }
+       }
+      },
+      {
+       "label": "C",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "D",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672000005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "E",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.767200005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      }
+     ],
+     "scale_locked": true,
+     "output_crs": "EPSG:6677",
+     "formats": {
+      "geopackage": false,
+      "shapefile": true,
+      "qgis": false
+     }
+    },
+    "view": {
+     "active_floor_label": "A",
+     "mode": "group",
+     "tab": "fit",
+     "station_pin": null,
+     "location": null,
+     "references": {
+      "preloaded": true,
+      "include_lines": false,
+      "hidden": [],
+      "removed": [],
+      "uploads": []
+     }
+    }
+   },
+   "expected": {
+    "A": "aligned",
+    "B": "aligned",
+    "C": "needs-alignment",
+    "D": "needs-alignment",
+    "E": "needs-alignment"
+   }
+  },
+  {
+   "name": "matched layer removed",
+   "draft": {
+    "version": 1,
+    "placement": {
+     "frame": {
+      "rotation_deg": 12.5,
+      "metres_per_point": 0.3527777777777778,
+      "working_crs": "EPSG:6677"
+     },
+     "floors": [
+      {
+       "label": "A",
+       "linked": true,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7671,
+        35.6812
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": null,
+       "metres_per_point": null,
+       "artwork_match": false,
+       "control_points": [
+        {
+         "id": "p1",
+         "artwork": [
+          0.0,
+          0.0
+         ],
+         "map": [
+          139.7665,
+          35.6808
+         ]
+        },
+        {
+         "id": "p2",
+         "artwork": [
+          200.0,
+          160.0
+         ],
+         "map": [
+          139.7677,
+          35.6816
+         ]
+        }
+       ],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7671,
+          35.6812
+         ],
+         "rotation_deg": 12.5,
+         "metres_per_point": 0.3527777777777778
+        },
+        "basis": {
+         "kind": "points",
+         "floor": "A",
+         "point_ids": [
+          "p1",
+          "p2"
+         ]
+        }
+       }
+      },
+      {
+       "label": "B",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "floor",
+         "floor": "A",
+         "pose": {
+          "artwork_anchor": [
+           100.0,
+           80.0
+          ],
+          "map_anchor": [
+           139.7671,
+           35.6812
+          ],
+          "rotation_deg": 12.5,
+          "metres_per_point": 0.3527777777777778
+         }
+        }
+       }
+      },
+      {
+       "label": "C",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "D",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672000005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "E",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.767200005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      }
+     ],
+     "scale_locked": true,
+     "output_crs": "EPSG:6677",
+     "formats": {
+      "geopackage": false,
+      "shapefile": true,
+      "qgis": false
+     }
+    },
+    "view": {
+     "active_floor_label": "A",
+     "mode": "group",
+     "tab": "fit",
+     "station_pin": [
+      139.7671,
+      35.6812
+     ],
+     "location": null,
+     "references": {
+      "preloaded": true,
+      "include_lines": false,
+      "hidden": [],
+      "removed": [
+       "Station_pg"
+      ],
+      "uploads": []
+     }
+    }
+   },
+   "expected": {
+    "A": "aligned",
+    "B": "aligned",
+    "C": "needs-alignment",
+    "D": "needs-alignment",
+    "E": "needs-alignment"
+   }
+  },
+  {
+   "name": "a file uploaded beside it",
+   "draft": {
+    "version": 1,
+    "placement": {
+     "frame": {
+      "rotation_deg": 12.5,
+      "metres_per_point": 0.3527777777777778,
+      "working_crs": "EPSG:6677"
+     },
+     "floors": [
+      {
+       "label": "A",
+       "linked": true,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7671,
+        35.6812
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": null,
+       "metres_per_point": null,
+       "artwork_match": false,
+       "control_points": [
+        {
+         "id": "p1",
+         "artwork": [
+          0.0,
+          0.0
+         ],
+         "map": [
+          139.7665,
+          35.6808
+         ]
+        },
+        {
+         "id": "p2",
+         "artwork": [
+          200.0,
+          160.0
+         ],
+         "map": [
+          139.7677,
+          35.6816
+         ]
+        }
+       ],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7671,
+          35.6812
+         ],
+         "rotation_deg": 12.5,
+         "metres_per_point": 0.3527777777777778
+        },
+        "basis": {
+         "kind": "points",
+         "floor": "A",
+         "point_ids": [
+          "p1",
+          "p2"
+         ]
+        }
+       }
+      },
+      {
+       "label": "B",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "floor",
+         "floor": "A",
+         "pose": {
+          "artwork_anchor": [
+           100.0,
+           80.0
+          ],
+          "map_anchor": [
+           139.7671,
+           35.6812
+          ],
+          "rotation_deg": 12.5,
+          "metres_per_point": 0.3527777777777778
+         }
+        }
+       }
+      },
+      {
+       "label": "C",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "D",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672000005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "E",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.767200005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      }
+     ],
+     "scale_locked": true,
+     "output_crs": "EPSG:6677",
+     "formats": {
+      "geopackage": false,
+      "shapefile": true,
+      "qgis": false
+     }
+    },
+    "view": {
+     "active_floor_label": "A",
+     "mode": "group",
+     "tab": "fit",
+     "station_pin": [
+      139.7671,
+      35.6812
+     ],
+     "location": null,
+     "references": {
+      "preloaded": true,
+      "include_lines": false,
+      "hidden": [],
+      "removed": [],
+      "uploads": [
+       "extra.zip"
+      ]
+     }
+    }
+   },
+   "expected": {
+    "A": "aligned",
+    "B": "aligned",
+    "C": "needs-alignment",
+    "D": "needs-alignment",
+    "E": "needs-alignment"
+   }
+  },
+  {
+   "name": "駅データ unloaded",
+   "draft": {
+    "version": 1,
+    "placement": {
+     "frame": {
+      "rotation_deg": 12.5,
+      "metres_per_point": 0.3527777777777778,
+      "working_crs": "EPSG:6677"
+     },
+     "floors": [
+      {
+       "label": "A",
+       "linked": true,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7671,
+        35.6812
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": null,
+       "metres_per_point": null,
+       "artwork_match": false,
+       "control_points": [
+        {
+         "id": "p1",
+         "artwork": [
+          0.0,
+          0.0
+         ],
+         "map": [
+          139.7665,
+          35.6808
+         ]
+        },
+        {
+         "id": "p2",
+         "artwork": [
+          200.0,
+          160.0
+         ],
+         "map": [
+          139.7677,
+          35.6816
+         ]
+        }
+       ],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7671,
+          35.6812
+         ],
+         "rotation_deg": 12.5,
+         "metres_per_point": 0.3527777777777778
+        },
+        "basis": {
+         "kind": "points",
+         "floor": "A",
+         "point_ids": [
+          "p1",
+          "p2"
+         ]
+        }
+       }
+      },
+      {
+       "label": "B",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "floor",
+         "floor": "A",
+         "pose": {
+          "artwork_anchor": [
+           100.0,
+           80.0
+          ],
+          "map_anchor": [
+           139.7671,
+           35.6812
+          ],
+          "rotation_deg": 12.5,
+          "metres_per_point": 0.3527777777777778
+         }
+        }
+       }
+      },
+      {
+       "label": "C",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "D",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672000005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "E",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.767200005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      }
+     ],
+     "scale_locked": true,
+     "output_crs": "EPSG:6677",
+     "formats": {
+      "geopackage": false,
+      "shapefile": true,
+      "qgis": false
+     }
+    },
+    "view": {
+     "active_floor_label": "A",
+     "mode": "group",
+     "tab": "fit",
+     "station_pin": [
+      139.7671,
+      35.6812
+     ],
+     "location": null,
+     "references": {
+      "preloaded": false,
+      "include_lines": false,
+      "hidden": [],
+      "removed": [],
+      "uploads": []
+     }
+    }
+   },
+   "expected": {
+    "A": "aligned",
+    "B": "aligned",
+    "C": "needs-alignment",
+    "D": "needs-alignment",
+    "E": "needs-alignment"
+   }
+  },
+  {
+   "name": "layer only hidden",
+   "draft": {
+    "version": 1,
+    "placement": {
+     "frame": {
+      "rotation_deg": 12.5,
+      "metres_per_point": 0.3527777777777778,
+      "working_crs": "EPSG:6677"
+     },
+     "floors": [
+      {
+       "label": "A",
+       "linked": true,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7671,
+        35.6812
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": null,
+       "metres_per_point": null,
+       "artwork_match": false,
+       "control_points": [
+        {
+         "id": "p1",
+         "artwork": [
+          0.0,
+          0.0
+         ],
+         "map": [
+          139.7665,
+          35.6808
+         ]
+        },
+        {
+         "id": "p2",
+         "artwork": [
+          200.0,
+          160.0
+         ],
+         "map": [
+          139.7677,
+          35.6816
+         ]
+        }
+       ],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7671,
+          35.6812
+         ],
+         "rotation_deg": 12.5,
+         "metres_per_point": 0.3527777777777778
+        },
+        "basis": {
+         "kind": "points",
+         "floor": "A",
+         "point_ids": [
+          "p1",
+          "p2"
+         ]
+        }
+       }
+      },
+      {
+       "label": "B",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "floor",
+         "floor": "A",
+         "pose": {
+          "artwork_anchor": [
+           100.0,
+           80.0
+          ],
+          "map_anchor": [
+           139.7671,
+           35.6812
+          ],
+          "rotation_deg": 12.5,
+          "metres_per_point": 0.3527777777777778
+         }
+        }
+       }
+      },
+      {
+       "label": "C",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "D",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672000005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "E",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.767200005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      }
+     ],
+     "scale_locked": true,
+     "output_crs": "EPSG:6677",
+     "formats": {
+      "geopackage": false,
+      "shapefile": true,
+      "qgis": false
+     }
+    },
+    "view": {
+     "active_floor_label": "A",
+     "mode": "group",
+     "tab": "fit",
+     "station_pin": [
+      139.7671,
+      35.6812
+     ],
+     "location": null,
+     "references": {
+      "preloaded": true,
+      "include_lines": false,
+      "hidden": [
+       "Station_pg"
+      ],
+      "removed": [],
+      "uploads": []
+     }
+    }
+   },
+   "expected": {
+    "A": "aligned",
+    "B": "aligned",
+    "C": "aligned",
+    "D": "aligned",
+    "E": "needs-alignment"
+   }
+  },
+  {
+   "name": "reference floor moved",
+   "draft": {
+    "version": 1,
+    "placement": {
+     "frame": {
+      "rotation_deg": 12.5,
+      "metres_per_point": 0.3527777777777778,
+      "working_crs": "EPSG:6677"
+     },
+     "floors": [
+      {
+       "label": "A",
+       "linked": true,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7673,
+        35.6812
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": null,
+       "metres_per_point": null,
+       "artwork_match": false,
+       "control_points": [
+        {
+         "id": "p1",
+         "artwork": [
+          0.0,
+          0.0
+         ],
+         "map": [
+          139.7665,
+          35.6808
+         ]
+        },
+        {
+         "id": "p2",
+         "artwork": [
+          200.0,
+          160.0
+         ],
+         "map": [
+          139.7677,
+          35.6816
+         ]
+        }
+       ],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7671,
+          35.6812
+         ],
+         "rotation_deg": 12.5,
+         "metres_per_point": 0.3527777777777778
+        },
+        "basis": {
+         "kind": "points",
+         "floor": "A",
+         "point_ids": [
+          "p1",
+          "p2"
+         ]
+        }
+       }
+      },
+      {
+       "label": "B",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "floor",
+         "floor": "A",
+         "pose": {
+          "artwork_anchor": [
+           100.0,
+           80.0
+          ],
+          "map_anchor": [
+           139.7671,
+           35.6812
+          ],
+          "rotation_deg": 12.5,
+          "metres_per_point": 0.3527777777777778
+         }
+        }
+       }
+      },
+      {
+       "label": "C",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "D",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672000005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "E",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.767200005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      }
+     ],
+     "scale_locked": true,
+     "output_crs": "EPSG:6677",
+     "formats": {
+      "geopackage": false,
+      "shapefile": true,
+      "qgis": false
+     }
+    },
+    "view": {
+     "active_floor_label": "A",
+     "mode": "group",
+     "tab": "fit",
+     "station_pin": [
+      139.7671,
+      35.6812
+     ],
+     "location": null,
+     "references": {
+      "preloaded": true,
+      "include_lines": false,
+      "hidden": [],
+      "removed": [],
+      "uploads": []
+     }
+    }
+   },
+   "expected": {
+    "A": "needs-alignment",
+    "B": "needs-alignment",
+    "C": "aligned",
+    "D": "aligned",
+    "E": "needs-alignment"
+   }
+  },
+  {
+   "name": "a pair removed",
+   "draft": {
+    "version": 1,
+    "placement": {
+     "frame": {
+      "rotation_deg": 12.5,
+      "metres_per_point": 0.3527777777777778,
+      "working_crs": "EPSG:6677"
+     },
+     "floors": [
+      {
+       "label": "A",
+       "linked": true,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7671,
+        35.6812
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": null,
+       "metres_per_point": null,
+       "artwork_match": false,
+       "control_points": [
+        {
+         "id": "p1",
+         "artwork": [
+          0.0,
+          0.0
+         ],
+         "map": [
+          139.7665,
+          35.6808
+         ]
+        }
+       ],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7671,
+          35.6812
+         ],
+         "rotation_deg": 12.5,
+         "metres_per_point": 0.3527777777777778
+        },
+        "basis": {
+         "kind": "points",
+         "floor": "A",
+         "point_ids": [
+          "p1",
+          "p2"
+         ]
+        }
+       }
+      },
+      {
+       "label": "B",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "floor",
+         "floor": "A",
+         "pose": {
+          "artwork_anchor": [
+           100.0,
+           80.0
+          ],
+          "map_anchor": [
+           139.7671,
+           35.6812
+          ],
+          "rotation_deg": 12.5,
+          "metres_per_point": 0.3527777777777778
+         }
+        }
+       }
+      },
+      {
+       "label": "C",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "D",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672000005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "E",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.767200005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      }
+     ],
+     "scale_locked": true,
+     "output_crs": "EPSG:6677",
+     "formats": {
+      "geopackage": false,
+      "shapefile": true,
+      "qgis": false
+     }
+    },
+    "view": {
+     "active_floor_label": "A",
+     "mode": "group",
+     "tab": "fit",
+     "station_pin": [
+      139.7671,
+      35.6812
+     ],
+     "location": null,
+     "references": {
+      "preloaded": true,
+      "include_lines": false,
+      "hidden": [],
+      "removed": [],
+      "uploads": []
+     }
+    }
+   },
+   "expected": {
+    "A": "needs-alignment",
+    "B": "aligned",
+    "C": "aligned",
+    "D": "aligned",
+    "E": "needs-alignment"
+   }
+  },
+  {
+   "name": "pinned where it was aligned",
+   "draft": {
+    "version": 1,
+    "placement": {
+     "frame": {
+      "rotation_deg": 12.5,
+      "metres_per_point": 0.3527777777777778,
+      "working_crs": "EPSG:6677"
+     },
+     "floors": [
+      {
+       "label": "A",
+       "linked": false,
+       "pinned": true,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7671,
+        35.6812
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 12.5,
+       "metres_per_point": 0.3527777777777778,
+       "artwork_match": false,
+       "control_points": [
+        {
+         "id": "p1",
+         "artwork": [
+          0.0,
+          0.0
+         ],
+         "map": [
+          139.7665,
+          35.6808
+         ]
+        },
+        {
+         "id": "p2",
+         "artwork": [
+          200.0,
+          160.0
+         ],
+         "map": [
+          139.7677,
+          35.6816
+         ]
+        }
+       ],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7671,
+          35.6812
+         ],
+         "rotation_deg": 12.5,
+         "metres_per_point": 0.3527777777777778
+        },
+        "basis": {
+         "kind": "points",
+         "floor": "A",
+         "point_ids": [
+          "p1",
+          "p2"
+         ]
+        }
+       }
+      },
+      {
+       "label": "B",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "floor",
+         "floor": "A",
+         "pose": {
+          "artwork_anchor": [
+           100.0,
+           80.0
+          ],
+          "map_anchor": [
+           139.7671,
+           35.6812
+          ],
+          "rotation_deg": 12.5,
+          "metres_per_point": 0.3527777777777778
+         }
+        }
+       }
+      },
+      {
+       "label": "C",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "D",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.7672000005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      },
+      {
+       "label": "E",
+       "linked": false,
+       "pinned": false,
+       "artwork_anchor": [
+        100.0,
+        80.0
+       ],
+       "map_anchor": [
+        139.767200005,
+        35.6813
+       ],
+       "artwork_bounds": [
+        0.0,
+        0.0,
+        200.0,
+        160.0
+       ],
+       "rotation_deg": 3.0,
+       "metres_per_point": 0.35,
+       "artwork_match": false,
+       "control_points": [],
+       "alignment": {
+        "pose": {
+         "artwork_anchor": [
+          100.0,
+          80.0
+         ],
+         "map_anchor": [
+          139.7672,
+          35.6813
+         ],
+         "rotation_deg": 3.0,
+         "metres_per_point": 0.35
+        },
+        "basis": {
+         "kind": "reference",
+         "reference": {
+          "layer": "Station_pg",
+          "preloaded": true,
+          "uploads": [],
+          "pin": [
+           139.7671,
+           35.6812
+          ]
+         }
+        }
+       }
+      }
+     ],
+     "scale_locked": true,
+     "output_crs": "EPSG:6677",
+     "formats": {
+      "geopackage": false,
+      "shapefile": true,
+      "qgis": false
+     }
+    },
+    "view": {
+     "active_floor_label": "A",
+     "mode": "group",
+     "tab": "fit",
+     "station_pin": [
+      139.7671,
+      35.6812
+     ],
+     "location": null,
+     "references": {
+      "preloaded": true,
+      "include_lines": false,
+      "hidden": [],
+      "removed": [],
+      "uploads": []
+     }
+    }
+   },
+   "expected": {
+    "A": "aligned",
+    "B": "aligned",
+    "C": "aligned",
+    "D": "aligned",
+    "E": "needs-alignment"
+   }
+  }
+ ]
+}
