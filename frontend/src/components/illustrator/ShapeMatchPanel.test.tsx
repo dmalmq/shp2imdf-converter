@@ -393,7 +393,7 @@ test("offers matching an unstacked floor onto the previous stacked floor", () =>
   expect(
     screen.getByText("4F did not stack. Match this floor to 3F, not to Station_pg.")
   ).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Match 4F to 3F" }));
+  fireEvent.click(screen.getByRole("button", { name: "Align 4F to 3F" }));
   expect(onStartArtworkMatch).toHaveBeenCalledOnce();
 });
 

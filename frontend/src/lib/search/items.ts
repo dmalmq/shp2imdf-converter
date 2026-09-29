@@ -62,8 +62,8 @@ function stationItems(input: ItemsInput): SearchItem[] {
       const status: Bilingual[] = [];
       if (project.status.kind === "to-fix") {
         status.push({ en: `${project.status.count} to fix`, ja: `要修正 ${project.status.count} 件` });
-      } else if (project.status.kind === "to-place" && project.status.count > 0) {
-        status.push({ en: `${project.status.count} to place`, ja: `未配置 ${project.status.count} 件` });
+      } else if (project.status.kind === "to-align" && project.status.count > 0) {
+        status.push({ en: `${project.status.count} to align`, ja: `位置合わせ待ち ${project.status.count} 件` });
       } else if (project.status.kind === "delivered") {
         const at = day(project.status.at);
         status.push({ en: `Delivered ${at.en}`, ja: `${at.ja} 書き出し済み` });

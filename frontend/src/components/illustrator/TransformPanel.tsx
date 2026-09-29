@@ -1,4 +1,5 @@
 import { HelpCircle, Redo2, Undo2 } from "lucide-react";
+import { useState } from "react";
 
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
@@ -12,7 +13,88 @@ import { drawingScaleDenominator } from "../../lib/similarity";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { relinkPreview } from "../../lib/relinkPreview";
 import { PlacementScopeNote } from "./PlacementScopeNote";
+
+/** Rejoining changes the floor's scale and rotation and can move others, so it shows that first. */
+export function RelinkControl({
+  state,
+  label,
+  dispatch
+}: {
+  state: PlacementState;
+  label: string;
+  dispatch: (action: PlacementAction) => void;
+}) {
+  const { t } = useUiLanguage();
+  const [open, setOpen] = useState(false);
+  const preview = open ? relinkPreview(state, label) : null;
+  const degrees = (value: number) => `${(Math.abs(value) < 0.05 ? 0 : value).toFixed(1)}°`;
+  const metres = (value: number) => (value < 10 ? `${value.toFixed(2)} m` : `${Math.round(value)} m`);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="secondary">
+          {t("Relink to shared frame", "共通フレームに再リンク")}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 space-y-2 text-xs leading-4" data-testid="relink-preview">
+        <p className="text-[13px] font-medium leading-[18px] text-foreground">
+          {t(`Relink ${label} to the shared frame?`, `${label}を共通フレームに再リンクしますか？`)}
+        </p>
+        {preview ? (
+          <ul className="space-y-1 text-muted-foreground">
+            <li>
+              {t("Scale", "縮尺")}{" "}
+              <span className="font-mono text-foreground">
+                1:{Math.round(preview.scale.from)} → 1:{Math.round(preview.scale.to)}
+              </span>
+            </li>
+            <li>
+              {t("Rotation", "回転")}{" "}
+              <span className="font-mono text-foreground">
+                {degrees(preview.rotation.from)} → {degrees(preview.rotation.to)}
+              </span>
+            </li>
+            {preview.moves.length > 0 ? (
+              <li>
+                {t("Moves", "移動")}{" "}
+                <span className="font-mono text-foreground">
+                  {preview.moves.map((move) => `${move.label} ${metres(move.metres)}`).join(", ")}
+                </span>
+              </li>
+            ) : (
+              <li>{t("Nothing moves on the map.", "地図上では何も動きません。")}</li>
+            )}
+            {preview.reopens.length > 0 ? (
+              <li className="text-warning-foreground">
+                {t(
+                  `${preview.reopens.join(", ")} will need aligning again.`,
+                  `${preview.reopens.join("、")}はもう一度位置合わせが必要になります。`
+                )}
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+            {t("Cancel", "キャンセル")}
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              dispatch({ type: "relinkFloor", label });
+              setOpen(false);
+            }}
+          >
+            {t("Relink", "再リンク")}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 type Props = {
   state: PlacementState;
@@ -107,13 +189,7 @@ export function TransformPanel({
         </p>
       ) : null}
       {activeFloor && !activeFloor.linked && !activeFloor.pinned ? (
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => dispatch({ type: "relinkFloor", label: activeFloor.label })}
-        >
-          {t("Relink to shared frame", "共通フレームに再リンク")}
-        </Button>
+        <RelinkControl state={state} label={activeFloor.label} dispatch={dispatch} />
       ) : null}
 
       <PlacementScopeNote state={state} mode={mode} />
