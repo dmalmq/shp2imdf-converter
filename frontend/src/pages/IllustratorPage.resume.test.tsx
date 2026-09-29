@@ -254,3 +254,22 @@ test("a project with no floors yet opens on naming them", () => {
   render(<IllustratorPage restored={conversion({ floors: null, draft: null, draft_revision: 0 })} />);
   expect(screen.getByRole("heading", { name: "Mark each floor" })).toBeInTheDocument();
 });
+
+test("a draft saved with no location, still at the default spot, says so on reopening", () => {
+  render(<IllustratorPage restored={conversion()} />);
+  expect(screen.getByTestId("lookup-failed")).toHaveTextContent(
+    "No location was found for this drawing, so it sits at a default spot in central Tokyo."
+  );
+});
+
+test("a draft whose floors were moved off the default spot shows no such notice", () => {
+  const moved = {
+    ...DRAFT,
+    placement: {
+      ...DRAFT.placement,
+      floors: DRAFT.placement.floors.map((item) => ({ ...item, map_anchor: [140.1, 35.6] as [number, number] }))
+    }
+  };
+  render(<IllustratorPage restored={conversion({ draft: moved })} />);
+  expect(screen.queryByTestId("lookup-failed")).toBeNull();
+});

@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 
 import { useAppStore } from "../../store/useAppStore";
 import { AppShell } from "./AppShell";
-import { createSlot, usePageShell, usePrimaryAction, type PrimaryAction } from "./ShellContext";
+import { createSlot, usePageShell, usePrimaryAction, type PageSave, type PrimaryAction } from "./ShellContext";
 
 describe("createSlot", () => {
   test("the latest registration wins and removing it reveals the previous one", () => {
@@ -251,5 +251,48 @@ describe("top bar", () => {
     const track = screen.getByRole("navigation", { name: "Stages" });
     fireEvent.click(within(track).getByRole("button", { name: /1 · Bring in/ }));
     expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Bring in");
+  });
+});
+
+describe("artwork save status", () => {
+  beforeEach(() => {
+    vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
+    useAppStore.setState({ uiLanguage: "en", sessionId: null, currentScreen: "upload" });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  function SavingPage({ save }: { save: PageSave | null }) {
+    usePageShell({ save });
+    return null;
+  }
+
+  const inShell = (save: PageSave) => (
+    <MemoryRouter initialEntries={["/a/abc"]}>
+      <AppShell>
+        <SavingPage save={save} />
+      </AppShell>
+    </MemoryRouter>
+  );
+
+  test("the top bar says what the artwork autosave is doing", () => {
+    const savedAt = new Date(2026, 8, 29, 14, 32).getTime();
+    const { rerender } = render(inShell({ state: "idle", savedAt: null }));
+    expect(screen.queryByTestId("page-save-status")).toBeNull();
+
+    rerender(inShell({ state: "saving", savedAt: null }));
+    expect(screen.getByTestId("page-save-status")).toHaveTextContent("Saving…");
+    rerender(inShell({ state: "saved", savedAt }));
+    expect(screen.getByTestId("page-save-status")).toHaveTextContent("Saved · 14:32");
+    rerender(inShell({ state: "failed", savedAt }));
+    expect(screen.getByTestId("page-save-status")).toHaveTextContent("Could not save · retrying");
+    rerender(inShell({ state: "stopped", savedAt }));
+    expect(screen.getByTestId("page-save-status")).toHaveTextContent("Not saved");
+    act(() => useAppStore.setState({ uiLanguage: "ja" }));
+    expect(screen.getByTestId("page-save-status")).toHaveTextContent("保存されていません");
+  });
+
+  test("a shapefile route never shows the artwork status", () => {
+    renderShell(<SavingPage save={{ state: "saving", savedAt: null }} />, "/p/s1/check");
+    expect(screen.queryByTestId("page-save-status")).toBeNull();
   });
 });

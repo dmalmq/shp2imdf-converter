@@ -169,6 +169,11 @@ export function LocateControl({
             {t("suggested · approximate", "推定 · おおよその位置")}
           </span>
         ) : null}
+        {locate.located.kind === "none" && (!siteName.trim() || restored !== undefined) ? (
+          <span data-testid="lookup-failure" className="shrink-0 font-medium text-warning-foreground">
+            {t("not located · search", "位置未設定 · 検索")}
+          </span>
+        ) : null}
         {locate.located.kind === "not-found" || locate.located.kind === "unavailable" ? (
           <span data-testid="lookup-failure" className="shrink-0 font-medium text-warning-foreground">
             {locate.located.kind === "not-found"
