@@ -27,6 +27,8 @@ Back to [overview](overview.md).
 - Save status in the top bar; 14a only shows a notice over the map when a save fails or conflicts.
 - Undo history is not kept across a reload.
 
+**Part b(i) (behaviour) landed next.** The per-floor status (`FloorAlignment` in the draft, `floorStatus` derived from it), the Deliver checklist and its one confirmation, the recommended method, the visible lookup failure, the template and rejoin previews, the top-bar save status and the hub's aligned count. Everything in the list above is done except undo across a reload, which stays a gap (see decisions.md). Part b(ii) is the page 112:2 restyle.
+
 **After this phase.** These are small, independent follow-ups:
 - a nudge step selector (0.01 / 0.1 / 1 / 10 m);
 - coordinate readouts labelled as geographic or projected, and as cursor, anchor or centre;

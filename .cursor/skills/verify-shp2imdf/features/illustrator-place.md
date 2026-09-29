@@ -7,6 +7,7 @@ The Illustrator screen converts a PDF-compatible `.ai` file, lets the user assig
 - `illustrator-open` reaches `/illustrator` from the hub.
 - `illustrator-choose` shows `Choose file` and `#illustrator-georef-input`.
 - `illustrator-skip-placement-save` never writes `data/placements.db` during verification.
+- `illustrator-status` (by hand): each floor is Aligned or Needs alignment. Handles: on the Export tab the list `Floor status`, one row per floor with `data-floor-status="aligned" | "needs-alignment"` and a button `Review <floor>`; exporting with any row not aligned opens a dialog with `Export anyway`. The locate row shows `suggested · approximate`, or `[data-testid=lookup-failure]` when the filename found nothing (a synthetic name such as `0001_東京.ai` renamed to `0001_zzqx.ai`); the map then shows `[data-testid=lookup-failed]`. The top bar's `[data-testid=page-save-status]` reads `Saved · HH:MM`. `Relink to shared frame` opens `[data-testid=relink-preview]`; picking a saved placement opens `[data-testid=template-preview]` (look, do not apply someone's building on the shared PC).
 
 ## How to get to it (user POV)
 
