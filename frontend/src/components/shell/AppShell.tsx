@@ -266,7 +266,7 @@ function PageSaveStatus({ save }: { save: PageSave }) {
   );
 }
 
-const LANGUAGES:ReadonlyArray<{ value: UiLanguage; label: string }> = [
+const LANGUAGES: ReadonlyArray<{ value: UiLanguage; label: string }> = [
   { value: "en", label: "EN" },
   { value: "ja", label: "日本語" }
 ];

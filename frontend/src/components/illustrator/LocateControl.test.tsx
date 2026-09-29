@@ -64,6 +64,8 @@ test("empty siteName does not search and the row is Find the building", () => {
   );
   expect(screen.queryByRole("listitem")).toBeNull();
   expect(settled).toHaveBeenCalledOnce();
+  // Nothing to look up is not a location: the row says so.
+  expect(screen.getByTestId("lookup-failure")).toHaveTextContent("not located · search");
 });
 
 test("a filename that finds nothing says so and moves nothing", async () => {
