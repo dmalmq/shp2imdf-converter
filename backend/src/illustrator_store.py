@@ -426,8 +426,7 @@ class ConversionStore:
             return lock
 
     def _directory_for(self, conversion_id: str) -> Path:
-        if not isinstance(conversion_id, str) or not _CONVERSION_ID_PATTERN.fullmatch(conversion_id):
-            raise ConversionExpiredError(_UNAVAILABLE)
+        require_conversion_id(conversion_id)
         directory = self.root / conversion_id
         if directory.resolve().parent != self.root.resolve():
             raise ConversionExpiredError(_UNAVAILABLE)
@@ -516,6 +515,12 @@ class ConversionStore:
         if target.parent != root or target == root:
             return
         shutil.rmtree(target, ignore_errors=True)
+
+
+def require_conversion_id(conversion_id: object) -> None:
+    """Reject anything ``put`` could not have generated, before it can name a path."""
+    if not isinstance(conversion_id, str) or not _CONVERSION_ID_PATTERN.fullmatch(conversion_id):
+        raise ConversionExpiredError(_UNAVAILABLE)
 
 
 _LOCKED_FILE_ATTEMPTS = 5

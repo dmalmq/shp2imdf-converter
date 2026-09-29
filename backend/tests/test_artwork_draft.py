@@ -478,3 +478,14 @@ def test_a_hostile_or_unknown_id_is_404(test_client, encoded_id: str) -> None:
     response = _put_draft(test_client, encoded_id, _draft(), 0)
     assert response.status_code == 404, response.text
     assert response.json()["code"] == "CONVERSION_EXPIRED"
+
+
+@pytest.mark.parametrize("encoded_id", _TRAVERSING_IDS)
+def test_a_hostile_id_is_404_even_with_a_body_that_would_not_validate(
+    test_client, encoded_id: str
+) -> None:
+    response = test_client.put(
+        f"/api/convert/illustrator/{encoded_id}/draft", json={"base_revision": 0, "draft": {}}
+    )
+    assert response.status_code == 404, response.text
+    assert response.json()["code"] == "CONVERSION_EXPIRED"

@@ -40,7 +40,7 @@ from backend.src.illustrator_importer import _sanitize_layer_name
 from backend.src.illustrator_importer import convert_ai_to_geopackage_bundle, parse_ai
 from backend.src.illustrator_shape_match import match_regions
 from backend.src.illustrator_shape_match import match_shapes
-from backend.src.illustrator_store import CachedConversion, ConversionStore
+from backend.src.illustrator_store import CachedConversion, ConversionStore, require_conversion_id
 from backend.src.illustrator_survey_snap import match_survey_consensus
 from backend.src.imdf_reader import read_imdf_zip
 from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
@@ -428,6 +428,7 @@ _DRAFT_TOO_LARGE = ApiError(
 @router.put("/convert/illustrator/{conversion_id}/draft", response_model=SaveDraftResponse)
 async def save_illustrator_draft(conversion_id: str, request: Request) -> SaveDraftResponse:
     """Autosave the placement draft; an unchanged draft is not an edit."""
+    require_conversion_id(conversion_id)
     declared = request.headers.get("content-length")
     if declared is not None and declared.isdigit() and int(declared) > MAX_DRAFT_BYTES:
         raise _DRAFT_TOO_LARGE
