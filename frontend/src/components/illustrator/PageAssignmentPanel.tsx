@@ -268,8 +268,10 @@ export function PageAssignmentPanel({
                         {t(`Page ${page.index}`, `ページ ${page.index}`)}
                       </button>
                       <span className="font-mono text-[10px] text-muted-foreground">
-                        {Math.round(page.width_pt)} × {Math.round(page.height_pt)} pt · {page.preview_feature_count}{" "}
-                        {t("shapes", "図形")}
+                        {Math.round(page.width_pt)} × {Math.round(page.height_pt)} pt ·{" "}
+                        {page.preview_feature_count === 1
+                          ? t("1 shape", "1 図形")
+                          : t(`${page.preview_feature_count} shapes`, `${page.preview_feature_count} 図形`)}
                       </span>
                     </div>
                     {boxes.length > 0 ? (
