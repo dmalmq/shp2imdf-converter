@@ -38,7 +38,7 @@ beforeEach(() => {
 });
 
 async function saveAs(name: string) {
-  render(<PlacementLibrary state={STATE} dispatch={vi.fn()} artworkBounds={[0, 0, 170, 160]} />);
+  render(<PlacementLibrary state={STATE} dispatch={vi.fn()} artworkBounds={[0, 0, 170, 160]} references={{ preloaded: false, uploads: [], removed: [], pin: null }} />);
   fireEvent.change(screen.getByPlaceholderText("Building name"), { target: { value: name } });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
 }

@@ -85,7 +85,15 @@ function toAlignment(alignment: FloorAlignment | undefined): DraftAlignment | nu
         ? { kind: "points", floor: basis.floor, point_ids: [...basis.pointIds] }
         : basis.kind === "floor"
           ? { kind: "floor", floor: basis.floor, pose: toPose(basis.pose) }
-          : { kind: "reference" }
+          : {
+              kind: "reference",
+              reference: {
+                layer: clip(basis.reference.layer),
+                preloaded: basis.reference.preloaded,
+                uploads: clipNames(basis.reference.uploads),
+                pin: basis.reference.pin ? [basis.reference.pin[0], basis.reference.pin[1]] : null
+              }
+            }
   };
 }
 
@@ -98,7 +106,15 @@ function fromAlignment(alignment: DraftAlignment): FloorAlignment {
         ? { kind: "points", floor: basis.floor, pointIds: [...basis.point_ids] }
         : basis.kind === "floor"
           ? { kind: "floor", floor: basis.floor, pose: fromPose(basis.pose) }
-          : { kind: "reference" }
+          : {
+              kind: "reference",
+              reference: {
+                layer: basis.reference.layer,
+                preloaded: basis.reference.preloaded,
+                uploads: [...basis.reference.uploads],
+                pin: basis.reference.pin ? [basis.reference.pin[0], basis.reference.pin[1]] : null
+              }
+            }
   };
 }
 

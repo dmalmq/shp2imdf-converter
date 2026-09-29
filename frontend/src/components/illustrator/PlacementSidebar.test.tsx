@@ -89,6 +89,7 @@ function SidebarHarness({
       onAlignMethodChange={() => {}}
       statuses={new Map()}
       onReviewFloor={() => {}}
+      references={{ preloaded: false, uploads: [], removed: [], pin: null }}
       referenceLayers={[]}
       onReferenceLayersChange={() => {}}
       bounds={[0, 0, 100, 100]}

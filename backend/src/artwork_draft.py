@@ -63,10 +63,24 @@ class PointsBasis(_Strict):
     point_ids: Annotated[list[Annotated[str, StringConstraints(min_length=1, max_length=64)]], Field(max_length=MAX_CONTROL_POINTS)]
 
 
+class ReferenceIdentity(_Strict):
+    """Reference data by identity, since its geometry is not stored.
+
+    The layer matched, the sources loaded (駅データ and uploaded file names) and
+    the station pin 駅データ was queried around.
+    """
+
+    layer: _Text
+    preloaded: bool
+    uploads: _Names = []
+    pin: LngLat | None = None
+
+
 class ReferenceBasis(_Strict):
-    """A shape match or snap against reference data, which is not stored."""
+    """A shape match or snap against reference data."""
 
     kind: Literal["reference"]
+    reference: ReferenceIdentity
 
 
 class FloorBasis(_Strict):
@@ -226,8 +240,30 @@ def _same_pose(a: DraftPose, b: DraftPose) -> bool:
     )
 
 
-def floor_is_aligned(placement: DraftPlacement, floor: DraftFloor) -> bool:
-    """Still where an accepted alignment put it, against a basis that has not moved."""
+def _same_pin(a: tuple[float, float] | None, b: tuple[float, float] | None) -> bool:
+    if a is None or b is None:
+        return a is b
+    return abs(a[0] - b[0]) <= _DEGREES and abs(a[1] - b[1]) <= _DEGREES
+
+
+def _same_reference(identity: ReferenceIdentity, view: DraftView) -> bool:
+    """The reference an alignment used is still the one loaded, queried around the same pin."""
+    loaded = view.references
+    return (
+        identity.layer not in loaded.removed
+        and identity.preloaded == loaded.preloaded
+        and sorted(identity.uploads) == sorted(loaded.uploads)
+        and _same_pin(identity.pin, view.station_pin)
+    )
+
+
+def floor_is_aligned(draft: PlacementDraft, floor: DraftFloor) -> bool:
+    """Still where an accepted alignment put it, against a basis that has not changed.
+
+    ``frontend/src/lib/floorStatus.ts`` applies the same rule; the shared
+    ``floor_status_golden.json`` fixture holds both to it.
+    """
+    placement = draft.placement
     alignment = floor.alignment
     if alignment is None or not _same_pose(_pose(placement.frame, floor), alignment.pose):
         return False
@@ -239,9 +275,9 @@ def floor_is_aligned(placement: DraftPlacement, floor: DraftFloor) -> bool:
     if isinstance(basis, PointsBasis):
         owner = by_label.get(basis.floor)
         return owner is not None and [p.id for p in owner.control_points] == basis.point_ids
-    return True
+    return _same_reference(basis.reference, draft.view)
 
 
-def placed_floor_count(placement: DraftPlacement) -> int:
+def placed_floor_count(draft: PlacementDraft) -> int:
     """Floors whose status is Aligned; moving or pinning a floor does not count."""
-    return sum(1 for floor in placement.floors if floor_is_aligned(placement, floor))
+    return sum(1 for floor in draft.placement.floors if floor_is_aligned(draft, floor))

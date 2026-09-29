@@ -44,12 +44,24 @@ export type Pose = Pick<
   "artworkAnchor" | "mapAnchor" | "rotationDeg" | "metresPerPoint"
 >;
 
+/**
+ * Reference data by identity, since its geometry is not stored: the layer, the
+ * set of sources loaded (駅データ and uploaded file names), and the station pin
+ * 駅データ was queried around.
+ */
+export type ReferenceIdentity = {
+  layer: string;
+  preloaded: boolean;
+  uploads: string[];
+  pin: [number, number] | null;
+};
+
 /** What an accepted alignment was made against. */
 export type AlignmentBasis =
   /** A fit to the pairs `pointIds` on `floor`. */
   | { kind: "points"; floor: string; pointIds: string[] }
   /** A shape match or snap against reference data. */
-  | { kind: "reference" }
+  | { kind: "reference"; reference: ReferenceIdentity }
   /** A match to another floor, where that floor was at the time. */
   | { kind: "floor"; floor: string; pose: Pose };
 
@@ -123,7 +135,7 @@ export type PlacementAction =
       mode: AdjustmentMode;
       transform: SimilarityTransform;
       /** Set when the user accepted this as an alignment; unset, the floors only move. */
-      alignedTo?: { kind: "reference" } | { kind: "floor"; floor: string };
+      alignedTo?: { kind: "reference"; reference: ReferenceIdentity } | { kind: "floor"; floor: string };
     }
   | { type: "applyFloors"; floors: { label: string; transform: TransformPayload }[] }
   /** Install a whole new floor set (new file or new assignment), labels included. */
@@ -178,13 +190,15 @@ function markAligned(
 
 function alignedBasis(
   state: PlacementState,
-  to: NonNullable<Extract<PlacementAction, { type: "applySimilarity" }>["alignedTo"]>
-): AlignmentBasis {
-  if (to.kind === "reference") return to;
+  to: Extract<PlacementAction, { type: "applySimilarity" }>["alignedTo"]
+): AlignmentBasis | null {
+  if (!to) return null;
+  if (to.kind === "reference") {
+    const { layer, preloaded, uploads, pin } = to.reference;
+    return { kind: "reference", reference: { layer, preloaded, uploads: [...uploads], pin } };
+  }
   const reference = state.floors.find((f) => f.label === to.floor);
-  return reference
-    ? { kind: "floor", floor: to.floor, pose: poseOf(state, reference) }
-    : { kind: "reference" };
+  return reference ? { kind: "floor", floor: to.floor, pose: poseOf(state, reference) } : null;
 }
 
 /** The floors a frame-wide operation moves. */
@@ -690,9 +704,8 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
             f.label === active.label ? { ...f, mapAnchor: [lon, lat] } : f
           )
         });
-        return action.alignedTo
-          ? markAligned(moved, framedLabels(moved), alignedBasis(moved, action.alignedTo))
-          : moved;
+        const basis = alignedBasis(moved, action.alignedTo);
+        return basis ? markAligned(moved, framedLabels(moved), basis) : moved;
       }
       const metresPerPoint = state.scaleLocked
         ? resolvedTransform(state, active).metresPerPoint
@@ -714,9 +727,8 @@ export function placementReducer(state: PlacementState, action: PlacementAction)
             : f
         )
       };
-      return action.alignedTo
-        ? markAligned(moved, [active.label], alignedBasis(moved, action.alignedTo))
-        : moved;
+      const basis = alignedBasis(moved, action.alignedTo);
+      return basis ? markAligned(moved, [active.label], basis) : moved;
     }
 
     case "applyFloors":

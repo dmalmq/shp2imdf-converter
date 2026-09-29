@@ -29,7 +29,7 @@ const STATE: PlacementState = {
   scaleLocked: true
 };
 
-const ALIGNED: FloorStatus = { kind: "aligned", basis: { kind: "reference" } };
+const ALIGNED: FloorStatus = { kind: "aligned", basis: { kind: "points", floor: "1F", pointIds: ["a", "b"] } };
 
 function renderPanel(statuses: Map<string, FloorStatus>) {
   const onExport = vi.fn();
@@ -50,6 +50,7 @@ function renderPanel(statuses: Map<string, FloorStatus>) {
       error={null}
       statuses={statuses}
       onReviewFloor={onReviewFloor}
+      references={{ preloaded: false, uploads: [], removed: [], pin: null }}
     />
   );
   return { onExport, onReviewFloor };

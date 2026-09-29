@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.src.artwork_draft import MAX_DRAFT_BYTES, PlacementDraft
+from backend.src.artwork_draft import MAX_DRAFT_BYTES, PlacementDraft, floor_is_aligned
 from backend.src.illustrator_importer import parse_ai
 from backend.src.illustrator_store import (
     ConversionExpiredError,
@@ -638,3 +638,53 @@ def test_a_delivered_project_opened_without_a_draft_stays_delivered(test_client)
     listed = test_client.get("/api/projects?flow=artwork").json()["projects"][0]
     assert listed["stage"] == "deliver"
     assert listed["changed_since_delivery"] is False
+
+
+_GOLDEN = json.loads(
+    (Path(__file__).parent / "fixtures" / "floor_status_golden.json").read_text(encoding="utf-8")
+)["cases"]
+
+
+@pytest.mark.parametrize("case", _GOLDEN, ids=[case["name"] for case in _GOLDEN])
+def test_floor_status_golden_fixture(case: dict) -> None:
+    # frontend/src/lib/floorStatus.test.ts runs the same cases through floorStatus.
+    draft = PlacementDraft.model_validate(case["draft"])
+    got = {
+        floor.label: "aligned" if floor_is_aligned(draft, floor) else "needs-alignment"
+        for floor in draft.placement.floors
+    }
+    assert got == case["expected"]
+
+
+def test_a_reference_change_in_the_view_recounts_placed_floors(store: ConversionStore) -> None:
+    cached = _assigned(store)
+    draft = _draft()
+    draft["placement"]["floors"][0]["alignment"] = {
+        "pose": {
+            "artwork_anchor": [42.5, 100.0],
+            "map_anchor": [139.7671, 35.6812],
+            "rotation_deg": 12.5,
+            "metres_per_point": 0.3527777777777778,
+        },
+        "basis": {
+            "kind": "reference",
+            "reference": {
+                "layer": "Station_pg",
+                "preloaded": True,
+                "uploads": [],
+                "pin": [139.7671, 35.6812],
+            },
+        },
+    }
+    draft["view"]["station_pin"] = [139.7671, 35.6812]
+    draft["view"]["references"].update(preloaded=True, removed=[], uploads=[])
+    saved = store.save_draft(cached.conversion_id, _model(draft), store.draft(cached).revision)
+    assert _project_json(cached.directory)["floors_placed"] == 2
+    changed_at = _project_json(cached.directory)["content_changed_at"]
+
+    removed = copy.deepcopy(draft)
+    removed["view"]["references"]["removed"] = ["Station_pg"]
+    store.save_draft(cached.conversion_id, _model(removed), saved.revision)
+    project = _project_json(cached.directory)
+    # The view changed, not the work: the count follows and the content does not move.
+    assert (project["floors_placed"], project["content_changed_at"]) == (1, changed_at)

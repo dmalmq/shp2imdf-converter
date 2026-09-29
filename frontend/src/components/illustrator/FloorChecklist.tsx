@@ -28,6 +28,11 @@ export function statusDetail(status: FloorStatus, t: T): string | null {
       return t("Moved since it was aligned", "位置合わせの後に動かされました");
     case "reference-moved":
       return t("The floor it was matched to has moved", "合わせた先のフロアが動きました");
+    case "reference-changed":
+      return t(
+        "The reference data or the station pin it was matched to changed",
+        "合わせた参照データか駅のピンが変わりました"
+      );
     case "points-changed":
       return t("Its matching pairs changed", "対応点が変わりました");
     default:
