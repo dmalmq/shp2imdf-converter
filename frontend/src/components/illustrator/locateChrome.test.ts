@@ -58,11 +58,15 @@ test("a reply for a query the user has moved on from is dropped", () => {
   expect(s).toBe(pendingShinjuku);
 });
 
-test("guessed with no candidates leaves none, and a later guess is ignored once the user acted", () => {
+test("a filename lookup with no candidates says so, and a later guess is ignored once the user acted", () => {
   expect(locateReducer(INITIAL_LOCATE, { type: "guessed", candidates: [] })).toBe(INITIAL_LOCATE);
   const locating = locateReducer(INITIAL_LOCATE, { type: "armFilename", query: "大井町" });
   expect(locateReducer(locating, { type: "guessed", candidates: [] })).toEqual({
-    located: { kind: "none" },
+    located: { kind: "not-found", query: "大井町" },
+    search: { kind: "collapsed" }
+  });
+  expect(locateReducer(locating, { type: "guessFailed" })).toEqual({
+    located: { kind: "unavailable", query: "大井町" },
     search: { kind: "collapsed" }
   });
   const opened = locateReducer(INITIAL_LOCATE, { type: "open", siteName: "大井町" });

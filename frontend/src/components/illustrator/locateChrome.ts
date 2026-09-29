@@ -5,6 +5,9 @@ export type NonEmpty<T> = readonly [T, ...T[]];
 export type Located =
   | { kind: "none" }
   | { kind: "locating"; query: string }
+  /** The filename lookup found nothing, or could not be asked; nothing was moved. */
+  | { kind: "not-found"; query: string }
+  | { kind: "unavailable"; query: string }
   | { kind: "guessed"; place: Place; candidates: NonEmpty<Place>; query: string }
   | { kind: "chosen"; place: Place; candidates: NonEmpty<Place>; query: string };
 
@@ -24,6 +27,7 @@ export type LocateState = { located: Located; search: Search };
 export type LocateEvent =
   | { type: "armFilename"; query: string }
   | { type: "guessed"; candidates: readonly Place[] }
+  | { type: "guessFailed" }
   | { type: "open"; siteName: string }
   | { type: "close" }
   | { type: "editQuery"; query: string }
@@ -115,7 +119,10 @@ export function locateReducer(state: LocateState, event: LocateEvent): LocateSta
     case "guessed": {
       if (!acceptsGuess(state)) return state;
       if (!isNonEmpty(event.candidates)) {
-        return { located: { kind: "none" }, search: { kind: "collapsed" } };
+        return {
+          located: { kind: "not-found", query: state.located.query },
+          search: { kind: "collapsed" }
+        };
       }
       return {
         located: {
@@ -127,6 +134,12 @@ export function locateReducer(state: LocateState, event: LocateEvent): LocateSta
         search: { kind: "collapsed" }
       };
     }
+    case "guessFailed":
+      if (!acceptsGuess(state)) return state;
+      return {
+        located: { kind: "unavailable", query: state.located.query },
+        search: { kind: "collapsed" }
+      };
     case "open": {
       const origin = locatedQuery(state.located);
       const cached = cachedCandidates(state.located);

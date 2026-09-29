@@ -116,7 +116,8 @@ function floor(label: string, anchor: [number, number], box: [number, number, nu
     rotation_deg: label === "1F" ? null : 7.25,
     metres_per_point: label === "1F" ? null : 0.3,
     artwork_match: false,
-    control_points: []
+    control_points: [],
+    alignment: null
   };
 }
 
