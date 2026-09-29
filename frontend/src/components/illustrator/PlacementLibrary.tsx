@@ -10,25 +10,29 @@ import { isApiClientError, toErrorMessage } from "../../api/errors";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
   placementReducer,
+  poseOf,
   toFloorPayloads,
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
-import { floorStatus } from "../../lib/floorStatus";
+import { floorStatus, samePose, type CurrentReferences } from "../../lib/floorStatus";
 import { Button } from "../ui/button";
 
 type Props = {
   state: PlacementState;
   dispatch: (action: PlacementAction) => void;
   artworkBounds: [number, number, number, number];
+  references: CurrentReferences;
 };
 
 /** How a saved template lines up with this drawing, shown before it is applied. */
 export type TemplatePreview = {
   /** Floors here that the template places. */
   matched: string[];
-  /** Floors here the template has nothing for; they keep their placement. */
+  /** Floors here the template has nothing for that stay exactly where they are. */
   kept: string[];
+  /** Floors the template has nothing for that are linked, so they take its scale and rotation. */
+  reframed: string[];
   /** Floors in the template this drawing does not have. */
   unused: string[];
   /** Drawing size as saved and now, in points, when they differ by more than 1%. */
@@ -40,7 +44,8 @@ export type TemplatePreview = {
 export function templatePreview(
   state: PlacementState,
   placement: Pick<PlacementItem, "floors" | "artwork_bounds">,
-  artworkBounds: [number, number, number, number]
+  artworkBounds: [number, number, number, number],
+  references: CurrentReferences
 ): TemplatePreview {
   const saved = new Set(placement.floors.map((f) => f.label));
   const current = new Set(state.floors.map((f) => f.label));
@@ -58,20 +63,25 @@ export function templatePreview(
   const after = placementReducer(state, { type: "applyFloors", floors: placement.floors });
   return {
     matched: state.floors.filter((f) => saved.has(f.label)).map((f) => f.label),
-    kept: state.floors.filter((f) => !saved.has(f.label)).map((f) => f.label),
+    kept: state.floors
+      .filter((f, index) => !saved.has(f.label) && samePose(poseOf(state, f), poseOf(after, after.floors[index])))
+      .map((f) => f.label),
+    reframed: state.floors
+      .filter((f, index) => !saved.has(f.label) && !samePose(poseOf(state, f), poseOf(after, after.floors[index])))
+      .map((f) => f.label),
     unused: placement.floors.filter((f) => !current.has(f.label)).map((f) => f.label),
     size: differs ? { saved: savedSize, current: currentSize } : null,
     reopens: state.floors
       .filter(
         (f, index) =>
-          floorStatus(state, f).kind === "aligned" &&
-          floorStatus(after, after.floors[index]).kind !== "aligned"
+          floorStatus(state, f, references).kind === "aligned" &&
+          floorStatus(after, after.floors[index], references).kind !== "aligned"
       )
       .map((f) => f.label)
   };
 }
 
-export function PlacementLibrary({ state, dispatch, artworkBounds }: Props) {
+export function PlacementLibrary({ state, dispatch, artworkBounds, references }: Props) {
   const { t } = useUiLanguage();
   const [placements, setPlacements] = useState<PlacementItem[]>([]);
   const [name, setName] = useState("");
@@ -109,7 +119,7 @@ export function PlacementLibrary({ state, dispatch, artworkBounds }: Props) {
     }
   };
 
-  const preview = pending ? templatePreview(state, pending, artworkBounds) : null;
+  const preview = pending ? templatePreview(state, pending, artworkBounds, references) : null;
   const size = (value: [number, number]) => `${Math.round(value[0])} × ${Math.round(value[1])} pt`;
 
   return (
@@ -145,6 +155,14 @@ export function PlacementLibrary({ state, dispatch, artworkBounds }: Props) {
               {t(
                 `Not in the template, keeps its placement: ${preview.kept.join(", ")}.`,
                 `テンプレートにないため今の配置のまま：${preview.kept.join("、")}`
+              )}
+            </p>
+          ) : null}
+          {preview.reframed.length > 0 ? (
+            <p className="text-warning-foreground">
+              {t(
+                `Not in the template, but linked, so ${preview.reframed.length === 1 ? "it takes" : "they take"} the template's scale and rotation: ${preview.reframed.join(", ")}.`,
+                `テンプレートにはないが、リンクしているためテンプレートの縮尺と回転になります：${preview.reframed.join("、")}`
               )}
             </p>
           ) : null}

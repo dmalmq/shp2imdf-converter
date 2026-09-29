@@ -13,6 +13,7 @@ import { drawingScaleDenominator } from "../../lib/similarity";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import type { CurrentReferences } from "../../lib/floorStatus";
 import { relinkPreview } from "../../lib/relinkPreview";
 import { PlacementScopeNote } from "./PlacementScopeNote";
 
@@ -20,15 +21,17 @@ import { PlacementScopeNote } from "./PlacementScopeNote";
 export function RelinkControl({
   state,
   label,
-  dispatch
+  dispatch,
+  references
 }: {
   state: PlacementState;
   label: string;
   dispatch: (action: PlacementAction) => void;
+  references: CurrentReferences;
 }) {
   const { t } = useUiLanguage();
   const [open, setOpen] = useState(false);
-  const preview = open ? relinkPreview(state, label) : null;
+  const preview = open ? relinkPreview(state, label, references) : null;
   const degrees = (value: number) => `${(Math.abs(value) < 0.05 ? 0 : value).toFixed(1)}°`;
   const metres = (value: number) => (value < 10 ? `${value.toFixed(2)} m` : `${Math.round(value)} m`);
 
@@ -102,6 +105,7 @@ type Props = {
   mode: AdjustmentMode;
   canUndo?: boolean;
   canRedo?: boolean;
+  references: CurrentReferences;
 };
 
 /**
@@ -116,7 +120,8 @@ export function TransformPanel({
   dispatch,
   mode,
   canUndo = false,
-  canRedo = false
+  canRedo = false,
+  references
 }: Props) {
   const { t } = useUiLanguage();
 
@@ -189,7 +194,7 @@ export function TransformPanel({
         </p>
       ) : null}
       {activeFloor && !activeFloor.linked && !activeFloor.pinned ? (
-        <RelinkControl state={state} label={activeFloor.label} dispatch={dispatch} />
+        <RelinkControl state={state} label={activeFloor.label} dispatch={dispatch} references={references} />
       ) : null}
 
       <PlacementScopeNote state={state} mode={mode} />

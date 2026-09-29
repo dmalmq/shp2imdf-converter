@@ -1284,7 +1284,10 @@ export type DraftAlignment = {
   pose: DraftPose;
   basis:
     | { kind: "points"; floor: string; point_ids: string[] }
-    | { kind: "reference" }
+    | {
+        kind: "reference";
+        reference: { layer: string; preloaded: boolean; uploads: string[]; pin: [number, number] | null };
+      }
     | { kind: "floor"; floor: string; pose: DraftPose };
 };
 

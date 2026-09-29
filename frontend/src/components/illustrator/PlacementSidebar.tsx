@@ -3,7 +3,7 @@ import type { Dispatch } from "react";
 import type { ExportFormatsPayload, ReferenceSelection } from "../../api/client";
 import type { AdjustmentMode, PlacementAction, PlacementState } from "../../hooks/useIllustratorPlacement";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
-import type { FloorStatus } from "../../lib/floorStatus";
+import type { CurrentReferences, FloorStatus } from "../../lib/floorStatus";
 import { workingCrsLabel } from "../../lib/workingCrs";
 import { Button } from "../ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
@@ -53,6 +53,7 @@ type Props = {
   onAlignMethodChange: (method: AlignMethod) => void;
   statuses: Map<string, FloorStatus>;
   onReviewFloor: (label: string) => void;
+  references: CurrentReferences;
   surveySnap: SurveySnapModel;
   referenceLayers: ReferenceLayer[];
   onReferenceLayersChange: (layers: ReferenceLayer[]) => void;
@@ -91,6 +92,7 @@ export function PlacementSidebar({
   onAlignMethodChange,
   statuses,
   onReviewFloor,
+  references,
   surveySnap,
   referenceLayers,
   onReferenceLayersChange,
@@ -136,6 +138,7 @@ export function PlacementSidebar({
           mode={mode}
           canUndo={canUndo}
           canRedo={canRedo}
+          references={references}
         />
       </div>
 
@@ -226,6 +229,7 @@ export function PlacementSidebar({
               onExport={onExport}
               statuses={statuses}
               onReviewFloor={onReviewFloor}
+              references={references}
               previewFeatures={previewFeatures}
               totalFeatures={totalFeatures}
               error={error}

@@ -55,7 +55,7 @@ import {
 } from "../lib/placementPose";
 import { fromDraft, NO_REFERENCES, toDraft, type DraftView } from "../lib/artworkDraft";
 import { saveBlob } from "../lib/download";
-import { floorStatuses, recommendedAlignment } from "../lib/floorStatus";
+import { floorStatuses, recommendedAlignment, type CurrentReferences } from "../lib/floorStatus";
 import type { AlignMethod } from "../components/illustrator/ScaleAndFitPanel";
 import { siteNameFromFilename, stationQueryFromFilename } from "../lib/siteName";
 import { usePageShell } from "../components/shell/ShellContext";
@@ -70,7 +70,8 @@ import {
   resolvedTransform,
   toFloorPayloads,
   type AdjustmentMode,
-  type PlacementState
+  type PlacementState,
+  type ReferenceIdentity
 } from "../hooks/useIllustratorPlacement";
 import { useDraftAutosave, type DraftSaveStatus } from "../hooks/useDraftAutosave";
 import { usePlacementShortcuts } from "../hooks/usePlacementShortcuts";
@@ -365,6 +366,33 @@ function saveProblem(status: DraftSaveStatus, t: (en: string, ja: string) => str
   return null;
 }
 
+/**
+ * Why the drawing is still at the default spot, when nothing located it: the
+ * lookup found nothing, could not be asked, or never ran (a file name with no
+ * station in it, or a project saved before lookups were recorded).
+ */
+export function defaultSpotNotice(located: Located, t: (en: string, ja: string) => string): string | null {
+  if (located.kind === "not-found") {
+    return t(
+      `No place called “${located.query}” was found, so the drawing sits at a default spot in central Tokyo. Search for the building, or drag the drawing onto it.`,
+      `「${located.query}」に当たる場所が見つからないため、図面は東京都心の仮の位置にあります。建物を検索するか、図面を建物までドラッグしてください。`
+    );
+  }
+  if (located.kind === "unavailable") {
+    return t(
+      `Could not look up “${located.query}”, so the drawing sits at a default spot in central Tokyo. Search for the building, or drag the drawing onto it.`,
+      `「${located.query}」を検索できなかったため、図面は東京都心の仮の位置にあります。建物を検索するか、図面を建物までドラッグしてください。`
+    );
+  }
+  if (located.kind === "none") {
+    return t(
+      "No location was found for this drawing, so it sits at a default spot in central Tokyo. Search for the building, or drag the drawing onto it.",
+      "この図面の位置が見つからないため、図面は東京都心の仮の位置にあります。建物を検索するか、図面を建物までドラッグしてください。"
+    );
+  }
+  return null;
+}
+
 type Props = {
   /** Converted on arrival: the file dropped on the hub. */
   initialFile?: File;
@@ -411,7 +439,8 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
   );
   const [surveyNotice, setSurveyNotice] = useState<string | null>(null);
   const [surveyPose, setSurveyPose] = useState<SurveyPose>("idle");
-  const [locateSettled, setLocateSettled] = useState(false);
+  // A restored placement never looks the file name up again, so it is settled already.
+  const [locateSettled, setLocateSettled] = useState(Boolean(resumed?.view));
 
   // A shape match against a station-sized reference layer is a long request, and
   // an unbounded one is indistinguishable from a hang. Bound it, let the user
@@ -559,7 +588,22 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
 
   const sourceName = preview?.report?.source_name ?? "";
   const placing = Boolean(preview) && assignment !== null;
-  const statuses = useMemo(() => floorStatuses(state), [state]);
+  const currentReferences: CurrentReferences = useMemo(
+    () => ({
+      preloaded: referenceSelection.preloaded,
+      uploads: referenceSelection.uploads,
+      removed: referenceSelection.removed,
+      pin: state.stationPin ?? null
+    }),
+    [referenceSelection, state.stationPin]
+  );
+  const referenceIdentity = (layer: string): ReferenceIdentity => ({
+    layer,
+    preloaded: referenceSelection.preloaded,
+    uploads: [...referenceSelection.uploads],
+    pin: state.stationPin ?? null
+  });
+  const statuses = useMemo(() => floorStatuses(state, currentReferences), [state, currentReferences]);
   const alignedFloors = [...statuses.values()].filter((status) => status.kind === "aligned").length;
   usePageShell({
     station: siteNameFromFilename(sourceName) || sourceName.replace(/\.[^.]+$/, "") || null,
@@ -710,7 +754,9 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
         type: "applySimilarity",
         mode: "group",
         transform: similarityTransform(match.transform),
-        ...(chosen ? { alignedTo: { kind: "reference" as const } } : {})
+        ...(chosen
+          ? { alignedTo: { kind: "reference" as const, reference: referenceIdentity(surveyLayerName(referenceLayers)) } }
+          : {})
       });
       const percent = Math.round(match.overlap_iou * 100);
       setSurveyNotice(
@@ -1051,7 +1097,7 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
         transform: selectedShapeMatchPreview.transform,
         alignedTo: shapeMatch.referenceFloorLabel
           ? { kind: "floor", floor: shapeMatch.referenceFloorLabel }
-          : { kind: "reference" }
+          : { kind: "reference", reference: referenceIdentity(shapeMatch.referenceName) }
       });
       setInspectedMatch(null);
       setShapeMatch((current) => keptMatchTarget(current));
@@ -1303,6 +1349,7 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
         onAlignMethodChange={setAlignMethod}
         statuses={statuses}
         onReviewFloor={reviewFloor}
+        references={currentReferences}
         surveySnap={surveySnapModel}
         referenceLayers={referenceLayers}
         onReferenceLayersChange={updateReferenceLayers}
@@ -1331,25 +1378,18 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
               : t("Locating the station…", "駅を検索しています…")}
           </p>
         ) : null}
-        {(located.kind === "not-found" || located.kind === "unavailable") &&
+        {locateSettled &&
         state.floors.some(
           (floor) =>
             floor.mapAnchor[0] === DEFAULT_MAP_ANCHOR[0] && floor.mapAnchor[1] === DEFAULT_MAP_ANCHOR[1]
-        ) ? (
+        ) &&
+        defaultSpotNotice(located, t) ? (
           <p
             role="status"
             data-testid="lookup-failed"
             className="absolute inset-x-0 top-16 z-30 mx-auto w-fit max-w-[70%] rounded-md border border-warning bg-warning-surface px-3 py-1.5 text-xs leading-4 text-warning-foreground shadow-sm"
           >
-            {located.kind === "not-found"
-              ? t(
-                  `No place called “${located.query}” was found, so the drawing sits at a default spot in central Tokyo. Search for the building, or drag the drawing onto it.`,
-                  `「${located.query}」に当たる場所が見つからないため、図面は東京都心の仮の位置にあります。建物を検索するか、図面を建物までドラッグしてください。`
-                )
-              : t(
-                  `Could not look up “${located.query}”, so the drawing sits at a default spot in central Tokyo. Search for the building, or drag the drawing onto it.`,
-                  `「${located.query}」を検索できなかったため、図面は東京都心の仮の位置にあります。建物を検索するか、図面を建物までドラッグしてください。`
-                )}
+            {defaultSpotNotice(located, t)}
           </p>
         ) : null}
         {saveProblem(autosave.status, t) ? (

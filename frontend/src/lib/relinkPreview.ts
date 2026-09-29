@@ -3,7 +3,7 @@ import {
   resolvedTransform,
   type PlacementState
 } from "../hooks/useIllustratorPlacement";
-import { floorStatus } from "./floorStatus";
+import { floorStatus, type CurrentReferences } from "./floorStatus";
 import { artworkToLngLat, drawingScaleDenominator, lngLatToEnu } from "./similarity";
 
 /** What rejoining `label` to the shared frame would change, before it is done. */
@@ -20,7 +20,11 @@ export type RelinkPreview = {
 /** Below this a floor is not reported as moving: a millimetre of re-derivation, not a change. */
 const STILL_METRES = 0.001;
 
-export function relinkPreview(state: PlacementState, label: string): RelinkPreview | null {
+export function relinkPreview(
+  state: PlacementState,
+  label: string,
+  references: CurrentReferences
+): RelinkPreview | null {
   const floor = state.floors.find((item) => item.label === label);
   if (!floor) return null;
   const after = placementReducer(state, { type: "relinkFloor", label });
@@ -41,7 +45,10 @@ export function relinkPreview(state: PlacementState, label: string): RelinkPrevi
     const [east, north] = lngLatToEnu(to[0], to[1], from[0], from[1]);
     const metres = Math.hypot(east, north);
     if (metres >= STILL_METRES) moves.push({ label: next.label, metres });
-    if (floorStatus(state, prior).kind === "aligned" && floorStatus(after, next).kind !== "aligned") {
+    if (
+      floorStatus(state, prior, references).kind === "aligned" &&
+      floorStatus(after, next, references).kind !== "aligned"
+    ) {
       reopens.push(next.label);
     }
   });

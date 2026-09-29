@@ -26,7 +26,7 @@ import {
 import { Separator } from "../ui/separator";
 import { DisabledHint } from "../ui/tooltip";
 import { cn } from "@/lib/utils";
-import type { FloorStatus } from "../../lib/floorStatus";
+import type { CurrentReferences, FloorStatus } from "../../lib/floorStatus";
 import { FloorChecklist } from "./FloorChecklist";
 import { PlacementLibrary } from "./PlacementLibrary";
 
@@ -45,6 +45,7 @@ type Props = {
   error: string | null;
   statuses: Map<string, FloorStatus>;
   onReviewFloor: (label: string) => void;
+  references: CurrentReferences;
 };
 
 type FormatKey = keyof ExportFormatsPayload;
@@ -64,7 +65,8 @@ export function ExportPanel({
   totalFeatures,
   error,
   statuses,
-  onReviewFloor
+  onReviewFloor,
+  references
 }: Props) {
   const { t } = useUiLanguage();
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -267,7 +269,7 @@ export function ExportPanel({
           />
         </CollapsibleTrigger>
         <CollapsibleContent className="pt-2">
-          <PlacementLibrary state={state} dispatch={dispatch} artworkBounds={artworkBounds} />
+          <PlacementLibrary state={state} dispatch={dispatch} artworkBounds={artworkBounds} references={references} />
         </CollapsibleContent>
       </Collapsible>
     </div>
