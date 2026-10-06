@@ -65,7 +65,7 @@ pytest -m colortheme # station colour theme (table, DBF patch, upload tree, geod
 |---|---|
 | `backend/routers/` | FastAPI route modules |
 | `backend/src/` | Conversion core: detection, mapping, generation, validation |
-| `backend/src/color_theme.py`, `dbf_table.py`, `recolor.py`, `gdb.py`, `gdb_worker.py` | Station colour-theme tool: the old → new table, DBF byte patch, upload tree, File Geodatabase worker |
+| `backend/src/color_theme.py`, `dbf_table.py`, `recolor.py`, `gdb.py`, `gdb_worker.py`, `cim_symbology.py` | Station colour-theme tool: the old → new table, DBF byte patch, upload tree, File Geodatabase worker, ArcGIS Pro symbology |
 | `backend/config/` | Server-side configuration |
 | `backend/tests/` | pytest suite (phase-marked) |
 | `frontend/src/` | React wizard, map view, table view |
@@ -154,3 +154,14 @@ pytest -m colortheme # station colour theme (table, DBF patch, upload tree, geod
   width, so the planner's `too_wide` is the only guard. Stale `*.lock` files inside a
   `.gdb` are left out (Tokyo's held 1,057 of 3,022 files). Without an `osgeo` Python a
   geodatabase is reported `gdb_unavailable` and comes back as uploaded, and its tests skip.
+  ArcGIS Pro layer files (`.lyrx`) and projects (`.aprx`, a zip of CIM JSON members) in
+  the upload get their `color2` unique-value renderers rewritten by `cim_symbology.py`:
+  one class per area, each listing the written value and every old value whose default
+  rule maps to it, so data draws the same before and after conversion. Strokes keep
+  their width (Tokyo draws 白 at 0.7 pt on 66 of 127 layers, 0.3 elsewhere). In a
+  project every other member comes back with the same name, date, compression and bytes;
+  a renderer naming `color2` with other fields or through Arcade is reported, not
+  touched. Esri's own deserializer in `ArcGIS.Core.dll` parses the result without a
+  licence (`backend/tests/esri_cim.py`), but it accepts unknown properties and a value
+  in two classes, so it proves parsing, not rendering. `TOKYO_APRX` points the
+  real-data test at a copy of the station project.
