@@ -27,6 +27,7 @@ import {
   generateReview,
   gotoEnglishHome,
   loadPlaywright,
+  openColorTheme,
   openIllustrator,
   queueTokyoStation,
   repoRoot,
@@ -36,6 +37,10 @@ import {
 const THEMES = ["light", "dark"];
 const LANGS = ["en", "ja"];
 const VIEWPORT = { width: 1440, height: 960 };
+// The colour-theme page scrolls inside the shell, so a full-page screenshot
+// would still cut it off; only a viewport as tall as the table and the opened
+// layer list shows all of it.
+const COLOR_THEME_VIEWPORT = { width: 1440, height: 1700 };
 const OUT_MARKER = ".capture-output";
 process.env.HANDOVER_VISIT_GAP_MINUTES ??= "0.5";
 const VISIT_GAP_MINUTES = Number(process.env.HANDOVER_VISIT_GAP_MINUTES);
@@ -74,17 +79,13 @@ function parseArgs(argv) {
   return options;
 }
 
-// Built from the backend's own test helper so the artwork is the three-page
-// document the Illustrator tests use; the name makes the station lookup query 東京駅.
-function writeArtworkFixture(dir) {
-  const file = path.join(dir, "0001_東京.ai");
-  const script = [
-    "import sys",
-    "from backend.tests.test_illustrator_import import _build_multipage_ai_pdf",
-    "open(sys.argv[1], 'wb').write(_build_multipage_ai_pdf())"
-  ].join("\n");
-  const result = spawnSync("python", ["-c", script, file], { cwd: repoRoot, encoding: "utf8" });
-  if (result.status !== 0) throw new Error(`artwork fixture failed: ${result.stderr}`);
+// Uploads are built by the backend's own test helpers, so each one is a
+// document its tests use.
+function writeFixture(dir, name, module, builder) {
+  const file = path.join(dir, name);
+  const script = ["import sys", `from ${module} import ${builder}`, `open(sys.argv[1], 'wb').write(${builder}())`];
+  const result = spawnSync("python", ["-c", script.join("\n"), file], { cwd: repoRoot, encoding: "utf8" });
+  if (result.status !== 0) throw new Error(`fixture ${name} failed: ${result.stderr}`);
   return file;
 }
 
@@ -296,6 +297,33 @@ async function captureIllustratorFlow(page, shoot, artwork) {
   await shoot("illustrator-export", { wait: 800 });
 }
 
+// The station carries every rule a shapefile can match, three rows of a value
+// the table does not know and a layer too narrow for one new value, so the
+// checked page shows every kind of row it has. The zip's stem is the station
+// name the page reports.
+async function captureColorThemeFlow(page, shoot, zip) {
+  const station = path.basename(zip, ".zip");
+  await gotoHub(page);
+  await page.getByRole("button", { name: /Recolour a station/ }).scrollIntoViewIfNeeded();
+  await shoot("color-theme-hub");
+
+  await openColorTheme(page);
+  await page.setViewportSize(COLOR_THEME_VIEWPORT);
+  await shoot("color-theme-empty");
+
+  await page.locator('[data-testid="color-theme-zip-input"]').setInputFiles(zip);
+  await page.getByRole("heading", { name: `Recolour ${station}`, level: 1 }).waitFor({ timeout: 60000 });
+  await page.getByRole("heading", { name: "Needs attention", exact: true }).waitFor({ timeout: 15000 });
+  await page.getByText(/^Layers \(\d+\)$/).click();
+  await shoot("color-theme-checked");
+
+  const download = page.waitForEvent("download", { timeout: 60000 });
+  await page.getByRole("region", { name: "Next step" }).getByRole("button", { name: "Download", exact: true }).click();
+  await download;
+  await page.getByText(`Downloaded ${station}_new-colors.zip`).waitFor({ timeout: 15000 });
+  await shoot("color-theme-delivered");
+}
+
 // --out can name any folder, so a rerun only clears one this script made.
 function prepareOutDir(dir) {
   if (fs.existsSync(dir)) {
@@ -324,16 +352,19 @@ async function main() {
 }
 
 async function capture(options) {
-  const artwork = writeArtworkFixture(options.out);
+  // The artwork's name makes the station lookup query 東京駅.
+  const artwork = writeFixture(options.out, "0001_東京.ai", "backend.tests.test_illustrator_import", "_build_multipage_ai_pdf");
+  const station = writeFixture(options.out, "DemoSta_6677.zip", "backend.tests.color_theme_fixtures", "demo_station");
   const manifest = [];
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: true });
   try {
-    // Separate contexts so the Illustrator route starts from a fresh store,
-    // the way a user arriving from the hub would.
+    // Separate contexts so each route starts from a fresh store, the way a
+    // user arriving from the hub would.
     for (const flow of [
       (page, shoot) => captureShapefileFlow(page, shoot),
-      (page, shoot) => captureIllustratorFlow(page, shoot, artwork)
+      (page, shoot) => captureIllustratorFlow(page, shoot, artwork),
+      (page, shoot) => captureColorThemeFlow(page, shoot, station)
     ]) {
       const context = await browser.newContext({ viewport: VIEWPORT });
       await context.addInitScript(() => {
@@ -347,7 +378,7 @@ async function capture(options) {
     }
   } finally {
     await browser.close();
-    fs.rmSync(artwork, { force: true });
+    for (const fixture of [artwork, station]) fs.rmSync(fixture, { force: true });
     fs.writeFileSync(path.join(options.out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   }
   const screens = new Set(manifest.map((entry) => entry.screen));

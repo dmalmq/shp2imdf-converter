@@ -35,8 +35,9 @@ The type gate is the two `-p` runs above. `npx tsc --noEmit -p .` passes without
 checking anything: `frontend/tsconfig.json` is `files: []` with project references.
 
 There are no Playwright specs, so `npx playwright test` runs nothing. The live check
-is the capture script: it drives Upload, every wizard section, Review and the
-Illustrator route in light/dark and EN/日本語, writing PNGs and `manifest.json` to
+is the capture script: it drives Upload, every wizard section, Review, the
+Illustrator route and the colour-theme route (`/color-theme`) in light/dark and
+EN/日本語, writing PNGs and `manifest.json` to
 `artifacts/captures/<label>/` (gitignored). `--frontend-port`/`--backend-port` run it on
 a separate pair (a worktree beside the shared 5310/8310), `--cleanup` stops only the
 servers it started. Details in `.cursor/skills/verify-shp2imdf/SKILL.md`.
@@ -53,6 +54,7 @@ slice of the suite:
 pytest -m phase3     # wizard mapping (mapper, config, generation setup)
 pytest -m phase5     # validation and export (converter, validator, autofix)
 pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
+pytest -m colortheme # station colour theme (table, DBF patch, upload tree)
 ```
 
 `phase0` generates test fixtures; `phase1`–`phase6` run foundation → polish.
@@ -63,6 +65,7 @@ pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
 |---|---|
 | `backend/routers/` | FastAPI route modules |
 | `backend/src/` | Conversion core: detection, mapping, generation, validation |
+| `backend/src/color_theme.py`, `dbf_table.py`, `recolor.py` | Station colour-theme tool: the old → new table, DBF byte patch, upload tree |
 | `backend/config/` | Server-side configuration |
 | `backend/tests/` | pytest suite (phase-marked) |
 | `frontend/src/` | React wizard, map view, table view |
@@ -125,3 +128,12 @@ pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
   trap: keep all levels of a token, and route Facility_Merge points to the level
   they actually fall in. Fixtures for a fixture-only level hid the bug further,
   because `_write_odc_layer` skips empty row sets instead of truncating the file.
+- The colour-theme tool (`/color-theme`) patches `color2` bytes inside each `.dbf` and
+  carries every other file through untouched. It must never round-trip a station through
+  geopandas or GDAL. A geopandas read→write was measured turning a C(20) field into
+  C(80) and an N(4,0) holding a null into N(24,15), and the same trip drops M from
+  PolygonZM, regenerates `.prj` and re-encodes the table. The values it writes are the
+  new area names (改札外通路, 施設 and so on). The old and new vocabularies must stay
+  disjoint, because that is what makes a second run change nothing, and
+  `load_color_theme` refuses a table where they overlap. The table is
+  `backend/config/color_theme.json`.

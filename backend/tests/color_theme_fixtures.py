@@ -146,3 +146,46 @@ def station_members() -> list[tuple[str, bytes | None]]:
         ("東京/acad.err", b"acad error log"),
     ]
     return members
+
+
+DEMO_FLOOR_1 = [
+    *[("白", "B021")] * 40,
+    *[("薄鼠", "B022")] * 30,
+    *[("薄空", "B001")] * 20,
+    *[("濃空", "B001")] * 12,
+    *[("トイレ", "B008")] * 6,
+    *[("ラチ外白", "B999")] * 5,
+    *[("黄", "B999")] * 4,
+    *[("道白", "B029")] * 2,
+    *[("薄紅", "B028")] * 2,
+    *[("橙", "B999")] * 2,
+    ("緑", "B999"),
+    ("濃紅", "B028"),
+    ("濃鼠", "B999"),
+    ("濃鼠", "B010"),
+    *[("赤", "B019")] * 3,
+    *[("", "B019")] * 2,
+]
+DEMO_FLOOR_B1 = [*[("白", "B021")] * 3, *[("黄", "B999")] * 2]
+
+
+def demo_station() -> bytes:
+    """A zipped station for capture.mjs to screenshot: every rule but the GDB-only 進入制限あり, three
+    unmapped rows, and a B1 layer whose color2 is too narrow (C(24)) for 階段・エスカレーター in UTF-8."""
+    narrow = [(name, kind, 24 if name == "color2" else width, dec) for name, kind, width, dec in SPACE_FIELDS]
+    members: list[tuple[str, bytes | None]] = []
+    for floor, fields, rows in (("1", SPACE_FIELDS, DEMO_FLOOR_1), ("B1", narrow, DEMO_FLOOR_B1)):
+        stem = f"DemoSta_6677.shp/DemoSta_{floor}_Space"
+        members += [
+            (f"{stem}.shp", b"shp " + floor.encode()),
+            (f"{stem}.shx", b"shx " + floor.encode()),
+            (f"{stem}.dbf", make_dbf(fields, [space_row(value, category) for value, category in rows])),
+            (f"{stem}.prj", b'PROJCS["JGD2011 / Japan Plane Rectangular CS IX"]'),
+            (f"{stem}.cpg", b"UTF-8"),
+        ]
+    members += [
+        ("DemoSta_6677.shp/DemoSta_1_Facility_Merge.dbf", make_dbf([("name", "C", 10, 0)], [[b"gate"]])),
+        ("DemoSta_6677.shp/DemoSta_1_Facility_Merge.sbn", b"sbn"),
+        ("DemoSta_6677.shp/acad.err", b"acad error log"),
+    ]
+    return make_zip(members)
