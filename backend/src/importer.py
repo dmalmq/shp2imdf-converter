@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import codecs
 from collections import Counter, defaultdict
 import copy
 import json
@@ -25,6 +24,7 @@ from shapely.geometry import GeometryCollection, MultiLineString, MultiPoint, Mu
 from shapely.geometry.polygon import orient
 import pyogrio
 
+from backend.src.dbf_table import cpg_codec, record_text, sniff_codec
 from backend.src.detector import detect_files, load_keyword_map
 from backend.src.schemas import CleanupSummary, DroppedRow, ImportedFile
 
@@ -89,33 +89,6 @@ class LoadedSource:
 _DBF_SAMPLE_BYTES = 4 * 1024 * 1024
 
 
-def _dbf_text_bytes(dbf: bytes) -> bytes:
-    if len(dbf) < 32:
-        return b""
-    header_length = int.from_bytes(dbf[8:10], "little")
-    field_names = [
-        dbf[offset : offset + 11].split(b"\x00", 1)[0]
-        for offset in range(32, header_length - 1, 32)
-        if dbf[offset] != 0x0D
-    ]
-    return b"".join(field_names) + dbf[header_length:].rstrip(b"\x1a")
-
-
-def _cpg_is_recognised(cpg: bytes) -> bool:
-    label = cpg.decode("ascii", errors="ignore").strip()
-    if label.upper().startswith("ANSI "):
-        label = label[5:].strip()
-    if label.isdigit():
-        label = f"cp{label}"
-    elif label.startswith("8859"):
-        label = f"iso{label}"
-    try:
-        codecs.lookup(label)
-    except LookupError:
-        return False
-    return True
-
-
 def detect_dbf_encoding(dbf_path: Path | None, cpg_path: Path | None = None) -> str | None:
     """Encoding to force when reading a DBF, or None to let GDAL decide.
 
@@ -123,7 +96,7 @@ def detect_dbf_encoding(dbf_path: Path | None, cpg_path: Path | None = None) -> 
     assumes Latin-1, which turns the cp932 attributes of Japanese CAD/GIS
     exports into mojibake that every later export then writes out as UTF-8.
     """
-    if cpg_path is not None and cpg_path.exists() and _cpg_is_recognised(cpg_path.read_bytes()):
+    if cpg_path is not None and cpg_path.exists() and cpg_codec(cpg_path.read_bytes()) is not None:
         return None
     if dbf_path is None or not dbf_path.exists():
         return None
@@ -131,16 +104,7 @@ def detect_dbf_encoding(dbf_path: Path | None, cpg_path: Path | None = None) -> 
         dbf = handle.read(_DBF_SAMPLE_BYTES)
     if len(dbf) > 29 and dbf[29] != 0:
         return None
-    text = _dbf_text_bytes(dbf)
-    if text.isascii():
-        return None
-    for encoding in ("utf-8", "cp932"):
-        try:
-            codecs.getincrementaldecoder(encoding)().decode(text, final=False)
-        except UnicodeDecodeError:
-            continue
-        return encoding
-    return None
+    return sniff_codec(record_text(dbf), final=False)
 
 
 # Overlay never draws attributes. Station_pl.dbf is 322 MB in the regional
