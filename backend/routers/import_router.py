@@ -9,7 +9,6 @@ import math
 from pathlib import Path
 import shutil
 from typing import Annotated
-from urllib.parse import quote
 import zipfile
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
@@ -18,7 +17,13 @@ from pydantic import ValidationError
 from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
-from backend.routers.common import session_manager
+from backend.routers.common import (
+    UPLOAD_LIMIT_MESSAGE,
+    attachment_response,
+    max_upload_bytes,
+    read_uploads,
+    session_manager,
+)
 from backend.src.artwork_draft import MAX_DRAFT_BYTES, SaveDraftRequest
 from backend.src.artwork_projects import ArtworkProject, derive_artwork_stage
 from backend.src.errors import ApiError
@@ -92,11 +97,6 @@ def _keyword_config_path(request: Request) -> Path:
     return request.app.state.filename_keywords_path
 
 
-def _max_upload_bytes(request: Request) -> int:
-    value = getattr(request.app.state, "max_upload_bytes", 1024 * 1024 * 1024)
-    return int(value)
-
-
 def _illustrator_store(request: Request) -> ConversionStore:
     return request.app.state.illustrator_store
 
@@ -105,8 +105,8 @@ def _validate_ai_upload(request: Request, file: UploadFile, payload: bytes) -> s
     """Shared guard for both Illustrator entry points; returns the filename."""
     if not payload:
         raise ValueError("The uploaded file is empty.")
-    if len(payload) > _max_upload_bytes(request):
-        raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
+    if len(payload) > max_upload_bytes(request):
+        raise ValueError(UPLOAD_LIMIT_MESSAGE)
     name = file.filename or "illustrator.ai"
     if not name.lower().endswith((".ai", ".pdf")):
         raise ValueError("Upload an Adobe Illustrator (.ai) or PDF file.")
@@ -147,35 +147,26 @@ def _persist_session_upload_artifacts(
     return target
 
 
-def _expand_upload(upload: UploadFile, payload: bytes) -> list[tuple[str, bytes]]:
-    if upload.filename and upload.filename.lower().endswith(".zip"):
+def _expand_upload(name: str, payload: bytes) -> list[tuple[str, bytes]]:
+    if name.lower().endswith(".zip"):
         blobs: list[tuple[str, bytes]] = []
         with zipfile.ZipFile(BytesIO(payload)) as archive:
             for info in archive.infolist():
                 if info.is_dir():
                     continue
-                blobs.append((f"{Path(upload.filename).stem}/{zip_member_name(info)}", archive.read(info)))
+                blobs.append((f"{Path(name).stem}/{zip_member_name(info)}", archive.read(info)))
         return blobs
-    return [(upload.filename or "upload.bin", payload)]
+    return [(name, payload)]
 
 
 async def _read_uploaded_blobs(request: Request, files: list[UploadFile]) -> list[tuple[str, bytes]]:
-    if not files:
-        raise ValueError("No files were uploaded.")
-
-    max_upload_bytes = _max_upload_bytes(request)
-    raw_total = 0
+    limit = max_upload_bytes(request)
     expanded_total = 0
     raw_blobs: list[tuple[str, bytes]] = []
-    for upload in files:
-        payload = await upload.read()
-        raw_total += len(payload)
-        if raw_total > max_upload_bytes:
-            raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
-
-        expanded = _expand_upload(upload, payload)
+    for name, payload in await read_uploads(request, files):
+        expanded = _expand_upload(name, payload)
         expanded_total += sum(len(content) for _, content in expanded)
-        if expanded_total > max_upload_bytes:
+        if expanded_total > limit:
             raise ValueError("Expanded upload exceeds configured limit (MAX_UPLOAD_MB).")
         raw_blobs.extend(expanded)
     flat_names = flatten_member_paths([name for name, _ in raw_blobs])
@@ -187,12 +178,12 @@ async def import_imdf(
     request: Request,
     file: Annotated[UploadFile, File(description="Exported IMDF .zip archive")],
 ) -> ImportImdfResponse:
-    max_upload_bytes = _max_upload_bytes(request)
+    limit = max_upload_bytes(request)
     payload = await file.read()
-    if len(payload) > max_upload_bytes:
-        raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
+    if len(payload) > limit:
+        raise ValueError(UPLOAD_LIMIT_MESSAGE)
 
-    return await run_in_threadpool(_create_imdf_session, request, payload, max_upload_bytes)
+    return await run_in_threadpool(_create_imdf_session, request, payload, limit)
 
 
 def _create_imdf_session(request: Request, payload: bytes, max_upload_bytes: int) -> ImportImdfResponse:
@@ -227,18 +218,8 @@ async def convert_illustrator(
     name = _validate_ai_upload(request, file, payload)
 
     zip_bytes, filename, report = await run_in_threadpool(convert_ai_to_geopackage_bundle, payload, name)
-    # HTTP headers must be latin-1; keep a plain ASCII fallback and carry the
-    # real (possibly Japanese) name via RFC 5987 filename*.
-    ascii_name = filename.encode("ascii", "ignore").decode() or "output.zip"
-    return Response(
-        content=zip_bytes,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}",
-            # ensure_ascii keeps non-ASCII layer names out of the raw header bytes.
-            "X-Conversion-Report": json.dumps(report.to_dict()),
-        },
-    )
+    # ensure_ascii keeps non-ASCII layer names out of the raw header bytes.
+    return attachment_response(zip_bytes, filename, headers={"X-Conversion-Report": json.dumps(report.to_dict())})
 
 
 def _parse_focus_bounds(raw: str | None) -> tuple[float, float, float, float] | None:
@@ -307,16 +288,7 @@ async def upload_reference_layers(
 
     ``focus_bounds`` optionally pins the trim to a WGS84 box.
     """
-    blobs: list[tuple[str, bytes]] = []
-    total = 0
-    limit = _max_upload_bytes(request)
-    for upload in files:
-        payload = await upload.read()
-        total += len(payload)
-        if total > limit:
-            raise ValueError("Upload exceeds configured limit (MAX_UPLOAD_MB).")
-        blobs.append((upload.filename or "reference.bin", payload))
-
+    blobs = await read_uploads(request, files)
     layers = await run_in_threadpool(read_reference_layers, blobs, focus=_parse_focus_bounds(focus_bounds))
     return _reference_layers_response(layers)
 
@@ -695,16 +667,7 @@ def export_illustrator(
     except Exception:
         # The archive is already built; losing the delivery mark must not lose the download.
         logger.exception("Could not record delivery of conversion %s", conversion_id)
-    ascii_name = filename.encode("ascii", "ignore").decode() or "output.zip"
-    return Response(
-        content=zip_bytes,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": (
-                f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
-            ),
-        },
-    )
+    return attachment_response(zip_bytes, filename)
 
 
 @router.get("/geocode", response_model=GeocodeSearchResponse)
