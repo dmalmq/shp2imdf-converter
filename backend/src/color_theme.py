@@ -57,6 +57,12 @@ class Area:
 
 
 @dataclass(frozen=True, slots=True)
+class Swatch:
+    spec: str
+    hex: str
+
+
+@dataclass(frozen=True, slots=True)
 class Rule:
     id: RuleId
     """Position in the config's ``rules`` list."""
@@ -78,6 +84,8 @@ class OldValue:
 class ColorTheme:
     field: str
     category_field: str
+    outline: Swatch
+    """The Figma 枠線 colour every area is outlined in, in layer files and projects."""
     areas: tuple[Area, ...]
     rules: tuple[Rule, ...]
     new_values: frozenset[str]
@@ -103,7 +111,8 @@ class ColorTheme:
 
 
 _HEX = re.compile(r"#[0-9A-Fa-f]{6}")
-_TOP_KEYS = {"source", "field", "category_field", "areas", "rules"}
+_TOP_KEYS = {"source", "field", "category_field", "outline", "areas", "rules"}
+_SWATCH_KEYS = {"spec", "hex"}
 _AREA_KEYS = {"key", "name", "value", "spec", "hex"}
 _RULE_KEYS = {"old", "old_hex", "scope", "area", "categories"}
 _BILINGUAL_KEYS = {"en", "ja"}
@@ -136,6 +145,11 @@ def _hex(value: Any, where: str) -> str:
 def _bilingual(value: Any, where: str) -> Bilingual:
     obj = _keys(value, _BILINGUAL_KEYS, where)
     return Bilingual(en=_text(obj["en"], f"{where}.en"), ja=_text(obj["ja"], f"{where}.ja"))
+
+
+def _swatch(value: Any, where: str) -> Swatch:
+    obj = _keys(value, _SWATCH_KEYS, where)
+    return Swatch(spec=_text(obj["spec"], f"{where}.spec"), hex=_hex(obj["hex"], f"{where}.hex"))
 
 
 def load_color_theme(path: Path) -> ColorTheme:
@@ -206,6 +220,7 @@ def load_color_theme(path: Path) -> ColorTheme:
     return ColorTheme(
         field=_text(raw["field"], "field"),
         category_field=_text(raw["category_field"], "category_field"),
+        outline=_swatch(raw["outline"], "outline"),
         areas=tuple(areas.values()),
         rules=tuple(rules),
         new_values=new_values,

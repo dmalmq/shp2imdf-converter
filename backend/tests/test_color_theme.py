@@ -86,6 +86,10 @@ def test_the_written_vocabulary_is_the_six_area_names(theme: ColorTheme) -> None
     assert theme.category_field == "category"
 
 
+def test_layer_files_are_outlined_in_the_figma_border_colour(theme: ColorTheme) -> None:
+    assert (theme.outline.spec, theme.outline.hex) == ("TurquoiseGray 1000", "#657678")
+
+
 @pytest.mark.parametrize(
     ("value", "category", "expected"),
     [
@@ -128,6 +132,8 @@ BROKEN = {
     "padded old value": lambda c: _rule(c, "黄").update(old="黄 "),
     "bad colour": lambda c: c["areas"][0].update(hex="white"),
     "empty override": lambda c: _rule(c, "濃鼠", override=True).update(categories=[]),
+    "no outline": lambda c: c.pop("outline"),
+    "bad outline colour": lambda c: c["outline"].update(hex="#65767"),
 }
 
 
