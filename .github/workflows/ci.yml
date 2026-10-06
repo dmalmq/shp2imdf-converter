@@ -44,6 +44,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r backend/requirements.txt
 
+      # The colour tool edits a File Geodatabase through osgeo, which PyPI ships
+      # only as source, so it is built against the apt libgdal at the same version.
+      # The geodatabase tests skip where osgeo is missing; this makes them run.
+      - name: Install GDAL Python bindings
+        run: python -m pip install "GDAL==$(gdal-config --version)"
+
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci

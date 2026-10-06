@@ -10,7 +10,15 @@ import {
 } from "../api/client";
 import { ToastProvider } from "../components/shared/ToastProvider";
 import { AppShell } from "../components/shell/AppShell";
-import { colorThemeReport, colorThemeRules, counts, rerunInspection, tokyoInspection } from "../lib/colorTheme.fixtures";
+import {
+  colorThemeReport,
+  colorThemeRules,
+  counts,
+  rerunInspection,
+  TOKYO_GDB,
+  tokyoGeodatabaseInspection,
+  tokyoInspection
+} from "../lib/colorTheme.fixtures";
 import { useAppStore } from "../store/useAppStore";
 import { ColorThemePage } from "./ColorThemePage";
 
@@ -164,6 +172,135 @@ test("everything left as it is is listed under Needs attention, with why", async
   expect(layerRow("JRTokyoSta_6677.shp/JRTokyoSta_0_Space.dbf")?.lastElementChild).toHaveTextContent(/^2$/);
   expect(layerRow("JRTokyoSta_6677.shp/JRTokyoSta_1_Space.dbf")?.lastElementChild).toHaveTextContent(/^3$/);
   expect(layerRow("JRTokyoSta_6677.shp/JRTokyoSta_2_Space.dbf")?.lastElementChild).toHaveTextContent(/^0$/);
+});
+
+test("a geodatabase field's width reads in characters, and 0 as no limit, where a shapefile's reads in bytes", async () => {
+  const shapefiles = tokyoInspection();
+  const [narrow, ...rest] = tokyoGeodatabaseInspection().theme.layers;
+  vi.mocked(inspectColorTheme).mockResolvedValue({
+    dataset: { ...shapefiles.dataset, geodatabases: 1 },
+    theme: {
+      ...shapefiles.theme,
+      layers: [shapefiles.theme.layers[0], { ...narrow, counts: counts({ ...narrow.counts, too_wide: 4 }) }, ...rest]
+    }
+  });
+  renderPage();
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+
+  const attention = await screen.findByRole("region", { name: "Needs attention" });
+  expect(attention).toHaveTextContent("JRTokyoSta_1_Space4 rows · the new value does not fit color2 (12 characters), left as is");
+
+  fireEvent.click(screen.getByText("Layers (5)"));
+  const cells = (id: string) => Array.from((screen.getByText(id).closest("tr") as HTMLElement).children, (cell) => cell.textContent);
+  expect(cells(`${TOKYO_GDB}/JRTokyoSta_1_Space`).slice(1, 3)).toEqual(["utf-8 · geodatabase", "12 characters"]);
+  expect(cells(`${TOKYO_GDB}/JRTokyoSta_B1_Space`).slice(1, 3)).toEqual(["utf-8 · geodatabase", "no limit"]);
+  expect(cells("JRTokyoSta_6677.shp/JRTokyoSta_0_Space.dbf").slice(1, 3)).toEqual(["utf-8 · .cpg", "254 bytes"]);
+});
+
+test("a geodatabase this server cannot edit or read is listed under Needs attention, and Download says nothing can be edited", async () => {
+  const gdb = tokyoGeodatabaseInspection();
+  const skipped = [
+    { id: TOKYO_GDB, reason: "gdb_unavailable" as const },
+    { id: "JRShinjukuSta.gdb", reason: "unreadable" as const }
+  ];
+  vi.mocked(inspectColorTheme).mockResolvedValue({
+    ...gdb,
+    dataset: { ...gdb.dataset, geodatabases: 2 },
+    theme: { ...gdb.theme, rules: colorThemeRules(), layers: [], skipped, totals: counts() }
+  });
+  renderPage();
+  pickFolder([inFolder("a00000001.gdbtable", TOKYO_GDB)]);
+
+  const attention = await screen.findByRole("region", { name: "Needs attention" });
+  expect(within(attention).getByTitle(TOKYO_GDB)).toHaveTextContent(/^JRTokyoSta_3857\.gdb$/);
+  expect(attention).toHaveTextContent(
+    "JRTokyoSta_3857.gdbThis server has no Python with GDAL (ArcGIS Pro’s, or the one GDB_GDAL_PYTHON names), so the geodatabase cannot be edited; it comes back as uploaded"
+  );
+  expect(attention).toHaveTextContent("JRShinjukuSta.gdbThe geodatabase could not be read safely; it comes back untouched");
+  expect(screen.getByRole("region", { name: "Next step" })).toHaveTextContent("No color2 field here can be edited.");
+  expect(screen.getByRole("button", { name: "Download" })).toBeDisabled();
+});
+
+test("the geodatabase paragraph appears only for an upload holding one, and the byte-for-byte promise only where shapefiles come back", async () => {
+  const byteForByte = /Shapefiles come back.*byte for byte/;
+  const rewritten = /In a geodatabase, GDAL rewrites each changed row.*Convert a copy and open it in ArcGIS Pro/;
+  const returns = () => screen.getByRole("region", { name: "What comes back" });
+  const shapefiles = tokyoInspection();
+  const gdb = tokyoGeodatabaseInspection();
+  vi.mocked(inspectColorTheme)
+    .mockResolvedValueOnce(shapefiles)
+    .mockResolvedValueOnce(gdb)
+    .mockResolvedValueOnce({
+      dataset: { ...gdb.dataset, name: "JRTokyoSta" },
+      theme: { ...gdb.theme, layers: [...shapefiles.theme.layers, ...gdb.theme.layers] }
+    });
+  renderPage();
+  await screen.findByRole("table", { name: "How color2 changes" });
+  expect(returns()).toHaveTextContent(byteForByte);
+  expect(returns()).toHaveTextContent(rewritten);
+
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_6677" });
+  expect(returns()).toHaveTextContent(byteForByte);
+  expect(returns()).not.toHaveTextContent(/geodatabase/);
+
+  pickFolder([inFolder("a00000001.gdbtable", TOKYO_GDB)]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_3857" });
+  expect(returns()).toHaveTextContent(rewritten);
+  expect(returns()).not.toHaveTextContent(/byte for byte/);
+
+  pickFolder([inFolder("a00000001.gdbtable", TOKYO_GDB), inFolder("JRTokyoSta_1_Space.dbf")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta" });
+  expect(returns()).toHaveTextContent(byteForByte);
+  expect(returns()).toHaveTextContent(rewritten);
+});
+
+test("stale lock files are counted once, the page's and the server's together, and not mentioned when there are none", async () => {
+  const gdb = tokyoGeodatabaseInspection();
+  vi.mocked(inspectColorTheme)
+    .mockResolvedValueOnce({ ...gdb, dataset: { ...gdb.dataset, lock_files_dropped: 1055 } })
+    .mockResolvedValueOnce(tokyoInspection());
+  const returns = () => screen.getByRole("region", { name: "What comes back" });
+  renderPage();
+  pickFolder([
+    inFolder("a00000004.gdbtable", TOKYO_GDB),
+    inFolder("_gdb.TOKYO-PC.10424.12388.sr.lock", TOKYO_GDB),
+    inFolder("a00000004.TOKYO-PC.10424.12388.sr.lock", TOKYO_GDB)
+  ]);
+
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_3857" });
+  expect(vi.mocked(inspectColorTheme).mock.calls[0][0].map(({ path }) => path)).toEqual([`${TOKYO_GDB}/a00000004.gdbtable`]);
+  expect(returns()).toHaveTextContent("Left out: 1,057 stale geodatabase lock files.");
+
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_6677" });
+  expect(returns()).not.toHaveTextContent(/lock file/);
+});
+
+test("Files back untouched is not claimed for an upload holding a geodatabase", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValue(tokyoGeodatabaseInspection());
+  renderPage();
+  pickFolder([inFolder("a00000001.gdbtable", TOKYO_GDB)]);
+
+  const summary = await screen.findByRole("region", { name: "What this station gets" });
+  expect(summary).toHaveTextContent("Changes5,996");
+  expect(summary).toHaveTextContent("Geodatabases1");
+  expect(summary).not.toHaveTextContent("Files back untouched");
+});
+
+test("the Next step bar promises an exact copy for shapefiles only, since GDAL rewrites a geodatabase's changed rows", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValueOnce(tokyoInspection()).mockResolvedValueOnce(tokyoGeodatabaseInspection());
+  renderPage();
+  const bar = () => screen.getByRole("region", { name: "Next step" });
+
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_6677" });
+  expect(bar()).toHaveTextContent("Everything else comes back exactly as it was.");
+
+  pickFolder([inFolder("a00000001.gdbtable", TOKYO_GDB)]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_3857" });
+  expect(bar()).toHaveTextContent("Everything but the changed rows comes back as it was.");
+  expect(bar()).not.toHaveTextContent("exactly");
 });
 
 test("on a station already converted, Download is disabled and says why", async () => {

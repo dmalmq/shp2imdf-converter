@@ -1,85 +1,89 @@
-import type { DatasetFile } from "../api/client";
 import {
   categoryRange,
   colorThemeReducer,
   colorThemeStage,
+  datasetFiles,
   datasetPath,
   downloadBlockedReason,
   initialColorThemeState,
   type ColorThemeEvent,
-  type ColorThemeState
+  type ColorThemeState,
+  type DatasetUpload
 } from "./colorTheme";
-import { colorThemeRules, counts, rerunInspection, tokyoInspection } from "./colorTheme.fixtures";
+import { colorThemeRules, counts, rerunInspection, TOKYO_GDB, tokyoGeodatabaseInspection, tokyoInspection } from "./colorTheme.fixtures";
 
 const english = (en: string) => en;
 const japanese = (_en: string, ja: string) => ja;
 
-const station = (name: string): DatasetFile[] => [{ file: new File(["x"], `${name}.dbf`), path: `${name}/${name}.dbf` }];
+const station = (name: string, lockFilesLeftOut = 0): DatasetUpload => ({
+  files: [{ file: new File(["x"], `${name}.dbf`), path: `${name}/${name}.dbf` }],
+  lockFilesLeftOut
+});
 const run = (events: ColorThemeEvent[], from: ColorThemeState = initialColorThemeState) => events.reduce(colorThemeReducer, from);
 
 describe("colorThemeReducer", () => {
-  const tokyo = station("tokyo");
+  const tokyo = station("tokyo", 1057);
   const shinjuku = station("shinjuku");
 
-  test("a drop is inspected, checked, then converted and delivered", () => {
-    const inspecting = run([{ type: "dropped", files: tokyo }, { type: "progress", files: tokyo, percent: 40 }]);
-    expect(inspecting).toEqual({ phase: "inspecting", files: tokyo, progress: 40 });
+  test("a drop is inspected, checked, then converted and delivered, keeping its lock-file count", () => {
+    const inspecting = run([{ type: "dropped", upload: tokyo }, { type: "progress", upload: tokyo, percent: 40 }]);
+    expect(inspecting).toEqual({ phase: "inspecting", upload: tokyo, progress: 40 });
     expect(colorThemeStage(inspecting)).toBe("bring-in");
 
-    const checked = run([{ type: "inspected", files: tokyo, inspection: tokyoInspection() }], inspecting);
-    expect(checked).toMatchObject({ phase: "checked", files: tokyo, delivered: null });
+    const checked = run([{ type: "inspected", upload: tokyo, inspection: tokyoInspection() }], inspecting);
+    expect(checked).toMatchObject({ phase: "checked", upload: tokyo, delivered: null });
     expect(colorThemeStage(checked)).toBe("check");
 
-    const converting = run([{ type: "convertStarted" }, { type: "progress", files: tokyo, percent: 70 }], checked);
+    const converting = run([{ type: "convertStarted" }, { type: "progress", upload: tokyo, percent: 70 }], checked);
     expect(converting).toMatchObject({ phase: "converting", progress: 70 });
     expect(colorThemeStage(converting)).toBe("deliver");
 
-    const delivered = run([{ type: "converted", files: tokyo, filename: "tokyo_new-colors.zip" }], converting);
-    expect(delivered).toMatchObject({ phase: "checked", delivered: "tokyo_new-colors.zip" });
+    const delivered = run([{ type: "converted", upload: tokyo, filename: "tokyo_new-colors.zip" }], converting);
+    expect(delivered).toMatchObject({ phase: "checked", upload: { lockFilesLeftOut: 1057 }, delivered: "tokyo_new-colors.zip" });
     expect(colorThemeStage(delivered)).toBe("deliver");
   });
 
   test("answers for files no longer on screen are ignored", () => {
-    const afterReset = run([{ type: "dropped", files: tokyo }, { type: "reset" }]);
-    expect(run([{ type: "progress", files: tokyo, percent: 90 }], afterReset)).toBe(afterReset);
-    expect(run([{ type: "inspected", files: tokyo, inspection: tokyoInspection() }], afterReset)).toBe(afterReset);
-    expect(run([{ type: "inspectFailed", files: tokyo, message: "late" }], afterReset)).toBe(afterReset);
+    const afterReset = run([{ type: "dropped", upload: tokyo }, { type: "reset" }]);
+    expect(run([{ type: "progress", upload: tokyo, percent: 90 }], afterReset)).toBe(afterReset);
+    expect(run([{ type: "inspected", upload: tokyo, inspection: tokyoInspection() }], afterReset)).toBe(afterReset);
+    expect(run([{ type: "inspectFailed", upload: tokyo, message: "late" }], afterReset)).toBe(afterReset);
 
-    const second = run([{ type: "dropped", files: tokyo }, { type: "dropped", files: shinjuku }]);
-    expect(run([{ type: "progress", files: tokyo, percent: 90 }], second)).toBe(second);
-    expect(run([{ type: "inspected", files: tokyo, inspection: tokyoInspection() }], second)).toBe(second);
+    const second = run([{ type: "dropped", upload: tokyo }, { type: "dropped", upload: shinjuku }]);
+    expect(run([{ type: "progress", upload: tokyo, percent: 90 }], second)).toBe(second);
+    expect(run([{ type: "inspected", upload: tokyo, inspection: tokyoInspection() }], second)).toBe(second);
   });
 
   test("a late conversion answer does not land on a station dropped since", () => {
     const converting = run([
-      { type: "dropped", files: tokyo },
-      { type: "inspected", files: tokyo, inspection: tokyoInspection() },
+      { type: "dropped", upload: tokyo },
+      { type: "inspected", upload: tokyo, inspection: tokyoInspection() },
       { type: "convertStarted" }
     ]);
-    const replaced = run([{ type: "dropped", files: shinjuku }], converting);
-    expect(run([{ type: "converted", files: tokyo, filename: "tokyo_new-colors.zip" }], replaced)).toBe(replaced);
-    expect(run([{ type: "progress", files: tokyo, percent: 100 }], replaced)).toBe(replaced);
+    const replaced = run([{ type: "dropped", upload: shinjuku }], converting);
+    expect(run([{ type: "converted", upload: tokyo, filename: "tokyo_new-colors.zip" }], replaced)).toBe(replaced);
+    expect(run([{ type: "progress", upload: tokyo, percent: 100 }], replaced)).toBe(replaced);
   });
 
   test("events that do not fit the phase change nothing", () => {
     expect(run([{ type: "convertStarted" }])).toBe(initialColorThemeState);
-    const inspecting = run([{ type: "dropped", files: tokyo }]);
+    const inspecting = run([{ type: "dropped", upload: tokyo }]);
     expect(run([{ type: "convertStarted" }], inspecting)).toBe(inspecting);
-    expect(run([{ type: "converted", files: tokyo, filename: "x.zip" }], inspecting)).toBe(inspecting);
+    expect(run([{ type: "converted", upload: tokyo, filename: "x.zip" }], inspecting)).toBe(inspecting);
   });
 
   test("a failed inspection goes back to empty with the reason; a failed download keeps the check", () => {
-    expect(run([{ type: "dropped", files: tokyo }, { type: "inspectFailed", files: tokyo, message: "Not a zip" }])).toEqual({
+    expect(run([{ type: "dropped", upload: tokyo }, { type: "inspectFailed", upload: tokyo, message: "Not a zip" }])).toEqual({
       phase: "empty",
       error: "Not a zip"
     });
     const failed = run([
-      { type: "dropped", files: tokyo },
-      { type: "inspected", files: tokyo, inspection: tokyoInspection() },
+      { type: "dropped", upload: tokyo },
+      { type: "inspected", upload: tokyo, inspection: tokyoInspection() },
       { type: "convertStarted" },
-      { type: "convertFailed", files: tokyo, message: "Upload exceeds 200 MB" }
+      { type: "convertFailed", upload: tokyo, message: "Upload exceeds 200 MB" }
     ]);
-    expect(failed).toMatchObject({ phase: "checked", files: tokyo, error: "Upload exceeds 200 MB", delivered: null });
+    expect(failed).toMatchObject({ phase: "checked", upload: tokyo, error: "Upload exceeds 200 MB", delivered: null });
   });
 });
 
@@ -103,6 +107,32 @@ describe("datasetPath", () => {
   });
 });
 
+describe("datasetFiles", () => {
+  const dropped = (path: string) => {
+    const file = new File([], path.slice(path.lastIndexOf("/") + 1));
+    Object.defineProperty(file, "relativePath", { value: path });
+    return file;
+  };
+
+  test("leaves out lock files inside a .gdb at any depth and in any case, and keeps a .lock elsewhere and every other file", () => {
+    const paths: Array<[path: string, sent: boolean]> = [
+      ["/JRTokyoSta_3857.gdb/a00000004.gdbtable", true],
+      ["/JRTokyoSta_3857.gdb/_gdb.TOKYO-PC.10424.12388.sr.lock", false],
+      ["/JRTokyoSta_3857.gdb/a00000004.spx", true],
+      ["/JRTokyoSta_3857.gdb/gdb", true],
+      ["/NW,POI_20260625東京/JRTokyoSta_3857.GDB/a0000000a.TOKYO-PC.10424.12388.sr.lock", false],
+      ["/NW,POI_20260625東京/JRTokyoSta_3857.GDB/a0000000a.gdbtablx", true],
+      ["NW,POI_20260625東京/駅/JRShinjukuSta.gdb/a00000004.LAPTOP.4410.9921.sr.lock", false],
+      ["/JRTokyoSta_6677.shp/editing.lock", true],
+      ["/JRTokyoSta_6677.gdb.bak/a00000004.sr.lock", true],
+      ["/JRTokyoSta_6677.shp/JRTokyoSta_1_Space.dbf", true]
+    ];
+    const upload = datasetFiles(paths.map(([path]) => dropped(path)));
+    expect(upload.files.map(({ path }) => path)).toEqual(paths.filter(([, sent]) => sent).map(([path]) => path));
+    expect(upload.lockFilesLeftOut).toBe(3);
+  });
+});
+
 describe("downloadBlockedReason", () => {
   test("is null while anything would change", () => {
     expect(downloadBlockedReason(tokyoInspection(), english)).toBeNull();
@@ -123,6 +153,16 @@ describe("downloadBlockedReason", () => {
 
     const locked = { ...none, theme: { ...none.theme, skipped: [{ id: "a.dbf", reason: "unreadable" as const }] } };
     expect(downloadBlockedReason(locked, english)).toBe("No color2 field here can be edited.");
+  });
+
+  test("says nothing can be edited when every geodatabase is skipped for want of GDAL", () => {
+    const gdb = tokyoGeodatabaseInspection();
+    const unavailable = {
+      ...gdb,
+      theme: { ...gdb.theme, layers: [], skipped: [{ id: TOKYO_GDB, reason: "gdb_unavailable" as const }], totals: counts() }
+    };
+    expect(downloadBlockedReason(unavailable, english)).toBe("No color2 field here can be edited.");
+    expect(downloadBlockedReason(unavailable, japanese)).toBe("編集できる color2 フィールドがありません。");
   });
 
   test("says the new value does not fit when matching rows are left as they are for width", () => {

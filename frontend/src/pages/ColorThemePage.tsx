@@ -8,8 +8,7 @@ import {
   inspectColorTheme,
   type ColorThemeInspection,
   type ColorThemeLayer,
-  type ColorThemeReport,
-  type DatasetFile
+  type ColorThemeReport
 } from "../api/client";
 import { toErrorMessage } from "../api/errors";
 import { NextBar } from "../components/bringIn/NextBar";
@@ -25,8 +24,10 @@ import {
   colorThemeStage,
   datasetFiles,
   downloadBlockedReason,
+  inGeodatabase,
   initialColorThemeState,
-  type ColorThemeState
+  type ColorThemeState,
+  type DatasetUpload
 } from "../lib/colorTheme";
 import { saveBlob } from "../lib/download";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,27 @@ function plural(count: number, one: string, many: string): string {
 }
 
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+
+function fieldWidth({ width, width_unit }: ColorThemeLayer, t: T): string {
+  if (width_unit === "bytes") return t(`${width} bytes`, `${width} バイト`);
+  return width === 0 ? t("no limit", "制限なし") : t(`${width} characters`, `${width} 文字`);
+}
+
+function skipDetail({ id, reason }: ColorThemeReport["skipped"][number], field: string, t: T): string {
+  switch (reason) {
+    case "field_not_text":
+      return t(`${field} is not a text field; the file comes back untouched`, `${field} がテキスト型ではないため、そのまま戻します`);
+    case "unreadable":
+      return id.toLowerCase().endsWith(".gdb")
+        ? t("The geodatabase could not be read safely; it comes back untouched", "ジオデータベースを安全に読めないため、そのまま戻します")
+        : t("The table could not be read safely; the file comes back untouched", "テーブルを安全に読めないため、そのまま戻します");
+    case "gdb_unavailable":
+      return t(
+        "This server has no Python with GDAL (ArcGIS Pro’s, or the one GDB_GDAL_PYTHON names), so the geodatabase cannot be edited; it comes back as uploaded",
+        "このサーバーには GDAL を使える Python（ArcGIS Pro のもの、または GDB_GDAL_PYTHON で指定したもの）がないため、ジオデータベースを編集できず、アップロードしたまま戻します"
+      );
+  }
+}
 
 /** /color-theme: drop one station, check what changes, download the same files with color2 rewritten. */
 export function ColorThemePage() {
@@ -81,34 +103,34 @@ export function ColorThemePage() {
     return request.signal;
   };
 
-  const inspect = (files: DatasetFile[]) => {
-    if (files.length === 0) return;
+  const inspect = (upload: DatasetUpload) => {
+    if (upload.files.length === 0) return;
     const signal = begin();
-    dispatch({ type: "dropped", files });
-    inspectColorTheme(files, { signal, onProgress: (percent) => dispatch({ type: "progress", files, percent }) }).then(
-      (inspection) => dispatch({ type: "inspected", files, inspection }),
+    dispatch({ type: "dropped", upload });
+    inspectColorTheme(upload.files, { signal, onProgress: (percent) => dispatch({ type: "progress", upload, percent }) }).then(
+      (inspection) => dispatch({ type: "inspected", upload, inspection }),
       (caught: unknown) => {
         if (signal.aborted) return;
         const message = handleApiError(caught, t("Could not read the station", "駅のデータを読み込めませんでした"), {
           title: t("Check failed", "チェック失敗")
         });
-        dispatch({ type: "inspectFailed", files, message });
+        dispatch({ type: "inspectFailed", upload, message });
       }
     );
   };
 
   const download = async () => {
     if (state.phase !== "checked" || downloadBlockedReason(state.inspection, t)) return;
-    const { files } = state;
+    const { upload } = state;
     const signal = begin();
     dispatch({ type: "convertStarted" });
     try {
-      const { blob, filename } = await convertColorTheme(files, {
+      const { blob, filename } = await convertColorTheme(upload.files, {
         signal,
-        onProgress: (percent) => dispatch({ type: "progress", files, percent })
+        onProgress: (percent) => dispatch({ type: "progress", upload, percent })
       });
       saveBlob(blob, filename);
-      dispatch({ type: "converted", files, filename });
+      dispatch({ type: "converted", upload, filename });
       pushToast({
         title: t(`Created ${filename}`, `${filename} を作成しました`),
         description: t("It is in your browser’s downloads.", "ブラウザのダウンロードに保存されます。"),
@@ -119,7 +141,7 @@ export function ColorThemePage() {
       const message = handleApiError(caught, t("Could not build the download", "ダウンロードを作成できませんでした"), {
         title: t("Download failed", "ダウンロード失敗")
       });
-      dispatch({ type: "convertFailed", files, message });
+      dispatch({ type: "convertFailed", upload, message });
     }
   };
 
@@ -141,8 +163,10 @@ export function ColorThemePage() {
     event.target.value = "";
   };
 
-  const inspection = state.phase === "checked" || state.phase === "converting" ? state.inspection : null;
+  const checked = state.phase === "checked" || state.phase === "converting" ? state : null;
+  const inspection = checked?.inspection ?? null;
   const blocked = inspection ? downloadBlockedReason(inspection, t) : null;
+  const lockFiles = checked ? checked.upload.lockFilesLeftOut + checked.inspection.dataset.lock_files_dropped : 0;
 
   usePageShell({
     current: colorThemeStage(state),
@@ -201,8 +225,8 @@ export function ColorThemePage() {
             </h1>
             <p className="max-w-[46rem] text-[15px] leading-[1.55] text-muted-foreground">
               {t(
-                "Drop one station’s shapefile folder, or its zip. Each color2 value is rewritten to its new area name, as the table shows.",
-                "駅のシェープファイルのフォルダ、またはその zip をドロップしてください。color2 の値を表のとおり新しいエリア名に書き換えます。"
+                "Drop one station’s shapefile folder, its File Geodatabase (.gdb folder), or a zip of either. Each color2 value is rewritten to its new area name, as the table shows.",
+                "駅のシェープファイルのフォルダ、ファイルジオデータベース（.gdb フォルダ）、またはそのどちらかの zip をドロップしてください。color2 の値を表のとおり新しいエリア名に書き換えます。"
               )}
             </p>
           </div>
@@ -231,7 +255,7 @@ export function ColorThemePage() {
 
         <aside className="flex w-[360px] shrink-0 flex-col gap-4">
           {inspection ? <Attention inspection={inspection} /> : null}
-          <WhatComesBack field={report?.field ?? "color2"} />
+          <WhatComesBack field={report?.field ?? "color2"} inspection={inspection} lockFiles={lockFiles} />
         </aside>
       </div>
 
@@ -269,7 +293,12 @@ function nextStep(state: ColorThemeState, inspection: ColorThemeInspection, bloc
           `${plural(totals.recolor, "value changes", "values change")} in ${plural(changed, "layer", "layers")}`,
           `${formatCount(changed)} レイヤーの ${formatCount(totals.recolor)} 件の値を変更します`
         );
-  const detail = blocked ?? error ?? t("Everything else comes back exactly as it was.", "ほかはすべてそのまま戻ります。");
+  // GDAL rewrites a geodatabase's changed rows whole (Shape_Area recomputed), so only shapefiles get the stronger promise.
+  const unchanged =
+    inspection.dataset.geodatabases > 0
+      ? t("Everything but the changed rows comes back as it was.", "変更する行以外はそのまま戻ります。")
+      : t("Everything else comes back exactly as it was.", "ほかはすべてそのまま戻ります。");
+  const detail = blocked ?? error ?? unchanged;
   const action = delivered ? t("Download again", "もう一度ダウンロード") : t("Download", "ダウンロード");
   // The strings are already in the operator's language.
   const same = (text: string) => ({ en: text, ja: text });
@@ -295,7 +324,7 @@ function MicroLabel({ id, children }: { id?: string; children: ReactNode }) {
 function DropArea({ state, dragging, pickers }: { state: ColorThemeState; dragging: boolean; pickers: ReactNode }) {
   const { t } = useUiLanguage();
   if (state.phase === "inspecting") {
-    const count = state.files.length;
+    const count = state.upload.files.length;
     return (
       <div role="status" className="flex flex-col gap-3 rounded-[14px] border border-border bg-card px-6 py-6">
         <p className="text-sm font-medium text-foreground">
@@ -319,10 +348,13 @@ function DropArea({ state, dragging, pickers }: { state: ColorThemeState; draggi
       <p className="text-sm font-medium text-foreground">
         {dragging
           ? t("Drop to check it", "ドロップして確認")
-          : t("Drop the station folder or its zip here", "駅のフォルダまたは zip をここにドロップ")}
+          : t("Drop the station’s shapefile folder, .gdb folder or zip here", "駅のシェープファイルのフォルダ、.gdb フォルダ、または zip をここにドロップ")}
       </p>
       <p className="text-[12.5px] text-muted-foreground">
-        {t("Every file comes back, whatever its kind.", "どの種類のファイルもすべて戻ります。")}
+        {t(
+          "Every file comes back, whatever its kind, except stale lock files inside a .gdb.",
+          "どの種類のファイルもすべて戻ります（.gdb 内の古いロックファイルを除く）。"
+        )}
       </p>
       {pickers}
       {state.phase === "empty" && state.error ? (
@@ -348,10 +380,15 @@ function Summary({ inspection, pickers }: { inspection: ColorThemeInspection; pi
         <Stat label={t("Changes", "変更")} value={formatCount(theme.totals.recolor)} />
         <Stat label={t("Layers", "レイヤー")} value={formatCount(theme.layers.length)} />
         <Stat label={t("Left as is", "変更しない")} value={formatCount(leftAsIs)} warning={leftAsIs > 0} />
-        <Stat
-          label={t("Files back untouched", "そのまま戻るファイル")}
-          value={`${formatCount(dataset.files - changedLayers)} / ${formatCount(dataset.files)}`}
-        />
+        {/* One file per changed layer holds only for shapefiles: an edited feature class changes several and GDAL adds .freelist files. */}
+        {dataset.geodatabases > 0 ? (
+          <Stat label={t("Geodatabases", "ジオデータベース")} value={formatCount(dataset.geodatabases)} />
+        ) : (
+          <Stat
+            label={t("Files back untouched", "そのまま戻るファイル")}
+            value={`${formatCount(dataset.files - changedLayers)} / ${formatCount(dataset.files)}`}
+          />
+        )}
       </div>
       <div className="flex flex-col items-end gap-1.5">
         <span className="text-xs text-muted-foreground">{t("Another station?", "別の駅？")}</span>
@@ -490,8 +527,8 @@ function Attention({ inspection }: { inspection: ColorThemeInspection }) {
         key: `too-wide-${layer.id}`,
         title: fileName(layer.id),
         detail: t(
-          `${plural(layer.counts.too_wide, "row", "rows")} · the new value does not fit ${field} (${layer.width} bytes), left as is`,
-          `${formatCount(layer.counts.too_wide)} 行 · 新しい値が ${field}（${layer.width} バイト）に収まらないため変更しません`
+          `${plural(layer.counts.too_wide, "row", "rows")} · the new value does not fit ${field} (${fieldWidth(layer, t)}), left as is`,
+          `${formatCount(layer.counts.too_wide)} 行 · 新しい値が ${field}（${fieldWidth(layer, t)}）に収まらないため変更しません`
         )
       })),
     ...layers
@@ -507,10 +544,7 @@ function Attention({ inspection }: { inspection: ColorThemeInspection }) {
     ...skipped.map((layer) => ({
       key: `skipped-${layer.id}`,
       title: fileName(layer.id),
-      detail:
-        layer.reason === "field_not_text"
-          ? t(`${field} is not a text field; the file comes back untouched`, `${field} がテキスト型ではないため、そのまま戻します`)
-          : t("The table could not be read safely; the file comes back untouched", "テーブルを安全に読めないため、そのまま戻します")
+      detail: skipDetail(layer, field, t)
     }))
   ];
 
@@ -553,25 +587,64 @@ function Attention({ inspection }: { inspection: ColorThemeInspection }) {
   );
 }
 
-function WhatComesBack({ field }: { field: string }) {
+/** Which formats the download holds, so each promise is made only where it is true. Both until an upload says. */
+function returnedFormats(inspection: ColorThemeInspection | null): { shapefile: boolean; geodatabase: boolean } {
+  if (!inspection) return { shapefile: true, geodatabase: true };
+  const { dataset, theme } = inspection;
+  return {
+    shapefile: dataset.geodatabases === 0 || [...theme.layers, ...theme.skipped].some(({ id }) => !inGeodatabase(id)),
+    geodatabase: dataset.geodatabases > 0
+  };
+}
+
+function WhatComesBack({
+  field,
+  inspection,
+  lockFiles
+}: {
+  field: string;
+  inspection: ColorThemeInspection | null;
+  /** Left out by the page before sending and by the server from a zip, together. */
+  lockFiles: number;
+}) {
   const { t } = useUiLanguage();
+  const formats = returnedFormats(inspection);
+  const paragraph = "text-[12.5px] leading-[1.5] text-muted-foreground";
   return (
     <section aria-labelledby="color-theme-returns" className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5">
       <h2 id="color-theme-returns" className="font-display text-xl font-semibold text-foreground">
         {t("What comes back", "戻ってくるもの")}
       </h2>
-      <p className="text-[12.5px] leading-[1.5] text-muted-foreground">
-        {t(
-          `The same files in the same folders, as one zip. Only ${field} changes. Geometry, every other field, .prj, .cpg and the indexes come back byte for byte.`,
-          `同じフォルダ構成の同じファイルを 1 つの zip で返します。変わるのは ${field} だけです。ジオメトリ、ほかのフィールド、.prj、.cpg、インデックスはそのまま戻ります。`
-        )}
-      </p>
-      <p className="text-[12.5px] leading-[1.5] text-muted-foreground">
+      {formats.shapefile ? (
+        <p className={paragraph}>
+          {t(
+            `Shapefiles come back as the same files in the same folders, in one zip. Only ${field} changes. Geometry, every other field, .prj, .cpg and the indexes come back byte for byte.`,
+            `シェープファイルは同じフォルダ構成の同じファイルとして 1 つの zip で戻ります。変わるのは ${field} だけです。ジオメトリ、ほかのフィールド、.prj、.cpg、インデックスはそのまま戻ります。`
+          )}
+        </p>
+      ) : null}
+      {formats.geodatabase ? (
+        <p className={paragraph}>
+          {t(
+            "In a geodatabase, GDAL rewrites each changed row. Other tables, fields and indexes stay as they were; Shape_Area and Shape_Length are recomputed. Convert a copy and open it in ArcGIS Pro before replacing the original.",
+            "ジオデータベースでは、変更する行を GDAL が書き直します。ほかのテーブル、フィールド、インデックスはそのままですが、Shape_Area と Shape_Length は再計算されます。元のデータを置き換える前に、コピーを変換して ArcGIS Pro で開いて確認してください。"
+          )}
+        </p>
+      ) : null}
+      <p className={paragraph}>
         {t(
           "Values that are already new, blank, or not in the table are left as they are.",
           "すでに新しい値、空欄、表にない値は変更しません。"
         )}
       </p>
+      {lockFiles > 0 ? (
+        <p className={paragraph}>
+          {t(
+            `Left out: ${plural(lockFiles, "stale geodatabase lock file", "stale geodatabase lock files")}.`,
+            `ジオデータベース内の古いロックファイル ${formatCount(lockFiles)} 個は含めません。`
+          )}
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -580,7 +653,8 @@ const SOURCE_LABEL: Record<ColorThemeLayer["encoding"]["source"], { en: string; 
   cpg: { en: ".cpg", ja: ".cpg" },
   ldid: { en: "language driver", ja: "言語ドライバー" },
   sniffed: { en: "guessed", ja: "推定" },
-  ascii: { en: "ASCII only", ja: "ASCII のみ" }
+  ascii: { en: "ASCII only", ja: "ASCII のみ" },
+  gdb: { en: "geodatabase", ja: "ジオデータベース" }
 };
 
 function LayerTable({ layers }: { layers: ColorThemeLayer[] }) {
@@ -624,7 +698,7 @@ function LayerTable({ layers }: { layers: ColorThemeLayer[] }) {
                     <span className="font-mono">{layer.encoding.codec}</span> · {t(source.en, source.ja)}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-muted-foreground">
-                    {t(`${layer.width} bytes`, `${layer.width} バイト`)}
+                    {fieldWidth(layer, t)}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-foreground">{formatCount(layer.counts.recolor)}</td>
                   <td className={cn("px-3 py-2 text-right tabular-nums", leftAsIs > 0 ? "text-warning-foreground" : "text-foreground")}>

@@ -39,4 +39,4 @@ Each feature file starts with an H1 title and one paragraph, then exactly four H
 - [Review and export](./review-export.md) covers validation and IMDF download.
 - [Place Illustrator artwork](./illustrator-place.md) covers opening the georeference screen.
 - [Open IMDF archive](./open-imdf-archive.md) covers re-opening a previous `.imdf` export.
-- [Recolour a station](./color-theme.md) covers the colour tool: the old → new table, checking an uploaded station, and the download.
+- [Recolour a station](./color-theme.md) covers the colour tool: the old → new table, checking an uploaded station (shapefiles or a File Geodatabase), and the download.

@@ -28,6 +28,7 @@ from backend.routers.projects_router import router as projects_router
 from backend.routers.reference_router import router as reference_router
 from backend.routers.wizard_router import router as wizard_router
 from backend.src.color_theme import load_color_theme
+from backend.src.gdb import find_gdal_python
 from backend.src.errors import ApiError
 from backend.src.geocoding import GeocodingError, build_geocoder
 from backend.src.handover import gap_setting_problem
@@ -241,6 +242,7 @@ async def lifespan(app: FastAPI):
     app.state.unit_categories_path = Path(__file__).parent / "config" / "unit_categories.json"
     app.state.company_mappings_path = Path(__file__).parent / "config" / "company_mappings.json"
     app.state.color_theme = load_color_theme(Path(__file__).parent / "config" / "color_theme.json")
+    app.state.gdal_python = find_gdal_python()
     app.state.placement_store = PlacementStore(
         Path(os.getenv("PLACEMENTS_DB", "./data/placements.db"))
     )

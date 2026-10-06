@@ -60,7 +60,7 @@ slice of the suite:
 pytest -m phase3     # wizard mapping (mapper, config, generation setup)
 pytest -m phase5     # validation and export (converter, validator, autofix)
 pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
-pytest -m colortheme # station colour theme (table, DBF patch, upload tree)
+pytest -m colortheme # station colour theme (table, DBF patch, upload tree, geodatabases)
 ```
 
 `phase0` generates test fixtures; `phase1`–`phase6` run foundation → polish.
@@ -71,7 +71,7 @@ pytest -m colortheme # station colour theme (table, DBF patch, upload tree)
 |---|---|
 | `backend/routers/` | FastAPI route modules |
 | `backend/src/` | Conversion core: detection, mapping, generation, validation |
-| `backend/src/color_theme.py`, `dbf_table.py`, `recolor.py` | Station colour-theme tool: the old → new table, DBF byte patch, upload tree |
+| `backend/src/color_theme.py`, `dbf_table.py`, `recolor.py`, `gdb.py`, `gdb_worker.py` | Station colour-theme tool: the old → new table, DBF byte patch, upload tree, File Geodatabase worker |
 | `backend/config/` | Server-side configuration |
 | `backend/tests/` | pytest suite (phase-marked) |
 | `frontend/src/` | React wizard, map view, table view |
@@ -135,7 +135,7 @@ pytest -m colortheme # station colour theme (table, DBF patch, upload tree)
   they actually fall in. Fixtures for a fixture-only level hid the bug further,
   because `_write_odc_layer` skips empty row sets instead of truncating the file.
 - The colour-theme tool (`/color-theme`) patches `color2` bytes inside each `.dbf` and
-  carries every other file through untouched. It must never round-trip a station through
+  carries every other file through untouched. It must never round-trip a shapefile through
   geopandas or GDAL. A geopandas read→write was measured turning a C(20) field into
   C(80) and an N(4,0) holding a null into N(24,15), and the same trip drops M from
   PolygonZM, regenerates `.prj` and re-encodes the table. The values it writes are the
@@ -143,3 +143,20 @@ pytest -m colortheme # station colour theme (table, DBF patch, upload tree)
   disjoint, because that is what makes a second run change nothing, and
   `load_color_theme` refuses a table where they overlap. The table is
   `backend/config/color_theme.json`.
+  A File Geodatabase (any folder named `*.gdb` in the upload) is the exception, because
+  pyogrio cannot update one: `gdb_worker.py` runs in a Python that has GDAL's `osgeo`
+  (`GDB_GDAL_PYTHON`, else this one, else ArcGIS Pro's `arcgispro-py3`, which needs no
+  licence) and sets `color2` in place, with `SetFeature` on the planned FIDs, on a
+  temporary copy. Never copy a geodatabase through GDAL instead (VectorTranslate drops
+  metadata, `Shape_Length`/`Shape_Area`, feature datasets and aliases), and never REPACK
+  (measured: it rewrote 106 tables for 64 edited and deleted the spatial and attribute
+  indexes, after which a filter on `color2` raised). The guarantee is per table: a table
+  without edits comes back byte for byte, and an edited row gets `Shape_Area` recomputed.
+  GDAL rewrites that row's geometry too, and it groups rings by containment, so a
+  clockwise ring drawn inside another (filled, to ArcGIS) would come back as a hole: Tokyo's
+  0F floor lost 19% of its area that way until the worker regrouped polygons by their
+  stored winding before writing. Compare `Shape_Area` before and after when touching it.
+  GDB text widths count characters, not bytes, and 0 means no limit; GDAL enforces no
+  width, so the planner's `too_wide` is the only guard. Stale `*.lock` files inside a
+  `.gdb` are left out (Tokyo's held 1,057 of 3,022 files). Without an `osgeo` Python a
+  geodatabase is reported `gdb_unavailable` and comes back as uploaded, and its tests skip.

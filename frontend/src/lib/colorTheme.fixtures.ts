@@ -84,7 +84,13 @@ const TOKYO_LAYER_CHANGES = [400, 300, 250, 200, 214, 180, 170, 150, 150, 150];
 
 export function tokyoInspection(): ColorThemeInspection {
   return {
-    dataset: { name: "JRTokyoSta_6677", download_name: "JRTokyoSta_6677_new-colors.zip", files: 501 },
+    dataset: {
+      name: "JRTokyoSta_6677",
+      download_name: "JRTokyoSta_6677_new-colors.zip",
+      files: 501,
+      geodatabases: 0,
+      lock_files_dropped: 0
+    },
     theme: {
       field: "color2",
       rules: colorThemeRules(TOKYO_ROWS),
@@ -93,10 +99,66 @@ export function tokyoInspection(): ColorThemeInspection {
         id: `JRTokyoSta_6677.shp/JRTokyoSta_${index}_Space.dbf`,
         encoding: { codec: "utf-8", source: "cpg" },
         width: 254,
+        width_unit: "bytes",
         counts: counts({ rows: recolor, recolor })
       })),
       skipped: [],
       totals: counts({ rows: 2164, recolor: 2164 })
+    }
+  };
+}
+
+export const TOKYO_GDB = "NW,POI_20260625東京/JRTokyoSta_3857.gdb";
+
+/** The survey numbers for JRTokyoSta_3857.gdb (5,996 rewrites), over four of its feature classes. */
+const TOKYO_GDB_ROWS: Record<string, number> = {
+  薄鼠: 1739,
+  白: 1698,
+  薄空: 962,
+  進入制限あり: 572,
+  ラチ外白: 456,
+  トイレ: 251,
+  濃空: 224,
+  黄: 24,
+  道白: 23,
+  橙: 17,
+  濃鼠: 12,
+  薄紅: 9,
+  濃紅: 5,
+  緑: 4
+};
+
+/** Feature class, color2 width in characters (0: no limit), rows rewritten. */
+const TOKYO_GDB_LAYERS: Array<[name: string, width: number, recolor: number]> = [
+  ["JRTokyoSta_1_Space", 12, 2000],
+  ["JRTokyoSta_2_Space", 12, 1500],
+  ["JRTokyoSta_3_Space", 12, 1500],
+  ["JRTokyoSta_B1_Space", 0, 996]
+];
+
+/** JRTokyoSta_3857.gdb dropped as its folder; the browser has already left its lock files out. */
+export function tokyoGeodatabaseInspection(): ColorThemeInspection {
+  return {
+    dataset: {
+      name: "JRTokyoSta_3857",
+      download_name: "JRTokyoSta_3857_new-colors.zip",
+      files: 1965,
+      geodatabases: 1,
+      lock_files_dropped: 0
+    },
+    theme: {
+      field: "color2",
+      rules: colorThemeRules(TOKYO_GDB_ROWS),
+      unmapped: [],
+      layers: TOKYO_GDB_LAYERS.map(([name, width, recolor]) => ({
+        id: `${TOKYO_GDB}/${name}`,
+        encoding: { codec: "utf-8", source: "gdb" },
+        width,
+        width_unit: "characters",
+        counts: counts({ rows: recolor, recolor })
+      })),
+      skipped: [],
+      totals: counts({ rows: 5996, recolor: 5996 })
     }
   };
 }
