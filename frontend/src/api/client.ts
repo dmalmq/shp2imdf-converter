@@ -1,5 +1,6 @@
 import type { Feature, Geometry } from "geojson";
 
+import type { Bilingual } from "../components/shell/stages";
 import { ApiClientError, buildApiClientError } from "./errors";
 
 export type CleanupSummary = {
@@ -547,33 +548,141 @@ function filesForm(files: File[]): FormData {
   return form;
 }
 
-type SendFormOptions = { onProgress?: (percent: number) => void };
+/** Aborting `signal` rejects with an AbortError, as fetch does. */
+export type SendFormOptions = { onProgress?: (percent: number) => void; signal?: AbortSignal };
 
-/** POSTs a multipart form over XHR, because fetch cannot report upload progress. */
-function sendForm<T>(endpoint: string, form: FormData, { onProgress }: SendFormOptions): Promise<T> {
+/**
+ * POSTs a multipart form over XHR, because fetch cannot report upload progress.
+ * With `download` the answer is a file to save, named by the server or else `download`.
+ */
+function sendForm(
+  endpoint: string,
+  form: FormData,
+  options: SendFormOptions & { download: string }
+): Promise<ExportArchiveResponse>;
+function sendForm<T>(endpoint: string, form: FormData, options: SendFormOptions): Promise<T>;
+function sendForm(
+  endpoint: string,
+  form: FormData,
+  { onProgress, signal, download }: SendFormOptions & { download?: string }
+): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("POST", endpoint);
+    request.responseType = download === undefined ? "text" : "arraybuffer";
 
     request.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100));
     };
 
     request.onload = () => {
+      const text = () =>
+        download === undefined ? request.responseText : new TextDecoder().decode(request.response as ArrayBuffer);
       if (request.status < 200 || request.status >= 300) {
-        reject(buildApiClientError(request.status, request.responseText || ""));
+        reject(buildApiClientError(request.status, text() || ""));
+        return;
+      }
+      if (download !== undefined) {
+        resolve({
+          blob: new Blob([request.response as ArrayBuffer], { type: request.getResponseHeader("content-type") ?? "" }),
+          filename: attachmentFilename(request.getResponseHeader("content-disposition"), download)
+        });
         return;
       }
       try {
-        resolve(JSON.parse(request.responseText) as T);
+        resolve(JSON.parse(request.responseText));
       } catch {
         reject(new ApiClientError(request.status, "INVALID_RESPONSE", "The server returned invalid JSON."));
       }
     };
 
     request.onerror = () => reject(new ApiClientError(0, "NETWORK_ERROR", "Network error during upload."));
+    request.onabort = () => reject(new DOMException("The upload was cancelled.", "AbortError"));
+    signal?.addEventListener("abort", () => request.abort(), { once: true });
     request.send(form);
   });
+}
+
+export type ColorThemeCounts = {
+  rows: number;
+  recolor: number;
+  already_new: number;
+  empty: number;
+  unmapped: number;
+  too_wide: number;
+  undecodable: number;
+};
+
+/** One line of `backend/config/color_theme.json`, with what an upload did under it. */
+export type ColorThemeRule = {
+  rule: number;
+  old: string;
+  /** Null when the old theme drew no fill. */
+  old_hex: string | null;
+  scope: Bilingual;
+  /** Set on a category override, which applies only to those `category` codes. */
+  categories: string[] | null;
+  area: string;
+  area_name: Bilingual;
+  /** The text written into the field. */
+  value: string;
+  spec: string;
+  hex: string;
+  rows: number;
+  /** Rows matched but left as they are: the new value does not fit the field. */
+  too_wide: number;
+};
+
+export type ColorThemeLayer = {
+  /** Path inside the upload, e.g. "JRTokyoSta_6677.shp/JRTokyoSta_1_Space.dbf". */
+  id: string;
+  encoding: { codec: string; source: "cpg" | "ldid" | "sniffed" | "ascii" };
+  /** The field's width in bytes of `codec`. */
+  width: number;
+  counts: ColorThemeCounts;
+};
+
+export type ColorThemeReport = {
+  field: string;
+  /** Every rule in config order, those no row matched included. */
+  rules: ColorThemeRule[];
+  /** Values no rule knows, most rows first. */
+  unmapped: { value: string; rows: number; layers: string[] }[];
+  layers: ColorThemeLayer[];
+  /** Layers naming the field that come back untouched because they cannot be edited safely. */
+  skipped: { id: string; reason: "field_not_text" | "unreadable" }[];
+  totals: ColorThemeCounts;
+};
+
+export type ColorThemeInspection = {
+  dataset: { name: string; download_name: string; files: number };
+  theme: ColorThemeReport;
+};
+
+/** A dropped or picked file and its path inside what was dropped or picked. */
+export type DatasetFile = { file: File; path: string };
+
+/** The mapping with every count at zero, to show before anything is uploaded. */
+export async function fetchColorTheme(): Promise<ColorThemeReport> {
+  return handleJson<ColorThemeReport>(await fetch("/api/color-theme"));
+}
+
+export function inspectColorTheme(files: DatasetFile[], options: SendFormOptions): Promise<ColorThemeInspection> {
+  return sendForm<ColorThemeInspection>("/api/color-theme/inspect", datasetForm(files), options);
+}
+
+export function convertColorTheme(files: DatasetFile[], options: SendFormOptions): Promise<ExportArchiveResponse> {
+  return sendForm("/api/color-theme/convert", datasetForm(files), { ...options, download: "new-colors.zip" });
+}
+
+/** Multipart names carry no folders, so each file's path travels beside it, pairwise. */
+function datasetForm(files: DatasetFile[]): FormData {
+  const form = new FormData();
+  for (const { file, path } of files) {
+    form.append("files", file);
+    form.append("paths", path);
+  }
+  return form;
 }
 
 export type IllustratorPageAlignment = {

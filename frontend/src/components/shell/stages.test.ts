@@ -1,8 +1,8 @@
 import {
-  artworkStages,
   datasetStem,
   flowForPath,
   landingStage,
+  pageStages,
   parseProjectPath,
   projectPath,
   shapefileStages,
@@ -152,10 +152,10 @@ describe("shapefile flow", () => {
 
 describe("artwork flow", () => {
   test("follows the Illustrator route's stage", () => {
-    expect(statuses(artworkStages({ illustratorStage: 1 }))).toEqual(["current", "todo", "todo", "todo"]);
-    expect(statuses(artworkStages({ illustratorStage: 2 }))).toEqual(["done", "current", "todo", "todo"]);
-    expect(statuses(artworkStages({ illustratorStage: 3 }))).toEqual(["done", "done", "current", "todo"]);
-    expect(artworkStages({ illustratorStage: 1 }).map((stage) => stage.label.en)).toEqual([
+    expect(statuses(pageStages("artwork", 0))).toEqual(["current", "todo", "todo", "todo"]);
+    expect(statuses(pageStages("artwork", 1))).toEqual(["done", "current", "todo", "todo"]);
+    expect(statuses(pageStages("artwork", 2))).toEqual(["done", "done", "current", "todo"]);
+    expect(pageStages("artwork", 0).map((stage) => stage.label.en)).toEqual([
       "Bring in artwork",
       "Name floors",
       "Place on map",
@@ -164,18 +164,47 @@ describe("artwork flow", () => {
   });
 
   test("stages are links only where the page can switch to them", () => {
-    expect(targets(artworkStages({ illustratorStage: 2 }))).toEqual([null, null, null, null]);
-    const placing = artworkStages({ illustratorStage: 3, page: { targets: ["deliver"] } });
+    expect(targets(pageStages("artwork", 1))).toEqual([null, null, null, null]);
+    const placing = pageStages("artwork", 2, { targets: ["deliver"] });
     expect(targets(placing)).toEqual([null, null, null, "page"]);
-    const delivering = artworkStages({ illustratorStage: 3, page: { current: "deliver", targets: ["place"] } });
+    const delivering = pageStages("artwork", 2, { current: "deliver", targets: ["place"] });
     expect(statuses(delivering)).toEqual(["done", "done", "done", "current"]);
     expect(targets(delivering)).toEqual([null, null, "page", null]);
   });
 });
 
-test("the Illustrator route is the artwork flow; every other route is shapefiles", () => {
+describe("colour-theme flow", () => {
+  test("is Bring in, Check, Deliver with the shapefile stages' ids and labels", () => {
+    const stages = pageStages("color-theme", 0);
+    expect(stages.map((stage) => stage.id)).toEqual(["bring-in", "check", "deliver"]);
+    expect(stages.map((stage) => stage.label)).toEqual([
+      { en: "Bring in", ja: "取り込み" },
+      { en: "Check", ja: "チェック" },
+      { en: "Deliver", ja: "書き出し" }
+    ]);
+    expect(statuses(stages)).toEqual(["current", "todo", "todo"]);
+  });
+
+  test("follows the page, which can only go back to Bring in", () => {
+    const checking = pageStages("color-theme", 0, { current: "check", targets: ["bring-in"] });
+    expect(statuses(checking)).toEqual(["done", "current", "todo"]);
+    expect(targets(checking)).toEqual(["page", null, null]);
+    const delivered = pageStages("color-theme", 0, { current: "deliver", targets: ["bring-in"] });
+    expect(statuses(delivered)).toEqual(["done", "done", "current"]);
+  });
+
+  test("Deliver is blocked, with the reason, while there is nothing to change", () => {
+    const reason = { en: "Nothing to change: every value is already new", ja: "変更なし" };
+    const stages = pageStages("color-theme", 0, { current: "check", nextBlockedReason: reason });
+    expect(statuses(stages)).toEqual(["done", "current", "blocked"]);
+    expect(stages[2].detail).toEqual(reason);
+  });
+});
+
+test("each route belongs to one flow; every other route is shapefiles", () => {
   expect(flowForPath("/illustrator")).toBe("artwork");
   expect(flowForPath("/a/0123456789abcdef0123456789abcdef")).toBe("artwork");
+  expect(flowForPath("/color-theme")).toBe("color-theme");
   expect(flowForPath("/")).toBe("shapefiles");
   expect(flowForPath("/p/s1/check")).toBe("shapefiles");
 });

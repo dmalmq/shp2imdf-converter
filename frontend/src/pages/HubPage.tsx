@@ -8,7 +8,13 @@ import { toErrorMessage } from "../api/errors";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
 import { StageBars } from "../components/shell/StageTrack";
-import { FLOW_STAGES, NEW_PROJECT_PATH, projectPath, type ShapefileStageId } from "../components/shell/stages";
+import {
+  COLOR_THEME_PATH,
+  FLOW_STAGES,
+  NEW_PROJECT_PATH,
+  projectPath,
+  type ShapefileStageId
+} from "../components/shell/stages";
 import { Button } from "../components/ui/button";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
@@ -358,7 +364,7 @@ const HOW: Record<ShapefileStageId, { en: string; ja: string }> = {
 };
 
 function StartNew() {
-  const { t } = useUiLanguage();
+  const { t, isJapanese } = useUiLanguage();
   const navigate = useNavigate();
   const pushToast = useToast();
   const handleApiError = useApiErrorHandler();
@@ -439,6 +445,12 @@ function StartNew() {
     noKeyboard: true,
     disabled: opening
   });
+
+  const microLabel = cn(
+    "text-[11px] font-medium text-muted-foreground",
+    // Geist Mono has no Japanese, so the small caps labels are sans there.
+    !isJapanese && "font-mono uppercase tracking-[0.04em]"
+  );
 
   return (
     <section
@@ -528,10 +540,33 @@ function StartNew() {
         </p>
       ) : null}
 
-      <div className="flex flex-col gap-2 px-1 pt-2">
-        <h3 className="font-mono text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
-          {t("How a project goes", "プロジェクトの流れ")}
+      {/* Not a way to start a project, and the drop zone above never routes here. */}
+      <div role="group" aria-labelledby="hub-tools" className="flex flex-col gap-2 pt-2">
+        <h3 id="hub-tools" className={cn(microLabel, "px-1")}>
+          {t("Tools", "ツール")}
         </h3>
+        <button
+          type="button"
+          onClick={() => navigate(COLOR_THEME_PATH)}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          )}
+        >
+          {/* 濃空's old swatch giving way to 施設's new one, from the theme table itself. */}
+          <span aria-hidden="true" className="relative h-7 w-7 shrink-0 rounded-lg bg-muted">
+            <span className="absolute left-1.5 top-1.5 h-2.5 w-2.5 rounded-[2px] border border-foreground/25 bg-[#C2E5F2]" />
+            <span className="absolute bottom-1.5 right-1.5 h-2.5 w-2.5 rounded-[2px] border border-foreground/25 bg-[#DDEBEC]" />
+          </span>
+          <span className="shrink-0 text-[13px] font-semibold text-foreground">{t("Recolour a station", "駅の色を新しくする")}</span>
+          <span className="min-w-0 truncate text-[12.5px] text-muted-foreground">
+            {t("color2 to the new area names", "color2 を新しいエリア名に")}
+          </span>
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-2 px-1 pt-2">
+        <h3 className={microLabel}>{t("How a project goes", "プロジェクトの流れ")}</h3>
         <ol className="flex flex-col gap-2">
           {FLOW_STAGES.shapefiles.map(({ id, label }, index) => (
             <li key={id} className="flex items-center gap-2.5 text-[13px] text-foreground/80">

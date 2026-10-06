@@ -1,0 +1,233 @@
+import React from "react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+
+import {
+  convertColorTheme,
+  fetchColorTheme,
+  inspectColorTheme,
+  type ColorThemeInspection
+} from "../api/client";
+import { ToastProvider } from "../components/shared/ToastProvider";
+import { AppShell } from "../components/shell/AppShell";
+import { colorThemeReport, colorThemeRules, counts, rerunInspection, tokyoInspection } from "../lib/colorTheme.fixtures";
+import { useAppStore } from "../store/useAppStore";
+import { ColorThemePage } from "./ColorThemePage";
+
+vi.mock("../api/client", () => ({
+  convertColorTheme: vi.fn(),
+  fetchColorTheme: vi.fn(),
+  inspectColorTheme: vi.fn()
+}));
+
+function renderPage() {
+  return render(
+    <MemoryRouter initialEntries={["/color-theme"]}>
+      <ToastProvider>
+        <AppShell>
+          <ColorThemePage />
+        </AppShell>
+      </ToastProvider>
+    </MemoryRouter>
+  );
+}
+
+function inFolder(name: string, folder = "JRTokyoSta_6677.shp"): File {
+  const file = new File(["x"], name);
+  Object.defineProperty(file, "webkitRelativePath", { value: `${folder}/${name}` });
+  return file;
+}
+
+function pickFolder(files: File[]) {
+  fireEvent.change(screen.getByTestId("color-theme-folder-input"), { target: { files } });
+}
+
+const table = () => screen.getByRole("table", { name: "How color2 changes" });
+const ruleRow = (text: string) =>
+  within(table())
+    .getAllByRole("row")
+    .find((row) => within(row).queryByRole("rowheader")?.textContent === text);
+
+let saved: string[] = [];
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  useAppStore.setState({ uiLanguage: "en" });
+  vi.mocked(fetchColorTheme).mockResolvedValue(colorThemeReport());
+  vi.mocked(inspectColorTheme).mockResolvedValue(tokyoInspection());
+  saved = [];
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+    saved.push(this.download);
+  });
+  URL.createObjectURL = vi.fn(() => "blob:new-colors");
+  URL.revokeObjectURL = vi.fn();
+});
+
+test("shows the whole mapping before anything is uploaded", async () => {
+  renderPage();
+  await screen.findByRole("table", { name: "How color2 changes" });
+
+  expect(within(table()).getAllByRole("row")).toHaveLength(1 + 15);
+  expect(ruleRow("白")).toHaveTextContent("Stairs and escalators");
+  expect(ruleRow("白")).toHaveTextContent("階段・エスカレーター");
+  expect(ruleRow("濃鼠 · B007–B014")).toHaveTextContent("Facilities");
+  expect(within(table()).queryByRole("columnheader", { name: "Rows" })).toBeNull();
+  expect(within(table()).getByRole("columnheader", { name: "New area, written to color2" })).toBeInTheDocument();
+  expect(within(table()).queryByRole("columnheader", { name: "Written to color2" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+});
+
+test("in Japanese each rule names its new area once, as the value written", async () => {
+  useAppStore.setState({ uiLanguage: "ja" });
+  renderPage();
+  const japaneseTable = await screen.findByRole("table", { name: "color2 の変更内容" });
+  const row = within(japaneseTable)
+    .getAllByRole("row")
+    .find((candidate) => within(candidate).queryByRole("rowheader")?.textContent === "白");
+  expect(row?.textContent?.split("階段・エスカレーター")).toHaveLength(2);
+  expect(row).toHaveTextContent("Mono 000");
+  expect(within(japaneseTable).getByRole("columnheader", { name: "新エリア（color2 に書く値）" })).toBeInTheDocument();
+});
+
+test("a picked folder is sent with its layout and checked rule by rule", async () => {
+  renderPage();
+  await screen.findByRole("table", { name: "How color2 changes" });
+  expect((screen.getByTestId("color-theme-folder-input") as HTMLInputElement).webkitdirectory).toBe(true);
+
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf"), inFolder("acad.err")]);
+
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_6677" });
+  const sent = vi.mocked(inspectColorTheme).mock.calls[0][0];
+  expect(sent.map((file) => file.path)).toEqual(["JRTokyoSta_6677.shp/JRTokyoSta_1_Space.dbf", "JRTokyoSta_6677.shp/acad.err"]);
+
+  expect(within(table()).getByRole("columnheader", { name: "Rows" })).toBeInTheDocument();
+  expect(ruleRow("白")).toHaveTextContent("711");
+  expect(ruleRow("薄鼠")).toHaveTextContent("612");
+  expect(ruleRow("濃鼠 · B007–B014")).toHaveTextContent(/0$/);
+
+  const summary = screen.getByRole("region", { name: "What this station gets" });
+  expect(summary).toHaveTextContent("Changes2,164");
+  expect(summary).toHaveTextContent("Left as is0");
+  expect(summary).toHaveTextContent("Files back untouched491 / 501");
+
+  expect(screen.getByRole("heading", { name: "Nothing needs attention" })).toBeInTheDocument();
+  expect(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByText("JRTokyoSta_6677")).toBeInTheDocument();
+  expect(within(screen.getByRole("navigation", { name: "Stages" })).getByText("2 · Check")).toBeInTheDocument();
+});
+
+test("a drop sends every file, whatever its kind", async () => {
+  renderPage();
+  const files = ["JRTokyoSta_1_Space.dbf", "JRTokyoSta_1_Space.sbn", "JRTokyoSta_1_Space.shp.xml", "acad.err"].map(
+    (name) => new File(["x"], name)
+  );
+  fireEvent.change(screen.getByTestId("color-theme-drop-input"), { target: { files } });
+  await waitFor(() => expect(inspectColorTheme).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(inspectColorTheme).mock.calls[0][0].map(({ file }) => file)).toEqual(files);
+});
+
+test("everything left as it is is listed under Needs attention, with why", async () => {
+  const tokyo = tokyoInspection();
+  const rules = colorThemeRules({ 白: 711 }).map((rule) => (rule.old === "トイレ" ? { ...rule, too_wide: 3 } : rule));
+  const [first, second, ...rest] = tokyo.theme.layers;
+  const inspection: ColorThemeInspection = {
+    ...tokyo,
+    theme: {
+      ...tokyo.theme,
+      rules,
+      unmapped: [{ value: "赤", rows: 12, layers: ["JRTokyoSta_6677.shp/JRTokyoSta_1_Space.dbf", "JRTokyoSta_6677.shp/JRTokyoSta_2_Space.dbf"] }],
+      layers: [
+        { ...first, encoding: { codec: "cp932", source: "sniffed" }, counts: counts({ ...first.counts, undecodable: 2 }) },
+        { ...second, width: 24, counts: counts({ ...second.counts, too_wide: 3 }) },
+        ...rest
+      ],
+      skipped: [{ id: "JRTokyoSta_6677.shp/JRTokyoSta_9_Space.dbf", reason: "field_not_text" }],
+      totals: counts({ rows: 2181, recolor: 2164, unmapped: 12, too_wide: 3, undecodable: 2 })
+    }
+  };
+  vi.mocked(inspectColorTheme).mockResolvedValue(inspection);
+  renderPage();
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+
+  const attention = await screen.findByRole("region", { name: "Needs attention" });
+  expect(attention).toHaveTextContent("赤12 rows in 2 layers · not in the table, left as is");
+  expect(within(attention).getByTitle("JRTokyoSta_6677.shp/JRTokyoSta_2_Space.dbf")).toHaveTextContent("JRTokyoSta_2_Space.dbf");
+  expect(attention).toHaveTextContent("JRTokyoSta_1_Space.dbf3 rows · the new value does not fit color2 (24 bytes), left as is");
+  expect(ruleRow("トイレ")).toHaveTextContent("3 left as is");
+  expect(attention).toHaveTextContent("JRTokyoSta_0_Space.dbf2 rows could not be read as cp932, left as is");
+  expect(attention).toHaveTextContent("JRTokyoSta_9_Space.dbfcolor2 is not a text field; the file comes back untouched");
+  expect(screen.getByRole("region", { name: "What this station gets" })).toHaveTextContent("Left as is17");
+
+  fireEvent.click(screen.getByText("Layers (10)"));
+  const layerRow = (id: string) => screen.getByText(id).closest("tr");
+  const layerTable = layerRow("JRTokyoSta_6677.shp/JRTokyoSta_0_Space.dbf")?.closest("table") as HTMLElement;
+  expect(within(layerTable).getByRole("columnheader", { name: "Left as is" })).toBeInTheDocument();
+  expect(layerRow("JRTokyoSta_6677.shp/JRTokyoSta_0_Space.dbf")?.lastElementChild).toHaveTextContent(/^2$/);
+  expect(layerRow("JRTokyoSta_6677.shp/JRTokyoSta_1_Space.dbf")?.lastElementChild).toHaveTextContent(/^3$/);
+  expect(layerRow("JRTokyoSta_6677.shp/JRTokyoSta_2_Space.dbf")?.lastElementChild).toHaveTextContent(/^0$/);
+});
+
+test("on a station already converted, Download is disabled and says why", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValue(rerunInspection());
+  renderPage();
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf", "JRTokyoSta_6677_new-colors")]);
+
+  const download = await screen.findByRole("button", { name: "Download" });
+  expect(download).toBeDisabled();
+  const bar = screen.getByRole("region", { name: "Next step" });
+  expect(bar).toHaveTextContent("Nothing to change");
+  expect(bar).toHaveTextContent("Every value is already new.");
+  expect(bar.textContent?.split("Nothing to change")).toHaveLength(2);
+  fireEvent.click(download);
+  expect(convertColorTheme).not.toHaveBeenCalled();
+});
+
+test("Download sends the same files again and saves the zip under the server's name", async () => {
+  vi.mocked(convertColorTheme).mockResolvedValue({ blob: new Blob(["zip"]), filename: "JRTokyoSta_6677_new-colors.zip" });
+  renderPage();
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf"), inFolder("JRTokyoSta_1_Space.shp")]);
+
+  const bar = await screen.findByRole("region", { name: "Next step" });
+  expect(bar).toHaveTextContent("2,164 values change in 10 layers");
+  expect(bar).toHaveTextContent("JRTokyoSta_6677_new-colors.zip");
+  fireEvent.click(within(bar).getByRole("button", { name: "Download" }));
+
+  await waitFor(() => expect(saved).toEqual(["JRTokyoSta_6677_new-colors.zip"]));
+  const inspected = vi.mocked(inspectColorTheme).mock.calls[0][0];
+  expect(vi.mocked(convertColorTheme).mock.calls[0][0]).toBe(inspected);
+  expect(await screen.findByText("Created JRTokyoSta_6677_new-colors.zip")).toBeInTheDocument();
+  expect(bar).toHaveTextContent("Downloaded JRTokyoSta_6677_new-colors.zip");
+  expect(bar.textContent?.split("JRTokyoSta_6677_new-colors.zip")).toHaveLength(2);
+  expect(within(screen.getByRole("navigation", { name: "Stages" })).getByText("3 · Deliver")).toBeInTheDocument();
+});
+
+test("a new drop aborts the check in flight, and its late answer is ignored", async () => {
+  const answers: Array<(inspection: ColorThemeInspection) => void> = [];
+  vi.mocked(inspectColorTheme).mockImplementation(
+    () => new Promise((resolve) => answers.push(resolve))
+  );
+  renderPage();
+  pickFolder([inFolder("JRShinjukuSta_1_Space.dbf", "JRShinjukuSta.shp")]);
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+  await waitFor(() => expect(answers).toHaveLength(2));
+
+  const [first, second] = vi.mocked(inspectColorTheme).mock.calls.map(([, options]) => options.signal as AbortSignal);
+  expect(first.aborted).toBe(true);
+  expect(second.aborted).toBe(false);
+
+  const shinjuku = tokyoInspection();
+  await act(async () => answers[0]({ ...shinjuku, dataset: { ...shinjuku.dataset, name: "JRShinjukuSta" } }));
+  expect(screen.getByRole("status")).toHaveTextContent("Sending 1 file");
+  await act(async () => answers[1](tokyoInspection()));
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Recolour JRTokyoSta_6677");
+});
+
+test("a failed check says why beside the drop area", async () => {
+  vi.mocked(inspectColorTheme).mockRejectedValue(
+    Object.assign(new Error("Upload exceeds 200 MB"), { name: "ApiClientError", detail: "Upload exceeds 200 MB" })
+  );
+  renderPage();
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Upload exceeds 200 MB");
+  expect(screen.getByRole("button", { name: "Choose folder" })).toBeInTheDocument();
+});
+

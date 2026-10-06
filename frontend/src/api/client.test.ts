@@ -2,14 +2,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   attachmentFilename,
+  convertColorTheme,
   exportIllustrator,
   exportSessionArchive,
   exportSessionShapefiles,
+  fetchColorTheme,
   fetchPreloadedReferenceLayers,
   getPreloadedReferenceOverlay,
   importShapefiles,
+  inspectColorTheme,
   matchIllustratorShape,
   uploadReferenceLayers,
+  type DatasetFile,
   type IllustratorShapeMatchRequest,
   type IllustratorShapeMatchResponse,
   type ShapefileExportRequest
@@ -37,12 +41,16 @@ class FakeRequest {
   url = "";
   body: unknown = null;
   status = 0;
+  responseType = "";
   responseText = "";
+  response: unknown = null;
+  headers: Record<string, string> = {};
   upload: { onprogress: ((event: { lengthComputable: boolean; loaded: number; total: number }) => void) | null } = {
     onprogress: null
   };
   onload: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  onabort: (() => void) | null = null;
 
   open(method: string, url: string) {
     this.method = method;
@@ -54,9 +62,20 @@ class FakeRequest {
     FakeRequest.sent.push(this);
   }
 
-  respond(status: number, text: string) {
+  abort() {
+    this.onabort?.();
+  }
+
+  getResponseHeader(name: string): string | null {
+    return this.headers[name.toLowerCase()] ?? null;
+  }
+
+  /** Answers the way a browser would for the `responseType` the client asked for. */
+  respond(status: number, text: string, headers: Record<string, string> = {}) {
     this.status = status;
-    this.responseText = text;
+    this.headers = headers;
+    if (this.responseType === "arraybuffer") this.response = new TextEncoder().encode(text).buffer;
+    else this.responseText = text;
     this.onload?.();
   }
 }
@@ -111,6 +130,65 @@ describe("shapefile import upload", () => {
     const pending = importShapefiles([new File(["a"], "a.shp")]);
     lastRequest().onerror?.();
     await expect(pending).rejects.toMatchObject({ status: 0, code: "NETWORK_ERROR" });
+  });
+});
+
+describe("colour theme upload", () => {
+  const files: DatasetFile[] = [
+    { file: new File(["a"], "JRTokyoSta_1_Space.dbf"), path: "JRTokyoSta_6677.shp/JRTokyoSta_1_Space.dbf" },
+    { file: new File(["b"], "JRTokyoSta_1_Space.dbf"), path: "JRTokyoSta_6677.shp/sub/JRTokyoSta_1_Space.dbf" },
+    { file: new File(["c"], "acad.err"), path: "JRTokyoSta_6677.shp/acad.err" }
+  ];
+
+  it("sends each file with its path, pairwise and in order", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeRequest);
+    const pending = inspectColorTheme(files, {});
+    const request = lastRequest();
+    expect([request.method, request.url]).toEqual(["POST", "/api/color-theme/inspect"]);
+    const form = request.body as FormData;
+    expect([...form.entries()].map(([name]) => name)).toEqual(["files", "paths", "files", "paths", "files", "paths"]);
+    expect(form.getAll("files")).toEqual(files.map(({ file }) => file));
+    expect(form.getAll("paths")).toEqual(files.map(({ path }) => path));
+    request.respond(200, JSON.stringify({ dataset: { name: "JRTokyoSta_6677" } }));
+    await expect(pending).resolves.toMatchObject({ dataset: { name: "JRTokyoSta_6677" } });
+  });
+
+  it("downloads the converted zip as bytes, under the server's Japanese name", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeRequest);
+    const pending = convertColorTheme(files, {});
+    const request = lastRequest();
+    expect(request.url).toBe("/api/color-theme/convert");
+    expect(request.responseType).toBe("arraybuffer");
+    request.respond(200, "PK zip bytes", {
+      "content-type": "application/zip",
+      "content-disposition": `attachment; filename="_new-colors.zip"; filename*=UTF-8''%E6%9D%B1%E4%BA%AC_new-colors.zip`
+    });
+    const { blob, filename } = await pending;
+    expect(filename).toBe("東京_new-colors.zip");
+    expect(blob.size).toBe("PK zip bytes".length);
+    expect(blob.type).toBe("application/zip");
+  });
+
+  it("still reports the server's error when the answer was asked for as bytes", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeRequest);
+    const pending = convertColorTheme(files, {});
+    lastRequest().respond(400, JSON.stringify({ detail: "Two files differ only in case", code: "CASE_COLLISION" }));
+    await expect(pending).rejects.toMatchObject({ status: 400, code: "CASE_COLLISION", detail: "Two files differ only in case" });
+  });
+
+  it("rejects with an AbortError when the caller aborts, as fetch would", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeRequest);
+    const controller = new AbortController();
+    const pending = inspectColorTheme(files, { signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("GETs the mapping to show before any upload", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ field: "color2", rules: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchColorTheme()).resolves.toEqual({ field: "color2", rules: [] });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/color-theme");
   });
 });
 
