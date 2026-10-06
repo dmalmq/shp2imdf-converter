@@ -221,6 +221,51 @@ test("a geodatabase this server cannot edit or read is listed under Needs attent
   expect(screen.getByRole("button", { name: "Download" })).toBeDisabled();
 });
 
+test("the geodatabase paragraph appears only for an upload holding one, and the byte-for-byte promise only where shapefiles come back", async () => {
+  const byteForByte = /Shapefiles come back.*byte for byte/;
+  const rewritten = /In a geodatabase, GDAL rewrites each changed row.*Convert a copy and open it in ArcGIS Pro/;
+  const returns = () => screen.getByRole("region", { name: "What comes back" });
+  const shapefiles = tokyoInspection();
+  const gdb = tokyoGeodatabaseInspection();
+  vi.mocked(inspectColorTheme)
+    .mockResolvedValueOnce(shapefiles)
+    .mockResolvedValueOnce(gdb)
+    .mockResolvedValueOnce({
+      dataset: { ...gdb.dataset, name: "JRTokyoSta" },
+      theme: { ...gdb.theme, layers: [...shapefiles.theme.layers, ...gdb.theme.layers] }
+    });
+  renderPage();
+  await screen.findByRole("table", { name: "How color2 changes" });
+  expect(returns()).toHaveTextContent(byteForByte);
+  expect(returns()).toHaveTextContent(rewritten);
+
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_6677" });
+  expect(returns()).toHaveTextContent(byteForByte);
+  expect(returns()).not.toHaveTextContent(/geodatabase/);
+
+  pickFolder([inFolder("a00000001.gdbtable", TOKYO_GDB)]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_3857" });
+  expect(returns()).toHaveTextContent(rewritten);
+  expect(returns()).not.toHaveTextContent(/byte for byte/);
+
+  pickFolder([inFolder("a00000001.gdbtable", TOKYO_GDB), inFolder("JRTokyoSta_1_Space.dbf")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta" });
+  expect(returns()).toHaveTextContent(byteForByte);
+  expect(returns()).toHaveTextContent(rewritten);
+});
+
+test("Files back untouched is not claimed for an upload holding a geodatabase", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValue(tokyoGeodatabaseInspection());
+  renderPage();
+  pickFolder([inFolder("a00000001.gdbtable", TOKYO_GDB)]);
+
+  const summary = await screen.findByRole("region", { name: "What this station gets" });
+  expect(summary).toHaveTextContent("Changes5,996");
+  expect(summary).toHaveTextContent("Geodatabases1");
+  expect(summary).not.toHaveTextContent("Files back untouched");
+});
+
 test("on a station already converted, Download is disabled and says why", async () => {
   vi.mocked(inspectColorTheme).mockResolvedValue(rerunInspection());
   renderPage();

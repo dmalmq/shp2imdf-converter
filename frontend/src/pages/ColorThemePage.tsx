@@ -25,6 +25,7 @@ import {
   colorThemeStage,
   datasetFiles,
   downloadBlockedReason,
+  inGeodatabase,
   initialColorThemeState,
   type ColorThemeState
 } from "../lib/colorTheme";
@@ -222,8 +223,8 @@ export function ColorThemePage() {
             </h1>
             <p className="max-w-[46rem] text-[15px] leading-[1.55] text-muted-foreground">
               {t(
-                "Drop one station’s shapefile folder, or its zip. Each color2 value is rewritten to its new area name, as the table shows.",
-                "駅のシェープファイルのフォルダ、またはその zip をドロップしてください。color2 の値を表のとおり新しいエリア名に書き換えます。"
+                "Drop one station’s shapefile folder, its File Geodatabase (.gdb folder), or a zip of either. Each color2 value is rewritten to its new area name, as the table shows.",
+                "駅のシェープファイルのフォルダ、ファイルジオデータベース（.gdb フォルダ）、またはそのどちらかの zip をドロップしてください。color2 の値を表のとおり新しいエリア名に書き換えます。"
               )}
             </p>
           </div>
@@ -252,7 +253,7 @@ export function ColorThemePage() {
 
         <aside className="flex w-[360px] shrink-0 flex-col gap-4">
           {inspection ? <Attention inspection={inspection} /> : null}
-          <WhatComesBack field={report?.field ?? "color2"} />
+          <WhatComesBack field={report?.field ?? "color2"} inspection={inspection} />
         </aside>
       </div>
 
@@ -340,7 +341,7 @@ function DropArea({ state, dragging, pickers }: { state: ColorThemeState; draggi
       <p className="text-sm font-medium text-foreground">
         {dragging
           ? t("Drop to check it", "ドロップして確認")
-          : t("Drop the station folder or its zip here", "駅のフォルダまたは zip をここにドロップ")}
+          : t("Drop the station’s shapefile folder, .gdb folder or zip here", "駅のシェープファイルのフォルダ、.gdb フォルダ、または zip をここにドロップ")}
       </p>
       <p className="text-[12.5px] text-muted-foreground">
         {t("Every file comes back, whatever its kind.", "どの種類のファイルもすべて戻ります。")}
@@ -369,10 +370,15 @@ function Summary({ inspection, pickers }: { inspection: ColorThemeInspection; pi
         <Stat label={t("Changes", "変更")} value={formatCount(theme.totals.recolor)} />
         <Stat label={t("Layers", "レイヤー")} value={formatCount(theme.layers.length)} />
         <Stat label={t("Left as is", "変更しない")} value={formatCount(leftAsIs)} warning={leftAsIs > 0} />
-        <Stat
-          label={t("Files back untouched", "そのまま戻るファイル")}
-          value={`${formatCount(dataset.files - changedLayers)} / ${formatCount(dataset.files)}`}
-        />
+        {/* One file per changed layer holds only for shapefiles: an edited feature class changes several and GDAL adds .freelist files. */}
+        {dataset.geodatabases > 0 ? (
+          <Stat label={t("Geodatabases", "ジオデータベース")} value={formatCount(dataset.geodatabases)} />
+        ) : (
+          <Stat
+            label={t("Files back untouched", "そのまま戻るファイル")}
+            value={`${formatCount(dataset.files - changedLayers)} / ${formatCount(dataset.files)}`}
+          />
+        )}
       </div>
       <div className="flex flex-col items-end gap-1.5">
         <span className="text-xs text-muted-foreground">{t("Another station?", "別の駅？")}</span>
@@ -571,20 +577,42 @@ function Attention({ inspection }: { inspection: ColorThemeInspection }) {
   );
 }
 
-function WhatComesBack({ field }: { field: string }) {
+/** Which formats the download holds, so each promise is made only where it is true. Both until an upload says. */
+function returnedFormats(inspection: ColorThemeInspection | null): { shapefile: boolean; geodatabase: boolean } {
+  if (!inspection) return { shapefile: true, geodatabase: true };
+  const { dataset, theme } = inspection;
+  return {
+    shapefile: dataset.geodatabases === 0 || [...theme.layers, ...theme.skipped].some(({ id }) => !inGeodatabase(id)),
+    geodatabase: dataset.geodatabases > 0
+  };
+}
+
+function WhatComesBack({ field, inspection }: { field: string; inspection: ColorThemeInspection | null }) {
   const { t } = useUiLanguage();
+  const formats = returnedFormats(inspection);
+  const paragraph = "text-[12.5px] leading-[1.5] text-muted-foreground";
   return (
     <section aria-labelledby="color-theme-returns" className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-5">
       <h2 id="color-theme-returns" className="font-display text-xl font-semibold text-foreground">
         {t("What comes back", "戻ってくるもの")}
       </h2>
-      <p className="text-[12.5px] leading-[1.5] text-muted-foreground">
-        {t(
-          `The same files in the same folders, as one zip. Only ${field} changes. Geometry, every other field, .prj, .cpg and the indexes come back byte for byte.`,
-          `同じフォルダ構成の同じファイルを 1 つの zip で返します。変わるのは ${field} だけです。ジオメトリ、ほかのフィールド、.prj、.cpg、インデックスはそのまま戻ります。`
-        )}
-      </p>
-      <p className="text-[12.5px] leading-[1.5] text-muted-foreground">
+      {formats.shapefile ? (
+        <p className={paragraph}>
+          {t(
+            `Shapefiles come back as the same files in the same folders, in one zip. Only ${field} changes. Geometry, every other field, .prj, .cpg and the indexes come back byte for byte.`,
+            `シェープファイルは同じフォルダ構成の同じファイルとして 1 つの zip で戻ります。変わるのは ${field} だけです。ジオメトリ、ほかのフィールド、.prj、.cpg、インデックスはそのまま戻ります。`
+          )}
+        </p>
+      ) : null}
+      {formats.geodatabase ? (
+        <p className={paragraph}>
+          {t(
+            "In a geodatabase, GDAL rewrites each changed row. Other tables, fields and indexes stay as they were; Shape_Area and Shape_Length are recomputed. Convert a copy and open it in ArcGIS Pro before replacing the original.",
+            "ジオデータベースでは、変更する行を GDAL が書き直します。ほかのテーブル、フィールド、インデックスはそのままですが、Shape_Area と Shape_Length は再計算されます。元のデータを置き換える前に、コピーを変換して ArcGIS Pro で開いて確認してください。"
+          )}
+        </p>
+      ) : null}
+      <p className={paragraph}>
         {t(
           "Values that are already new, blank, or not in the table are left as they are.",
           "すでに新しい値、空欄、表にない値は変更しません。"

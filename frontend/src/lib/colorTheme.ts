@@ -82,6 +82,14 @@ export function datasetPath(file: FileWithPath): string {
   return file.relativePath || file.webkitRelativePath || file.name;
 }
 
+/** True for a `.gdb` folder and everything under one, the way the server partitions an upload. */
+export function inGeodatabase(path: string): boolean {
+  return path
+    .toLowerCase()
+    .split("/")
+    .some((segment) => segment.endsWith(".gdb"));
+}
+
 export function datasetFiles(files: ReadonlyArray<FileWithPath>): DatasetFile[] {
   return files.map((file) => ({ file, path: datasetPath(file) }));
 }
