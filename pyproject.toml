@@ -8,6 +8,7 @@ markers = [
     "phase4: Review (generator, map, table, selection)",
     "phase5: Validation and export (converter, validator, autofix)",
     "phase6: Polish and edge cases",
-    "georef: Illustrator georeferencing (transform, zones, placement)"
+    "georef: Illustrator georeferencing (transform, zones, placement)",
+    "colortheme: Station colour theme converter (table, DBF patch, upload tree)"
 ]
 

@@ -1,0 +1,30 @@
+{
+  "source": "Figma IiM1QNaEzWOM4uZCvsbor5 'Setting up a new map design in ArcGIS Pro': section 1:2613 (Old and New エリアカラー tables), variables in frame 5:914 (MapBackground/*). old_hex is the Old swatch fill sampled from Figma's own render, display only.",
+  "field": "color2",
+  "category_field": "category",
+  "areas": [
+    { "key": "free_area", "name": { "en": "Free area outside the gates", "ja": "改札外通路" }, "value": "改札外通路", "spec": "Mono 000", "hex": "#FFFFFF" },
+    { "key": "paid_area", "name": { "en": "Paid area, conventional lines", "ja": "在来線改札内" }, "value": "在来線改札内", "spec": "PaleBlue 050", "hex": "#F2F7FB" },
+    { "key": "paid_area_shinkansen", "name": { "en": "Paid area, Shinkansen", "ja": "新幹線改札内" }, "value": "新幹線改札内", "spec": "PaleBlue 100", "hex": "#E5EFF7" },
+    { "key": "facilities", "name": { "en": "Facilities", "ja": "施設" }, "value": "施設", "spec": "Turquoise 150", "hex": "#DDEBEC" },
+    { "key": "restricted", "name": { "en": "Restricted area", "ja": "進入制限エリア" }, "value": "進入制限エリア", "spec": "Mono 050", "hex": "#F2F2F2" },
+    { "key": "stairs_escalators", "name": { "en": "Stairs and escalators", "ja": "階段・エスカレーター" }, "value": "階段・エスカレーター", "spec": "Mono 000", "hex": "#FFFFFF" }
+  ],
+  "rules": [
+    { "old": "黄", "old_hex": "#FCFCE3", "scope": { "en": "JR East floors inside the gates", "ja": "JR東ラチ内フロア" }, "area": "paid_area" },
+    { "old": "橙", "old_hex": "#FFE8BF", "scope": { "en": "JR Central Shinkansen floors inside the gates", "ja": "JR東海新幹線 ラチ内フロア" }, "area": "paid_area_shinkansen" },
+    { "old": "緑", "old_hex": "#DDF5D9", "scope": { "en": "JR East Shinkansen floors inside the gates", "ja": "JR東新幹線 ラチ内フロア" }, "area": "paid_area_shinkansen" },
+    { "old": "ラチ外白", "old_hex": "#FFFFFF", "scope": { "en": "Floors outside the gates", "ja": "ラチ外フロア" }, "area": "free_area" },
+    { "old": "薄紅", "old_hex": "#FFECE6", "scope": { "en": "Conventional line platforms", "ja": "在来線プラットホーム" }, "area": "paid_area" },
+    { "old": "濃紅", "old_hex": "#F2CFC2", "scope": { "en": "Shinkansen platforms", "ja": "新幹線プラットホーム" }, "area": "paid_area_shinkansen" },
+    { "old": "薄空", "old_hex": "#E5F8FF", "scope": { "en": "Shops and public facilities outside the gates, ticket offices", "ja": "ラチ外商業スペース、店舗、公的施設、みどりの窓口" }, "area": "facilities" },
+    { "old": "濃空", "old_hex": "#C2E5F2", "scope": { "en": "Shops and public facilities inside the gates", "ja": "ラチ内商業スペース、店舗、公的施設" }, "area": "facilities" },
+    { "old": "薄鼠", "old_hex": "#E5E6E6", "scope": { "en": "Waiting rooms, lifts, station offices, other rooms", "ja": "待合室、エレベーター、駅事務室、その他部屋の範囲" }, "area": "restricted" },
+    { "old": "白", "old_hex": "#FFFFFF", "scope": { "en": "Stairs, escalators, moving walkways, voids", "ja": "階段、エスカレーター、動く歩道、吹抜" }, "area": "stairs_escalators" },
+    { "old": "トイレ", "old_hex": "#E5E6E6", "scope": { "en": "Toilets", "ja": "トイレ" }, "area": "facilities" },
+    { "old": "濃鼠", "old_hex": null, "scope": { "en": "Floor 0 outside the gates", "ja": "0F ラチ外" }, "area": "free_area" },
+    { "old": "濃鼠", "old_hex": "#E5E6E6", "scope": { "en": "Toilets coded 濃鼠", "ja": "トイレ（濃鼠）" }, "area": "facilities", "categories": ["B007", "B008", "B009", "B010", "B011", "B012", "B013", "B014"] },
+    { "old": "道白", "old_hex": "#C8C9CA", "scope": { "en": "Floor 0 walkways outside the gates", "ja": "0F ラチ外通路" }, "area": "free_area" },
+    { "old": "進入制限あり", "old_hex": null, "scope": { "en": "Restricted entry (KITTE)", "ja": "進入制限あり（KITTE）" }, "area": "restricted" }
+  ]
+}
