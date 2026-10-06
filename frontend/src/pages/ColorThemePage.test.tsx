@@ -255,6 +255,28 @@ test("the geodatabase paragraph appears only for an upload holding one, and the 
   expect(returns()).toHaveTextContent(rewritten);
 });
 
+test("stale lock files are counted once, the page's and the server's together, and not mentioned when there are none", async () => {
+  const gdb = tokyoGeodatabaseInspection();
+  vi.mocked(inspectColorTheme)
+    .mockResolvedValueOnce({ ...gdb, dataset: { ...gdb.dataset, lock_files_dropped: 1055 } })
+    .mockResolvedValueOnce(tokyoInspection());
+  const returns = () => screen.getByRole("region", { name: "What comes back" });
+  renderPage();
+  pickFolder([
+    inFolder("a00000004.gdbtable", TOKYO_GDB),
+    inFolder("_gdb.TOKYO-PC.10424.12388.sr.lock", TOKYO_GDB),
+    inFolder("a00000004.TOKYO-PC.10424.12388.sr.lock", TOKYO_GDB)
+  ]);
+
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_3857" });
+  expect(vi.mocked(inspectColorTheme).mock.calls[0][0].map(({ path }) => path)).toEqual([`${TOKYO_GDB}/a00000004.gdbtable`]);
+  expect(returns()).toHaveTextContent("Left out: 1,057 stale geodatabase lock files.");
+
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_6677" });
+  expect(returns()).not.toHaveTextContent(/lock file/);
+});
+
 test("Files back untouched is not claimed for an upload holding a geodatabase", async () => {
   vi.mocked(inspectColorTheme).mockResolvedValue(tokyoGeodatabaseInspection());
   renderPage();

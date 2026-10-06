@@ -3,35 +3,38 @@ import type { FileWithPath } from "react-dropzone";
 import type { ColorThemeInspection, ColorThemeRule, DatasetFile } from "../api/client";
 import type { ColorThemeStageId } from "../components/shell/stages";
 
+/** What one drop sends, and how many stale lock files inside a `.gdb` it kept back. */
+export type DatasetUpload = { files: DatasetFile[]; lockFilesLeftOut: number };
+
 /**
- * One station at a time. The files stay in the browser after the inspection,
- * so Download sends them again without another drop.
+ * One station at a time. The upload stays in the browser after the inspection,
+ * so Download sends it again without another drop.
  */
 export type ColorThemeState =
   | { phase: "empty"; error: string | null }
-  | { phase: "inspecting"; files: DatasetFile[]; progress: number }
+  | { phase: "inspecting"; upload: DatasetUpload; progress: number }
   | {
       phase: "checked";
-      files: DatasetFile[];
+      upload: DatasetUpload;
       inspection: ColorThemeInspection;
       error: string | null;
       /** File name of the last download. */
       delivered: string | null;
     }
-  | { phase: "converting"; files: DatasetFile[]; inspection: ColorThemeInspection; progress: number };
+  | { phase: "converting"; upload: DatasetUpload; inspection: ColorThemeInspection; progress: number };
 
 /**
- * An answer names the files it was for, so one that arrives after a reset or
+ * An answer names the upload it was for, so one that arrives after a reset or
  * a new drop matches nothing and is ignored.
  */
 export type ColorThemeEvent =
-  | { type: "dropped"; files: DatasetFile[] }
-  | { type: "progress"; files: DatasetFile[]; percent: number }
-  | { type: "inspected"; files: DatasetFile[]; inspection: ColorThemeInspection }
-  | { type: "inspectFailed"; files: DatasetFile[]; message: string }
+  | { type: "dropped"; upload: DatasetUpload }
+  | { type: "progress"; upload: DatasetUpload; percent: number }
+  | { type: "inspected"; upload: DatasetUpload; inspection: ColorThemeInspection }
+  | { type: "inspectFailed"; upload: DatasetUpload; message: string }
   | { type: "convertStarted" }
-  | { type: "converted"; files: DatasetFile[]; filename: string }
-  | { type: "convertFailed"; files: DatasetFile[]; message: string }
+  | { type: "converted"; upload: DatasetUpload; filename: string }
+  | { type: "convertFailed"; upload: DatasetUpload; message: string }
   | { type: "reset" };
 
 export const initialColorThemeState: ColorThemeState = { phase: "empty", error: null };
@@ -39,31 +42,31 @@ export const initialColorThemeState: ColorThemeState = { phase: "empty", error: 
 export function colorThemeReducer(state: ColorThemeState, event: ColorThemeEvent): ColorThemeState {
   switch (event.type) {
     case "dropped":
-      return { phase: "inspecting", files: event.files, progress: 0 };
+      return { phase: "inspecting", upload: event.upload, progress: 0 };
     case "reset":
       return initialColorThemeState;
     case "convertStarted":
       return state.phase === "checked"
-        ? { phase: "converting", files: state.files, inspection: state.inspection, progress: 0 }
+        ? { phase: "converting", upload: state.upload, inspection: state.inspection, progress: 0 }
         : state;
   }
-  if (!("files" in state) || state.files !== event.files) return state;
+  if (!("upload" in state) || state.upload !== event.upload) return state;
   switch (event.type) {
     case "progress":
       return state.phase === "inspecting" || state.phase === "converting" ? { ...state, progress: event.percent } : state;
     case "inspected":
       return state.phase === "inspecting"
-        ? { phase: "checked", files: state.files, inspection: event.inspection, error: null, delivered: null }
+        ? { phase: "checked", upload: state.upload, inspection: event.inspection, error: null, delivered: null }
         : state;
     case "inspectFailed":
       return state.phase === "inspecting" ? { phase: "empty", error: event.message } : state;
     case "converted":
       return state.phase === "converting"
-        ? { phase: "checked", files: state.files, inspection: state.inspection, error: null, delivered: event.filename }
+        ? { phase: "checked", upload: state.upload, inspection: state.inspection, error: null, delivered: event.filename }
         : state;
     case "convertFailed":
       return state.phase === "converting"
-        ? { phase: "checked", files: state.files, inspection: state.inspection, error: event.message, delivered: null }
+        ? { phase: "checked", upload: state.upload, inspection: state.inspection, error: event.message, delivered: null }
         : state;
   }
 }
@@ -90,8 +93,16 @@ export function inGeodatabase(path: string): boolean {
     .some((segment) => segment.endsWith(".gdb"));
 }
 
-export function datasetFiles(files: ReadonlyArray<FileWithPath>): DatasetFile[] {
-  return files.map((file) => ({ file, path: datasetPath(file) }));
+const isGeodatabaseLock = (path: string) => path.toLowerCase().endsWith(".lock") && inGeodatabase(path);
+
+/**
+ * Every file but the stale lock files inside a `.gdb`: Tokyo's holds 1,057 of them,
+ * a third of its files, enough to push a two-station drop toward the multipart limit.
+ */
+export function datasetFiles(files: ReadonlyArray<FileWithPath>): DatasetUpload {
+  const all = files.map((file) => ({ file, path: datasetPath(file) }));
+  const kept = all.filter(({ path }) => !isGeodatabaseLock(path));
+  return { files: kept, lockFilesLeftOut: all.length - kept.length };
 }
 
 /**

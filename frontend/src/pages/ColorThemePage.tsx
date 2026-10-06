@@ -8,8 +8,7 @@ import {
   inspectColorTheme,
   type ColorThemeInspection,
   type ColorThemeLayer,
-  type ColorThemeReport,
-  type DatasetFile
+  type ColorThemeReport
 } from "../api/client";
 import { toErrorMessage } from "../api/errors";
 import { NextBar } from "../components/bringIn/NextBar";
@@ -27,7 +26,8 @@ import {
   downloadBlockedReason,
   inGeodatabase,
   initialColorThemeState,
-  type ColorThemeState
+  type ColorThemeState,
+  type DatasetUpload
 } from "../lib/colorTheme";
 import { saveBlob } from "../lib/download";
 import { cn } from "@/lib/utils";
@@ -103,34 +103,34 @@ export function ColorThemePage() {
     return request.signal;
   };
 
-  const inspect = (files: DatasetFile[]) => {
-    if (files.length === 0) return;
+  const inspect = (upload: DatasetUpload) => {
+    if (upload.files.length === 0) return;
     const signal = begin();
-    dispatch({ type: "dropped", files });
-    inspectColorTheme(files, { signal, onProgress: (percent) => dispatch({ type: "progress", files, percent }) }).then(
-      (inspection) => dispatch({ type: "inspected", files, inspection }),
+    dispatch({ type: "dropped", upload });
+    inspectColorTheme(upload.files, { signal, onProgress: (percent) => dispatch({ type: "progress", upload, percent }) }).then(
+      (inspection) => dispatch({ type: "inspected", upload, inspection }),
       (caught: unknown) => {
         if (signal.aborted) return;
         const message = handleApiError(caught, t("Could not read the station", "駅のデータを読み込めませんでした"), {
           title: t("Check failed", "チェック失敗")
         });
-        dispatch({ type: "inspectFailed", files, message });
+        dispatch({ type: "inspectFailed", upload, message });
       }
     );
   };
 
   const download = async () => {
     if (state.phase !== "checked" || downloadBlockedReason(state.inspection, t)) return;
-    const { files } = state;
+    const { upload } = state;
     const signal = begin();
     dispatch({ type: "convertStarted" });
     try {
-      const { blob, filename } = await convertColorTheme(files, {
+      const { blob, filename } = await convertColorTheme(upload.files, {
         signal,
-        onProgress: (percent) => dispatch({ type: "progress", files, percent })
+        onProgress: (percent) => dispatch({ type: "progress", upload, percent })
       });
       saveBlob(blob, filename);
-      dispatch({ type: "converted", files, filename });
+      dispatch({ type: "converted", upload, filename });
       pushToast({
         title: t(`Created ${filename}`, `${filename} を作成しました`),
         description: t("It is in your browser’s downloads.", "ブラウザのダウンロードに保存されます。"),
@@ -141,7 +141,7 @@ export function ColorThemePage() {
       const message = handleApiError(caught, t("Could not build the download", "ダウンロードを作成できませんでした"), {
         title: t("Download failed", "ダウンロード失敗")
       });
-      dispatch({ type: "convertFailed", files, message });
+      dispatch({ type: "convertFailed", upload, message });
     }
   };
 
@@ -163,8 +163,10 @@ export function ColorThemePage() {
     event.target.value = "";
   };
 
-  const inspection = state.phase === "checked" || state.phase === "converting" ? state.inspection : null;
+  const checked = state.phase === "checked" || state.phase === "converting" ? state : null;
+  const inspection = checked?.inspection ?? null;
   const blocked = inspection ? downloadBlockedReason(inspection, t) : null;
+  const lockFiles = checked ? checked.upload.lockFilesLeftOut + checked.inspection.dataset.lock_files_dropped : 0;
 
   usePageShell({
     current: colorThemeStage(state),
@@ -253,7 +255,7 @@ export function ColorThemePage() {
 
         <aside className="flex w-[360px] shrink-0 flex-col gap-4">
           {inspection ? <Attention inspection={inspection} /> : null}
-          <WhatComesBack field={report?.field ?? "color2"} inspection={inspection} />
+          <WhatComesBack field={report?.field ?? "color2"} inspection={inspection} lockFiles={lockFiles} />
         </aside>
       </div>
 
@@ -317,7 +319,7 @@ function MicroLabel({ id, children }: { id?: string; children: ReactNode }) {
 function DropArea({ state, dragging, pickers }: { state: ColorThemeState; dragging: boolean; pickers: ReactNode }) {
   const { t } = useUiLanguage();
   if (state.phase === "inspecting") {
-    const count = state.files.length;
+    const count = state.upload.files.length;
     return (
       <div role="status" className="flex flex-col gap-3 rounded-[14px] border border-border bg-card px-6 py-6">
         <p className="text-sm font-medium text-foreground">
@@ -344,7 +346,10 @@ function DropArea({ state, dragging, pickers }: { state: ColorThemeState; draggi
           : t("Drop the station’s shapefile folder, .gdb folder or zip here", "駅のシェープファイルのフォルダ、.gdb フォルダ、または zip をここにドロップ")}
       </p>
       <p className="text-[12.5px] text-muted-foreground">
-        {t("Every file comes back, whatever its kind.", "どの種類のファイルもすべて戻ります。")}
+        {t(
+          "Every file comes back, whatever its kind, except stale lock files inside a .gdb.",
+          "どの種類のファイルもすべて戻ります（.gdb 内の古いロックファイルを除く）。"
+        )}
       </p>
       {pickers}
       {state.phase === "empty" && state.error ? (
@@ -587,7 +592,16 @@ function returnedFormats(inspection: ColorThemeInspection | null): { shapefile: 
   };
 }
 
-function WhatComesBack({ field, inspection }: { field: string; inspection: ColorThemeInspection | null }) {
+function WhatComesBack({
+  field,
+  inspection,
+  lockFiles
+}: {
+  field: string;
+  inspection: ColorThemeInspection | null;
+  /** Left out by the page before sending and by the server from a zip, together. */
+  lockFiles: number;
+}) {
   const { t } = useUiLanguage();
   const formats = returnedFormats(inspection);
   const paragraph = "text-[12.5px] leading-[1.5] text-muted-foreground";
@@ -618,6 +632,14 @@ function WhatComesBack({ field, inspection }: { field: string; inspection: Color
           "すでに新しい値、空欄、表にない値は変更しません。"
         )}
       </p>
+      {lockFiles > 0 ? (
+        <p className={paragraph}>
+          {t(
+            `Left out: ${plural(lockFiles, "stale geodatabase lock file", "stale geodatabase lock files")}.`,
+            `ジオデータベース内の古いロックファイル ${formatCount(lockFiles)} 個は含めません。`
+          )}
+        </p>
+      ) : null}
     </section>
   );
 }
