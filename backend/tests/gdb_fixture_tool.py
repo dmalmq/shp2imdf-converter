@@ -11,7 +11,8 @@ class a spatial index plus ``Shape_Length``/``Shape_Area``, and every field
 named in ``index`` an attribute index.
 
 ``dump <gdb>`` prints every layer's field widths and rows (``fid``, every field, ISO WKB hex),
-and the file stem of every table (``a00000009`` for the catalog's row 9).
+plus what ``tables`` prints.
+``tables <gdb>`` prints the file stem of every table (``a00000009`` for the catalog's row 9).
 ``filter <gdb> <layer> <where>`` prints the FIDs an attribute filter returns.
 """
 
@@ -79,10 +80,14 @@ def dump(path: str) -> dict:
             )
         widths = {definition.GetFieldDefn(i).GetName(): definition.GetFieldDefn(i).GetWidth() for i in range(len(names))}
         layers[layer.GetName()] = {"widths": widths, "rows": rows}
-    catalog = gdal.OpenEx(path, gdal.OF_VECTOR, allowed_drivers=["OpenFileGDB"], open_options=["LIST_ALL_TABLES=YES"])
-    # A table's files are named after its row in the catalog: row 9 is a00000009.gdbtable and its siblings.
-    tables = {feature.GetField("Name"): f"a{feature.GetFID():08x}" for feature in catalog.GetLayerByName("GDB_SystemCatalog")}
-    return {"layers": layers, "tables": tables}
+    return {"layers": layers, **tables(path)}
+
+
+def tables(path: str) -> dict:
+    """Table name to file stem: a table's files are named after its row in the catalog (row 9 is a00000009.*)."""
+    dataset = gdal.OpenEx(path, gdal.OF_VECTOR, allowed_drivers=["OpenFileGDB"], open_options=["LIST_ALL_TABLES=YES"])
+    catalog = dataset.GetLayerByName("GDB_SystemCatalog")
+    return {"tables": {feature.GetField("Name"): f"a{feature.GetFID():08x}" for feature in catalog}}
 
 
 def where(path: str, layer_name: str, clause: str) -> dict:
@@ -98,6 +103,8 @@ if __name__ == "__main__":
         result = build(args[0], json.loads(sys.stdin.buffer.read()))
     elif command == "dump":
         result = dump(args[0])
+    elif command == "tables":
+        result = tables(args[0])
     elif command == "filter":
         result = where(*args)
     else:

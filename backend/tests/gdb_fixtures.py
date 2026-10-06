@@ -44,6 +44,11 @@ def dump_gdb(path: Path, python: Path) -> dict:
     return _tool(python, "dump", str(path))
 
 
+def table_stems(path: Path, python: Path) -> dict[str, str]:
+    """Table name to the stem its files share, e.g. ``a00000009``."""
+    return _tool(python, "tables", str(path))["tables"]
+
+
 def filter_fids(path: Path, layer: str, where: str, python: Path) -> list[int]:
     return _tool(python, "filter", str(path), layer, where)["fids"]
 
