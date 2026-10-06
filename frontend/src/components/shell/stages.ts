@@ -1,14 +1,14 @@
 import type { WizardState } from "../../api/client";
-import type { IllustratorStage } from "../../store/useAppStore";
 
 export type Bilingual = { en: string; ja: string };
 
 export type StageStatus = "done" | "current" | "todo" | "blocked";
 
-export type Flow = "shapefiles" | "artwork";
+export type Flow = "shapefiles" | "artwork" | "color-theme";
 
 export type ShapefileStageId = "bring-in" | "set-up" | "check" | "deliver";
 export type ArtworkStageId = "bring-in-artwork" | "name-floors" | "place" | "deliver";
+export type ColorThemeStageId = Exclude<ShapefileStageId, "set-up">;
 export type StageId = ShapefileStageId | ArtworkStageId;
 
 /**
@@ -27,23 +27,32 @@ export type Stage = {
   target?: StageTarget;
 };
 
+const SHAPEFILE_FLOW: ReadonlyArray<{ id: ShapefileStageId; label: Bilingual }> = [
+  { id: "bring-in", label: { en: "Bring in", ja: "取り込み" } },
+  { id: "set-up", label: { en: "Set up", ja: "設定" } },
+  { id: "check", label: { en: "Check", ja: "チェック" } },
+  { id: "deliver", label: { en: "Deliver", ja: "書き出し" } }
+];
+
 export const FLOW_STAGES: Record<Flow, ReadonlyArray<{ id: StageId; label: Bilingual }>> = {
-  shapefiles: [
-    { id: "bring-in", label: { en: "Bring in", ja: "取り込み" } },
-    { id: "set-up", label: { en: "Set up", ja: "設定" } },
-    { id: "check", label: { en: "Check", ja: "チェック" } },
-    { id: "deliver", label: { en: "Deliver", ja: "書き出し" } }
-  ],
+  shapefiles: SHAPEFILE_FLOW,
   artwork: [
     { id: "bring-in-artwork", label: { en: "Bring in artwork", ja: "図面の取り込み" } },
     { id: "name-floors", label: { en: "Name floors", ja: "フロア名付け" } },
     { id: "place", label: { en: "Place on map", ja: "地図に配置" } },
     { id: "deliver", label: { en: "Deliver", ja: "書き出し" } }
-  ]
+  ],
+  // The shapefile stages' own ids and labels, so the words mean the same thing in both flows.
+  "color-theme": SHAPEFILE_FLOW.filter((stage) => stage.id !== "set-up")
 };
 
+/** The station colour-theme tool. */
+export const COLOR_THEME_PATH = "/color-theme";
+
 export function flowForPath(pathname: string): Flow {
-  return pathname === "/illustrator" || pathname.startsWith("/a/") ? "artwork" : "shapefiles";
+  if (pathname === "/illustrator" || pathname.startsWith("/a/")) return "artwork";
+  if (pathname === COLOR_THEME_PATH) return "color-theme";
+  return "shapefiles";
 }
 
 /** An artwork project: the conversion id is the project. */
@@ -213,19 +222,21 @@ export function shapefileStages({
   });
 }
 
-export type ArtworkInput = {
-  illustratorStage: IllustratorStage;
-  page?: PageStages;
-};
+/**
+ * Stages of a flow that one page drives by itself: the page's current stage,
+ * else `fallback` (an index); only the page's own targets are links.
+ */
+export function pageStages(flow: Exclude<Flow, "shapefiles">, fallback: number, page?: PageStages): Stage[] {
+  const stages = FLOW_STAGES[flow];
+  const current = page?.current ? Math.max(stages.findIndex((stage) => stage.id === page.current), 0) : fallback;
 
-export function artworkStages({ illustratorStage, page }: ArtworkInput): Stage[] {
-  const order = FLOW_STAGES.artwork.map((stage) => stage.id);
-  const current = page?.current ? Math.max(order.indexOf(page.current), 0) : illustratorStage - 1;
-
-  return FLOW_STAGES.artwork.map(({ id, label }, index) => {
-    const status = statusFor(index, current);
-    const stage: Stage = { id, label, status };
-    if (status !== "current") stage.target = pageTarget(page, id);
+  return stages.map(({ id, label }, index) => {
+    const stage: Stage = { id, label, status: statusFor(index, current) };
+    if (stage.status !== "current") stage.target = pageTarget(page, id);
+    if (index === current + 1 && stage.status === "todo" && page?.nextBlockedReason && !stage.target) {
+      stage.status = "blocked";
+      stage.detail = page.nextBlockedReason;
+    }
     return stage;
   });
 }

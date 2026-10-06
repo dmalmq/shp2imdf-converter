@@ -603,6 +603,16 @@ async function openIllustrator(page) {
   await page.getByRole("button", { name: "Choose file", exact: true }).waitFor();
 }
 
+// The table is the answer to GET /api/color-theme, so waiting for it also
+// proves the backend is serving the tool.
+async function openColorTheme(page) {
+  await gotoEnglishHome(page);
+  await page.getByRole("button", { name: /Recolour a station/ }).click();
+  await page.waitForURL("**/color-theme", { timeout: 15000 });
+  await page.getByRole("heading", { name: "Recolour a station", level: 1 }).waitFor({ timeout: 15000 });
+  await page.getByRole("table", { name: "How color2 changes" }).waitFor({ timeout: 15000 });
+}
+
 async function driveIllustratorOpen() {
   await withPage(async (page) => {
     await openIllustrator(page);
@@ -665,6 +675,7 @@ export {
   gotoEnglishHome,
   importTokyoStation,
   loadPlaywright,
+  openColorTheme,
   openIllustrator,
   queueTokyoStation,
   repoRoot

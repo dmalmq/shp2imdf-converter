@@ -54,6 +54,7 @@ import {
   type SurveySnapTarget
 } from "../lib/placementPose";
 import { fromDraft, NO_REFERENCES, toDraft, type DraftView } from "../lib/artworkDraft";
+import { saveBlob } from "../lib/download";
 import { siteNameFromFilename, stationQueryFromFilename } from "../lib/siteName";
 import { usePageShell } from "../components/shell/ShellContext";
 import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
@@ -1124,14 +1125,7 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
         }
         result = await exportIllustrator(renewed.conversion_id, body);
       }
-      const url = URL.createObjectURL(result.blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = result.filename;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
+      saveBlob(result.blob, result.filename);
     } catch (error) {
       const expired = isApiClientError(error) && error.code === "CONVERSION_EXPIRED";
       setError(

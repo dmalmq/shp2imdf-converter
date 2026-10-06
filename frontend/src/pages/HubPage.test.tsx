@@ -125,9 +125,18 @@ test("with no projects the hub says so and still offers every route", async () =
   renderHub();
   expect(await screen.findByText("No projects on this PC yet")).toBeInTheDocument();
   expect(screen.queryByRole("list", { name: "Projects" })).toBeNull();
-  for (const route of [/From floor shapefiles/, /From Illustrator artwork/, /Reopen an IMDF archive/]) {
+  for (const route of [/From floor shapefiles/, /From Illustrator artwork/, /Reopen an IMDF archive/, /Recolour a station/]) {
     expect(screen.getByRole("button", { name: route })).toBeEnabled();
   }
+});
+
+// Production deep links 404, so this button is the only way into the colour tool.
+test("Recolour a station opens the colour-theme tool", async () => {
+  vi.mocked(fetchProjects).mockResolvedValue(listing([]));
+  renderHub();
+  const tools = screen.getByRole("group", { name: "Tools" });
+  fireEvent.click(within(tools).getByRole("button", { name: /Recolour a station/ }));
+  expect(await screen.findByTestId("landed")).toHaveTextContent(/^\/color-theme$/);
 });
 
 test("a failed listing shows the error and tries again on request", async () => {

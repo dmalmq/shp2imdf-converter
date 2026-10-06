@@ -20,9 +20,9 @@ import {
 } from "./ShellContext";
 import { StageTrack } from "./StageTrack";
 import {
-  artworkStages,
   currentStage,
   flowForPath,
+  pageStages,
   parseProjectPath,
   shapefileStages,
   stationName,
@@ -157,20 +157,22 @@ function useStages(pathname: string, page: PageShell | null, primary: PrimaryAct
   const blockedReason = primary?.disabledReason && !primary.busy ? primary.disabledReason : null;
 
   return useMemo(() => {
-    const pageStages = {
+    const fromPage = {
       ...page,
       // The reason is already in the operator's language.
       nextBlockedReason: blockedReason ? { en: blockedReason, ja: blockedReason } : null
     };
-    return flowForPath(pathname) === "artwork"
-      ? artworkStages({ illustratorStage, page: pageStages })
-      : shapefileStages({
-          pathname,
-          sessionId,
-          importProfile,
-          reviewReached: currentScreen === "review",
-          page: pageStages
-        });
+    const flow = flowForPath(pathname);
+    if (flow === "shapefiles") {
+      return shapefileStages({
+        pathname,
+        sessionId,
+        importProfile,
+        reviewReached: currentScreen === "review",
+        page: fromPage
+      });
+    }
+    return pageStages(flow, flow === "artwork" ? illustratorStage - 1 : 0, fromPage);
   }, [pathname, page, blockedReason, sessionId, importProfile, currentScreen, illustratorStage]);
 }
 
@@ -178,8 +180,8 @@ function useStation(pathname: string, page: PageShell | null): string | null {
   const wizardState = useAppStore((s) => s.wizardState);
   const files = useAppStore((s) => s.files);
   if (page?.station) return page.station;
-  // The shapefile session's name means nothing on the artwork route.
-  if (flowForPath(pathname) === "artwork") return null;
+  // The shapefile session's name means nothing on another flow's route.
+  if (flowForPath(pathname) !== "shapefiles") return null;
   return stationName(wizardState, files);
 }
 
