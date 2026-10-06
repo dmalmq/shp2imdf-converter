@@ -288,6 +288,21 @@ test("Files back untouched is not claimed for an upload holding a geodatabase", 
   expect(summary).not.toHaveTextContent("Files back untouched");
 });
 
+test("the Next step bar promises an exact copy for shapefiles only, since GDAL rewrites a geodatabase's changed rows", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValueOnce(tokyoInspection()).mockResolvedValueOnce(tokyoGeodatabaseInspection());
+  renderPage();
+  const bar = () => screen.getByRole("region", { name: "Next step" });
+
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_6677" });
+  expect(bar()).toHaveTextContent("Everything else comes back exactly as it was.");
+
+  pickFolder([inFolder("a00000001.gdbtable", TOKYO_GDB)]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_3857" });
+  expect(bar()).toHaveTextContent("Everything but the changed rows comes back as it was.");
+  expect(bar()).not.toHaveTextContent("exactly");
+});
+
 test("on a station already converted, Download is disabled and says why", async () => {
   vi.mocked(inspectColorTheme).mockResolvedValue(rerunInspection());
   renderPage();

@@ -293,7 +293,12 @@ function nextStep(state: ColorThemeState, inspection: ColorThemeInspection, bloc
           `${plural(totals.recolor, "value changes", "values change")} in ${plural(changed, "layer", "layers")}`,
           `${formatCount(changed)} レイヤーの ${formatCount(totals.recolor)} 件の値を変更します`
         );
-  const detail = blocked ?? error ?? t("Everything else comes back exactly as it was.", "ほかはすべてそのまま戻ります。");
+  // GDAL rewrites a geodatabase's changed rows whole (Shape_Area recomputed), so only shapefiles get the stronger promise.
+  const unchanged =
+    inspection.dataset.geodatabases > 0
+      ? t("Everything but the changed rows comes back as it was.", "変更する行以外はそのまま戻ります。")
+      : t("Everything else comes back exactly as it was.", "ほかはすべてそのまま戻ります。");
+  const detail = blocked ?? error ?? unchanged;
   const action = delivered ? t("Download again", "もう一度ダウンロード") : t("Download", "ダウンロード");
   // The strings are already in the operator's language.
   const same = (text: string) => ({ en: text, ja: text });
