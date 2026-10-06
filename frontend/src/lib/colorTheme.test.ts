@@ -9,7 +9,7 @@ import {
   type ColorThemeEvent,
   type ColorThemeState
 } from "./colorTheme";
-import { colorThemeRules, counts, rerunInspection, tokyoInspection } from "./colorTheme.fixtures";
+import { colorThemeRules, counts, rerunInspection, TOKYO_GDB, tokyoGeodatabaseInspection, tokyoInspection } from "./colorTheme.fixtures";
 
 const english = (en: string) => en;
 const japanese = (_en: string, ja: string) => ja;
@@ -123,6 +123,16 @@ describe("downloadBlockedReason", () => {
 
     const locked = { ...none, theme: { ...none.theme, skipped: [{ id: "a.dbf", reason: "unreadable" as const }] } };
     expect(downloadBlockedReason(locked, english)).toBe("No color2 field here can be edited.");
+  });
+
+  test("says nothing can be edited when every geodatabase is skipped for want of GDAL", () => {
+    const gdb = tokyoGeodatabaseInspection();
+    const unavailable = {
+      ...gdb,
+      theme: { ...gdb.theme, layers: [], skipped: [{ id: TOKYO_GDB, reason: "gdb_unavailable" as const }], totals: counts() }
+    };
+    expect(downloadBlockedReason(unavailable, english)).toBe("No color2 field here can be edited.");
+    expect(downloadBlockedReason(unavailable, japanese)).toBe("編集できる color2 フィールドがありません。");
   });
 
   test("says the new value does not fit when matching rows are left as they are for width", () => {

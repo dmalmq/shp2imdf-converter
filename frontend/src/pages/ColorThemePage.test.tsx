@@ -10,7 +10,15 @@ import {
 } from "../api/client";
 import { ToastProvider } from "../components/shared/ToastProvider";
 import { AppShell } from "../components/shell/AppShell";
-import { colorThemeReport, colorThemeRules, counts, rerunInspection, tokyoInspection } from "../lib/colorTheme.fixtures";
+import {
+  colorThemeReport,
+  colorThemeRules,
+  counts,
+  rerunInspection,
+  TOKYO_GDB,
+  tokyoGeodatabaseInspection,
+  tokyoInspection
+} from "../lib/colorTheme.fixtures";
 import { useAppStore } from "../store/useAppStore";
 import { ColorThemePage } from "./ColorThemePage";
 
@@ -164,6 +172,53 @@ test("everything left as it is is listed under Needs attention, with why", async
   expect(layerRow("JRTokyoSta_6677.shp/JRTokyoSta_0_Space.dbf")?.lastElementChild).toHaveTextContent(/^2$/);
   expect(layerRow("JRTokyoSta_6677.shp/JRTokyoSta_1_Space.dbf")?.lastElementChild).toHaveTextContent(/^3$/);
   expect(layerRow("JRTokyoSta_6677.shp/JRTokyoSta_2_Space.dbf")?.lastElementChild).toHaveTextContent(/^0$/);
+});
+
+test("a geodatabase field's width reads in characters, and 0 as no limit, where a shapefile's reads in bytes", async () => {
+  const shapefiles = tokyoInspection();
+  const [narrow, ...rest] = tokyoGeodatabaseInspection().theme.layers;
+  vi.mocked(inspectColorTheme).mockResolvedValue({
+    dataset: { ...shapefiles.dataset, geodatabases: 1 },
+    theme: {
+      ...shapefiles.theme,
+      layers: [shapefiles.theme.layers[0], { ...narrow, counts: counts({ ...narrow.counts, too_wide: 4 }) }, ...rest]
+    }
+  });
+  renderPage();
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+
+  const attention = await screen.findByRole("region", { name: "Needs attention" });
+  expect(attention).toHaveTextContent("JRTokyoSta_1_Space4 rows · the new value does not fit color2 (12 characters), left as is");
+
+  fireEvent.click(screen.getByText("Layers (5)"));
+  const cells = (id: string) => Array.from((screen.getByText(id).closest("tr") as HTMLElement).children, (cell) => cell.textContent);
+  expect(cells(`${TOKYO_GDB}/JRTokyoSta_1_Space`).slice(1, 3)).toEqual(["utf-8 · geodatabase", "12 characters"]);
+  expect(cells(`${TOKYO_GDB}/JRTokyoSta_B1_Space`).slice(1, 3)).toEqual(["utf-8 · geodatabase", "no limit"]);
+  expect(cells("JRTokyoSta_6677.shp/JRTokyoSta_0_Space.dbf").slice(1, 3)).toEqual(["utf-8 · .cpg", "254 bytes"]);
+});
+
+test("a geodatabase this server cannot edit or read is listed under Needs attention, and Download says nothing can be edited", async () => {
+  const gdb = tokyoGeodatabaseInspection();
+  const skipped = [
+    { id: TOKYO_GDB, reason: "gdb_unavailable" as const },
+    { id: "JRShinjukuSta.gdb", reason: "unreadable" as const }
+  ];
+  vi.mocked(inspectColorTheme).mockResolvedValue({
+    ...gdb,
+    dataset: { ...gdb.dataset, geodatabases: 2 },
+    theme: { ...gdb.theme, rules: colorThemeRules(), layers: [], skipped, totals: counts() }
+  });
+  renderPage();
+  pickFolder([inFolder("a00000001.gdbtable", TOKYO_GDB)]);
+
+  const attention = await screen.findByRole("region", { name: "Needs attention" });
+  expect(within(attention).getByTitle(TOKYO_GDB)).toHaveTextContent(/^JRTokyoSta_3857\.gdb$/);
+  expect(attention).toHaveTextContent(
+    "JRTokyoSta_3857.gdbThis server has no Python with GDAL (ArcGIS Pro’s, or the one GDB_GDAL_PYTHON names), so the geodatabase cannot be edited; it comes back as uploaded"
+  );
+  expect(attention).toHaveTextContent("JRShinjukuSta.gdbThe geodatabase could not be read safely; it comes back untouched");
+  expect(screen.getByRole("region", { name: "Next step" })).toHaveTextContent("No color2 field here can be edited.");
+  expect(screen.getByRole("button", { name: "Download" })).toBeDisabled();
 });
 
 test("on a station already converted, Download is disabled and says why", async () => {

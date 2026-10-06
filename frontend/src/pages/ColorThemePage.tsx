@@ -43,6 +43,27 @@ function plural(count: number, one: string, many: string): string {
 
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
+function fieldWidth({ width, width_unit }: ColorThemeLayer, t: T): string {
+  if (width_unit === "bytes") return t(`${width} bytes`, `${width} バイト`);
+  return width === 0 ? t("no limit", "制限なし") : t(`${width} characters`, `${width} 文字`);
+}
+
+function skipDetail({ id, reason }: ColorThemeReport["skipped"][number], field: string, t: T): string {
+  switch (reason) {
+    case "field_not_text":
+      return t(`${field} is not a text field; the file comes back untouched`, `${field} がテキスト型ではないため、そのまま戻します`);
+    case "unreadable":
+      return id.toLowerCase().endsWith(".gdb")
+        ? t("The geodatabase could not be read safely; it comes back untouched", "ジオデータベースを安全に読めないため、そのまま戻します")
+        : t("The table could not be read safely; the file comes back untouched", "テーブルを安全に読めないため、そのまま戻します");
+    case "gdb_unavailable":
+      return t(
+        "This server has no Python with GDAL (ArcGIS Pro’s, or the one GDB_GDAL_PYTHON names), so the geodatabase cannot be edited; it comes back as uploaded",
+        "このサーバーには GDAL を使える Python（ArcGIS Pro のもの、または GDB_GDAL_PYTHON で指定したもの）がないため、ジオデータベースを編集できず、アップロードしたまま戻します"
+      );
+  }
+}
+
 /** /color-theme: drop one station, check what changes, download the same files with color2 rewritten. */
 export function ColorThemePage() {
   const { t } = useUiLanguage();
@@ -490,8 +511,8 @@ function Attention({ inspection }: { inspection: ColorThemeInspection }) {
         key: `too-wide-${layer.id}`,
         title: fileName(layer.id),
         detail: t(
-          `${plural(layer.counts.too_wide, "row", "rows")} · the new value does not fit ${field} (${layer.width} bytes), left as is`,
-          `${formatCount(layer.counts.too_wide)} 行 · 新しい値が ${field}（${layer.width} バイト）に収まらないため変更しません`
+          `${plural(layer.counts.too_wide, "row", "rows")} · the new value does not fit ${field} (${fieldWidth(layer, t)}), left as is`,
+          `${formatCount(layer.counts.too_wide)} 行 · 新しい値が ${field}（${fieldWidth(layer, t)}）に収まらないため変更しません`
         )
       })),
     ...layers
@@ -507,10 +528,7 @@ function Attention({ inspection }: { inspection: ColorThemeInspection }) {
     ...skipped.map((layer) => ({
       key: `skipped-${layer.id}`,
       title: fileName(layer.id),
-      detail:
-        layer.reason === "field_not_text"
-          ? t(`${field} is not a text field; the file comes back untouched`, `${field} がテキスト型ではないため、そのまま戻します`)
-          : t("The table could not be read safely; the file comes back untouched", "テーブルを安全に読めないため、そのまま戻します")
+      detail: skipDetail(layer, field, t)
     }))
   ];
 
@@ -580,7 +598,8 @@ const SOURCE_LABEL: Record<ColorThemeLayer["encoding"]["source"], { en: string; 
   cpg: { en: ".cpg", ja: ".cpg" },
   ldid: { en: "language driver", ja: "言語ドライバー" },
   sniffed: { en: "guessed", ja: "推定" },
-  ascii: { en: "ASCII only", ja: "ASCII のみ" }
+  ascii: { en: "ASCII only", ja: "ASCII のみ" },
+  gdb: { en: "geodatabase", ja: "ジオデータベース" }
 };
 
 function LayerTable({ layers }: { layers: ColorThemeLayer[] }) {
@@ -624,7 +643,7 @@ function LayerTable({ layers }: { layers: ColorThemeLayer[] }) {
                     <span className="font-mono">{layer.encoding.codec}</span> · {t(source.en, source.ja)}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-muted-foreground">
-                    {t(`${layer.width} bytes`, `${layer.width} バイト`)}
+                    {fieldWidth(layer, t)}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-foreground">{formatCount(layer.counts.recolor)}</td>
                   <td className={cn("px-3 py-2 text-right tabular-nums", leftAsIs > 0 ? "text-warning-foreground" : "text-foreground")}>

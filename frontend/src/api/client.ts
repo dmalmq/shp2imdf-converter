@@ -634,11 +634,16 @@ export type ColorThemeRule = {
 };
 
 export type ColorThemeLayer = {
-  /** Path inside the upload, e.g. "JRTokyoSta_6677.shp/JRTokyoSta_1_Space.dbf". */
+  /**
+   * Path inside the upload: "JRTokyoSta_6677.shp/JRTokyoSta_1_Space.dbf" for a shapefile,
+   * "<gdb path>/<feature class>" for a geodatabase layer.
+   */
   id: string;
-  encoding: { codec: string; source: "cpg" | "ldid" | "sniffed" | "ascii" };
-  /** The field's width in bytes of `codec`. */
+  /** A geodatabase layer is always utf-8 from "gdb". */
+  encoding: { codec: string; source: "cpg" | "ldid" | "sniffed" | "ascii" | "gdb" };
+  /** The field's width: bytes of `codec` in a shapefile, characters in a geodatabase, where 0 is no limit. */
   width: number;
+  width_unit: "bytes" | "characters";
   counts: ColorThemeCounts;
 };
 
@@ -649,13 +654,25 @@ export type ColorThemeReport = {
   /** Values no rule knows, most rows first. */
   unmapped: { value: string; rows: number; layers: string[] }[];
   layers: ColorThemeLayer[];
-  /** Layers naming the field that come back untouched because they cannot be edited safely. */
-  skipped: { id: string; reason: "field_not_text" | "unreadable" }[];
+  /**
+   * Layers naming the field that come back untouched because they cannot be edited safely.
+   * A whole geodatabase skipped as "gdb_unavailable" or "unreadable" has the geodatabase's path as id.
+   */
+  skipped: { id: string; reason: "field_not_text" | "unreadable" | "gdb_unavailable" }[];
   totals: ColorThemeCounts;
 };
 
 export type ColorThemeInspection = {
-  dataset: { name: string; download_name: string; files: number };
+  dataset: {
+    name: string;
+    download_name: string;
+    /** Files that come back, stale lock files excluded. */
+    files: number;
+    /** `.gdb` folders in the upload. */
+    geodatabases: number;
+    /** Stale `*.lock` files inside a `.gdb` that reached the server (in a zip) and are left out of the download. */
+    lock_files_dropped: number;
+  };
   theme: ColorThemeReport;
 };
 
