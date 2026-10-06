@@ -45,6 +45,7 @@ import {
   type ShapefileOptions,
   type Tone
 } from "../lib/deliver";
+import { saveBlob } from "../lib/download";
 import { useAppStore } from "../store/useAppStore";
 import { cn } from "@/lib/utils";
 
@@ -52,17 +53,6 @@ function download(format: ExportFormat, sessionId: string, request: ShapefileExp
   if (format === "qgis_project") return exportSessionQgisProject(sessionId, request!);
   if (format === "shapefiles" || format === "odc2026_shapefiles") return exportSessionShapefiles(sessionId, request!);
   return exportSessionArchive(sessionId, format === "imdf_zip");
-}
-
-function saveBlob(blob: Blob, filename: string) {
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  window.URL.revokeObjectURL(url);
 }
 
 const TONE_ICON: Record<Tone, ReactNode> = {

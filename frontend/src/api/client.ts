@@ -529,7 +529,7 @@ export async function importShapefiles(
   files: File[],
   onProgress?: (percent: number) => void
 ): Promise<ImportResponse> {
-  return uploadImportFiles("/api/import", files, onProgress);
+  return sendForm<ImportResponse>("/api/import", filesForm(files), { onProgress });
 }
 
 export async function importImdfShapefiles(
@@ -538,43 +538,41 @@ export async function importImdfShapefiles(
   preferFilenameFloor = false
 ): Promise<ImportResponse> {
   const query = preferFilenameFloor ? "?prefer_filename_floor=true" : "";
-  return uploadImportFiles(`/api/import/imdf-shapefiles${query}`, files, onProgress);
+  return sendForm<ImportResponse>(`/api/import/imdf-shapefiles${query}`, filesForm(files), { onProgress });
 }
 
-function uploadImportFiles(
-  endpoint: string,
-  files: File[],
-  onProgress?: (percent: number) => void
-): Promise<ImportResponse> {
-  const formData = new FormData();
-  files.forEach((file) => formData.append("files", file));
+function filesForm(files: File[]): FormData {
+  const form = new FormData();
+  files.forEach((file) => form.append("files", file));
+  return form;
+}
 
+type SendFormOptions = { onProgress?: (percent: number) => void };
+
+/** POSTs a multipart form over XHR, because fetch cannot report upload progress. */
+function sendForm<T>(endpoint: string, form: FormData, { onProgress }: SendFormOptions): Promise<T> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open("POST", endpoint);
 
     request.upload.onprogress = (event) => {
-      if (!event.lengthComputable || !onProgress) {
-        return;
-      }
-      const percent = Math.round((event.loaded / event.total) * 100);
-      onProgress(percent);
+      if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100));
     };
 
     request.onload = () => {
-      if (request.status >= 200 && request.status < 300) {
-        try {
-          resolve(JSON.parse(request.responseText) as ImportResponse);
-        } catch {
-          reject(new ApiClientError(request.status, "INVALID_RESPONSE", "Import returned invalid JSON."));
-        }
+      if (request.status < 200 || request.status >= 300) {
+        reject(buildApiClientError(request.status, request.responseText || ""));
         return;
       }
-      reject(buildApiClientError(request.status, request.responseText || ""));
+      try {
+        resolve(JSON.parse(request.responseText) as T);
+      } catch {
+        reject(new ApiClientError(request.status, "INVALID_RESPONSE", "The server returned invalid JSON."));
+      }
     };
 
     request.onerror = () => reject(new ApiClientError(0, "NETWORK_ERROR", "Network error during upload."));
-    request.send(formData);
+    request.send(form);
   });
 }
 
@@ -600,38 +598,6 @@ export type IllustratorConversionReport = {
   page_alignment?: IllustratorPageAlignment[];
 };
 
-export type IllustratorConversionResult = {
-  blob: Blob;
-  filename: string;
-  report: IllustratorConversionReport | null;
-};
-
-export async function convertIllustrator(file: File): Promise<IllustratorConversionResult> {
-  const formData = new FormData();
-  formData.append("file", file);
-  const response = await fetch("/api/convert/illustrator", { method: "POST", body: formData });
-  if (!response.ok) {
-    const body = await response.text();
-    throw buildApiClientError(response.status, body || "");
-  }
-  const contentDisposition = response.headers.get("content-disposition") ?? "";
-  const filenameStarMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
-  const filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
-  const filename = filenameStarMatch
-    ? decodeURIComponent(filenameStarMatch[1])
-    : filenameMatch?.[1] ?? "output.zip";
-  let report: IllustratorConversionReport | null = null;
-  const rawReport = response.headers.get("x-conversion-report");
-  if (rawReport) {
-    try {
-      report = JSON.parse(rawReport) as IllustratorConversionReport;
-    } catch {
-      report = null;
-    }
-  }
-  return { blob: await response.blob(), filename, report };
-}
-
 export async function importImdf(file: File): Promise<ImportImdfResponse> {
   const formData = new FormData();
   formData.append("file", file);
@@ -645,6 +611,23 @@ async function handleJson<T>(response: Response): Promise<T> {
     throw buildApiClientError(response.status, body || "");
   }
   return (await response.json()) as T;
+}
+
+async function handleFile(response: Response, fallback: string): Promise<ExportArchiveResponse> {
+  if (!response.ok) {
+    throw buildApiClientError(response.status, (await response.text()) || "");
+  }
+  return {
+    blob: await response.blob(),
+    filename: attachmentFilename(response.headers.get("content-disposition"), fallback)
+  };
+}
+
+/** `filename*` wins over `filename`: only it can carry a Japanese name. */
+export function attachmentFilename(disposition: string | null, fallback: string): string {
+  const encoded = disposition?.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encoded) return decodeURIComponent(encoded[1]);
+  return disposition?.match(/filename="?([^";]+)"?/i)?.[1] ?? fallback;
 }
 
 export async function fetchSessionFiles(
@@ -1006,16 +989,7 @@ export async function snapOpening(sessionId: string, openingId: string, unitId: 
 export async function exportSessionArchive(sessionId: string, asZip = false): Promise<ExportArchiveResponse> {
   const query = asZip ? "?ext=zip" : "";
   const response = await fetch(`/api/session/${sessionId}/export${query}`);
-  if (!response.ok) {
-    const body = await response.text();
-    throw buildApiClientError(response.status, body || "");
-  }
-  const contentDisposition = response.headers.get("content-disposition") ?? "";
-  const filenameMatch = contentDisposition.match(/filename=\"?([^\";]+)\"?/i);
-  return {
-    blob: await response.blob(),
-    filename: filenameMatch?.[1] ?? (asZip ? "output.zip" : "output.imdf")
-  };
+  return handleFile(response, asZip ? "output.zip" : "output.imdf");
 }
 
 export async function exportSessionShapefiles(
@@ -1029,16 +1003,7 @@ export async function exportSessionShapefiles(
     },
     body: JSON.stringify(payload)
   });
-  if (!response.ok) {
-    const body = await response.text();
-    throw buildApiClientError(response.status, body || "");
-  }
-  const contentDisposition = response.headers.get("content-disposition") ?? "";
-  const filenameMatch = contentDisposition.match(/filename=\"?([^\";]+)\"?/i);
-  return {
-    blob: await response.blob(),
-    filename: filenameMatch?.[1] ?? "output_shapefiles.zip"
-  };
+  return handleFile(response, "output_shapefiles.zip");
 }
 
 export async function exportSessionQgisProject(
@@ -1052,16 +1017,7 @@ export async function exportSessionQgisProject(
     },
     body: JSON.stringify(payload)
   });
-  if (!response.ok) {
-    const body = await response.text();
-    throw buildApiClientError(response.status, body || "");
-  }
-  const contentDisposition = response.headers.get("content-disposition") ?? "";
-  const filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
-  return {
-    blob: await response.blob(),
-    filename: filenameMatch?.[1] ?? "qgis_project.zip"
-  };
+  return handleFile(response, "qgis_project.zip");
 }
 
 export type IllustratorLayerSummary = {
@@ -1386,22 +1342,13 @@ export async function exportIllustrator(
     output_crs: string;
     formats: ExportFormatsPayload;
   }
-): Promise<{ blob: Blob; filename: string }> {
+): Promise<ExportArchiveResponse> {
   const response = await fetch(`/api/convert/illustrator/${conversionId}/export`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
-  if (!response.ok) {
-    throw buildApiClientError(response.status, (await response.text()) || "");
-  }
-  const disposition = response.headers.get("content-disposition") ?? "";
-  const starMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-  const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
-  return {
-    blob: await response.blob(),
-    filename: starMatch ? decodeURIComponent(starMatch[1]) : plainMatch?.[1] ?? "output.zip"
-  };
+  return handleFile(response, "output.zip");
 }
 
 export async function geocodeSearch(
