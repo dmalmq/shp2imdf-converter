@@ -134,6 +134,7 @@ test("layer files and projects are listed layer by layer, with what was left alo
   pickFolder([inFolder("DemoSta_0_Space.lyrx", "DemoSta_layers"), inFolder("DemoSta.aprx", "DemoSta_layers")]);
 
   await screen.findByRole("heading", { level: 1, name: "Recolour DemoSta_layers" });
+  expect(within(table()).queryByRole("columnheader", { name: "Rows" })).toBeNull();
   const symbology = screen.getByRole("region", { name: "Symbology" });
   expect(symbology).toHaveTextContent("DemoSta_layers/DemoSta_0_Space.lyrxLayer file1 redrawn");
   expect(symbology).toHaveTextContent("DemoSta_layers/DemoSta.aprxProject2 redrawn · 1 left as is");

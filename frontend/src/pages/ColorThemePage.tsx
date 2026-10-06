@@ -249,7 +249,11 @@ export function ColorThemePage() {
           <section aria-labelledby="color-theme-table" className="flex flex-col gap-2.5">
             <MicroLabel id="color-theme-table">{t("Old colour → new area", "旧カラー → 新エリア")}</MicroLabel>
             {report ? (
-              <RuleTable report={report} counted={inspection !== null} />
+              // Rows are counted only where the upload has a table to count them in, not for layer files alone.
+              <RuleTable
+                report={report}
+                counted={inspection !== null && inspection.theme.layers.length + inspection.theme.skipped.length > 0}
+              />
             ) : mapping.state === "failed" ? (
               <p role="alert" className="rounded-xl border border-border bg-card px-4 py-3 text-sm text-destructive">
                 {t("The colour table did not load.", "カラー表を読み込めませんでした。")} {mapping.message}
@@ -873,7 +877,7 @@ function Symbology({ report }: { report: ColorThemeReport }) {
                             {renderer.areas.map((key) => {
                               const area = areas.get(key);
                               return area ? (
-                                <span key={key} title={`${area.value} · ${area.spec}`}>
+                                <span key={key} className="flex" title={`${area.value} · ${area.spec}`}>
                                   <Swatch hex={area.hex} />
                                 </span>
                               ) : null;
