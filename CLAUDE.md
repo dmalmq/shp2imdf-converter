@@ -48,7 +48,8 @@ after a crash, check for orphaned uvicorn/node processes.
 `--reload-dir backend` is load-bearing. Without it uvicorn watches the whole checkout,
 including agent worktrees under `.claude/worktrees/`, so every file an agent saves restarts
 the shared server; a burst of saves races the reloader and leaves it dead with
-`PermissionError: [WinError 5]` from `multiprocessing.spawn`.
+`PermissionError: [WinError 5]` from `multiprocessing.spawn`. It needs uvicorn 0.34.3 or later:
+earlier versions add the working directory to the watch list even with `--reload-dir`.
 
 ## Test markers
 

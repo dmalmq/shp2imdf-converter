@@ -107,7 +107,7 @@ cp .env.example .env
 cd frontend && npm ci && cd ..
 
 # Run backend (terminal 1)
-uvicorn backend.main:app --reload --port 8310
+uvicorn backend.main:app --reload --reload-dir backend --port 8310
 
 # Run frontend (terminal 2)
 cd frontend && npm run dev
