@@ -300,9 +300,9 @@ async function captureIllustratorFlow(page, shoot, artwork) {
 // The station carries every rule a shapefile can match, three rows of a value
 // the table does not know and a layer too narrow for one new value, so the
 // checked page shows every kind of row it has. The zip's stem is the station
-// name the page reports.
-async function captureColorThemeFlow(page, shoot, zip) {
-  const station = path.basename(zip, ".zip");
+// name the page reports. The geodatabase, when this machine has a GDAL Python
+// to build it, is then dropped as a second station and converted for real.
+async function captureColorThemeFlow(page, shoot, zip, gdbZip) {
   await gotoHub(page);
   await page.getByRole("button", { name: /Recolour a station/ }).scrollIntoViewIfNeeded();
   await shoot("color-theme-hub");
@@ -311,17 +311,35 @@ async function captureColorThemeFlow(page, shoot, zip) {
   await page.setViewportSize(COLOR_THEME_VIEWPORT);
   await shoot("color-theme-empty");
 
+  await checkAndDownloadStation(page, shoot, zip, "color-theme");
+  if (gdbZip) await checkAndDownloadStation(page, shoot, gdbZip, "color-theme-gdb");
+}
+
+async function checkAndDownloadStation(page, shoot, zip, prefix) {
+  const station = path.basename(zip, ".zip");
   await page.locator('[data-testid="color-theme-zip-input"]').setInputFiles(zip);
   await page.getByRole("heading", { name: `Recolour ${station}`, level: 1 }).waitFor({ timeout: 60000 });
   await page.getByRole("heading", { name: "Needs attention", exact: true }).waitFor({ timeout: 15000 });
-  await page.getByText(/^Layers \(\d+\)$/).click();
-  await shoot("color-theme-checked");
+  // The layer list keeps its open state when a second station replaces the first.
+  await page.locator("details").first().evaluate((details) => {
+    details.open = true;
+  });
+  await shoot(`${prefix}-checked`);
 
   const download = page.waitForEvent("download", { timeout: 60000 });
   await page.getByRole("region", { name: "Next step" }).getByRole("button", { name: "Download", exact: true }).click();
   await download;
-  await page.getByText(`Downloaded ${station}_new-colors.zip`).waitFor({ timeout: 15000 });
-  await shoot("color-theme-delivered");
+  await page.getByText(`Downloaded ${station}_new-colors.zip`).waitFor({ timeout: 30000 });
+  await shoot(`${prefix}-delivered`);
+}
+
+function writeGeodatabaseFixture(dir) {
+  try {
+    return writeFixture(dir, "DemoSta_3857.zip", "backend.tests.gdb_fixtures", "demo_geodatabase");
+  } catch (err) {
+    console.log(`skipping the color-theme-gdb screens: ${err.message.trim().split("\n").pop()}`);
+    return null;
+  }
 }
 
 // --out can name any folder, so a rerun only clears one this script made.
@@ -355,6 +373,7 @@ async function capture(options) {
   // The artwork's name makes the station lookup query 東京駅.
   const artwork = writeFixture(options.out, "0001_東京.ai", "backend.tests.test_illustrator_import", "_build_multipage_ai_pdf");
   const station = writeFixture(options.out, "DemoSta_6677.zip", "backend.tests.color_theme_fixtures", "demo_station");
+  const geodatabase = writeGeodatabaseFixture(options.out);
   const manifest = [];
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: true });
@@ -364,7 +383,7 @@ async function capture(options) {
     for (const flow of [
       (page, shoot) => captureShapefileFlow(page, shoot),
       (page, shoot) => captureIllustratorFlow(page, shoot, artwork),
-      (page, shoot) => captureColorThemeFlow(page, shoot, station)
+      (page, shoot) => captureColorThemeFlow(page, shoot, station, geodatabase)
     ]) {
       const context = await browser.newContext({ viewport: VIEWPORT });
       await context.addInitScript(() => {
@@ -378,7 +397,7 @@ async function capture(options) {
     }
   } finally {
     await browser.close();
-    for (const fixture of [artwork, station]) fs.rmSync(fixture, { force: true });
+    for (const fixture of [artwork, station, geodatabase]) if (fixture) fs.rmSync(fixture, { force: true });
     fs.writeFileSync(path.join(options.out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   }
   const screens = new Set(manifest.map((entry) => entry.screen));

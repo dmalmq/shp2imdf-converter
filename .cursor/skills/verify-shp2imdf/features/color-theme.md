@@ -1,6 +1,6 @@
 # Recolour a station
 
-The colour tool takes one station's shapefile folder or zip, shows how each old `color2` value maps to a new area name, and returns every file as one zip with only `color2` rewritten.
+The colour tool takes one station's shapefile folder, its File Geodatabase (`.gdb` folder), or a zip of either, shows how each old `color2` value maps to a new area name, and returns every file as one zip with only `color2` rewritten. Shapefiles are patched byte for byte. A geodatabase is updated in place by GDAL in a Python that has `osgeo` (ArcGIS Pro's on this PC), so its edited tables are rewritten and every other table comes back byte for byte.
 
 ## Sub-features
 
@@ -8,6 +8,7 @@ The colour tool takes one station's shapefile folder or zip, shows how each old 
 - `color-theme-check` reads an uploaded station and shows the rows each rule changes, the layers, and what stays as it is.
 - `color-theme-attention` lists the values the table does not know and the new values that do not fit the field.
 - `color-theme-download` downloads `<station>_new-colors.zip` and moves the stage track to `Deliver`.
+- `color-theme-gdb` does the same for a zipped geodatabase: its feature classes in the tables, widths in characters, the geodatabase paragraph under `What comes back`, and the stale lock files left out.
 
 ## How to get to it (user POV)
 
@@ -33,6 +34,17 @@ Preconditions:
 - **Download.** Run `getByRole('region', { name: 'Next step' }).getByRole('button', { name: 'Download', exact: true }).click()` and wait for the browser's `download` event. The bar reads `Downloaded DemoSta_6677_new-colors.zip` (the file name appears once), the button becomes `Download again`, and the current stage is `3 · Deliver`.
 - **Proof.** Screenshot the checked page and the delivered page, and record the download's suggested file name. Write `artifacts/verify-shp2imdf/color-theme/`.
 
+### A geodatabase
+
+Preconditions: the backend found a Python with `osgeo` at startup (`GDB_GDAL_PYTHON`, else its own, else ArcGIS Pro's `arcgispro-py3`). `capture.mjs` builds `DemoSta_3857.zip` from `demo_geodatabase()` in `backend/tests/gdb_fixtures.py` through that Python, and skips the `color-theme-gdb-*` screens with a logged reason where there is none.
+
+- **Upload.** On the checked or delivered page, set `[data-testid="color-theme-zip-input"]` to the zip. Wait for the heading `Recolour DemoSta_3857`.
+- **Counts.** `What this station gets` reads `Changes 42`, `Layers 4`, `Left as is 3` and `Geodatabases 1`. `Files back untouched` is not shown for a geodatabase, because an edited feature class changes several files and GDAL adds `.freelist` files.
+- **Layers.** Each row's path is `DemoSta_3857.gdb/<feature class>`, its encoding `utf-8 · geodatabase`, and its width in characters: `254 characters`, `12 characters`, `no limit` (`DemoSta_0_Space`, width 0) and `8 characters`. `DemoSta_1_Facility` has no `color2` and is not listed.
+- **Needs attention.** `赤` (2 rows) and `DemoSta_2_Space` (1 row, the new value does not fit `color2 (8 characters)`). `階段・エスカレーター` is 10 characters, so it fits the width-12 class.
+- **What comes back.** Only the geodatabase paragraph (GDAL rewrites each changed row, `Shape_Area` and `Shape_Length` are recomputed, convert a copy and open it in ArcGIS Pro first), and `Left out: 2 stale geodatabase lock files.`
+- **Download.** As above. The bar reads `Downloaded DemoSta_3857_new-colors.zip`. The download is the real GDAL update, not a mock.
+
 ## Gotchas
 
 - The page scrolls inside the shell and the table is taller than 1440×960, so `fullPage: true` still cuts it off. `capture.mjs` uses a 1440×1700 viewport for these screens.
@@ -42,3 +54,5 @@ Preconditions:
 - The page has three file inputs. `color-theme-drop-input` is the page-wide drop zone, `color-theme-folder-input` is `Choose folder` and takes a folder path, and `color-theme-zip-input` is `Choose zip`, the only one with an `accept` filter.
 - Upload the download again and `Download` is disabled. The bar reads `Nothing to change` with the reason `Rows match an old colour, but the new value does not fit color2.`, because the B1 rows are still too narrow. `Changes` is `0` and `Files back untouched` is `13 / 13`. A second run changes nothing by design.
 - Japanese labels are `駅の色を新しくする`, `要確認`, `ダウンロード` and `もう一度ダウンロード`. The values written to `color2` are Japanese in both languages.
+- A backend with no `osgeo` Python lists the geodatabase under `Needs attention` as one that cannot be edited on this server, and it comes back as uploaded. Shapefiles in the same upload still convert.
+- A dropped `.gdb` folder sends no `*.lock` files: the page leaves them out (Tokyo's holds 1,057 of 3,022 files). A zip carries them to the server, which leaves them out of the download. The `Left out` line counts both.

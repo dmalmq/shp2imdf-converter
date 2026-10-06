@@ -10,10 +10,12 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+from tempfile import TemporaryDirectory
+
+from backend.src.gdb import find_gdal_python
+from backend.tests.color_theme_fixtures import make_zip
 
 TOOL = Path(__file__).with_name("gdb_fixture_tool.py")
-
-Rows = list[dict[str, str | None]]
 
 
 def _tool(python: Path, *args: str, stdin: bytes = b"") -> dict:
@@ -56,6 +58,34 @@ def filter_fids(path: Path, layer: str, where: str, python: Path) -> list[int]:
 def gdb_files(path: Path, prefix: str) -> list[tuple[str, bytes]]:
     """Every file of the geodatabase as upload entries under ``prefix``, in name order."""
     return [(f"{prefix}/{file.name}", file.read_bytes()) for file in sorted(path.iterdir()) if file.is_file()]
+
+
+def demo_geodatabase() -> bytes:
+    """A zipped geodatabase for capture.mjs: a width-254, a width-12 and a no-limit class, one too narrow (8)
+    for 階段・エスカレーター, two values the table does not know, a class without color2, and stale lock files."""
+    python = find_gdal_python()
+    if python is None:
+        raise RuntimeError("no Python with GDAL's osgeo; set GDB_GDAL_PYTHON")
+    floor_1 = [
+        *[("白", "B021")] * 12,
+        *[("薄鼠", "B022")] * 9,
+        *[("進入制限あり", "B999")] * 6,
+        *[("薄空", "B001")] * 5,
+        *[("トイレ", "B008")] * 3,
+        ("濃鼠", "B010"),
+        *[("赤", "B019")] * 2,
+    ]
+    classes = [
+        space("DemoSta_1_Space", floor_1, width=254, dataset="DemoSta"),
+        space("DemoSta_B1_Space", [("白", "B021"), ("黄", "B999"), ("黄", "B999")], width=12, dataset="DemoSta"),
+        space("DemoSta_0_Space", [("ラチ外白", "B999"), ("道白", "B029")], width=0, dataset="DemoSta"),
+        space("DemoSta_2_Space", [("白", "B021"), ("濃空", "B001")], width=8, dataset=None),
+        {"name": "DemoSta_1_Facility", "dataset": "DemoSta", "fields": [["name", 20]], "rows": [{"name": "gate"}]},
+    ]
+    with TemporaryDirectory() as folder:
+        gdb = build_gdb(Path(folder) / "DemoSta_3857.gdb", classes, python)
+        locks = [(f"DemoSta_3857.gdb/{name}.CL202405004.13112.44100.sr.lock", b"") for name in ("_gdb", "DemoSta_1_Space")]
+        return make_zip([*gdb_files(gdb, "DemoSta_3857.gdb"), *locks])
 
 
 def fingerprint(path: Path) -> dict[str, tuple[str, int]]:
