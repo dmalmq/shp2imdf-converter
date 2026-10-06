@@ -4,6 +4,8 @@ Format-neutral on purpose. Nothing here knows about DBF bytes, zips or GDAL: a
 layer is an id plus its decoded rows and its target field's width, and the
 answer is a report plus per-layer edits. ``recolor.py`` feeds it from
 shapefiles, and ``gdb.py`` from File Geodatabases, as the same ``LayerInput``s.
+Layer files and projects are rethemed by ``cim_symbology.py`` and only
+reported here.
 
 ``load_color_theme`` checks the invariants once, at startup. The one that
 matters most: the old vocabulary and the written vocabulary are disjoint, so
@@ -33,6 +35,12 @@ Fate = Literal["recolor", "already_new", "empty", "unmapped", "too_wide", "undec
 
 SkipReason = Literal["field_not_text", "unreadable", "gdb_unavailable"]
 """``gdb_unavailable``: no Python with GDAL's ``osgeo`` was found, so a geodatabase cannot be edited."""
+
+RendererOutcome = Literal["rewritten", "already_new", "left_alone"]
+"""What retheming did to one unique-value renderer that names the field."""
+
+LeftAloneReason = Literal["several_fields", "expression", "not_polygon", "unrecognised", "no_known_values", "unreadable"]
+"""Why a renderer that names the field was left as it was. ``unreadable``: an ``.aprx`` member that is not JSON."""
 
 WidthUnit = Literal["bytes", "characters"]
 """A DBF field counts bytes of its codec. A geodatabase text field counts characters, and 0 means no limit."""
@@ -316,6 +324,37 @@ class SkippedLine:
 
 
 @dataclass(frozen=True, slots=True)
+class RendererChange:
+    """One unique-value renderer in a layer file or project that names the field."""
+
+    layer: str | None
+    """The enclosing layer's name; the member's path when an ``.aprx`` member could not be parsed."""
+    outcome: RendererOutcome
+    reason: LeftAloneReason | None
+    """Set exactly when ``outcome`` is ``left_alone``."""
+    classes_before: int
+    classes_after: int
+    areas: tuple[AreaKey, ...]
+    """The theme areas the renderer draws after the rewrite, in theme order."""
+    kept: tuple[str, ...]
+    """Class values the theme does not know, kept in their own classes with their old symbols."""
+
+
+SymbologyKind = Literal["lyrx", "aprx"]
+
+
+@dataclass(frozen=True, slots=True)
+class SymbologyLine:
+    """One ``.lyrx`` or ``.aprx`` in the upload. An unreadable file comes back untouched."""
+
+    path: str
+    kind: SymbologyKind
+    unreadable: bool
+    renderers: tuple[RendererChange, ...]
+    """Only renderers that name the field; renderers keyed on other fields are not listed."""
+
+
+@dataclass(frozen=True, slots=True)
 class ThemeReport:
     field: str
     rules: tuple[RuleLine, ...]
@@ -324,6 +363,7 @@ class ThemeReport:
     layers: tuple[LayerLine, ...]
     skipped: tuple[SkippedLine, ...]
     totals: Counts
+    symbology: tuple[SymbologyLine, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,7 +394,9 @@ def _fits(value: str, layer: LayerInput) -> bool:
         return False
 
 
-def plan(theme: ColorTheme, layers: Sequence[LayerInput | SkippedLayer]) -> ThemePlan:
+def plan(
+    theme: ColorTheme, layers: Sequence[LayerInput | SkippedLayer], symbology: Sequence[SymbologyLine] = ()
+) -> ThemePlan:
     """Classify every row of every layer once; the report and the edits come from that one pass.
 
     A matched rule whose value is wider than the field, counted in the
@@ -434,5 +476,6 @@ def plan(theme: ColorTheme, layers: Sequence[LayerInput | SkippedLayer]) -> Them
         layers=tuple(layer_lines),
         skipped=tuple(skipped),
         totals=_counts(totals),
+        symbology=tuple(symbology),
     )
     return ThemePlan(report=report, edits=MappingProxyType(edits))
