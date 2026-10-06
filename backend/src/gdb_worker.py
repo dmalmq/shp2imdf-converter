@@ -14,10 +14,12 @@ exits 1 with the error as the last line of stderr.
 for every layer that has the field; a NULL cell is null.
 
 ``apply <gdb> <field>`` reads ``{"edits": {layer: {fid: text}}}`` on stdin, sets
-the field on exactly those rows and prints ``{"updated": n}``. It never runs
-REPACK: measured on Tokyo, REPACK rewrote 106 tables for 64 edited, deleted
-105 spatial indexes, and dropped an attribute index that ``.gdbindexes`` still
-declared, after which a filter on that field raised.
+the field on exactly those rows and prints ``{"updated": n}``. GDAL rewrites
+each such row whole, geometry included, so a polygon is first regrouped by its
+stored ring winding. It never runs REPACK: measured on Tokyo, REPACK rewrote
+106 tables for 64 edited, deleted 105 spatial indexes, and dropped an
+attribute index that ``.gdbindexes`` still declared, after which a filter on
+that field raised.
 """
 
 from __future__ import annotations
@@ -63,6 +65,42 @@ def read(path: str, field: str, category_field: str) -> dict:
     return {"gdal": gdal.__version__, "layers": layers}
 
 
+def _clockwise(ring: ogr.Geometry) -> bool:
+    points = ring.GetPoints() or []
+    return sum(x1 * y2 - x2 * y1 for (x1, y1, *_), (x2, y2, *_) in zip(points, points[1:])) < 0
+
+
+def _regrouped(geometry: ogr.Geometry | None) -> ogr.Geometry | None:
+    """The polygon regrouped by the winding it was stored with; None when GDAL's grouping already matches it.
+
+    In a geodatabase a clockwise ring is filled and a counter-clockwise one is
+    a hole. GDAL reads rings into polygons by containment and writes interior
+    rings counter-clockwise, so a clockwise ring drawn inside another (Tokyo's
+    0F floor has 26) would come back as a hole: measured, its area fell from
+    31,900.75 to 25,725.10.
+    """
+    kind = None if geometry is None else geometry.GetGeometryType()
+    if kind is None or ogr.GT_Flatten(kind) not in (ogr.wkbPolygon, ogr.wkbMultiPolygon):
+        return None
+    polygons = [geometry] if ogr.GT_Flatten(kind) == ogr.wkbPolygon else list(geometry)
+    if all(_clockwise(ring) == (index == 0) for polygon in polygons for index, ring in enumerate(polygon)):
+        return None
+    groups: list[list[ogr.Geometry]] = []
+    for ring in (ring for polygon in polygons for ring in polygon):
+        if _clockwise(ring) or not groups:
+            groups.append([ring])
+        else:
+            groups[-1].append(ring)
+    has_z, has_m = ogr.GT_HasZ(kind), ogr.GT_HasM(kind)
+    regrouped = ogr.Geometry(ogr.GT_SetModifier(ogr.wkbMultiPolygon, has_z, has_m))
+    for rings in groups:
+        polygon = ogr.Geometry(ogr.GT_SetModifier(ogr.wkbPolygon, has_z, has_m))
+        for ring in rings:
+            polygon.AddGeometry(ring)
+        regrouped.AddGeometry(polygon)
+    return regrouped
+
+
 def apply(path: str, field: str, edits: dict[str, dict[str, str]]) -> dict:
     dataset = _open(path, update=True)
     updated = 0
@@ -85,6 +123,9 @@ def apply(path: str, field: str, edits: dict[str, dict[str, str]]) -> dict:
             if feature is None:
                 raise ValueError(f"{name} has no row {fid}")
             feature.SetField(index, text)
+            regrouped = _regrouped(feature.GetGeometryRef())
+            if regrouped is not None:
+                feature.SetGeometry(regrouped)
             layer.SetFeature(feature)
             updated += 1
         layer.SyncToDisk()

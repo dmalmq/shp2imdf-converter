@@ -6,9 +6,10 @@ Standard library and ``osgeo`` only, run as ``python -I gdb_fixture_tool.py``.
 
 ``build <gdb>`` reads a spec on stdin:
 ``{"classes": [{"name", "dataset": str|null, "fields": [[name, width], ...], "index": [field, ...], "rows": [{field: text|null}]}]}``.
-Every field is text. Each row gets its own square MultiPolygon ZM, every
-class a spatial index plus ``Shape_Length``/``Shape_Area``, and every field
-named in ``index`` an attribute index.
+Every field is text. Each row gets its own square MultiPolygon ZM unless it
+names one in a ``wkt`` key, every class a spatial index plus
+``Shape_Length``/``Shape_Area``, and every field named in ``index`` an
+attribute index.
 
 ``dump <gdb>`` prints every layer's field widths and rows (``fid``, every field, ISO WKB hex),
 plus what ``tables`` prints.
@@ -48,11 +49,13 @@ def build(path: str, spec: dict) -> dict:
         for index, row in enumerate(item["rows"]):
             feature = ogr.Feature(layer.GetLayerDefn())
             for name, value in row.items():
+                if name == "wkt":
+                    continue
                 if value is None:
                     feature.SetFieldNull(name)
                 else:
                     feature.SetField(name, value)
-            feature.SetGeometry(_square(index))
+            feature.SetGeometry(ogr.CreateGeometryFromWkt(row["wkt"]) if "wkt" in row else _square(index))
             layer.CreateFeature(feature)
         for field in item.get("index", []):
             # The driver's parser takes quotes as part of the name, and index names must be ASCII.

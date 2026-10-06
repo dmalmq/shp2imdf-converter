@@ -54,14 +54,21 @@ NARROW = [("白", "B021"), ("黄", "B999"), ("薄鼠", "B022")]
 JAPANESE = [("ラチ外白", "B999"), ("トイレ", "B008")]
 TOO_NARROW = [("白", "B021"), ("黄", "B999")]
 ALREADY_NEW = [("施設", "B001"), ("改札外通路", "B999")]
+# A floor with a room drawn as a second clockwise ring inside it: two filled parts to ArcGIS, not a hole.
+NESTED_PARTS = "MULTIPOLYGON ZM (((0 0 1 0,0 100 1 0,100 100 1 0,100 0 1 0,0 0 1 0)),((10 10 1 0,10 20 1 0,20 20 1 0,20 10 1 0,10 10 1 0)))"
+WITH_HOLE = "POLYGON ZM ((200 0 1 0,200 100 1 0,300 100 1 0,300 0 1 0,200 0 1 0),(210 10 1 0,220 10 1 0,220 20 1 0,210 20 1 0,210 10 1 0))"
+RINGS = space("DemoSta_4_Space", [("薄鼠", "B022"), ("白", "B021")], width=12)
+RINGS["rows"][0]["wkt"], RINGS["rows"][1]["wkt"] = NESTED_PARTS, WITH_HOLE
 CLASSES = [
     space("DemoSta_1_Space", FLOOR_1, width=254),
     space("DemoSta_B1_Space", NARROW, width=12),
     space("G空間_0_Space", JAPANESE, width=12),
     space("DemoSta_2_Space", TOO_NARROW, width=8, dataset=None),
     space("DemoSta_3_Space", ALREADY_NEW, width=12),
+    RINGS,
     {"name": "DemoSta_1_Facility", "dataset": "Station", "fields": [["name", 20]], "rows": [{"name": "gate"}, {"name": "lift"}]},
 ]
+EDITED = ("DemoSta_1_Space", "DemoSta_B1_Space", "G空間_0_Space", "DemoSta_2_Space", "DemoSta_4_Space")
 LOCKS = [
     (f"{GDB}/_gdb.CL201902004.21204.26768.sr.lock", b""),
     (f"{GDB}/DemoSta_1_Space.CL201902004.21204.26768.sr.lock", b""),
@@ -135,20 +142,19 @@ def test_every_rule_rewrites_its_rows_inside_the_geodatabase(converted: Converte
         ("濃紅", False): 1,
         ("薄空", False): 1,
         ("濃空", False): 1,
-        ("薄鼠", False): 2,
-        ("白", False): 2,
+        ("薄鼠", False): 3,
+        ("白", False): 3,
         ("トイレ", False): 2,
         ("濃鼠", False): 1,
         ("濃鼠", True): 1,
         ("道白", False): 1,
         ("進入制限あり", False): 1,
     }
-    assert (report.totals.recolor, report.totals.already_new, report.totals.empty, report.totals.unmapped) == (21, 3, 2, 1)
+    assert (report.totals.recolor, report.totals.already_new, report.totals.empty, report.totals.unmapped) == (23, 3, 2, 1)
     assert [(line.value, line.rows) for line in report.unmapped] == [("赤", 1)]
     assert report.skipped == ()
     assert {layer.id: (layer.encoding.codec, layer.encoding.source) for layer in report.layers} == {
-        f"{GDB}/{name}": ("utf-8", "gdb")
-        for name in ("DemoSta_1_Space", "DemoSta_B1_Space", "G空間_0_Space", "DemoSta_2_Space", "DemoSta_3_Space")
+        f"{GDB}/{name}": ("utf-8", "gdb") for name in (*EDITED, "DemoSta_3_Space")
     }
 
 
@@ -182,7 +188,7 @@ def test_a_japanese_named_feature_class_converts(converted: Converted) -> None:
 @needs_gdal
 def test_converting_moves_no_other_table_field_or_shape(converted: Converted) -> None:
     before, after = converted.before, converted.after
-    edited = {before["tables"][name] for name in ("DemoSta_1_Space", "DemoSta_B1_Space", "G空間_0_Space", "DemoSta_2_Space")}
+    edited = {before["tables"][name] for name in EDITED}
     old, new = fingerprint(converted.pristine), fingerprint(converted.result)
 
     assert sorted(old.keys() - new.keys()) == []
@@ -224,7 +230,7 @@ def test_reading_a_geodatabase_writes_nothing(converted: Converted, theme: Color
 
     layers = read_layers(copy, GDB, theme, GDAL_PYTHON)
 
-    assert len(layers) == 5
+    assert len(layers) == 6
     assert fingerprint(copy) == before
 
 
