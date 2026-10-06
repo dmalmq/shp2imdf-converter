@@ -13,7 +13,7 @@ client install. See `README.md` for the product overview.
 ```
 
 ```bash
-uvicorn backend.main:app --reload --port 8310   # backend only
+uvicorn backend.main:app --reload --reload-dir backend --port 8310   # backend only
 cd frontend && npm run dev                       # frontend only
 pytest                               # testpaths = backend/tests
 cd frontend && npx vitest            # frontend unit tests
@@ -44,6 +44,11 @@ servers it started. Details in `.cursor/skills/verify-shp2imdf/SKILL.md`.
 
 `dev.ps1` spawns two `pwsh` windows and kills both on exit — if a port is still held
 after a crash, check for orphaned uvicorn/node processes.
+
+`--reload-dir backend` is load-bearing. Without it uvicorn watches the whole checkout,
+including agent worktrees under `.claude/worktrees/`, so every file an agent saves restarts
+the shared server; a burst of saves races the reloader and leaves it dead with
+`PermissionError: [WinError 5]` from `multiprocessing.spawn`.
 
 ## Test markers
 
