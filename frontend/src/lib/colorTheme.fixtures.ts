@@ -1,4 +1,11 @@
-import type { ColorThemeCounts, ColorThemeInspection, ColorThemeReport, ColorThemeRule } from "../api/client";
+import type {
+  ColorThemeCounts,
+  ColorThemeInspection,
+  ColorThemeRenderer,
+  ColorThemeReport,
+  ColorThemeRule,
+  ColorThemeSymbologyFile
+} from "../api/client";
 
 const AREAS = {
   free_area: { name: { en: "Free area outside the gates", ja: "改札外通路" }, spec: "Mono 000", hex: "#FFFFFF" },
@@ -60,7 +67,7 @@ export function colorThemeRules(rows: Record<string, number> = {}): ColorThemeRu
 
 /** What `GET /api/color-theme` answers: every rule at zero. */
 export function colorThemeReport(): ColorThemeReport {
-  return { field: "color2", rules: colorThemeRules(), unmapped: [], layers: [], skipped: [], totals: counts() };
+  return { field: "color2", rules: colorThemeRules(), unmapped: [], layers: [], skipped: [], totals: counts(), symbology: [] };
 }
 
 /** The survey numbers for JRTokyoSta_6677 (501 files, 10 Space layers, 2,164 rewrites). */
@@ -103,7 +110,8 @@ export function tokyoInspection(): ColorThemeInspection {
         counts: counts({ rows: recolor, recolor })
       })),
       skipped: [],
-      totals: counts({ rows: 2164, recolor: 2164 })
+      totals: counts({ rows: 2164, recolor: 2164 }),
+      symbology: []
     }
   };
 }
@@ -158,7 +166,8 @@ export function tokyoGeodatabaseInspection(): ColorThemeInspection {
         counts: counts({ rows: recolor, recolor })
       })),
       skipped: [],
-      totals: counts({ rows: 5996, recolor: 5996 })
+      totals: counts({ rows: 5996, recolor: 5996 }),
+      symbology: []
     }
   };
 }
@@ -176,6 +185,65 @@ export function rerunInspection(): ColorThemeInspection {
         counts: counts({ rows: layer.counts.rows, already_new: layer.counts.rows })
       })),
       totals: counts({ rows: 2164, already_new: 2164 })
+    }
+  };
+}
+
+const ALL_AREAS = ["free_area", "paid_area", "paid_area_shinkansen", "facilities", "restricted", "stairs_escalators"];
+
+function renderer(layer: string, overrides: Partial<ColorThemeRenderer> = {}): ColorThemeRenderer {
+  return {
+    layer,
+    outcome: "rewritten",
+    reason: null,
+    classes_before: 14,
+    classes_after: 6,
+    areas: ALL_AREAS,
+    kept: [],
+    ...overrides
+  };
+}
+
+/** `demo_layer_files()` in `backend/tests/color_theme_fixtures.py`: a layer file and a project, nothing else. */
+export function layerFilesInspection(): ColorThemeInspection {
+  const symbology: ColorThemeSymbologyFile[] = [
+    { path: "DemoSta_layers/DemoSta_0_Space.lyrx", kind: "lyrx", unreadable: false, renderers: [renderer("DemoSta_0_Space")] },
+    {
+      path: "DemoSta_layers/DemoSta.aprx",
+      kind: "aprx",
+      unreadable: false,
+      renderers: [
+        renderer("DemoSta_0_Space"),
+        renderer("DemoSta_1_Space", { classes_before: 15, classes_after: 7, kept: ["赤"] }),
+        renderer("DemoSta_B1_Space", { outcome: "left_alone", reason: "expression", classes_after: 14, areas: [] })
+      ]
+    }
+  ];
+  return {
+    dataset: {
+      name: "DemoSta_layers",
+      download_name: "DemoSta_layers_new-colors.zip",
+      files: 2,
+      geodatabases: 0,
+      lock_files_dropped: 0
+    },
+    theme: { ...colorThemeReport(), symbology }
+  };
+}
+
+/** The same layer files run through the tool a second time. */
+export function layerFilesRerunInspection(): ColorThemeInspection {
+  const first = layerFilesInspection();
+  return {
+    ...first,
+    theme: {
+      ...first.theme,
+      symbology: first.theme.symbology.map((file) => ({
+        ...file,
+        renderers: file.renderers.map((item) =>
+          item.outcome === "rewritten" ? { ...item, outcome: "already_new" as const, classes_before: item.classes_after } : item
+        )
+      }))
     }
   };
 }
