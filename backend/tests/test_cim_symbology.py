@@ -217,6 +217,19 @@ def test_an_added_outline_is_drawn_on_top_at_the_renderers_common_width(theme: C
     ]
 
 
+def test_a_class_drawn_without_a_solid_fill_gains_the_area_fill_under_its_own_layers(theme: ColorTheme) -> None:
+    hatched = uv_class(["薄空"], "#E5F8FF")
+    hatched["symbol"]["symbol"]["symbolLayers"][-1] = {"type": "CIMHatchFill", "enable": True, "separation": 5}
+    doc = layer_doc(renderer([hatched]))
+
+    retheme_document(doc, theme)
+
+    (facilities,) = classes_of(doc)
+    assert [layer["type"] for layer in symbol_layers(facilities)] == ["CIMSolidStroke", "CIMHatchFill", "CIMSolidFill"]
+    assert fills(facilities) == ["#DDEBEC"]
+    assert symbol_layers(facilities)[-1]["enable"] is True
+
+
 def _without_classes(doc: dict[str, Any]) -> dict[str, Any]:
     stripped = copy.deepcopy(doc)
     for layer in stripped["layerDefinitions"]:

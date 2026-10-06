@@ -217,6 +217,9 @@ def _area_class(
     if not any(isinstance(layer, dict) and layer.get("type") == "CIMSolidStroke" for layer in layers):
         # Index 0 draws on top; a stroke under the fill would be hidden by it.
         layers.insert(0, {**copy.deepcopy(stroke), "width": width})
+    if not any(isinstance(layer, dict) and layer.get("type") == "CIMSolidFill" for layer in layers):
+        # A hatch or picture fill carries no area colour; the last layer draws underneath the rest.
+        layers.append({"type": "CIMSolidFill", "enable": True, "color": None})
     for layer in layers:
         if not isinstance(layer, dict):
             continue
