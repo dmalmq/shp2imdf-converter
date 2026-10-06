@@ -247,6 +247,30 @@ def test_switched_off_fill_and_outline_do_not_count_as_drawn(theme: ColorTheme) 
     assert drawn[1] is symbol_layers(facilities)[-1]
 
 
+def test_a_fully_transparent_fill_or_outline_comes_back_opaque_and_a_tinted_one_keeps_its_alpha(theme: ColorTheme) -> None:
+    clear = uv_class(["薄空"], "#E5F8FF")
+    for layer in symbol_layers(clear):
+        layer["color"]["values"][3] = 0
+    tinted = uv_class(["黄"], "#FCFCE3")
+    symbol_layers(tinted)[-1]["color"]["values"][3] = 40
+    doc = layer_doc(renderer([clear, tinted]))
+
+    retheme_document(doc, theme)
+
+    by_label = {cls["label"]: cls for cls in classes_of(doc)}
+    assert [layer["color"]["values"][3] for layer in symbol_layers(by_label["施設"])] == [100, 100]
+    assert symbol_layers(by_label["在来線改札内"])[-1]["color"]["values"][3] == 40
+
+
+def test_a_switched_off_stroke_does_not_set_the_width_of_an_added_outline(theme: ColorTheme) -> None:
+    doc = layer_doc(renderer([uv_class(["白"], "#FFFFFF", strokes=[{**stroke(width=10), "enable": False}])]))
+
+    retheme_document(doc, theme)
+
+    (stairs,) = classes_of(doc)
+    assert (symbol_layers(stairs)[0]["enable"], symbol_layers(stairs)[0]["width"]) == (True, 0.3)
+
+
 def _without_classes(doc: dict[str, Any]) -> dict[str, Any]:
     stripped = copy.deepcopy(doc)
     for layer in stripped["layerDefinitions"]:

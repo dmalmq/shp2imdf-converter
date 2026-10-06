@@ -163,6 +163,17 @@ def test_a_project_larger_than_the_limit_once_expanded_is_not_read(theme: ColorT
     assert report.symbology[0].unreadable
 
 
+def test_projects_in_one_upload_share_the_expansion_limit(theme: ColorTheme) -> None:
+    source = make_project(project_members())
+    with zipfile.ZipFile(BytesIO(source)) as archive:
+        expanded = sum(info.file_size for info in archive.infolist())
+    assert 2 * len(source) <= expanded + expanded // 2 < 2 * expanded
+
+    report = inspect(theme, [("st/a.aprx", source), ("st/b.aprx", source)], max_bytes=expanded + expanded // 2).theme
+
+    assert [line.unreadable for line in report.symbology] == [False, True]
+
+
 def test_a_station_zip_with_layer_files_rewrites_rows_and_renderers_in_one_pass(theme: ColorTheme) -> None:
     project = make_project(project_members())
     upload = [

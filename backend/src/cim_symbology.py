@@ -195,7 +195,10 @@ def _common_stroke(classes: list[_Class]) -> tuple[float, dict[str, Any]]:
         layer
         for cls in classes
         for layer in cls.node["symbol"]["symbol"]["symbolLayers"]
-        if isinstance(layer, dict) and layer.get("type") == "CIMSolidStroke" and isinstance(layer.get("width"), (int, float))
+        if isinstance(layer, dict)
+        and layer.get("type") == "CIMSolidStroke"
+        and layer.get("enable") is not False
+        and isinstance(layer.get("width"), (int, float))
     ]
     if not strokes:
         return _DEFAULT_WIDTH, _STROKE
@@ -242,11 +245,11 @@ def _draws(layers: list[Any], kind: str) -> bool:
 
 
 def _rgb(hex_colour: str, previous: Any) -> dict[str, Any]:
-    """An opaque RGB colour, keeping the previous colour's transparency when it was RGB."""
+    """An RGB colour that keeps the previous colour's transparency when it was RGB, unless that hid it entirely."""
     alpha = 100
     if isinstance(previous, dict) and previous.get("type") == "CIMRGBColor":
         old = previous.get("values")
-        if isinstance(old, list) and len(old) == 4 and isinstance(old[3], (int, float)):
+        if isinstance(old, list) and len(old) == 4 and isinstance(old[3], (int, float)) and old[3] > 0:
             alpha = old[3]
     red, green, blue = (int(hex_colour[index : index + 2], 16) for index in (1, 3, 5))
     return {"type": "CIMRGBColor", "values": [red, green, blue, alpha]}

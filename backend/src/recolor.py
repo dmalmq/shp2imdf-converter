@@ -350,11 +350,15 @@ def _survey(
         geodatabases.append(_Geodatabase(path=root, directory=directory, python=gdal_python, layers=ids))
     symbology: list[SymbologyLine] = []
     rewritten: dict[TreePath, bytes] = {}
+    # One allowance for every project in the upload, or many small ones could each inflate to the whole limit.
+    remaining = max_bytes
     for entry in tree.entries:
         kind = _symbology_kind(entry.path)
         if entry.data is None or kind is None or _gdb_root(entry.path) is not None:
             continue
-        line, data = _retheme_file(theme, entry.path, entry.data, kind, max_bytes=max_bytes)
+        line, data = _retheme_file(theme, entry.path, entry.data, kind, max_bytes=remaining)
+        if kind == "aprx" and not line.unreadable:
+            remaining -= _expanded_size(entry.data)
         symbology.append(line)
         if data is not None:
             rewritten[entry.path] = data
@@ -489,6 +493,11 @@ def _retheme_lyrx(theme: ColorTheme, data: bytes) -> tuple[list[RendererChange],
     # Pro's own layout for a layer file; JSON escapes any newline inside a string, so only the layout's change.
     text = json.dumps(doc, ensure_ascii=False, indent=2, separators=(",", " : ")).replace("\n", "\r\n")
     return changes, bom + text.encode("utf-8")
+
+
+def _expanded_size(project: bytes) -> int:
+    with zipfile.ZipFile(BytesIO(project)) as archive:
+        return sum(info.file_size for info in archive.infolist())
 
 
 def _retheme_aprx(theme: ColorTheme, data: bytes, *, max_bytes: int) -> tuple[list[RendererChange], bytes | None]:
