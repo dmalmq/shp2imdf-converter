@@ -230,6 +230,23 @@ def test_a_class_drawn_without_a_solid_fill_gains_the_area_fill_under_its_own_la
     assert symbol_layers(facilities)[-1]["enable"] is True
 
 
+def test_switched_off_fill_and_outline_do_not_count_as_drawn(theme: ColorTheme) -> None:
+    hidden = uv_class(["薄空"], "#E5F8FF", strokes=[{**stroke(), "enable": False}])
+    hidden["symbol"]["symbol"]["symbolLayers"][-1]["enable"] = False
+    doc = layer_doc(renderer([hidden]))
+
+    retheme_document(doc, theme)
+
+    (facilities,) = classes_of(doc)
+    drawn = [layer for layer in symbol_layers(facilities) if layer.get("enable") is not False]
+    assert [(layer["type"], _hex(layer["color"])) for layer in drawn] == [
+        ("CIMSolidStroke", OUTLINE),
+        ("CIMSolidFill", "#DDEBEC"),
+    ]
+    assert drawn[0] is symbol_layers(facilities)[0]
+    assert drawn[1] is symbol_layers(facilities)[-1]
+
+
 def _without_classes(doc: dict[str, Any]) -> dict[str, Any]:
     stripped = copy.deepcopy(doc)
     for layer in stripped["layerDefinitions"]:

@@ -214,10 +214,10 @@ def _area_class(
     """The template class drawn in the area's fill, labelled and matched by the area's values; key order kept."""
     symbol = copy.deepcopy(template["symbol"])
     layers = symbol["symbol"]["symbolLayers"]
-    if not any(isinstance(layer, dict) and layer.get("type") == "CIMSolidStroke" for layer in layers):
+    if not _draws(layers, "CIMSolidStroke"):
         # Index 0 draws on top; a stroke under the fill would be hidden by it.
-        layers.insert(0, {**copy.deepcopy(stroke), "width": width})
-    if not any(isinstance(layer, dict) and layer.get("type") == "CIMSolidFill" for layer in layers):
+        layers.insert(0, {**copy.deepcopy(stroke), "width": width, "enable": True})
+    if not _draws(layers, "CIMSolidFill"):
         # A hatch or picture fill carries no area colour; the last layer draws underneath the rest.
         layers.append({"type": "CIMSolidFill", "enable": True, "color": None})
     for layer in layers:
@@ -234,6 +234,11 @@ def _area_class(
     }
     result = {key: replaced.get(key, copy.deepcopy(value)) for key, value in template.items()}
     return {**result, **{key: value for key, value in replaced.items() if key not in result}}
+
+
+def _draws(layers: list[Any], kind: str) -> bool:
+    """Whether a layer of this type is switched on; a disabled layer draws nothing, so it does not count."""
+    return any(isinstance(layer, dict) and layer.get("type") == kind and layer.get("enable") is not False for layer in layers)
 
 
 def _rgb(hex_colour: str, previous: Any) -> dict[str, Any]:
