@@ -40,6 +40,8 @@ _CASES = {
     "preview_illustrator": ("backend.routers.import_router.parse_ai", "post", "/api/convert/illustrator/preview", {"files": {"file": _PDF}}),
     "reference_layers": ("backend.routers.import_router.read_reference_layers", "post", "/api/reference-layers", {"files": [("files", ("a.shp", b"x", "application/octet-stream"))]}),
     "geocode": (None, "get", "/api/geocode?query=tokyo", {}),
+    "color_theme_inspect": ("backend.routers.color_theme_router.inspect", "post", "/api/color-theme/inspect", {"files": [("files", ("a.dbf", b"x", "application/octet-stream"))]}),
+    "color_theme_convert": ("backend.routers.color_theme_router.convert", "post", "/api/color-theme/convert", {"files": [("files", ("a.dbf", b"x", "application/octet-stream"))]}),
     "company_mappings": ("backend.routers.wizard_router.normalize_company_mappings_payload", "post", "/api/session/{session_id}/config/company-mappings", {"files": {"file": ("m.json", b"{}", "application/json")}}),
 }
 
