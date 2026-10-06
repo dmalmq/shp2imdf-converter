@@ -9,6 +9,8 @@ sees these requests.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
@@ -27,6 +29,11 @@ _FORM_PARTS = 20_000
 
 def _theme(request: Request) -> ColorTheme:
     return request.app.state.color_theme
+
+
+def _gdal_python(request: Request) -> Path | None:
+    """Resolved once at startup by ``find_gdal_python``."""
+    return request.app.state.gdal_python
 
 
 async def _station(request: Request) -> list[tuple[str, bytes]]:
@@ -48,11 +55,15 @@ def color_theme(request: Request) -> ThemeReport:
 @router.post("/inspect", response_model=Inspection)
 async def inspect_color_theme(request: Request) -> Inspection:
     blobs = await _station(request)
-    return await run_in_threadpool(inspect, _theme(request), blobs, max_bytes=max_upload_bytes(request))
+    return await run_in_threadpool(
+        inspect, _theme(request), blobs, max_bytes=max_upload_bytes(request), gdal_python=_gdal_python(request)
+    )
 
 
 @router.post("/convert")
 async def convert_color_theme(request: Request) -> Response:
     blobs = await _station(request)
-    archive = await run_in_threadpool(convert, _theme(request), blobs, max_bytes=max_upload_bytes(request))
+    archive = await run_in_threadpool(
+        convert, _theme(request), blobs, max_bytes=max_upload_bytes(request), gdal_python=_gdal_python(request)
+    )
     return attachment_response(archive.data, archive.filename)

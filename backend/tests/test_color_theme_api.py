@@ -56,6 +56,8 @@ def test_inspect_reports_each_rule_for_a_dropped_folder(test_client) -> None:
         "name": "JRTokyoSta_6677",
         "download_name": "JRTokyoSta_6677_new-colors.zip",
         "files": len(files),
+        "geodatabases": 0,
+        "lock_files_dropped": 0,
     }
     rows = {(rule["old"], tuple(rule["categories"] or ())): rule["rows"] for rule in body["theme"]["rules"]}
     assert rows[("濃鼠", ())] == 1

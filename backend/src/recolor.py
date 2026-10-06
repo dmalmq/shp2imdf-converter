@@ -1,11 +1,18 @@
-"""Apply the colour theme to one uploaded station. Every file comes back; only ``color2`` bytes change.
+"""Apply the colour theme to one uploaded station. Every file comes back; only ``color2`` changes.
 
 The upload becomes a ``FileTree``: relative path to bytes, in upload order.
-Each ``.dbf`` in it that carries the theme's field is decoded here (the one
-decode/encode boundary), planned by ``color_theme.plan`` and patched by
-``DbfTable.with_text``. Every other entry is carried over as it came. No
-geometry is opened, so PolygonZM measures, .prj text and spatial indexes
-cannot drift.
+Entries under a folder named ``*.gdb`` belong to a File Geodatabase;
+everything else is a shapefile's or passes through. Each ``.dbf`` that
+carries the theme's field is decoded here (the one decode/encode boundary),
+planned by ``color_theme.plan`` and patched by ``DbfTable.with_text``. No
+shapefile geometry is opened, so PolygonZM measures, .prj text and spatial
+indexes cannot drift.
+
+A geodatabase is written to a temporary folder, read and updated in place
+there through ``gdb.py``, and its entries are replaced by the files on disk.
+GDAL rewrites each edited row, so for a geodatabase the guarantee is per
+table: a table without edits comes back byte for byte. Stale ``*.lock``
+files inside a ``.gdb`` are left out.
 
 ``inspect`` and ``convert`` share one private pass, so the report the
 operator checks and the archive they download come from the same plan.
@@ -14,10 +21,11 @@ operator checks and the archive they download come from the same plan.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import re
+from tempfile import TemporaryDirectory
 import time
 from typing import NewType
 import zipfile
@@ -33,6 +41,7 @@ from backend.src.color_theme import (
     plan,
 )
 from backend.src.dbf_table import DbfField, DbfLayoutError, DbfTable, resolve_codec
+from backend.src.gdb import apply_edits, read_layers
 from backend.src.importer import zip_member_name
 
 DOWNLOAD_SUFFIX = "_new-colors"
@@ -46,7 +55,10 @@ class DatasetInfo:
     ``station``. A trailing ``.shp`` or ``.gdb`` is dropped (``JRTokyoSta_6677.shp`` gives ``JRTokyoSta_6677``)."""
     download_name: str
     files: int
-    """Every file in the upload, including the ones that come back untouched."""
+    """Every file in the upload that comes back: the untouched ones included, lock files not."""
+    geodatabases: int
+    lock_files_dropped: int
+    """Stale ``*.lock`` files inside a ``.gdb``, left out of the download."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,21 +73,44 @@ class Archive:
     data: bytes
 
 
-def inspect(theme: ColorTheme, blobs: Sequence[tuple[str, bytes]], *, max_bytes: int) -> Inspection:
-    """What converting this upload would change. Writes nothing anywhere."""
-    survey = _survey(theme, blobs, max_bytes=max_bytes)
-    return Inspection(dataset=_dataset(survey.tree), theme=survey.plan.report)
+def inspect(
+    theme: ColorTheme, blobs: Sequence[tuple[str, bytes]], *, max_bytes: int, gdal_python: Path | None = None
+) -> Inspection:
+    """What converting this upload would change. Writes nothing but a temporary copy of its geodatabases.
+
+    ``gdal_python`` runs ``gdb_worker.py``; without one each geodatabase is ``gdb_unavailable``.
+    """
+    with TemporaryDirectory(prefix="color-theme-") as workspace:
+        survey = _survey(theme, blobs, max_bytes=max_bytes, gdal_python=gdal_python, workspace=Path(workspace))
+    return Inspection(dataset=survey.dataset, theme=survey.plan.report)
 
 
-def convert(theme: ColorTheme, blobs: Sequence[tuple[str, bytes]], *, max_bytes: int) -> Archive:
+def convert(
+    theme: ColorTheme, blobs: Sequence[tuple[str, bytes]], *, max_bytes: int, gdal_python: Path | None = None
+) -> Archive:
     """The upload as a zip with the theme applied: same entries, same order, same bytes but the edits.
 
-    Converting a converted upload finds every value already new and returns
-    the same entries with the same bytes.
+    In a geodatabase with edits, the edited tables come back as GDAL
+    rewrote them and files GDAL added follow its last entry. Converting a
+    converted upload finds every value already new and returns the same
+    entries with the same bytes.
     """
-    survey = _survey(theme, blobs, max_bytes=max_bytes)
-    replaced = {path: _patch(survey.tables[path], edits) for path, edits in survey.plan.edits.items()}
-    return Archive(filename=_dataset(survey.tree).download_name, data=_write_zip(survey.tree, replaced))
+    with TemporaryDirectory(prefix="color-theme-") as workspace:
+        survey = _survey(theme, blobs, max_bytes=max_bytes, gdal_python=gdal_python, workspace=Path(workspace))
+        tree = survey.tree
+        for gdb in survey.geodatabases:
+            edits = {
+                layer_id.removeprefix(f"{gdb.path}/"): survey.plan.edits[layer_id]
+                for layer_id in gdb.layers
+                if layer_id in survey.plan.edits
+            }
+            if edits:
+                apply_edits(gdb.directory, theme.field, edits, gdb.python)
+                tree = _reloaded(tree, gdb)
+    replaced = {
+        path: _patch(table, survey.plan.edits[path]) for path, table in survey.tables.items() if path in survey.plan.edits
+    }
+    return Archive(filename=survey.dataset.download_name, data=_write_zip(tree, replaced))
 
 
 TreePath = NewType("TreePath", str)
@@ -176,12 +211,18 @@ def _folder_name(paths: Sequence[TreePath]) -> str:
     return "_".join(shared) or "station"
 
 
-def _dataset(tree: FileTree) -> DatasetInfo:
-    return DatasetInfo(
-        name=tree.name,
-        download_name=f"{tree.name}{DOWNLOAD_SUFFIX}.zip",
-        files=sum(1 for entry in tree.entries if entry.data is not None),
-    )
+def _gdb_root(path: TreePath) -> TreePath | None:
+    """The outermost folder named ``*.gdb`` holding this entry; None outside a geodatabase."""
+    segments = path.rstrip("/").split("/")
+    for depth, segment in enumerate(segments[:-1]):
+        if segment.lower().endswith(".gdb"):
+            return TreePath("/".join(segments[: depth + 1]))
+    return None
+
+
+def _is_lock_file(entry: TreeEntry) -> bool:
+    """ArcGIS leaves ``*.sr.lock`` files in a .gdb (Tokyo's held 1,057 of 3,022 files); a copy is locked by none of them."""
+    return entry.data is not None and entry.path.lower().endswith(".lock") and _gdb_root(entry.path) is not None
 
 
 def _write_zip(tree: FileTree, replaced: Mapping[TreePath, bytes]) -> bytes:
@@ -218,25 +259,51 @@ class _Table:
 
 
 @dataclass(frozen=True, slots=True)
+class _Geodatabase:
+    path: TreePath
+    directory: Path
+    """Its files, written out under the workspace."""
+    python: Path
+    """The interpreter that read it, and so the one that updates it."""
+    layers: tuple[str, ...]
+    """Ids of the layers read from it, each ``<path>/<layer name>``."""
+
+
+@dataclass(frozen=True, slots=True)
 class _Survey:
     tree: FileTree
+    """The upload without its lock files."""
+    dataset: DatasetInfo
     tables: Mapping[str, _Table]
+    geodatabases: tuple[_Geodatabase, ...]
+    """The ones that were read; none without a GDAL Python."""
     plan: ThemePlan
 
 
-def _survey(theme: ColorTheme, blobs: Sequence[tuple[str, bytes]], *, max_bytes: int) -> _Survey:
-    """The tree, then one layer per DBF that names the theme's field, then the plan.
+def _survey(
+    theme: ColorTheme,
+    blobs: Sequence[tuple[str, bytes]],
+    *,
+    max_bytes: int,
+    gdal_python: Path | None,
+    workspace: Path,
+) -> _Survey:
+    """The tree, then one layer per DBF and per geodatabase layer that names the theme's field, then the plan.
 
     A .dbf whose header does not add up is reported ``unreadable``: it might
     have carried the field, and the operator should hear about it. A .dbf
-    without the field is not a layer.
+    without the field is not a layer. A geodatabase is either read whole or
+    reported as one ``gdb_unavailable`` or ``unreadable`` entry.
     """
-    tree = _tree_from_upload(blobs, max_bytes=max_bytes)
+    uploaded = _tree_from_upload(blobs, max_bytes=max_bytes)
+    tree = replace(uploaded, entries=tuple(entry for entry in uploaded.entries if not _is_lock_file(entry)))
     files = {entry.path.casefold(): entry.data for entry in tree.entries if entry.data is not None}
+    in_gdb = [root for entry in tree.entries if entry.data is not None and (root := _gdb_root(entry.path)) is not None]
+    roots = list(dict.fromkeys(in_gdb))
     tables: dict[str, _Table] = {}
     layers: list[LayerInput | SkippedLayer] = []
     for entry in tree.entries:
-        if entry.data is None or not entry.path.lower().endswith(".dbf"):
+        if entry.data is None or not entry.path.lower().endswith(".dbf") or _gdb_root(entry.path) is not None:
             continue
         try:
             table = DbfTable.parse(entry.data)
@@ -252,7 +319,69 @@ def _survey(theme: ColorTheme, blobs: Sequence[tuple[str, bytes]], *, max_bytes:
         layer = _layer(theme, entry.path, table, field, files.get(entry.path[:-4].casefold() + ".cpg"))
         tables[entry.path] = _Table(table=table, field=field, codec=layer.encoding.codec)
         layers.append(layer)
-    return _Survey(tree=tree, tables=tables, plan=plan(theme, layers))
+    geodatabases: list[_Geodatabase] = []
+    for number, root in enumerate(roots):
+        if gdal_python is None:
+            layers.append(SkippedLayer(id=root, reason="gdb_unavailable"))
+            continue
+        directory = workspace / f"{number}.gdb"
+        read = _read_geodatabase(theme, tree, root, directory, gdal_python)
+        layers += read
+        ids = tuple(layer.id for layer in read if isinstance(layer, LayerInput))
+        geodatabases.append(_Geodatabase(path=root, directory=directory, python=gdal_python, layers=ids))
+    dataset = DatasetInfo(
+        name=tree.name,
+        download_name=f"{tree.name}{DOWNLOAD_SUFFIX}.zip",
+        files=sum(1 for entry in tree.entries if entry.data is not None),
+        geodatabases=len(roots),
+        lock_files_dropped=len(uploaded.entries) - len(tree.entries),
+    )
+    return _Survey(tree=tree, dataset=dataset, tables=tables, geodatabases=tuple(geodatabases), plan=plan(theme, layers))
+
+
+def _read_geodatabase(
+    theme: ColorTheme, tree: FileTree, root: TreePath, directory: Path, python: Path
+) -> list[LayerInput | SkippedLayer]:
+    prefix = f"{root}/"
+    try:
+        for entry in tree.entries:
+            if entry.data is not None and entry.path.startswith(prefix):
+                target = directory / entry.path.removeprefix(prefix)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(entry.data)
+    except OSError:
+        # A name Windows will not create (CON, a trailing dot) cannot be a geodatabase file anyway.
+        return [SkippedLayer(id=root, reason="unreadable")]
+    return read_layers(directory, root, theme, python)
+
+
+def _reloaded(tree: FileTree, gdb: _Geodatabase) -> FileTree:
+    """``tree`` with the geodatabase's entries read back from its folder after an update.
+
+    A file still there keeps its position and zip date, a file GDAL added
+    follows the geodatabase's last entry, and a file GDAL removed is dropped.
+    """
+    prefix = f"{gdb.path}/"
+    on_disk = {
+        file.relative_to(gdb.directory).as_posix(): file for file in sorted(gdb.directory.rglob("*")) if file.is_file()
+    }
+    unclaimed = {name.casefold(): name for name in on_disk}
+    entries: list[TreeEntry] = []
+    after_last = 0
+    for entry in tree.entries:
+        if not entry.path.startswith(prefix):
+            entries.append(entry)
+            continue
+        name = unclaimed.pop(entry.path.removeprefix(prefix).casefold(), None)
+        if entry.data is None:
+            entries.append(entry)
+        elif name is not None:
+            entries.append(replace(entry, data=on_disk[name].read_bytes()))
+        after_last = len(entries)
+    added = [
+        TreeEntry(path=TreePath(prefix + name), data=on_disk[name].read_bytes(), source=None) for name in unclaimed.values()
+    ]
+    return replace(tree, entries=(*entries[:after_last], *added, *entries[after_last:]))
 
 
 def _layer(theme: ColorTheme, path: str, table: DbfTable, field: DbfField, cpg: bytes | None) -> LayerInput:
