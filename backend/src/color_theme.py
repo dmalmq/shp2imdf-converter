@@ -3,7 +3,7 @@
 Format-neutral on purpose. Nothing here knows about DBF bytes, zips or GDAL: a
 layer is an id plus its decoded rows and its target field's width, and the
 answer is a report plus per-layer edits. ``recolor.py`` feeds it from
-shapefiles; a File Geodatabase reader would build the same ``LayerInput``s.
+shapefiles, and ``gdb.py`` from File Geodatabases, as the same ``LayerInput``s.
 
 ``load_color_theme`` checks the invariants once, at startup. The one that
 matters most: the old vocabulary and the written vocabulary are disjoint, so
@@ -31,7 +31,11 @@ Keep = Literal["empty", "already_new", "unmapped"]
 Fate = Literal["recolor", "already_new", "empty", "unmapped", "too_wide", "undecodable"]
 """What happens to one row. Only ``recolor`` writes."""
 
-SkipReason = Literal["field_not_text", "unreadable"]
+SkipReason = Literal["field_not_text", "unreadable", "gdb_unavailable"]
+"""``gdb_unavailable``: no Python with GDAL's ``osgeo`` was found, so a geodatabase cannot be edited."""
+
+WidthUnit = Literal["bytes", "characters"]
+"""A DBF field counts bytes of its codec. A geodatabase text field counts characters, and 0 means no limit."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,7 +216,7 @@ def load_color_theme(path: Path) -> ColorTheme:
 @dataclass(frozen=True, slots=True)
 class Row:
     index: int
-    """Record number in the layer, counting deleted records, so an edit addresses the source row."""
+    """Addresses the source row: the DBF record number, counting deleted records, or the geodatabase FID."""
     value: str | None
     """Decoded target field, trailing blanks stripped. None when the bytes do not decode."""
     category: str | None
@@ -222,16 +226,16 @@ class Row:
 class Encoding:
     codec: str
     source: str
-    """Where the codec came from: "cpg", "ldid", "sniffed" or "ascii" for a shapefile."""
+    """Where the codec came from: "cpg", "ldid", "sniffed" or "ascii" for a shapefile, "gdb" for a geodatabase."""
 
 
 @dataclass(frozen=True, slots=True)
 class LayerInput:
     id: str
-    """Shown to the operator: the path inside the upload for a shapefile."""
+    """Shown to the operator: the .dbf's path inside the upload, or ``<gdb path>/<feature class>``."""
     rows: Sequence[Row]
     width: int
-    """The target field's width in bytes of ``encoding.codec``."""
+    width_unit: WidthUnit
     encoding: Encoding
 
 
@@ -286,6 +290,7 @@ class LayerLine:
     id: str
     encoding: Encoding
     width: int
+    width_unit: WidthUnit
     counts: Counts
 
 
@@ -325,9 +330,11 @@ def _counts(fates: Counter[Fate]) -> Counts:
     )
 
 
-def _fits(value: str, codec: str, width: int) -> bool:
+def _fits(value: str, layer: LayerInput) -> bool:
+    if layer.width_unit == "characters":
+        return layer.width == 0 or len(value) <= layer.width
     try:
-        return len(value.encode(codec)) <= width
+        return len(value.encode(layer.encoding.codec)) <= layer.width
     except UnicodeEncodeError:
         return False
 
@@ -335,8 +342,8 @@ def _fits(value: str, codec: str, width: int) -> bool:
 def plan(theme: ColorTheme, layers: Sequence[LayerInput | SkippedLayer]) -> ThemePlan:
     """Classify every row of every layer once; the report and the edits come from that one pass.
 
-    A matched rule whose value, encoded with the layer's codec, is wider than
-    the field is ``too_wide``: reported, never truncated. Pure, so the inspect
+    A matched rule whose value is wider than the field, counted in the
+    layer's own unit, is ``too_wide``: reported, never truncated. Pure, so the inspect
     call and the convert call cannot disagree.
     """
     rule_rows: Counter[RuleId] = Counter()
@@ -354,9 +361,7 @@ def plan(theme: ColorTheme, layers: Sequence[LayerInput | SkippedLayer]) -> Them
             continue
         fates: Counter[Fate] = Counter()
         layer_edits: dict[int, str] = {}
-        fits = {
-            area.key: _fits(area.value, layer.encoding.codec, layer.width) for area in theme.areas
-        }
+        fits = {area.key: _fits(area.value, layer) for area in theme.areas}
         for row in layer.rows:
             if row.value is None:
                 fates["undecodable"] += 1
@@ -379,7 +384,13 @@ def plan(theme: ColorTheme, layers: Sequence[LayerInput | SkippedLayer]) -> Them
             edits[layer.id] = MappingProxyType(layer_edits)
         totals.update(fates)
         layer_lines.append(
-            LayerLine(id=layer.id, encoding=layer.encoding, width=layer.width, counts=_counts(fates))
+            LayerLine(
+                id=layer.id,
+                encoding=layer.encoding,
+                width=layer.width,
+                width_unit=layer.width_unit,
+                counts=_counts(fates),
+            )
         )
 
     report = ThemeReport(

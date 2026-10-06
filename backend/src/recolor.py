@@ -267,7 +267,9 @@ def _layer(theme: ColorTheme, path: str, table: DbfTable, field: DbfField, cpg: 
         if category_field is not None and category is None:
             value = None
         rows.append(Row(index=row, value=value, category=category))
-    return LayerInput(id=path, rows=rows, width=field.width, encoding=Encoding(codec.name, codec.source))
+    return LayerInput(
+        id=path, rows=rows, width=field.width, width_unit="bytes", encoding=Encoding(codec.name, codec.source)
+    )
 
 
 def _decode(raw: bytes, codec: str) -> str | None:

@@ -15,6 +15,7 @@ from backend.src.color_theme import (
     Row,
     Rule,
     SkippedLayer,
+    WidthUnit,
     load_color_theme,
     plan,
 )
@@ -136,9 +137,16 @@ def test_a_broken_table_stops_the_load(tmp_path: Path, broken: str) -> None:
         load_color_theme(_broken(tmp_path, BROKEN[broken]))
 
 
-def _layer(layer_id: str, values: list[tuple[str | None, str | None]], *, width: int = 254, encoding: Encoding = UTF8) -> LayerInput:
+def _layer(
+    layer_id: str,
+    values: list[tuple[str | None, str | None]],
+    *,
+    width: int = 254,
+    width_unit: WidthUnit = "bytes",
+    encoding: Encoding = UTF8,
+) -> LayerInput:
     rows = [Row(index=index, value=value, category=category) for index, (value, category) in enumerate(values)]
-    return LayerInput(id=layer_id, rows=rows, width=width, encoding=encoding)
+    return LayerInput(id=layer_id, rows=rows, width=width, width_unit=width_unit, encoding=encoding)
 
 
 def test_plan_counts_each_fate_and_edits_only_rewritten_rows(theme: ColorTheme) -> None:
@@ -196,6 +204,29 @@ def test_a_value_wider_than_the_field_in_its_own_codec_is_reported_not_written(t
     assert (stairs.rows, stairs.too_wide) == (0, 1)
     assert utf8.report.totals.too_wide == 1
     assert dict(cp932.edits) == {"c.dbf": {0: "階段・エスカレーター", 1: "在来線改札内"}}
+
+
+@pytest.mark.parametrize(
+    ("width", "unit", "written"),
+    [
+        (12, "characters", True),
+        (10, "characters", True),
+        (9, "characters", False),
+        (0, "characters", True),
+        (30, "bytes", True),
+        (29, "bytes", False),
+        (0, "bytes", False),
+    ],
+)
+def test_a_geodatabase_width_counts_characters_and_zero_is_no_limit(
+    theme: ColorTheme, width: int, unit: WidthUnit, written: bool
+) -> None:
+    # 階段・エスカレーター is 10 characters and 30 UTF-8 bytes.
+    result = plan(theme, [_layer("g", [("白", "B021")], width=width, width_unit=unit, encoding=Encoding("utf-8", "gdb"))])
+
+    assert dict(result.edits) == ({"g": {0: "階段・エスカレーター"}} if written else {})
+    assert result.report.totals.too_wide == (0 if written else 1)
+    assert (result.report.layers[0].width, result.report.layers[0].width_unit) == (width, unit)
 
 
 def test_planning_the_written_rows_again_changes_nothing(theme: ColorTheme) -> None:
