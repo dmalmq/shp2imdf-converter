@@ -80,7 +80,7 @@ def inspect(
 
     ``gdal_python`` runs ``gdb_worker.py``; without one each geodatabase is ``gdb_unavailable``.
     """
-    with TemporaryDirectory(prefix="color-theme-") as workspace:
+    with _workspace() as workspace:
         survey = _survey(theme, blobs, max_bytes=max_bytes, gdal_python=gdal_python, workspace=Path(workspace))
     return Inspection(dataset=survey.dataset, theme=survey.plan.report)
 
@@ -95,7 +95,7 @@ def convert(
     converted upload finds every value already new and returns the same
     entries with the same bytes.
     """
-    with TemporaryDirectory(prefix="color-theme-") as workspace:
+    with _workspace() as workspace:
         survey = _survey(theme, blobs, max_bytes=max_bytes, gdal_python=gdal_python, workspace=Path(workspace))
         tree = survey.tree
         for gdb in survey.geodatabases:
@@ -111,6 +111,11 @@ def convert(
         path: _patch(table, survey.plan.edits[path]) for path, table in survey.tables.items() if path in survey.plan.edits
     }
     return Archive(filename=survey.dataset.download_name, data=_write_zip(tree, replaced))
+
+
+def _workspace() -> TemporaryDirectory[str]:
+    # A virus scanner can still hold a file GDAL just wrote; a leftover folder must not fail a finished conversion.
+    return TemporaryDirectory(prefix="color-theme-", ignore_cleanup_errors=True)
 
 
 TreePath = NewType("TreePath", str)
