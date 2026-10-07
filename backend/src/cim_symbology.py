@@ -136,6 +136,8 @@ def _retheme(renderer: dict[str, Any], layer: str | None, theme: ColorTheme) -> 
         return _left_alone(layer, "unrecognised", before)
     if any(cls.node["symbol"]["symbol"].get("type") != "CIMPolygonSymbol" for cls in classes):
         return _left_alone(layer, "not_polygon", before)
+    if _colours_set_at_draw_time(renderer, classes):
+        return _left_alone(layer, "unrecognised", before)
 
     area_values = _area_values(theme)
     area_of = {value: key for key, values in area_values.items() for value in values}
@@ -190,6 +192,21 @@ def _retheme(renderer: dict[str, Any], layer: str | None, theme: ColorTheme) -> 
         areas=tuple(area.key for area in theme.areas if area.key in first),
         kept=tuple(kept),
     )
+
+
+def _colours_set_at_draw_time(renderer: dict[str, Any], classes: list[_Class]) -> bool:
+    """A colour visual variable or a primitive override repaints a class when it draws, whatever its symbol says."""
+    variables = renderer.get("visualVariables")
+    if isinstance(variables, list) and any(
+        isinstance(item, dict) and item.get("type") == "CIMColorVisualVariable" for item in variables
+    ):
+        return True
+    for cls in classes:
+        alternates = cls.node.get("alternateSymbols")
+        references = [cls.node["symbol"], *(alternates if isinstance(alternates, list) else [])]
+        if any(isinstance(reference, dict) and reference.get("primitiveOverrides") for reference in references):
+            return True
+    return False
 
 
 def _common_stroke(classes: list[_Class]) -> tuple[float, dict[str, Any]]:

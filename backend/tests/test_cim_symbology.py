@@ -294,6 +294,25 @@ def test_alternate_scale_symbols_are_redrawn_like_the_main_symbol(theme: ColorTh
         assert [(layer["type"], _hex(layer["color"])) for layer in layers] == [("CIMSolidStroke", OUTLINE), ("CIMSolidFill", "#DDEBEC")]
 
 
+def test_a_renderer_whose_colours_are_overridden_at_draw_time_is_left_alone(theme: ColorTheme) -> None:
+    ramped = renderer([uv_class(["薄空"], "#E5F8FF")], visualVariables=[{"type": "CIMColorVisualVariable"}])
+    overridden_class = uv_class(["薄空"], "#E5F8FF")
+    overridden_class["symbol"]["primitiveOverrides"] = [{"type": "CIMPrimitiveOverride", "propertyName": "Color"}]
+    overridden = renderer([overridden_class])
+    sized = renderer([uv_class(["薄空"], "#E5F8FF")], visualVariables=[{"type": "CIMSizeVisualVariable"}])
+    doc = layer_doc(ramped, overridden, sized)
+    before = copy.deepcopy(doc)
+
+    changes = retheme_document(doc, theme)
+
+    assert [(change.outcome, change.reason) for change in changes] == [
+        ("left_alone", "unrecognised"),
+        ("left_alone", "unrecognised"),
+        ("rewritten", None),
+    ]
+    assert doc["layerDefinitions"][:2] == before["layerDefinitions"][:2]
+
+
 def _without_classes(doc: dict[str, Any]) -> dict[str, Any]:
     stripped = copy.deepcopy(doc)
     for layer in stripped["layerDefinitions"]:
