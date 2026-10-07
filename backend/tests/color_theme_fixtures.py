@@ -195,6 +195,15 @@ def demo_station() -> bytes:
     return make_zip(members)
 
 
+def zip_members(payload: bytes) -> list[tuple[str, tuple[int, ...], int, int, bytes]]:
+    """Each member of a zip that passes its own CRC check, in order: name, date, compression, CRC, inflated data."""
+    with zipfile.ZipFile(BytesIO(payload)) as archive:
+        assert archive.testzip() is None
+        return [
+            (info.filename, info.date_time, info.compress_type, info.CRC, archive.read(info)) for info in archive.infolist()
+        ]
+
+
 LAYER_FILE = Path(__file__).resolve().parent / "fixtures" / "color_theme" / "DemoSta_0_Space.lyrx"
 """One layer of the Tokyo station project as a layer file: its 14 color2 classes, with names and paths replaced."""
 

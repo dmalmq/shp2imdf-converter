@@ -20,6 +20,7 @@ from backend.tests.color_theme_fixtures import (
     read_zip,
     station_members,
     unit_project_members,
+    zip_members as _members,
 )
 
 pytestmark = pytest.mark.colortheme
@@ -104,14 +105,6 @@ def test_a_layer_file_without_a_color2_renderer_comes_back_byte_for_byte(theme: 
 
     assert [(line.path, line.renderers) for line in report.symbology] == [("a.lyrx", ())]
     assert output["a.lyrx"] == source
-
-
-def _members(payload: bytes) -> list[tuple[str, tuple[int, ...], int, int, bytes]]:
-    with zipfile.ZipFile(BytesIO(payload)) as archive:
-        assert archive.testzip() is None
-        return [
-            (info.filename, info.date_time, info.compress_type, info.CRC, archive.read(info)) for info in archive.infolist()
-        ]
 
 
 def test_a_project_changes_only_the_members_with_a_color2_renderer(theme: ColorTheme) -> None:

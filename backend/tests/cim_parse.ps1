@@ -1,7 +1,8 @@
-# Reads a .lyrx, or every color2 layer member of an .aprx, with Esri's own CIM deserializer
-# (ArcGIS.Core.dll, no Pro session and no licence) and prints what it read back as JSON.
-# usage: pwsh -NoProfile -File cim_parse.ps1 <ArcGIS.Core.dll> <file.lyrx|file.aprx>
-param([Parameter(Mandatory)][string]$Dll, [Parameter(Mandatory)][string]$Path)
+# Reads a .lyrx, or every layer member of an .aprx whose renderer is keyed on one field alone (color2 unless
+# named), with Esri's own CIM deserializer (ArcGIS.Core.dll, no Pro session and no licence) and prints what it
+# read back as JSON.
+# usage: pwsh -NoProfile -File cim_parse.ps1 <ArcGIS.Core.dll> <file.lyrx|file.aprx> [field]
+param([Parameter(Mandatory)][string]$Dll, [Parameter(Mandatory)][string]$Path, [string]$Field = "color2")
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $asm = [Reflection.Assembly]::LoadFrom($Dll)
@@ -46,7 +47,7 @@ if ($Path.ToLower().EndsWith(".aprx")) {
             $reader = [IO.StreamReader]::new($entry.Open(), [Text.Encoding]::UTF8)
             $text = $reader.ReadToEnd()
             $reader.Dispose()
-            if ($text -notmatch '"CIMFeatureLayer"' -or $text -notmatch '"fields":\["color2"\]') { continue }
+            if ($text -notmatch '"CIMFeatureLayer"' -or -not $text.Contains('"fields":["' + $Field + '"]')) { continue }
             try { $layers += , (Describe (Parse $text)) } catch { $failed += $entry.FullName }
         }
     }

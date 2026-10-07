@@ -20,13 +20,14 @@ AVAILABLE = ARCGIS_CORE.is_file() and PWSH is not None
 SKIP_REASON = "needs ArcGIS Pro's ArcGIS.Core.dll and PowerShell 7"
 
 
-def esri_read(path: Path) -> dict[str, Any]:
+def esri_read(path: Path, field: str = "color2") -> dict[str, Any]:
     """``{"layers": [{name, fields, classes: [{label, values, layers, fill, stroke}]}], "failed": [member, ...]}``.
 
-    Raises CalledProcessError when a layer file does not parse.
+    From a project, the layers whose renderer is keyed on ``field`` alone. Raises CalledProcessError when a
+    layer file does not parse.
     """
     done = subprocess.run(
-        [str(PWSH), "-NoProfile", "-NonInteractive", "-File", str(SCRIPT), str(ARCGIS_CORE), str(path)],
+        [str(PWSH), "-NoProfile", "-NonInteractive", "-File", str(SCRIPT), str(ARCGIS_CORE), str(path), field],
         capture_output=True,
         check=True,
         timeout=600,
