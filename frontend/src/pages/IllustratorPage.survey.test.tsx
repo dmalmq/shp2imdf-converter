@@ -4,7 +4,7 @@ import type { FeatureCollection, Polygon } from "geojson";
 
 import { assignFloors, previewIllustrator, snapIllustratorSurvey } from "../api/client";
 import type * as ApiClient from "../api/client";
-import type { SurveySnapModel } from "../components/illustrator/PlacementSidebar";
+import type { SurveySnapModel } from "../components/illustrator/AlignPanel";
 import {
   DEFAULT_METRES_PER_POINT,
   type AdjustmentMode,
@@ -68,8 +68,8 @@ type SidebarProps = {
   statuses: Map<string, FloorStatus>;
 };
 
-vi.mock("../components/illustrator/PlacementSidebar", () => ({
-  PlacementSidebar: ({
+vi.mock("../components/illustrator/AlignPanel", () => ({
+  AlignPanel: ({
     state,
     dispatch,
     surveySnap,

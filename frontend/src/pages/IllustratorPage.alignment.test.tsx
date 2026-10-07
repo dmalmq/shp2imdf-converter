@@ -31,8 +31,8 @@ type MapProps = SidebarProps & {
   onPickMap: (point: [number, number]) => void;
 };
 
-vi.mock("../components/illustrator/PlacementSidebar", () => ({
-  PlacementSidebar: ({ state, dispatch, mode, pickStage, onTogglePicking }: SidebarProps) => (
+vi.mock("../components/illustrator/AlignPanel", () => ({
+  AlignPanel: ({ state, dispatch, mode, pickStage, onTogglePicking }: SidebarProps) => (
     <section>
       <button type="button" onClick={onTogglePicking}>
         Add matching pair

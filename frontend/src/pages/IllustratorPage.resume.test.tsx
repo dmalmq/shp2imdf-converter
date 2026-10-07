@@ -10,9 +10,15 @@ import {
 } from "../api/client";
 import type * as ApiClient from "../api/client";
 import type { ReferenceLayer } from "../components/illustrator/PlacementMap";
-import type { PlacementTab } from "../components/illustrator/PlacementSidebar";
 import { type PlacementAction, type PlacementState } from "../hooks/useIllustratorPlacement";
+import { usePageShell } from "../components/shell/ShellContext";
+import type * as Shell from "../components/shell/ShellContext";
 import { IllustratorPage } from "./IllustratorPage";
+
+vi.mock("../components/shell/ShellContext", async (importOriginal) => {
+  const actual = await importOriginal<typeof Shell>();
+  return { ...actual, usePageShell: vi.fn(actual.usePageShell) };
+});
 
 vi.mock("../api/client", async (importOriginal) => ({
   ...(await importOriginal<typeof ApiClient>()),
@@ -24,9 +30,8 @@ vi.mock("../api/client", async (importOriginal) => ({
 type SidebarProps = {
   state: PlacementState;
   dispatch: Dispatch<PlacementAction>;
-  tab: PlacementTab;
   mode: string;
-  outputCrs: string;
+  onAlignMethodChange: (method: "move" | "points" | "shape") => void;
   onReferenceLayersChange: (layers: ReferenceLayer[]) => void;
 };
 
@@ -51,9 +56,15 @@ const STATION_PG: ReferenceLayer = {
   truncated: false
 };
 
-vi.mock("../components/illustrator/PlacementSidebar", () => ({
-  PlacementSidebar: ({ state, dispatch, tab, mode, outputCrs, onReferenceLayersChange }: SidebarProps) => (
+vi.mock("../components/illustrator/AlignPanel", () => ({
+  AlignPanel: ({ state, dispatch, mode, onAlignMethodChange, onReferenceLayersChange }: SidebarProps) => (
     <section>
+      <button type="button" onClick={() => onAlignMethodChange("move")}>
+        Move
+      </button>
+      <button type="button" onClick={() => onAlignMethodChange("points")}>
+        Control points
+      </button>
       <button type="button" onClick={() => dispatch({ type: "rotateFrame", rotationDeg: 45 })}>
         Rotate
       </button>
@@ -63,9 +74,27 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
       <output data-testid="rotation">{state.frame.rotationDeg}</output>
       <output data-testid="active">{state.activeFloorLabel}</output>
       <output data-testid="anchor-2F">{JSON.stringify(state.floors.find((f) => f.label === "2F")?.mapAnchor)}</output>
-      <output data-testid="tab">{tab}</output>
       <output data-testid="mode">{mode}</output>
+    </section>
+  )
+}));
+
+vi.mock("../components/illustrator/ArtworkDeliver", () => ({
+  ArtworkDeliver: ({
+    outputCrs,
+    onExport,
+    error
+  }: {
+    outputCrs: string;
+    onExport: () => void;
+    error: string | null;
+  }) => (
+    <section data-testid="deliver">
+      <button type="button" onClick={onExport}>
+        Export
+      </button>
       <output data-testid="output-crs">{outputCrs}</output>
+      <output data-testid="sidebar-error">{error ?? ""}</output>
     </section>
   )
 }));
@@ -182,7 +211,7 @@ test("reopening restores the placement and view, sends nothing, and never re-sna
   expect(screen.getByTestId("rotation")).toHaveTextContent("30");
   expect(screen.getByTestId("active")).toHaveTextContent("2F");
   expect(screen.getByTestId("anchor-2F")).toHaveTextContent("[139.76723456789,35.68134567891]");
-  expect(screen.getByTestId("tab")).toHaveTextContent("export");
+  expect(screen.getByTestId("deliver").closest("[hidden]")).toBeNull();
   expect(screen.getByTestId("mode")).toHaveTextContent("individual");
   expect(screen.getByTestId("output-crs")).toHaveTextContent("EPSG:4326");
 
@@ -212,7 +241,7 @@ test("an assignment with no saved placement opens placement from the assignment 
   render(<IllustratorPage restored={conversion({ draft: null })} />);
   expect(screen.getByTestId("rotation")).toHaveTextContent("0");
   expect(screen.getByTestId("active")).toHaveTextContent("1F");
-  expect(screen.getByTestId("tab")).toHaveTextContent("fit");
+  expect(screen.getByTestId("deliver").closest("[hidden]")).not.toBeNull();
   expect(screen.getByTestId("output-crs")).toHaveTextContent("EPSG:6677");
   await act(async () => {
     await vi.advanceTimersByTimeAsync(3000);
@@ -250,6 +279,31 @@ test("saved floors the assignment no longer has are dropped, and missing ones st
   expect(sent.placement.floors[1]).toEqual(DRAFT.placement.floors[1]);
 });
 
+test("the placement under Deliver is inert, and is not while placing", () => {
+  const delivering = render(<IllustratorPage restored={conversion()} />);
+  expect(screen.getByTestId("map").closest("[inert]")).not.toBeNull();
+  expect(screen.getByRole("button", { name: "Rotate", hidden: true }).closest("[inert]")).not.toBeNull();
+  expect(screen.getByTestId("deliver").closest("[inert]")).toBeNull();
+  delivering.unmount();
+
+  render(<IllustratorPage restored={conversion({ draft: null })} />);
+  expect(screen.getByTestId("map").closest("[inert]")).toBeNull();
+});
+
+test("the stage track counts the pages floors were named from, not a page left out", () => {
+  const page = (index: number) => ({ ...PREVIEW.pages[0], index });
+  const preview = { ...PREVIEW, pages: [page(1), page(2), page(3)] };
+  const floors = [
+    { label: "1F", box: null, pages: [1], layer_names: null },
+    { label: "2F", box: null, pages: [3], layer_names: null }
+  ];
+  render(<IllustratorPage restored={conversion({ preview, floors, draft: null })} />);
+  expect(vi.mocked(usePageShell).mock.lastCall?.[0]?.artworkRead).toEqual({
+    pages: 3,
+    named: { floors: 2, pages: 2 }
+  });
+});
+
 test("a project with no floors yet opens on naming them", () => {
   render(<IllustratorPage restored={conversion({ floors: null, draft: null, draft_revision: 0 })} />);
   expect(screen.getByRole("heading", { name: "Mark each floor" })).toBeInTheDocument();
@@ -272,4 +326,16 @@ test("a draft whose floors were moved off the default spot shows no such notice"
   };
   render(<IllustratorPage restored={conversion({ draft: moved })} />);
   expect(screen.queryByTestId("lookup-failed")).toBeNull();
+});
+
+test.each([
+  { saved: "fit", choose: "Move", stored: "reference" },
+  { saved: "reference", choose: "Control points", stored: "fit" }
+] as const)("choosing $choose on a draft saved on $saved is saved as $stored", async ({ saved, choose, stored }) => {
+  render(<IllustratorPage restored={conversion({ draft: { ...DRAFT, view: { ...DRAFT.view, tab: saved } } })} />);
+  fireEvent.click(screen.getByRole("button", { name: choose }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(save.mock.calls.at(-1)?.[2].view.tab).toBe(stored);
 });

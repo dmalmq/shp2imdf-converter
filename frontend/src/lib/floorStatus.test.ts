@@ -14,6 +14,7 @@ import {
 import { fromDraft, NO_REFERENCES, toDraft } from "./artworkDraft";
 import {
   alignedCount,
+  floorFit,
   floorStatus,
   recommendedAlignment,
   type CurrentReferences
@@ -241,6 +242,15 @@ test("the relink preview names the scale, rotation and floors that would move", 
   expect(preview.moves.map((move) => move.label)).toEqual(["1F"]);
   expect(preview.reopens).toEqual(["1F"]);
   expect(relinkPreview(STATE, "1F", REFS)).toBeNull();
+});
+
+test("a two-pair fit keeps its RMSE when the scale is unlocked afterwards", () => {
+  const state = fitted();
+  const accepted = floorFit(state, state.floors[0], REFS);
+  expect(accepted).toBeGreaterThan(0);
+  const unlocked = run(state, { type: "unlockScale" });
+  expect(floorStatus(unlocked, unlocked.floors[0], REFS).kind).toBe("aligned");
+  expect(floorFit(unlocked, unlocked.floors[0], REFS)).toBe(accepted);
 });
 
 test("the template preview says which floors keep their place and which take its frame", () => {

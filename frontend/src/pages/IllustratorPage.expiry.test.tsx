@@ -18,21 +18,35 @@ type SidebarProps = {
   state: PlacementState;
   dispatch: Dispatch<PlacementAction>;
   canUndo: boolean;
-  onExport: () => void;
-  error: string | null;
 };
 
-vi.mock("../components/illustrator/PlacementSidebar", () => ({
-  PlacementSidebar: ({ state, dispatch, canUndo, onExport, error }: SidebarProps) => (
+vi.mock("../components/illustrator/AlignPanel", () => ({
+  AlignPanel: ({ state, dispatch, canUndo }: SidebarProps) => (
     <section>
       <button type="button" onClick={() => dispatch({ type: "rotateFrame", rotationDeg: 30 })}>
         Rotate
       </button>
+      <output data-testid="rotation">{state.frame.rotationDeg}</output>
+      <output data-testid="can-undo">{String(canUndo)}</output>
+    </section>
+  )
+}));
+
+vi.mock("../components/illustrator/ArtworkDeliver", () => ({
+  ArtworkDeliver: ({
+    outputCrs,
+    onExport,
+    error
+  }: {
+    outputCrs: string;
+    onExport: () => void;
+    error: string | null;
+  }) => (
+    <section data-testid="deliver">
       <button type="button" onClick={onExport}>
         Export
       </button>
-      <output data-testid="rotation">{state.frame.rotationDeg}</output>
-      <output data-testid="can-undo">{String(canUndo)}</output>
+      <output data-testid="output-crs">{outputCrs}</output>
       <output data-testid="sidebar-error">{error ?? ""}</output>
     </section>
   )
@@ -116,7 +130,7 @@ async function placeAndRotate() {
 
 test("an expired conversion is renewed under the same assignment and the export retried", async () => {
   await placeAndRotate();
-  fireEvent.click(screen.getByRole("button", { name: "Export" }));
+  fireEvent.click(screen.getByRole("button", { name: "Export", hidden: true }));
 
   await waitFor(() => expect(exportFiles).toHaveBeenCalledTimes(2));
   expect(exportFiles.mock.calls[1][0]).toBe("second");
@@ -134,7 +148,7 @@ test("a file that no longer fits its assignment falls back to assigning again", 
   assign.mockRejectedValue(
     buildApiClientError(422, JSON.stringify({ detail: "No features in 1F.", code: "FLOOR_MISMATCH" }))
   );
-  fireEvent.click(screen.getByRole("button", { name: "Export" }));
+  fireEvent.click(screen.getByRole("button", { name: "Export", hidden: true }));
 
   expect(await screen.findByRole("alert")).toHaveTextContent(/assign the floors again/i);
   expect(screen.getByRole("button", { name: /Skip/ })).toBeInTheDocument();

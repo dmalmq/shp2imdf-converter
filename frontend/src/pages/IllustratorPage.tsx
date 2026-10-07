@@ -30,10 +30,13 @@ import {
 } from "../components/illustrator/PlacementMap";
 import { PlacementMap } from "../components/illustrator/PlacementMap";
 import {
-  PlacementSidebar,
+  AlignPanel,
   type PlacementTab,
   type SurveySnapModel
-} from "../components/illustrator/PlacementSidebar";
+} from "../components/illustrator/AlignPanel";
+import { ArtworkDeliver, type DeliverFloor } from "../components/illustrator/ArtworkDeliver";
+import { PlacementTodo } from "../components/illustrator/PlacementTodo";
+import { workingCrsLabel } from "../lib/workingCrs";
 import {
   nextMatchTarget,
   surveyLayerName
@@ -58,7 +61,7 @@ import { saveBlob } from "../lib/download";
 import { floorStatuses, recommendedAlignment, type CurrentReferences } from "../lib/floorStatus";
 import type { AlignMethod } from "../components/illustrator/ScaleAndFitPanel";
 import { siteNameFromFilename, stationQueryFromFilename } from "../lib/siteName";
-import { usePageShell } from "../components/shell/ShellContext";
+import { usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
 import { partitionByFloors, type PartitionFloor } from "../lib/svgPreview";
 import { useAppStore } from "../store/useAppStore";
 import {
@@ -190,6 +193,21 @@ function keptMatchTarget(current: Pick<ShapeMatchState, "referenceName" | "refer
     referenceName: current.referenceName,
     referenceFloorLabel: current.referenceFloorLabel
   };
+}
+
+/** The draft has no tab for Shape match, so it reopens on Control points. */
+function tabForMethod(method: AlignMethod): PlacementTab {
+  return method === "move" ? "reference" : "fit";
+}
+
+/** Pages the floors were named from; a floor with no page restriction spans all of them. */
+function pagesNamed(regions: AssignedRegion[], total: number): number {
+  const pages = new Set<number>();
+  for (const region of regions) {
+    if (!region.pages) return total;
+    region.pages.forEach((page) => pages.add(page));
+  }
+  return pages.size;
 }
 
 /** Union of the given pages' content bounds, or null when none are known. */
@@ -433,6 +451,9 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
   const [recenterTo, setRecenterTo] = useState<[number, number] | null>(null);
   const [referenceLayers, setReferenceLayers] = useState<ReferenceLayer[]>([]);
   const [placementTab, setPlacementTab] = useState<PlacementTab>(resumed?.view?.tab ?? "fit");
+  const [alignMethod, setAlignMethod] = useState<AlignMethod>(
+    resumed?.view?.tab === "reference" ? "move" : "points"
+  );
   const [located, setLocated] = useState<Located>(resumed?.view?.located ?? { kind: "none" });
   const [referenceSelection, setReferenceSelection] = useState<ReferenceSelection>(
     resumed?.view?.references ?? NO_REFERENCES
@@ -546,7 +567,7 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
     state,
     dispatch,
     mode: adjustmentMode,
-    enabled: Boolean(preview) && assignment !== null,
+    enabled: Boolean(preview) && assignment !== null && placementTab !== "export",
     onEscape: () => {
       setPickSession(null);
       setInspectedMatch(null);
@@ -605,12 +626,22 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
   });
   const statuses = useMemo(() => floorStatuses(state, currentReferences), [state, currentReferences]);
   const alignedFloors = [...statuses.values()].filter((status) => status.kind === "aligned").length;
+  const shellStation = siteNameFromFilename(sourceName) || sourceName.replace(/\.[^.]+$/, "") || null;
   usePageShell({
-    station: siteNameFromFilename(sourceName) || sourceName.replace(/\.[^.]+$/, "") || null,
+    station: shellStation,
     current: placing && placementTab === "export" ? "deliver" : null,
     targets: placing ? [placementTab === "export" ? "place" : "deliver"] : [],
-    go: { place: () => setPlacementTab("fit"), deliver: () => setPlacementTab("export") },
+    go: { place: () => setPlacementTab(tabForMethod(alignMethod)), deliver: () => setPlacementTab("export") },
     floorsAligned: placing ? { aligned: alignedFloors, total: state.floors.length } : null,
+    artworkRead: preview
+      ? {
+          pages: preview.pages.length,
+          named:
+            placing && assignment
+              ? { floors: state.floors.length, pages: pagesNamed(assignment, preview.pages.length) }
+              : null
+        }
+      : null,
     save: placing
       ? {
           state:
@@ -622,19 +653,37 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
       : null
   });
 
-  // A floor that did not stack opens on its recommended method; the other stays one click away.
-  const [alignMethod, setAlignMethod] = useState<AlignMethod>("points");
-  const recommendFor = (label: string | null) => {
-    const floor = state.floors.find((item) => item.label === label);
-    if (!floor || statuses.get(floor.label)?.kind === "aligned") return;
-    setAlignMethod(recommendedAlignment(state, floor).kind === "match-floor" ? "shape" : "points");
+  usePrimaryAction(
+    placing && placementTab !== "export"
+      ? { label: t("Deliver →", "書き出しへ →"), run: () => setPlacementTab("export") }
+      : null
+  );
+
+  // The draft's tab follows the method so a reload reopens it. The recommendation made as
+  // the page opens is left out: opening a project must not save anything.
+  const showMethod = (method: AlignMethod, remember = true) => {
+    setAlignMethod(method);
+    if (remember) setPlacementTab((tab) => (tab === "export" ? tab : tabForMethod(method)));
   };
-  useEffect(() => recommendFor(state.activeFloorLabel), [state.activeFloorLabel, placing]);
+  // A floor that did not stack opens on its recommended method; the other stays one click away.
+  const recommendFor = (label: string | null, remember = true): AlignMethod => {
+    const floor = state.floors.find((item) => item.label === label);
+    if (!floor || statuses.get(floor.label)?.kind === "aligned") return alignMethod;
+    // With no station pin the building has not been found yet, so that comes first.
+    const method =
+      recommendedAlignment(state, floor).kind === "match-floor" ? "shape" : state.stationPin ? "points" : "move";
+    showMethod(method, remember);
+    return method;
+  };
+  const opened = useRef(false);
+  useEffect(() => {
+    recommendFor(state.activeFloorLabel, opened.current);
+    opened.current = true;
+  }, [state.activeFloorLabel, placing]);
 
   const reviewFloor = (label: string) => {
     if (label !== state.activeFloorLabel) dispatch({ type: "setActiveFloor", label });
-    else recommendFor(label);
-    setPlacementTab("fit");
+    setPlacementTab(tabForMethod(recommendFor(label)));
   };
 
   const floorLayers: FloorLayer[] = useMemo(() => {
@@ -658,6 +707,26 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
       color: ARTWORK_TINT
     }));
   }, [preview, assignment]);
+
+  const deliverFloors: DeliverFloor[] = (assignment ?? []).map((region) => ({
+    label: region.label,
+    pages: region.pages,
+    box: region.box !== null && region.label !== "artwork",
+    shapes: floorLayers.find((floor) => floor.label === region.label)?.features.length ?? 0
+  }));
+
+  const pageSizes = new Set(
+    (preview?.pages ?? []).map((page) => `${Math.round(page.width_pt)}x${Math.round(page.height_pt)}`)
+  );
+  const placementNotes =
+    pageSizes.size > 1
+      ? [
+          t(
+            "The pages are not all the same size, so their plans may land offset. Align the building as a group first, then adjust any floor that needs its own position.",
+            "ページのサイズが揃っていないため、各階の位置がずれる場合があります。まずグループで建物全体を合わせてから、位置が合わないフロアを個別に調整してください。"
+          )
+        ]
+      : [];
 
   const focusBounds = useMemo(
     () => (state.stationPin ? pinFocusBounds(state.stationPin) : null),
@@ -1263,115 +1332,96 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
     };
 
     return (
-      <div className="mx-auto w-full max-w-[1120px] px-10 py-10">
-        {/* Two different jobs behind one stage: naming pages, or drawing boxes on
-            a single sheet. The heading has to say which one you are doing. */}
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold leading-9 tracking-tight text-foreground">
-            {preview.pages.length > 1
-              ? t("Name each floor", "フロア名を入力")
-              : t("Mark each floor", "フロアを囲む")}
-          </h1>
-          {preview.pages.length > 1 ? (
-            <p className="text-sm leading-5 text-muted-foreground">
-              {t(
-                "Pages given the same name become one floor. Untick a cover sheet or legend to leave it out.",
-                "同じ名前を付けたページは1つのフロアになります。表紙や凡例は除外してください。"
-              )}
-            </p>
-          ) : null}
-        </div>
-        <div className="mt-5">
-          {preview.pages.length > 1 ? (
-            <PageAssignmentPanel
-              preview={preview.preview}
-              pages={preview.pages}
-              layerSummaries={preview.layers}
-              alignment={preview.report.page_alignment ?? []}
-              onSkip={() => void commitAssignment([wholeArtwork])}
-              onAssigned={commitAssignment}
-            />
-          ) : (
-            <AssignmentPanel
-              preview={preview.preview}
-              artworkBounds={preview.artwork_bounds}
-              layerSummaries={preview.layers}
-              onSkip={() => void commitAssignment([wholeArtwork])}
-              onAssigned={commitAssignment}
-            />
-          )}
-        </div>
+      <div className="flex min-h-0 flex-1 flex-col">
         {error ? (
-          <p role="alert" className="mt-3 text-[13px] leading-[18px] text-destructive">
+          <p role="alert" className="border-b border-border bg-destructive-muted px-14 py-2 text-[13px] leading-[18px] text-destructive">
             {error}
           </p>
         ) : null}
+        {preview.pages.length > 1 ? (
+          <PageAssignmentPanel
+            preview={preview.preview}
+            pages={preview.pages}
+            layerSummaries={preview.layers}
+            alignment={preview.report.page_alignment ?? []}
+            onSkip={() => void commitAssignment([wholeArtwork])}
+            onAssigned={commitAssignment}
+          />
+        ) : (
+          <AssignmentPanel
+            preview={preview.preview}
+            artworkBounds={preview.artwork_bounds}
+            layerSummaries={preview.layers}
+            onSkip={() => void commitAssignment([wholeArtwork])}
+            onAssigned={commitAssignment}
+          />
+        )}
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-0 flex-1 gap-4 overflow-hidden p-4">
-      <PlacementSidebar
+    <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      {/* Covered by Deliver but still mounted, so it has to leave the tab order and the
+          accessibility tree. React 18 only passes `inert` through as a string. */}
+      <div className="contents" {...(placementTab === "export" ? { inert: "" } : null)}>
+      <PlacementTodo
         state={state}
         dispatch={dispatch}
-        mode={adjustmentMode}
-        siteName={siteName}
-        conversionId={preview.conversion_id}
-        onLocate={setRecenterTo}
-        onLookupSettled={() => setLocateSettled(true)}
-        restoredLocation={resumed?.view ? resumed.view.located : undefined}
-        onLocatedChange={setLocated}
-        referenceSelection={resumed?.view?.references}
-        onReferenceSelectionChange={setReferenceSelection}
-        canUndo={history.past.length > 0}
-        canRedo={history.future.length > 0}
-        tab={placementTab}
-        onTabChange={setPlacementTab}
-        pickStage={pickSession?.stage ?? null}
-        onTogglePicking={() => {
-          setShapeMatch((current) => keptMatchTarget(current));
-          setPickSession((session) => {
-            if (session) return null;
-            const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
-            return active
-              ? {
-                  stage: "artwork",
-                  pendingArtwork: null,
-                  floorLabel: active.label,
-                  mode: adjustmentMode
-                }
-              : null;
-          });
-        }}
-        shapeMatch={shapeMatchModel}
-        alignMethod={alignMethod}
-        onAlignMethodChange={setAlignMethod}
         statuses={statuses}
-        onReviewFloor={reviewFloor}
+        onAlign={reviewFloor}
+        artworkBounds={bounds}
+        notes={placementNotes}
         references={currentReferences}
-        surveySnap={surveySnapModel}
-        referenceLayers={referenceLayers}
-        onReferenceLayersChange={updateReferenceLayers}
-        focusBounds={focusBounds}
-        bounds={bounds}
-        outputCrs={outputCrs}
-        onOutputCrsChange={setOutputCrs}
-        formats={formats}
-        onFormatsChange={setFormats}
-        onExport={() => void download()}
-        previewFeatures={preview.preview_features}
-        totalFeatures={preview.total_features}
-        error={error}
       />
 
-      <div className="relative min-h-0 flex-1 overflow-hidden rounded-md border border-border">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <AlignPanel
+          state={state}
+          dispatch={dispatch}
+          mode={adjustmentMode}
+          siteName={siteName}
+          conversionId={preview.conversion_id}
+          onLocate={setRecenterTo}
+          onLookupSettled={() => setLocateSettled(true)}
+          restoredLocation={resumed?.view ? resumed.view.located : undefined}
+          onLocatedChange={setLocated}
+          referenceSelection={resumed?.view?.references}
+          onReferenceSelectionChange={setReferenceSelection}
+          canUndo={history.past.length > 0}
+          canRedo={history.future.length > 0}
+          pickStage={pickSession?.stage ?? null}
+          onTogglePicking={() => {
+            setShapeMatch((current) => keptMatchTarget(current));
+            setPickSession((session) => {
+              if (session) return null;
+              const active = state.floors.find((floor) => floor.label === state.activeFloorLabel);
+              return active
+                ? {
+                    stage: "artwork",
+                    pendingArtwork: null,
+                    floorLabel: active.label,
+                    mode: adjustmentMode
+                  }
+                : null;
+            });
+          }}
+          shapeMatch={shapeMatchModel}
+          alignMethod={alignMethod}
+          onAlignMethodChange={showMethod}
+          statuses={statuses}
+          references={currentReferences}
+          surveySnap={surveySnapModel}
+          referenceLayers={referenceLayers}
+          onReferenceLayersChange={updateReferenceLayers}
+          focusBounds={focusBounds}
+        />
         {/* `bg-popover` rather than a literal white: this sits over the map and
             has to stay readable when the page is dark. */}
         {!poseReady ? (
           <p
             data-testid="placement-hold"
-            className="pointer-events-none absolute inset-x-0 top-3 z-30 mx-auto w-fit rounded-md border border-border bg-popover/95 px-3 py-1 text-xs leading-4 text-muted-foreground shadow-sm"
+            className="pointer-events-none absolute left-0 right-[356px] top-3 z-30 mx-auto w-fit rounded-md border border-border bg-popover/95 px-3 py-1 text-xs leading-4 text-muted-foreground shadow-sm"
           >
             {state.stationPin
               ? t("Snapping to Station_pg…", "Station_pg に合わせています…")
@@ -1387,7 +1437,7 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
           <p
             role="status"
             data-testid="lookup-failed"
-            className="absolute inset-x-0 top-16 z-30 mx-auto w-fit max-w-[70%] rounded-md border border-warning bg-warning-surface px-3 py-1.5 text-xs leading-4 text-warning-foreground shadow-sm"
+            className="absolute left-0 right-[356px] top-16 z-30 mx-auto w-fit max-w-[70%] rounded-md border border-warning bg-warning-surface px-3 py-1.5 text-xs leading-4 text-warning-foreground shadow-sm"
           >
             {defaultSpotNotice(located, t)}
           </p>
@@ -1396,7 +1446,7 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
           <p
             role="status"
             data-testid="draft-save-problem"
-            className="absolute inset-x-0 bottom-3 z-30 mx-auto w-fit max-w-[80%] rounded-md border border-border bg-popover/95 px-3 py-1 text-xs leading-4 text-destructive shadow-sm"
+            className="absolute left-0 right-[356px] bottom-3 z-30 mx-auto w-fit max-w-[80%] rounded-md border border-border bg-popover/95 px-3 py-1 text-xs leading-4 text-destructive shadow-sm"
           >
             {saveProblem(autosave.status, t)}
           </p>
@@ -1521,7 +1571,39 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
                 : null
             );
           }}
+          statuses={statuses}
+          toolsInset={372}
         />
+      </div>
+      </div>
+
+      {/* Over the placement rather than instead of it: the map, the locate
+          lookup and the reference layers keep their state while Deliver is open. */}
+      <div
+        hidden={placementTab !== "export"}
+        className={placementTab === "export" ? "absolute inset-0 z-40 flex flex-col bg-background" : undefined}
+      >
+          <ArtworkDeliver
+            state={state}
+            statuses={statuses}
+            references={currentReferences}
+            station={shellStation ?? ""}
+            stem={sourceName.replace(/\.[^.]+$/, "") || "artwork"}
+            floors={deliverFloors}
+            shapesFromPreview={preview.preview_features !== preview.total_features}
+            crsChoices={[
+              { value: state.frame.workingCrs, label: workingCrsLabel(state.frame.workingCrs) },
+              { value: "EPSG:4326", label: "EPSG:4326 — WGS84 lon/lat" }
+            ]}
+            outputCrs={outputCrs}
+            onOutputCrsChange={setOutputCrs}
+            formats={formats}
+            onFormatsChange={setFormats}
+            onExport={() => void download()}
+            error={error}
+            onReview={reviewFloor}
+            onBackToMap={() => setPlacementTab(tabForMethod(alignMethod))}
+          />
       </div>
     </div>
   );

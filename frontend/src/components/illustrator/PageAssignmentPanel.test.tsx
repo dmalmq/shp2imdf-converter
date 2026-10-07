@@ -213,17 +213,26 @@ test("buildFloors emits a whole-page floor again for a page whose boxes were rem
   ]);
 });
 
-test("a page with boxes shows a Remove boxes control that re-enables the floor-name input", () => {
+test("a page with boxes lists them in place of its name until Remove boxes", () => {
   const boxes: PartitionFloor[] = [
     { label: "1F-north", box: [0, 0, 100, 200], pages: [1], layerNames: null }
   ];
   renderPanel([page(1), page(2)], () => {}, new Map([[1, boxes]]));
-  expect(screen.getByLabelText("Floor name for page 1")).toBeDisabled();
+  expect(screen.queryByLabelText("Floor name for page 1")).toBeNull();
+  expect(screen.getByText("1 floor, marked with a box:")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Mark each floor on page 1" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /remove boxes/i }));
   expect(screen.getByLabelText("Floor name for page 1")).toBeEnabled();
   expect(screen.queryByRole("button", { name: /remove boxes/i })).toBeNull();
-  // Both cards are on the normal whole-page path again.
-  expect(screen.getAllByRole("button", { name: /split this page/i })).toHaveLength(2);
+  expect(screen.getByRole("button", { name: "Draw boxes on this page" })).toBeInTheDocument();
+});
+
+test("Draw boxes opens the box view for the page that is selected", () => {
+  renderPanel([page(1), page(2)]);
+  fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+  fireEvent.click(screen.getByRole("button", { name: "Draw boxes on this page" }));
+  expect(screen.getByRole("heading", { name: "Mark each floor on page 2" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Floor name for page 1")).toBeInTheDocument();
 });
 
 test("AssignmentPanel seeds drafts from initialDrafts, and starts blank without it", () => {

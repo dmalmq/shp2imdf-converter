@@ -17,6 +17,40 @@ import type { CurrentReferences } from "../../lib/floorStatus";
 import { relinkPreview } from "../../lib/relinkPreview";
 import { PlacementScopeNote } from "./PlacementScopeNote";
 
+export function HistoryButtons({
+  dispatch,
+  canUndo,
+  canRedo
+}: {
+  dispatch: (action: PlacementAction) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+}) {
+  const { t } = useUiLanguage();
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="icon"
+        disabled={!canUndo}
+        aria-label={t("Undo", "元に戻す")}
+        onClick={() => dispatch({ type: "undo" })}
+      >
+        <Undo2 />
+      </Button>
+      <Button
+        variant="outline"
+        size="icon"
+        disabled={!canRedo}
+        aria-label={t("Redo", "やり直す")}
+        onClick={() => dispatch({ type: "redo" })}
+      >
+        <Redo2 />
+      </Button>
+    </>
+  );
+}
+
 /** Rejoining changes the floor's scale and rotation and can move others, so it shows that first. */
 export function RelinkControl({
   state,
@@ -106,6 +140,8 @@ type Props = {
   canUndo?: boolean;
   canRedo?: boolean;
   references: CurrentReferences;
+  /** False when undo and redo sit elsewhere, as in the Align panel's header. */
+  showHistory?: boolean;
 };
 
 /**
@@ -121,7 +157,8 @@ export function TransformPanel({
   mode,
   canUndo = false,
   canRedo = false,
-  references
+  references,
+  showHistory = true
 }: Props) {
   const { t } = useUiLanguage();
 
@@ -132,24 +169,9 @@ export function TransformPanel({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-1">
-        <Button
-          variant="outline"
-          size="icon"
-          disabled={!canUndo}
-          aria-label={t("Undo", "元に戻す")}
-          onClick={() => dispatch({ type: "undo" })}
-        >
-          <Undo2 />
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          disabled={!canRedo}
-          aria-label={t("Redo", "やり直す")}
-          onClick={() => dispatch({ type: "redo" })}
-        >
-          <Redo2 />
-        </Button>
+        {showHistory ? (
+          <HistoryButtons dispatch={dispatch} canUndo={canUndo} canRedo={canRedo} />
+        ) : null}
 
         {/* The keyboard reference is genuinely useful and was genuinely
             undiscoverable. As an inline block it also shoved the whole panel
