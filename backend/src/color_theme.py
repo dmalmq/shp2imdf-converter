@@ -1,11 +1,13 @@
-"""The station colour theme: which old ``color2`` values become which area names, and what a dataset will see.
+"""The station colour theme: which old ``color2`` values, and which categories, become which areas.
 
 Format-neutral on purpose. Nothing here knows about DBF bytes, zips or GDAL: a
 layer is an id plus its decoded rows and its target field's width, and the
 answer is a report plus per-layer edits. ``recolor.py`` feeds it from
 shapefiles, and ``gdb.py`` from File Geodatabases, as the same ``LayerInput``s.
 Layer files and projects are rethemed by ``cim_symbology.py`` and only
-reported here.
+reported here. That is also the only reader of ``category_areas``: a station
+drawn by ``category`` has no ``color2`` to rewrite, so its data is never
+edited and only its renderers change.
 
 ``load_color_theme`` checks the invariants once, at startup. The one that
 matters most: the old vocabulary and the written vocabulary are disjoint, so
@@ -98,6 +100,11 @@ class ColorTheme:
     rules: tuple[Rule, ...]
     new_values: frozenset[str]
     by_old: Mapping[str, OldValue]
+    category_areas: Mapping[str, Area]
+    """The area a unit of this category is drawn as, where a layer is coloured by ``category_field`` alone.
+
+    In config order. A category that is absent keeps the symbol it has.
+    """
 
     def classify(self, value: str, category: str | None) -> Rule | Keep:
         """The rule that rewrites ``value``, or why it stays.
@@ -119,10 +126,11 @@ class ColorTheme:
 
 
 _HEX = re.compile(r"#[0-9A-Fa-f]{6}")
-_TOP_KEYS = {"source", "field", "category_field", "outline", "areas", "rules"}
+_TOP_KEYS = {"source", "field", "category_field", "outline", "areas", "rules", "category_areas"}
 _SWATCH_KEYS = {"spec", "hex"}
 _AREA_KEYS = {"key", "name", "value", "spec", "hex"}
 _RULE_KEYS = {"old", "old_hex", "scope", "area", "categories"}
+_CATEGORY_AREA_KEYS = {"area", "categories"}
 _BILINGUAL_KEYS = {"en", "ja"}
 
 
@@ -225,14 +233,40 @@ def load_color_theme(path: Path) -> ColorTheme:
     new_values = frozenset(written)
     if clash := sorted(new_values & set(by_old)):
         raise ValueError(f"Written values must not also be old values (a second run would rewrite them): {', '.join(clash)}")
+
+    category_areas: dict[str, Area] = {}
+    listed: set[str] = set()
+    for index, item in enumerate(raw["category_areas"]):
+        where = f"category_areas[{index}]"
+        obj = _keys(item, _CATEGORY_AREA_KEYS, where)
+        area_key = obj["area"]
+        if area_key not in areas:
+            raise ValueError(f"{where} names unknown area {area_key!r}")
+        if area_key in listed:
+            raise ValueError(f"{where}: area {area_key!r} is listed twice")
+        listed.add(area_key)
+        categories = obj["categories"]
+        if not isinstance(categories, list) or not categories:
+            raise ValueError(f"{where}.categories must be a non-empty list")
+        for category in categories:
+            if _text(category, f"{where}.categories") in category_areas:
+                raise ValueError(f"{where}: category {category!r} is listed twice")
+            category_areas[category] = areas[area_key]
+
+    field = _text(raw["field"], "field")
+    category_field = _text(raw["category_field"], "category_field")
+    if field.casefold() == category_field.casefold():
+        # A renderer keyed on that one field would belong to both tables.
+        raise ValueError(f"field and category_field must differ, both are {field!r}")
     return ColorTheme(
-        field=_text(raw["field"], "field"),
-        category_field=_text(raw["category_field"], "category_field"),
+        field=field,
+        category_field=category_field,
         outline=_swatch(raw["outline"], "outline"),
         areas=tuple(areas.values()),
         rules=tuple(rules),
         new_values=new_values,
         by_old=MappingProxyType(by_old),
+        category_areas=MappingProxyType(category_areas),
     )
 
 
