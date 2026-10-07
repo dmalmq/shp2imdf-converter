@@ -228,9 +228,9 @@ def test_reading_a_geodatabase_writes_nothing(converted: Converted, theme: Color
     copy = shutil.copytree(converted.pristine, tmp_path / GDB)
     before = fingerprint(copy)
 
-    layers = read_layers(copy, GDB, theme, GDAL_PYTHON)
+    read = read_layers(copy, GDB, theme, GDAL_PYTHON)
 
-    assert len(layers) == 6
+    assert (len(read.layers), read.tables, read.category_only) == (6, 7, 0)
     assert fingerprint(copy) == before
 
 
@@ -295,6 +295,25 @@ def _fake_gdb(prefix: str) -> list[tuple[str, bytes]]:
         (f"{prefix}/gdb", b"\x05\x00\x00\x00"),
         (f"{prefix}/timestamps", b"\xff" * 8),
     ]
+
+
+@needs_gdal
+def test_a_geodatabase_drawn_by_category_reports_its_tables_instead_of_looking_empty(
+    theme: ColorTheme, tmp_path: Path
+) -> None:
+    units = [
+        {"name": name, "dataset": "Station", "fields": [["name", 20], ["category", 20]], "rows": [{"name": "a", "category": "walkway"}]}
+        for name in ("DemoSta_1_unit", "DemoSta_B1_unit")
+    ]
+    opening = {"name": "DemoSta_1_opening", "dataset": "Station", "fields": [["name", 20]], "rows": [{"name": "door"}]}
+    upload = gdb_files(build_gdb(tmp_path / GDB, [*units, opening], GDAL_PYTHON), GDB)
+
+    inspection = inspect(theme, upload, max_bytes=LIMIT, gdal_python=GDAL_PYTHON)
+    output = read_zip(convert(theme, upload, max_bytes=LIMIT, gdal_python=GDAL_PYTHON).data)
+
+    assert (inspection.theme.layers, inspection.theme.skipped) == ((), ())
+    assert (inspection.dataset.geodatabases, inspection.dataset.tables, inspection.dataset.category_only_tables) == (1, 3, 2)
+    assert output == dict(upload)
 
 
 def test_without_a_gdal_python_the_geodatabase_comes_back_as_uploaded_and_shapefiles_still_convert(theme: ColorTheme) -> None:

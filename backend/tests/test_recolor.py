@@ -200,6 +200,26 @@ def test_the_write_primitive_never_truncates_or_touches_deleted_rows() -> None:
         table.with_text(table.field("floor"), {0: b"1"})
 
 
+def test_shapefiles_drawn_by_category_report_their_tables_instead_of_looking_empty(theme: ColorTheme) -> None:
+    unit = make_dbf([("name", "C", 20, 0), ("category", "C", 20, 0)], [[b"room", b"walkway"]])
+    opening = make_dbf([("name", "C", 20, 0)], [[b"door"]])
+    upload = [("st/1_unit.dbf", unit), ("st/B1_unit.dbf", unit), ("st/1_opening.dbf", opening), ("st/1_unit.shp", b"shp")]
+
+    inspection = inspect(theme, upload, max_bytes=LIMIT)
+
+    assert (inspection.theme.layers, inspection.theme.skipped) == ((), ())
+    assert (inspection.dataset.tables, inspection.dataset.category_only_tables) == (3, 2)
+
+
+def test_a_table_with_color2_is_not_counted_as_drawn_by_category(theme: ColorTheme) -> None:
+    upload = [("st/1_Space.dbf", make_dbf(SPACE_FIELDS, [space_row("黄", "B999")])), ("st/broken.dbf", b"\x03")]
+
+    inspection = inspect(theme, upload, max_bytes=LIMIT)
+
+    assert (inspection.dataset.tables, inspection.dataset.category_only_tables) == (1, 0)
+    assert [line.reason for line in inspection.theme.skipped] == ["unreadable"]
+
+
 @pytest.mark.parametrize("cp932_names", [False, True])
 def test_a_zipped_station_comes_back_with_every_entry_in_order(theme: ColorTheme, cp932_names: bool) -> None:
     members = station_members()

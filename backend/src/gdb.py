@@ -9,6 +9,7 @@ worker turns rows into the same ``LayerInput``s a shapefile gives the planner.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 import importlib.util
 import json
 import logging
@@ -60,8 +61,18 @@ def _run(python: Path, args: list[str], stdin: bytes = b"") -> bytes:
     return done.stdout
 
 
-def read_layers(gdb_dir: Path, gdb_id: str, theme: ColorTheme, python: Path) -> list[LayerInput | SkippedLayer]:
-    """Every feature class or table carrying the theme's field, as ``<gdb_id>/<name>``.
+@dataclass(frozen=True, slots=True)
+class GdbRead:
+    layers: list[LayerInput | SkippedLayer]
+    """Every feature class or table carrying the theme's field, as ``<gdb_id>/<name>``."""
+    tables: int
+    """Every feature class and table in the geodatabase; 0 when it could not be read."""
+    category_only: int
+    """Those that have the category field and not the theme's field."""
+
+
+def read_layers(gdb_dir: Path, gdb_id: str, theme: ColorTheme, python: Path) -> GdbRead:
+    """What the geodatabase holds for the planner.
 
     A geodatabase the worker cannot read is one ``unreadable`` entry: it
     might have carried the field, and the operator should hear about it.
@@ -70,7 +81,7 @@ def read_layers(gdb_dir: Path, gdb_id: str, theme: ColorTheme, python: Path) -> 
         payload = json.loads(_run(python, ["read", str(gdb_dir), theme.field, theme.category_field]))
     except ValueError as exc:
         logger.warning("Could not read %s: %s", gdb_id, exc)
-        return [SkippedLayer(id=gdb_id, reason="unreadable")]
+        return GdbRead(layers=[SkippedLayer(id=gdb_id, reason="unreadable")], tables=0, category_only=0)
     layers: list[LayerInput | SkippedLayer] = []
     for layer in payload["layers"]:
         layer_id = f"{gdb_id}/{layer['name']}"
@@ -82,7 +93,7 @@ def read_layers(gdb_dir: Path, gdb_id: str, theme: ColorTheme, python: Path) -> 
         layers.append(
             LayerInput(id=layer_id, rows=rows, width=layer["width"], width_unit="characters", encoding=_ENCODING)
         )
-    return layers
+    return GdbRead(layers=layers, tables=payload["tables"], category_only=payload["category_only"])
 
 
 def apply_edits(gdb_dir: Path, field: str, edits: Mapping[str, Mapping[int, str]], python: Path) -> None:

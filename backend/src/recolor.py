@@ -53,7 +53,7 @@ from backend.src.color_theme import (
     plan,
 )
 from backend.src.dbf_table import DbfField, DbfLayoutError, DbfTable, resolve_codec
-from backend.src.gdb import apply_edits, read_layers
+from backend.src.gdb import GdbRead, apply_edits, read_layers
 from backend.src.importer import zip_member_name
 
 DOWNLOAD_SUFFIX = "_new-colors"
@@ -71,6 +71,11 @@ class DatasetInfo:
     geodatabases: int
     lock_files_dropped: int
     """Stale ``*.lock`` files inside a ``.gdb``, left out of the download."""
+    tables: int
+    """Attribute tables that were read: each shapefile ``.dbf`` and each geodatabase feature class or table."""
+    category_only_tables: int
+    """Of those, the ones with the category field and without the theme's field: a station drawn by category,
+    whose colours live in its layer file or project and not in its data."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,6 +327,7 @@ def _survey(
     roots = list(dict.fromkeys(in_gdb))
     tables: dict[str, _Table] = {}
     layers: list[LayerInput | SkippedLayer] = []
+    read_tables = category_only = 0
     for entry in tree.entries:
         if entry.data is None or not entry.path.lower().endswith(".dbf") or _gdb_root(entry.path) is not None:
             continue
@@ -330,8 +336,10 @@ def _survey(
         except DbfLayoutError:
             layers.append(SkippedLayer(id=entry.path, reason="unreadable"))
             continue
+        read_tables += 1
         field = table.field(theme.field)
         if field is None:
+            category_only += table.field(theme.category_field) is not None
             continue
         if field.type != "C":
             layers.append(SkippedLayer(id=entry.path, reason="field_not_text"))
@@ -346,8 +354,10 @@ def _survey(
             continue
         directory = workspace / f"{number}.gdb"
         read = _read_geodatabase(theme, tree, root, directory, gdal_python)
-        layers += read
-        ids = tuple(layer.id for layer in read if isinstance(layer, LayerInput))
+        layers += read.layers
+        read_tables += read.tables
+        category_only += read.category_only
+        ids = tuple(layer.id for layer in read.layers if isinstance(layer, LayerInput))
         geodatabases.append(_Geodatabase(path=root, directory=directory, python=gdal_python, layers=ids))
     symbology: list[SymbologyLine] = []
     rewritten: dict[TreePath, bytes] = {}
@@ -372,6 +382,8 @@ def _survey(
         files=sum(1 for entry in tree.entries if entry.data is not None),
         geodatabases=len(roots),
         lock_files_dropped=len(uploaded.entries) - len(tree.entries),
+        tables=read_tables,
+        category_only_tables=category_only,
     )
     return _Survey(
         tree=tree,
@@ -383,9 +395,7 @@ def _survey(
     )
 
 
-def _read_geodatabase(
-    theme: ColorTheme, tree: FileTree, root: TreePath, directory: Path, python: Path
-) -> list[LayerInput | SkippedLayer]:
+def _read_geodatabase(theme: ColorTheme, tree: FileTree, root: TreePath, directory: Path, python: Path) -> GdbRead:
     prefix = f"{root}/"
     try:
         for entry in tree.entries:
@@ -395,7 +405,7 @@ def _read_geodatabase(
                 target.write_bytes(entry.data)
     except OSError:
         # A name Windows will not create (CON, a trailing dot) cannot be a geodatabase file anyway.
-        return [SkippedLayer(id=root, reason="unreadable")]
+        return GdbRead(layers=[SkippedLayer(id=root, reason="unreadable")], tables=0, category_only=0)
     return read_layers(directory, root, theme, python)
 
 

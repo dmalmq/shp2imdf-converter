@@ -86,7 +86,7 @@ def test_tokyo_geodatabase_is_recoloured_and_no_other_table_or_index_moves(tmp_p
     assert [name for name in unedited if new.get(name, ("gone",))[0] != old[name][0]] == []
     indexes = [name for name in old if name.endswith((".spx", ".atx"))]
     assert [name for name in indexes if name not in new] == []
-    scanned = next(layer for layer in read_layers(result, TOKYO.name, theme, GDAL_PYTHON) if layer.id == f"{TOKYO.name}/JRTokyoSta_1_Space")
+    scanned = next(layer for layer in read_layers(result, TOKYO.name, theme, GDAL_PYTHON).layers if layer.id == f"{TOKYO.name}/JRTokyoSta_1_Space")
     facilities = sorted(row.index for row in scanned.rows if row.value == "施設")
     assert facilities and filter_fids(result, "JRTokyoSta_1_Space", "color2 = '施設'", GDAL_PYTHON) == facilities
 

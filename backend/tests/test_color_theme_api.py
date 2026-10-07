@@ -70,6 +70,8 @@ def test_inspect_reports_each_rule_for_a_dropped_folder(test_client) -> None:
         "files": len(files),
         "geodatabases": 0,
         "lock_files_dropped": 0,
+        "tables": 3,
+        "category_only_tables": 0,
     }
     rows = {(rule["old"], tuple(rule["categories"] or ())): rule["rows"] for rule in body["theme"]["rules"]}
     assert rows[("濃鼠", ())] == 1
