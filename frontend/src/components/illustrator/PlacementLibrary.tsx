@@ -9,38 +9,87 @@ import {
 import { isApiClientError, toErrorMessage } from "../../api/errors";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
+  placementReducer,
+  poseOf,
   toFloorPayloads,
   type PlacementAction,
   type PlacementState
 } from "../../hooks/useIllustratorPlacement";
+import { floorStatus, samePose, type CurrentReferences } from "../../lib/floorStatus";
 import { Button } from "../ui/button";
 
 type Props = {
   state: PlacementState;
   dispatch: (action: PlacementAction) => void;
   artworkBounds: [number, number, number, number];
+  references: CurrentReferences;
 };
 
-/** Warn when a saved placement was authored against a different artboard. */
-function boundsWarning(
-  saved: [number, number, number, number],
-  current: [number, number, number, number]
-): boolean {
-  const savedW = saved[2] - saved[0];
-  const savedH = saved[3] - saved[1];
-  if (savedW <= 0 || savedH <= 0) return false;
-  return (
-    Math.abs(current[2] - current[0] - savedW) / savedW > 0.01 ||
-    Math.abs(current[3] - current[1] - savedH) / savedH > 0.01
-  );
+/** How a saved template lines up with this drawing, shown before it is applied. */
+export type TemplatePreview = {
+  /** Floors here that the template places. */
+  matched: string[];
+  /** Floors the template names that are pinned here, so applying leaves them where they are. */
+  pinned: string[];
+  /** Floors here the template has nothing for that stay exactly where they are. */
+  kept: string[];
+  /** Floors the template has nothing for that are linked, so they take its scale and rotation. */
+  reframed: string[];
+  /** Floors in the template this drawing does not have. */
+  unused: string[];
+  /** Drawing size as saved and now, in points, when they differ by more than 1%. */
+  size: { saved: [number, number]; current: [number, number] } | null;
+  /** Floors now Aligned that applying would reopen. */
+  reopens: string[];
+};
+
+export function templatePreview(
+  state: PlacementState,
+  placement: Pick<PlacementItem, "floors" | "artwork_bounds">,
+  artworkBounds: [number, number, number, number],
+  references: CurrentReferences
+): TemplatePreview {
+  const saved = new Set(placement.floors.map((f) => f.label));
+  const current = new Set(state.floors.map((f) => f.label));
+  const [sx0, sy0, sx1, sy1] = placement.artwork_bounds;
+  const savedSize: [number, number] = [sx1 - sx0, sy1 - sy0];
+  const currentSize: [number, number] = [
+    artworkBounds[2] - artworkBounds[0],
+    artworkBounds[3] - artworkBounds[1]
+  ];
+  const differs =
+    savedSize[0] > 0 &&
+    savedSize[1] > 0 &&
+    (Math.abs(currentSize[0] - savedSize[0]) / savedSize[0] > 0.01 ||
+      Math.abs(currentSize[1] - savedSize[1]) / savedSize[1] > 0.01);
+  const after = placementReducer(state, { type: "applyFloors", floors: placement.floors });
+  return {
+    matched: state.floors.filter((f) => saved.has(f.label) && !f.pinned).map((f) => f.label),
+    pinned: state.floors.filter((f) => saved.has(f.label) && f.pinned).map((f) => f.label),
+    kept: state.floors
+      .filter((f, index) => !saved.has(f.label) && samePose(poseOf(state, f), poseOf(after, after.floors[index])))
+      .map((f) => f.label),
+    reframed: state.floors
+      .filter((f, index) => !saved.has(f.label) && !samePose(poseOf(state, f), poseOf(after, after.floors[index])))
+      .map((f) => f.label),
+    unused: placement.floors.filter((f) => !current.has(f.label)).map((f) => f.label),
+    size: differs ? { saved: savedSize, current: currentSize } : null,
+    reopens: state.floors
+      .filter(
+        (f, index) =>
+          floorStatus(state, f, references).kind === "aligned" &&
+          floorStatus(after, after.floors[index], references).kind !== "aligned"
+      )
+      .map((f) => f.label)
+  };
 }
 
-export function PlacementLibrary({ state, dispatch, artworkBounds }: Props) {
+export function PlacementLibrary({ state, dispatch, artworkBounds, references }: Props) {
   const { t } = useUiLanguage();
   const [placements, setPlacements] = useState<PlacementItem[]>([]);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
+  const [pending, setPending] = useState<PlacementItem | null>(null);
 
   const refresh = async () => {
     try {
@@ -73,22 +122,8 @@ export function PlacementLibrary({ state, dispatch, artworkBounds }: Props) {
     }
   };
 
-  const apply = (placement: PlacementItem) => {
-    dispatch({ type: "applyFloors", floors: placement.floors });
-    const saved = new Set(placement.floors.map((f) => f.label));
-    const current = new Set(state.floors.map((f) => f.label));
-    const missing = [...saved].filter((label) => !current.has(label));
-    const extra = [...current].filter((label) => !saved.has(label));
-    const floorMismatch = missing.length + extra.length > 0;
-    setWarning(
-      boundsWarning(placement.artwork_bounds, artworkBounds) || floorMismatch
-        ? t(
-            "This drawing or its floors differ from the saved placement. Check the alignment.",
-            "この図面またはフロア構成は保存時と異なります。位置合わせを確認してください。"
-          )
-        : null
-    );
-  };
+  const preview = pending ? templatePreview(state, pending, artworkBounds, references) : null;
+  const size = (value: [number, number]) => `${Math.round(value[0])} × ${Math.round(value[1])} pt`;
 
   return (
     <div className="space-y-2 text-sm">
@@ -105,11 +140,88 @@ export function PlacementLibrary({ state, dispatch, artworkBounds }: Props) {
         </Button>
       </div>
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
-      {warning ? <p className="text-xs text-warning-foreground">{warning}</p> : null}
+      {pending && preview ? (
+        <div
+          data-testid="template-preview"
+          className="space-y-1.5 rounded-md border border-border bg-muted p-2.5 text-xs leading-4"
+        >
+          <p className="font-medium text-foreground">
+            {t(`Apply “${pending.name}”?`, `「${pending.name}」を適用しますか？`)}
+          </p>
+          <p className="text-muted-foreground">
+            {preview.matched.length > 0
+              ? t(`Places ${preview.matched.join(", ")}.`, `${preview.matched.join("、")}を配置します。`)
+              : t("No floor here has a name the template knows.", "テンプレートと同じ名前のフロアがありません。")}
+          </p>
+          {preview.pinned.length > 0 ? (
+            <p className="text-warning-foreground">
+              {t(
+                `Pinned, so the template does not move ${preview.pinned.length === 1 ? "it" : "them"}: ${preview.pinned.join(", ")}.`,
+                `ピン留め中のためテンプレートでは動きません：${preview.pinned.join("、")}`
+              )}
+            </p>
+          ) : null}
+          {preview.kept.length > 0 ? (
+            <p className="text-warning-foreground">
+              {t(
+                `Not in the template, keeps its placement: ${preview.kept.join(", ")}.`,
+                `テンプレートにないため今の配置のまま：${preview.kept.join("、")}`
+              )}
+            </p>
+          ) : null}
+          {preview.reframed.length > 0 ? (
+            <p className="text-warning-foreground">
+              {t(
+                `Not in the template, but linked, so ${preview.reframed.length === 1 ? "it takes" : "they take"} the template's scale and rotation: ${preview.reframed.join(", ")}.`,
+                `テンプレートにはないが、リンクしているためテンプレートの縮尺と回転になります：${preview.reframed.join("、")}`
+              )}
+            </p>
+          ) : null}
+          {preview.unused.length > 0 ? (
+            <p className="text-warning-foreground">
+              {t(
+                `In the template but not in this drawing: ${preview.unused.join(", ")}.`,
+                `テンプレートにあってこの図面にないフロア：${preview.unused.join("、")}`
+              )}
+            </p>
+          ) : null}
+          {preview.size ? (
+            <p className="text-warning-foreground">
+              {t(
+                `The drawing size differs: saved ${size(preview.size.saved)}, now ${size(preview.size.current)}.`,
+                `図面の大きさが違います：保存時 ${size(preview.size.saved)}、現在 ${size(preview.size.current)}`
+              )}
+            </p>
+          ) : null}
+          {preview.reopens.length > 0 ? (
+            <p className="text-warning-foreground">
+              {t(
+                `${preview.reopens.join(", ")} will need aligning again.`,
+                `${preview.reopens.join("、")}はもう一度位置合わせが必要になります。`
+              )}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button size="sm" variant="ghost" onClick={() => setPending(null)}>
+              {t("Cancel", "キャンセル")}
+            </Button>
+            <Button
+              size="sm"
+              disabled={preview.matched.length === 0}
+              onClick={() => {
+                dispatch({ type: "applyFloors", floors: pending.floors });
+                setPending(null);
+              }}
+            >
+              {t("Apply", "適用")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <ul className="space-y-1">
         {placements.map((placement) => (
           <li key={placement.id} className="flex items-center justify-between text-xs">
-            <button type="button" className="text-left underline" onClick={() => apply(placement)}>
+            <button type="button" className="text-left underline" onClick={() => setPending(placement)}>
               {placement.name}
             </button>
             <button

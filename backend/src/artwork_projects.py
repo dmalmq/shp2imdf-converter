@@ -100,8 +100,8 @@ def derive_artwork_stage(
 ) -> tuple[ArtworkStage, int | None]:
     """Return ``(stage, blockers)``; blockers is the number of floors still to place.
 
-    A floor counts as placed once it is pinned, has enough control points, or is
-    marked done. A station pin alone does not count: it is set automatically.
+    A floor counts as placed while its status is Aligned (``floor_is_aligned``).
+    Moving or pinning a floor, or a station pin, does not count.
     """
     if delivery_is_current(delivered_at, content_changed_at):
         return "deliver", 0

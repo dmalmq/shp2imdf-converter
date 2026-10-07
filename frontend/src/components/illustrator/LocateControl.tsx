@@ -94,7 +94,7 @@ export function LocateControl({
         onLookupSettledRef.current?.();
       })
       .catch(() => {
-        if (acceptsGuess(locateRef.current)) send({ type: "guessed", candidates: [] });
+        if (acceptsGuess(locateRef.current)) send({ type: "guessFailed" });
         onLookupSettledRef.current?.();
       });
   }, [siteName, uiLanguage, dispatch, onLocate]);
@@ -159,8 +159,26 @@ export function LocateControl({
       >
         <span className="truncate">{rowLabel}</span>
         {locate.located.kind === "guessed" ? (
-          <span className="shrink-0 text-muted-foreground">
-            {t("first match", "最初の候補")}
+          <span
+            className="shrink-0 text-muted-foreground"
+            title={t(
+              `Suggested from the file name: ${locate.located.place.name}`,
+              `ファイル名からの推定：${locate.located.place.name}`
+            )}
+          >
+            {t("suggested · approximate", "推定 · おおよその位置")}
+          </span>
+        ) : null}
+        {locate.located.kind === "none" && (!siteName.trim() || restored !== undefined) ? (
+          <span data-testid="lookup-failure" className="shrink-0 font-medium text-warning-foreground">
+            {t("not located · search", "位置未設定 · 検索")}
+          </span>
+        ) : null}
+        {locate.located.kind === "not-found" || locate.located.kind === "unavailable" ? (
+          <span data-testid="lookup-failure" className="shrink-0 font-medium text-warning-foreground">
+            {locate.located.kind === "not-found"
+              ? t("not found · search", "見つかりません · 検索")
+              : t("lookup failed · search", "検索できません · 検索")}
           </span>
         ) : null}
       </button>

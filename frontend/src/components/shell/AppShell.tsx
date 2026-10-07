@@ -15,6 +15,7 @@ import {
   ShellProvider,
   useAnchorInView,
   useShellSlots,
+  type PageSave,
   type PageShell,
   type PrimaryAction
 } from "./ShellContext";
@@ -117,6 +118,7 @@ function ShellFrame({ children }: Props) {
         <SearchPalette />
 
         {parseProjectPath(location.pathname)?.stage === "set-up" ? <SaveStatus held={Boolean(page?.saveHeld)} /> : null}
+        {page?.save && flowForPath(location.pathname) === "artwork" ? <PageSaveStatus save={page.save} /> : null}
         <LanguageSwitch />
         <Button
           variant="ghost"
@@ -218,6 +220,44 @@ function SaveStatus({ held }: { held: boolean }) {
       className={cn(
         "flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs leading-4",
         status === "error" ? "text-destructive" : "text-muted-foreground"
+      )}
+    >
+      <span aria-hidden="true" className={cn("h-1.5 w-1.5 rounded-full", dot)} />
+      {content}
+    </span>
+  );
+}
+
+function PageSaveStatus({ save }: { save: PageSave }) {
+  const { t } = useUiLanguage();
+  const problem = save.state === "failed" || save.state === "stopped";
+  let content: React.ReactNode;
+  let dot = "bg-primary";
+  if (save.state === "saving") {
+    content = t("Saving…", "保存中…");
+    dot = "bg-muted-foreground";
+  } else if (save.state === "failed") {
+    content = t("Could not save · retrying", "保存できません · 再試行中");
+    dot = "bg-destructive";
+  } else if (save.state === "stopped") {
+    content = t("Not saved", "保存されていません");
+    dot = "bg-destructive";
+  } else if (save.savedAt !== null) {
+    content = (
+      <>
+        {t("Saved", "保存済み")} · <span className="font-mono">{formatClock(save.savedAt)}</span>
+      </>
+    );
+  } else {
+    return null;
+  }
+  return (
+    <span
+      role="status"
+      data-testid="page-save-status"
+      className={cn(
+        "flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs leading-4",
+        problem ? "text-destructive" : "text-muted-foreground"
       )}
     >
       <span aria-hidden="true" className={cn("h-1.5 w-1.5 rounded-full", dot)} />

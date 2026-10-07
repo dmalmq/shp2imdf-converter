@@ -64,7 +64,7 @@ test("the relink action appears only when the active floor is unlinked", () => {
   expect(screen.getByRole("button", { name: /relink/i })).toBeInTheDocument();
 });
 
-test("relinking dispatches relinkFloor for the active floor", () => {
+test("relinking previews the change and dispatches relinkFloor only once confirmed", () => {
   const seen: { type: string; label?: string }[] = [];
   const unlinked = stateWith([{ label: "2F", linked: false }], "2F");
   render(
@@ -73,7 +73,10 @@ test("relinking dispatches relinkFloor for the active floor", () => {
       dispatch={(action) => seen.push(action as { type: string; label?: string })}
     />
   );
-  fireEvent.click(screen.getByRole("button", { name: /relink/i }));
+  fireEvent.click(screen.getByRole("button", { name: "Relink to shared frame" }));
+  expect(screen.getByTestId("relink-preview")).toHaveTextContent("Relink 2F to the shared frame?");
+  expect(seen).toEqual([]);
+  fireEvent.click(screen.getByRole("button", { name: "Relink" }));
   expect(seen).toEqual([{ type: "relinkFloor", label: "2F" }]);
 });
 

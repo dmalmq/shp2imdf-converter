@@ -31,9 +31,11 @@ type Props = {
   onTogglePicking: () => void;
   referenceLayers: ReferenceLayer[];
   shapeMatch: ShapeMatchPanelModel;
+  method: AlignMethod;
+  onMethodChange: (method: AlignMethod) => void;
 };
 
-type Method = "points" | "shape";
+export type AlignMethod = "points" | "shape";
 
 /**
  * How the artwork gets aligned.
@@ -53,10 +55,11 @@ export function ScaleAndFitPanel({
   mode,
   onTogglePicking,
   referenceLayers,
-  shapeMatch
+  shapeMatch,
+  method,
+  onMethodChange
 }: Props) {
   const { t } = useUiLanguage();
-  const [method, setMethod] = useState<Method>("points");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [denominator, setDenominator] = useState(String(DEFAULT_DRAWING_SCALE));
   const [artworkDistance, setArtworkDistance] = useState("");
@@ -73,7 +76,7 @@ export function ScaleAndFitPanel({
 
       {/* One choice, not two open sections. Both stay mounted: each holds
           selection state that a switch must not discard. */}
-      <Tabs value={method} onValueChange={(value) => setMethod(value as Method)}>
+      <Tabs value={method} onValueChange={(value) => onMethodChange(value as AlignMethod)}>
         <TabsList className="w-full">
           <TabsTrigger value="points" className="flex-1">
             {t("Control points", "対応点")}

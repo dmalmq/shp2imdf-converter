@@ -163,6 +163,16 @@ describe("artwork flow", () => {
     ]);
   });
 
+  test("Place on map counts aligned floors, and Deliver says how many still need it", () => {
+    const partly = pageStages("artwork", 2, { floorsAligned: { aligned: 1, total: 3 } });
+    expect(partly[2].detail?.en).toBe("1 of 3 aligned · 2 to go");
+    expect(partly[3].detail?.en).toBe("2 floors need alignment");
+    const delivering = pageStages("artwork", 2, { current: "deliver", floorsAligned: { aligned: 1, total: 3 } });
+    expect(delivering[3].detail?.en).toBe("Choose outputs");
+    const all = pageStages("artwork", 2, { floorsAligned: { aligned: 3, total: 3 } });
+    expect([all[2].detail?.en, all[3].detail]).toEqual(["3 of 3 aligned", undefined]);
+  });
+
   test("stages are links only where the page can switch to them", () => {
     expect(targets(pageStages("artwork", 1))).toEqual([null, null, null, null]);
     const placing = pageStages("artwork", 2, { targets: ["deliver"] });

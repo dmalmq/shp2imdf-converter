@@ -1,5 +1,5 @@
 import React, { type Dispatch } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { FeatureCollection, Polygon } from "geojson";
 
 import { assignFloors, previewIllustrator, snapIllustratorSurvey } from "../api/client";
@@ -11,6 +11,8 @@ import {
   type PlacementAction,
   type PlacementState
 } from "../hooks/useIllustratorPlacement";
+import type { FloorStatus } from "../lib/floorStatus";
+import { useAppStore } from "../store/useAppStore";
 import { IllustratorPage } from "./IllustratorPage";
 
 vi.mock("../api/client", async (importOriginal) => ({
@@ -63,6 +65,7 @@ type SidebarProps = {
   surveySnap: SurveySnapModel;
   onReferenceLayersChange: (layers: (typeof STATION_PG)[]) => void;
   onLookupSettled?: () => void;
+  statuses: Map<string, FloorStatus>;
 };
 
 vi.mock("../components/illustrator/PlacementSidebar", () => ({
@@ -71,7 +74,8 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
     dispatch,
     surveySnap,
     onReferenceLayersChange,
-    onLookupSettled
+    onLookupSettled,
+    statuses
   }: SidebarProps) => (
     <section>
       <button
@@ -131,6 +135,9 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
         {state.floors.map((floor) => String(floor.linked)).join(",")}
       </output>
       <output data-testid="survey-notice">{surveySnap.notice ?? "none"}</output>
+      <output data-testid="statuses">
+        {[...statuses.values()].map((status) => status.kind).join(",")}
+      </output>
       <output data-testid="floor-labels">{state.floors.map((floor) => floor.label).join(",")}</output>
     </section>
   )
@@ -342,4 +349,41 @@ test("changing station hides the drawing until Station_pg snaps at the new pin",
   expect(finish).toBeDefined();
   finish!({ match: MATCH, reason: null });
   await waitFor(() => expect(screen.queryByTestId("placement-hold")).toBeNull());
+});
+
+test("the arrival snap aligns nothing; a Snap click aligns the linked floors, and moving the pin reopens them", async () => {
+  await enterPlacementView();
+  fireEvent.click(screen.getByRole("button", { name: "Pin station" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add Station_pg" }));
+  await waitFor(() => expect(screen.getByTestId("frame-rotation")).toHaveTextContent("-36.4"));
+  expect(screen.getByTestId("statuses")).toHaveTextContent(
+    "needs-alignment,needs-alignment,needs-alignment"
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Snap to Station_pg" }));
+  await waitFor(() => expect(snap).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.getByTestId("statuses")).toHaveTextContent("aligned,aligned,aligned"));
+
+  fireEvent.click(screen.getByRole("button", { name: "Pin elsewhere" }));
+  await waitFor(() =>
+    expect(screen.getByTestId("statuses")).toHaveTextContent(
+      "needs-alignment,needs-alignment,needs-alignment"
+    )
+  );
+});
+
+test("a drawing nothing located says it sits at the default spot, in English and Japanese", async () => {
+  await enterPlacementView();
+  expect(screen.queryByTestId("lookup-failed")).toBeNull();
+  // A file name with no station in it settles the lookup without moving anything.
+  fireEvent.click(screen.getByRole("button", { name: "Lookup failed" }));
+  expect(screen.getByTestId("lookup-failed")).toHaveTextContent(
+    "No location was found for this drawing, so it sits at a default spot in central Tokyo."
+  );
+  act(() => useAppStore.setState({ uiLanguage: "ja" }));
+  expect(screen.getByTestId("lookup-failed")).toHaveTextContent("東京都心の仮の位置");
+  act(() => useAppStore.setState({ uiLanguage: "en" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "Pin station" }));
+  expect(screen.queryByTestId("lookup-failed")).toBeNull();
 });

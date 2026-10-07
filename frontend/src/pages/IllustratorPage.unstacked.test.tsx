@@ -11,6 +11,7 @@ import {
   type PlacementAction,
   type PlacementState
 } from "../hooks/useIllustratorPlacement";
+import type { FloorStatus } from "../lib/floorStatus";
 import { IllustratorPage } from "./IllustratorPage";
 
 vi.mock("../api/client", async (importOriginal) => ({
@@ -69,6 +70,9 @@ type SidebarProps = {
   tab: PlacementTab;
   shapeMatch: ShapeMatchPanelModel;
   onReferenceLayersChange: (layers: (typeof STATION_PG)[]) => void;
+  alignMethod: string;
+  statuses: Map<string, FloorStatus>;
+  onReviewFloor: (label: string) => void;
 };
 
 vi.mock("../components/illustrator/PlacementSidebar", () => ({
@@ -78,7 +82,10 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
     mode,
     tab,
     shapeMatch,
-    onReferenceLayersChange
+    onReferenceLayersChange,
+    alignMethod,
+    statuses,
+    onReviewFloor
   }: SidebarProps) => (
     <section>
       <button
@@ -100,6 +107,13 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
       <button type="button" onClick={shapeMatch.onStartArtworkMatch}>
         Match 4F to 3F
       </button>
+      <button type="button" onClick={() => onReviewFloor("4F")}>
+        Review 4F
+      </button>
+      <output data-testid="align-method">{alignMethod}</output>
+      <output data-testid="statuses">
+        {[...statuses.values()].map((status) => status.kind).join(",")}
+      </output>
       <output data-testid="mode">{mode}</output>
       <output data-testid="tab">{tab}</output>
       <output data-testid="match-target">
@@ -253,4 +267,21 @@ test("an unstacked 4F stays unlinked, follows the pin, and matches onto 3F", asy
   expect(screen.getByTestId("tab")).toHaveTextContent("fit");
   expect(screen.getByTestId("shape-pick")).toHaveTextContent("picking");
   expect(screen.getByTestId("match-target")).toHaveTextContent("3F");
+});
+
+test("an automatic snap aligns nothing, and reviewing the unstacked 4F opens its match first", async () => {
+  await enterPlacementView();
+  fireEvent.click(screen.getByRole("button", { name: "Pin station" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add Station_pg" }));
+  await waitFor(() => expect(snap).toHaveBeenCalled());
+  await waitFor(() => expect(screen.getByTestId("floor-anchor-1F")).not.toHaveTextContent("140.1134,35.6132"));
+  expect(screen.getByTestId("statuses")).toHaveTextContent(
+    "needs-alignment,needs-alignment,needs-alignment,needs-alignment"
+  );
+  expect(screen.getByTestId("align-method")).toHaveTextContent("points");
+
+  fireEvent.click(screen.getByRole("button", { name: "Review 4F" }));
+  await waitFor(() => expect(screen.getByTestId("align-method")).toHaveTextContent("shape"));
+  expect(screen.getByTestId("tab")).toHaveTextContent("fit");
+  expect(screen.getByTestId("artwork-match-target")).toHaveTextContent("3F");
 });

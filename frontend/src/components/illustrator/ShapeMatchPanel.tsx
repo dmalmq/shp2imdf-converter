@@ -195,7 +195,7 @@ export function ShapeMatchPanel({ state, mode, referenceLayers, model }: Props) 
           {model.onStartArtworkMatch ? (
             <Button size="sm" className="w-full" onClick={model.onStartArtworkMatch}>
               {t(
-                `Match ${activeFloor.label} to ${model.artworkMatchTarget}`,
+                `Align ${activeFloor.label} to ${model.artworkMatchTarget}`,
                 `「${activeFloor.label}」を「${model.artworkMatchTarget}」に合わせる`
               )}
             </Button>

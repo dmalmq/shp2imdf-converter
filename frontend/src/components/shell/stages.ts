@@ -74,6 +74,8 @@ export type PageStages = {
   checkWarnings?: number | null;
   /** Files Bring in could not place on its own; null or undefined when nothing is read yet. */
   bringInNeeds?: number | null;
+  /** Artwork floors whose status is Aligned, of all floors; null before floors are named. */
+  floorsAligned?: { aligned: number; total: number } | null;
 };
 
 const SHAPEFILE_STAGE_IDS: ReadonlyArray<ShapefileStageId> = ["bring-in", "set-up", "check", "deliver"];
@@ -230,9 +232,29 @@ export function pageStages(flow: Exclude<Flow, "shapefiles">, fallback: number, 
   const stages = FLOW_STAGES[flow];
   const current = page?.current ? Math.max(stages.findIndex((stage) => stage.id === page.current), 0) : fallback;
 
+  const floors = flow === "artwork" ? page?.floorsAligned : null;
+  const left = floors ? floors.total - floors.aligned : 0;
+
   return stages.map(({ id, label }, index) => {
     const stage: Stage = { id, label, status: statusFor(index, current) };
     if (stage.status !== "current") stage.target = pageTarget(page, id);
+    if (id === "place" && floors) {
+      stage.detail =
+        left > 0
+          ? {
+              en: `${floors.aligned} of ${floors.total} aligned · ${left} to go`,
+              ja: `${floors.total} フロア中 ${floors.aligned} 位置合わせ済み · 残り ${left}`
+            }
+          : { en: `${floors.aligned} of ${floors.total} aligned`, ja: `全 ${floors.total} フロア位置合わせ済み` };
+    }
+    if (flow === "artwork" && id === "deliver" && stage.status === "current") {
+      stage.detail = { en: "Choose outputs", ja: "出力を選ぶ" };
+    } else if (id === "deliver" && floors && left > 0) {
+      stage.detail =
+        left === 1
+          ? { en: "1 floor needs alignment", ja: "位置合わせが必要なフロア 1 件" }
+          : { en: `${left} floors need alignment`, ja: `位置合わせが必要なフロア ${left} 件` };
+    }
     if (index === current + 1 && stage.status === "todo" && page?.nextBlockedReason && !stage.target) {
       stage.status = "blocked";
       stage.detail = page.nextBlockedReason;

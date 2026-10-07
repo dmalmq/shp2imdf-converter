@@ -27,6 +27,13 @@ export type PrimaryAction = {
   anchor?: RefObject<HTMLElement | null>;
 };
 
+/** A page that saves on its own (the artwork route's autosave), for the top bar. */
+export type PageSave = {
+  state: "idle" | "saving" | "saved" | "failed" | "stopped";
+  /** When the server last confirmed a save, as epoch milliseconds. */
+  savedAt: number | null;
+};
+
 /**
  * What a page tells the shell about itself. The next stage's blocked reason
  * is not here: the shell takes it from the page's disabled primary action.
@@ -38,6 +45,7 @@ export type PageShell = Omit<PageStages, "nextBlockedReason"> & {
   go?: Partial<Record<StageId, () => void>>;
   /** Edits are on screen that the server has not been sent, and will not be until they are complete. */
   saveHeld?: boolean;
+  save?: PageSave | null;
 };
 
 /**
@@ -166,7 +174,11 @@ export function usePageShell(page: PageShell | null) {
       page?.checkErrors,
       page?.checkWarnings,
       page?.bringInNeeds,
-      page?.saveHeld
+      page?.saveHeld,
+      page?.save?.state,
+      page?.save?.savedAt,
+      page?.floorsAligned?.aligned,
+      page?.floorsAligned?.total
     ]
   );
 }

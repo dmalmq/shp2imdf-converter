@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.src.artwork_draft import MAX_DRAFT_BYTES, PlacementDraft
+from backend.src.artwork_draft import MAX_DRAFT_BYTES, PlacementDraft, floor_is_aligned
 from backend.src.illustrator_importer import parse_ai
 from backend.src.illustrator_store import (
     ConversionExpiredError,
@@ -40,9 +40,19 @@ def _floor(label: str, **overrides) -> dict:
         "metres_per_point": None,
         "artwork_match": False,
         "control_points": [],
+        "alignment": None,
     }
     floor.update(overrides)
     return floor
+
+
+def _pose_2f() -> dict:
+    return {
+        "artwork_anchor": [142.5, 100.0],
+        "map_anchor": [139.76723456789012, 35.68134567890123],
+        "rotation_deg": -3.25,
+        "metres_per_point": 0.35,
+    }
 
 
 def _draft() -> dict:
@@ -64,6 +74,10 @@ def _draft() -> dict:
                         {"id": "1", "artwork": [90.0, 10.0], "map": [139.7672, 35.6813]},
                         {"id": "2", "artwork": [190.0, 190.0], "map": [139.7675, 35.6816]},
                     ],
+                    alignment={
+                        "pose": _pose_2f(),
+                        "basis": {"kind": "points", "floor": "2F", "point_ids": ["1", "2"]},
+                    },
                 ),
             ],
             "scale_locked": True,
@@ -182,25 +196,61 @@ def test_view_changes_are_saved_without_counting_as_an_edit(store: ConversionSto
     assert store.draft(cached).draft.view.tab == "export"
 
 
-def test_placed_floors_count_pins_and_enough_control_points(store: ConversionStore) -> None:
+def test_placed_floors_are_the_floors_still_aligned(store: ConversionStore) -> None:
     cached = _assigned(store)
     revision = store.draft(cached).revision
     saved = store.save_draft(cached.conversion_id, _model(_draft()), revision)
-    # 2F has two pairs with the scale locked: enough for a fit.
     assert _project_json(cached.directory)["floors_placed"] == 1
 
-    unlocked = _draft()
-    unlocked["placement"]["scale_locked"] = False
-    saved = store.save_draft(cached.conversion_id, _model(unlocked), saved.revision)
-    assert _project_json(cached.directory)["floors_placed"] == 0
-
-    pinned = copy.deepcopy(unlocked)
+    pinned = _draft()
     for floor in pinned["placement"]["floors"]:
         floor["pinned"] = True
-    store.save_draft(cached.conversion_id, _model(pinned), saved.revision)
+    saved = store.save_draft(cached.conversion_id, _model(pinned), saved.revision)
+    # Pinning keeps 2F where it was aligned and aligns nothing else.
+    assert _project_json(cached.directory)["floors_placed"] == 1
+
+    moved = _draft()
+    moved["placement"]["floors"][1]["map_anchor"] = [139.7673, 35.6814]
+    saved = store.save_draft(cached.conversion_id, _model(moved), saved.revision)
+    assert _project_json(cached.directory)["floors_placed"] == 0
+
+    repaired = _draft()
+    repaired["placement"]["floors"][1]["control_points"].pop()
+    saved = store.save_draft(cached.conversion_id, _model(repaired), saved.revision)
+    assert _project_json(cached.directory)["floors_placed"] == 0
+
+    both = _draft()
+    frame_pose = {
+        "artwork_anchor": [42.5, 100.0],
+        "map_anchor": [139.7671, 35.6812],
+        "rotation_deg": 12.5,
+        "metres_per_point": 0.3527777777777778,
+    }
+    both["placement"]["floors"][0]["alignment"] = {
+        "pose": frame_pose,
+        "basis": {"kind": "floor", "floor": "2F", "pose": _pose_2f()},
+    }
+    saved = store.save_draft(cached.conversion_id, _model(both), saved.revision)
     assert _project_json(cached.directory)["floors_placed"] == 2
     summary = store.summary(cached.conversion_id)
     assert (summary.stage, summary.blockers) == ("deliver", 0)
+
+    reference_moved = copy.deepcopy(both)
+    reference_moved["placement"]["floors"][1]["map_anchor"] = [139.7673, 35.6814]
+    store.save_draft(cached.conversion_id, _model(reference_moved), saved.revision)
+    # 1F was matched to 2F where 2F was; 2F moving reopens both.
+    assert _project_json(cached.directory)["floors_placed"] == 0
+
+
+def test_a_lookup_failure_round_trips(store: ConversionStore) -> None:
+    cached = _assigned(store)
+    failed = _draft()
+    failed["view"]["location"] = {"kind": "not-found", "query": "0001_合成"}
+    store.save_draft(cached.conversion_id, _model(failed), store.draft(cached).revision)
+    assert store.draft(cached).draft.view.location.model_dump() == {
+        "kind": "not-found",
+        "query": "0001_合成",
+    }
 
 
 def test_a_stale_revision_is_a_conflict(store: ConversionStore) -> None:
@@ -588,3 +638,53 @@ def test_a_delivered_project_opened_without_a_draft_stays_delivered(test_client)
     listed = test_client.get("/api/projects?flow=artwork").json()["projects"][0]
     assert listed["stage"] == "deliver"
     assert listed["changed_since_delivery"] is False
+
+
+_GOLDEN = json.loads(
+    (Path(__file__).parent / "fixtures" / "floor_status_golden.json").read_text(encoding="utf-8")
+)["cases"]
+
+
+@pytest.mark.parametrize("case", _GOLDEN, ids=[case["name"] for case in _GOLDEN])
+def test_floor_status_golden_fixture(case: dict) -> None:
+    # frontend/src/lib/floorStatus.test.ts runs the same cases through floorStatus.
+    draft = PlacementDraft.model_validate(case["draft"])
+    got = {
+        floor.label: "aligned" if floor_is_aligned(draft, floor) else "needs-alignment"
+        for floor in draft.placement.floors
+    }
+    assert got == case["expected"]
+
+
+def test_a_reference_change_in_the_view_recounts_placed_floors(store: ConversionStore) -> None:
+    cached = _assigned(store)
+    draft = _draft()
+    draft["placement"]["floors"][0]["alignment"] = {
+        "pose": {
+            "artwork_anchor": [42.5, 100.0],
+            "map_anchor": [139.7671, 35.6812],
+            "rotation_deg": 12.5,
+            "metres_per_point": 0.3527777777777778,
+        },
+        "basis": {
+            "kind": "reference",
+            "reference": {
+                "layer": "Station_pg",
+                "preloaded": True,
+                "uploads": [],
+                "pin": [139.7671, 35.6812],
+            },
+        },
+    }
+    draft["view"]["station_pin"] = [139.7671, 35.6812]
+    draft["view"]["references"].update(preloaded=True, removed=[], uploads=[])
+    saved = store.save_draft(cached.conversion_id, _model(draft), store.draft(cached).revision)
+    assert _project_json(cached.directory)["floors_placed"] == 2
+    changed_at = _project_json(cached.directory)["content_changed_at"]
+
+    removed = copy.deepcopy(draft)
+    removed["view"]["references"]["removed"] = ["Station_pg"]
+    store.save_draft(cached.conversion_id, _model(removed), saved.revision)
+    project = _project_json(cached.directory)
+    # The view changed, not the work: the count follows and the content does not move.
+    assert (project["floors_placed"], project["content_changed_at"]) == (1, changed_at)

@@ -503,7 +503,7 @@ export type ProjectSummary = {
   stage: "bring-in" | "set-up" | "check" | "name-floors" | "place" | "deliver" | null;
   updated_at: string | null;
   last_opened: string;
-  /** Validation errors for shapefiles; floors still to place for artwork. */
+  /** Validation errors for shapefiles; floors still to align for artwork. */
   blockers: number | null;
   /** Validation warnings; always null for artwork. */
   can_wait: number | null;
@@ -1273,6 +1273,24 @@ export async function assignFloors(
 
 export type DraftPlace = { name: string; lng_lat: [number, number]; working_crs?: string | null };
 
+export type DraftPose = {
+  artwork_anchor: [number, number];
+  map_anchor: [number, number];
+  rotation_deg: number;
+  metres_per_point: number;
+};
+
+export type DraftAlignment = {
+  pose: DraftPose;
+  basis:
+    | { kind: "points"; floor: string; point_ids: string[] }
+    | {
+        kind: "reference";
+        reference: { layer: string; preloaded: boolean; uploads: string[]; pin: [number, number] | null };
+      }
+    | { kind: "floor"; floor: string; pose: DraftPose };
+};
+
 /** `backend/src/artwork_draft.py`: what `/a/:id` resumes from. Version 1. */
 export type PlacementDraft = {
   version: 1;
@@ -1289,6 +1307,7 @@ export type PlacementDraft = {
       metres_per_point: number | null;
       artwork_match: boolean;
       control_points: { id: string; artwork: [number, number]; map: [number, number] }[];
+      alignment: DraftAlignment | null;
     }[];
     scale_locked: boolean;
     output_crs: string;
@@ -1299,12 +1318,16 @@ export type PlacementDraft = {
     mode: "group" | "individual";
     tab: "fit" | "reference" | "export";
     station_pin: [number, number] | null;
-    location: {
-      kind: "guessed" | "chosen";
-      query: string;
-      place: DraftPlace;
-      candidates: DraftPlace[];
-    } | null;
+    location:
+      | {
+          kind: "guessed" | "chosen";
+          query: string;
+          place: DraftPlace;
+          candidates: DraftPlace[];
+        }
+      | { kind: "not-found"; query: string }
+      | { kind: "unavailable"; query: string }
+      | null;
     references: ReferenceSelection;
   };
 };

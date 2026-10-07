@@ -6,6 +6,13 @@ import type { ExportFormatsPayload } from "../../api/client";
 import type { PlacementAction, PlacementState } from "../../hooks/useIllustratorPlacement";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle
+} from "../ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { Metric } from "../ui/metric";
 import { SectionHeader } from "../ui/section-header";
@@ -19,6 +26,8 @@ import {
 import { Separator } from "../ui/separator";
 import { DisabledHint } from "../ui/tooltip";
 import { cn } from "@/lib/utils";
+import type { CurrentReferences, FloorStatus } from "../../lib/floorStatus";
+import { FloorChecklist } from "./FloorChecklist";
 import { PlacementLibrary } from "./PlacementLibrary";
 
 type Props = {
@@ -34,6 +43,9 @@ type Props = {
   previewFeatures: number;
   totalFeatures: number;
   error: string | null;
+  statuses: Map<string, FloorStatus>;
+  onReviewFloor: (label: string) => void;
+  references: CurrentReferences;
 };
 
 type FormatKey = keyof ExportFormatsPayload;
@@ -51,10 +63,18 @@ export function ExportPanel({
   onExport,
   previewFeatures,
   totalFeatures,
-  error
+  error,
+  statuses,
+  onReviewFloor,
+  references
 }: Props) {
   const { t } = useUiLanguage();
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const unaligned = state.floors
+    .filter((floor) => statuses.get(floor.label)?.kind !== "aligned")
+    .map((floor) => floor.label);
+  const first = unaligned[0] ?? "";
 
   const floorCount = state.floors.length;
 
@@ -84,7 +104,11 @@ export function ExportPanel({
   const usingSuggested = outputCrs === suggested?.value;
 
   const exportButton = (
-    <Button className="w-full" disabled={chosen === 0} onClick={onExport}>
+    <Button
+      className="w-full"
+      disabled={chosen === 0}
+      onClick={() => (unaligned.length > 0 ? setConfirming(true) : onExport())}
+    >
       {t(
         `Export ${floorCount} ${floorCount === 1 ? "floor" : "floors"}`,
         `${floorCount} フロアを書き出し`
@@ -94,6 +118,48 @@ export function ExportPanel({
 
   return (
     <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2">
+        <SectionHeader title={t("Floors", "フロア")} />
+        <FloorChecklist state={state} statuses={statuses} onReview={onReviewFloor} />
+      </div>
+
+      <Dialog open={confirming} onOpenChange={setConfirming}>
+        <DialogContent>
+          <DialogTitle>
+            {unaligned.length === 1
+              ? t(`Export with ${first} not aligned?`, `${first}は位置合わせが済んでいません。書き出しますか？`)
+              : t(
+                  `Export with ${unaligned.length} floors not aligned?`,
+                  `位置合わせが済んでいないフロアが ${unaligned.length} 件あります。書き出しますか？`
+                )}
+          </DialogTitle>
+          <DialogDescription>
+            {t(
+              `${unaligned.join(", ")} will be written where ${unaligned.length === 1 ? "it sits" : "they sit"} now, which may be off the real building.`,
+              `${unaligned.join("、")}は今の位置のまま書き出されるため、実際の建物とずれている可能性があります。`
+            )}
+          </DialogDescription>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setConfirming(false);
+                onReviewFloor(first);
+              }}
+            >
+              {t(`Review ${first}`, `${first}を確認`)}
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirming(false);
+                onExport();
+              }}
+            >
+              {t("Export anyway", "このまま書き出す")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {/* ── Output formats ──
           Only shapefile is on by default: this route's entire job is Illustrator
           → shapefiles, and defaulting all three silently produced three artifacts. */}
@@ -203,7 +269,7 @@ export function ExportPanel({
           />
         </CollapsibleTrigger>
         <CollapsibleContent className="pt-2">
-          <PlacementLibrary state={state} dispatch={dispatch} artworkBounds={artworkBounds} />
+          <PlacementLibrary state={state} dispatch={dispatch} artworkBounds={artworkBounds} references={references} />
         </CollapsibleContent>
       </Collapsible>
     </div>

@@ -64,12 +64,30 @@ test("empty siteName does not search and the row is Find the building", () => {
   );
   expect(screen.queryByRole("listitem")).toBeNull();
   expect(settled).toHaveBeenCalledOnce();
+  // Nothing to look up is not a location: the row says so.
+  expect(screen.getByTestId("lookup-failure")).toHaveTextContent("not located · search");
+});
+
+test("a filename that finds nothing says so and moves nothing", async () => {
+  vi.mocked(geocodeSearch).mockResolvedValue([]);
+  const settled = vi.fn();
+  const { seen } = renderLocate("合成テスト", settled);
+  expect(await screen.findByTestId("lookup-failure")).toHaveTextContent("not found · search");
+  expect(seen).toEqual([]);
+  expect(settled).toHaveBeenCalledOnce();
+});
+
+test("a lookup that cannot be asked says so too", async () => {
+  vi.mocked(geocodeSearch).mockRejectedValue(new Error("offline"));
+  const { seen } = renderLocate("大井町駅");
+  expect(await screen.findByTestId("lookup-failure")).toHaveTextContent("lookup failed · search");
+  expect(seen).toEqual([]);
 });
 
 test("filename auto-locate prefers a 駅 hit even when Nominatim ranked the town first", async () => {
   vi.mocked(geocodeSearch).mockResolvedValue([oimachiTownWire, oimachiStaWire]);
   const { seen } = renderLocate("大井町駅");
-  await screen.findByText(/first match/i);
+  await screen.findByText(/suggested · approximate/i);
   expect(geocodeSearch).toHaveBeenCalledWith("大井町駅", expect.anything());
   expect(seen).toEqual([
     { type: "positionBuilding", mapAnchor: [139.7286, 35.6063], baseline: true }
@@ -81,7 +99,7 @@ test("a working_crs on the hit is applied with the pin", async () => {
     { ...oimachiStaWire, working_crs: "EPSG:6676" }
   ]);
   const { seen } = renderLocate("千葉駅");
-  await screen.findByText(/first match/i);
+  await screen.findByText(/suggested · approximate/i);
   expect(seen).toEqual([
     {
       type: "positionBuilding",
@@ -135,10 +153,10 @@ test("a resumed placement that was never located stays unlocated", () => {
 test("filename auto-locate places the first hit without opening the list", async () => {
   vi.mocked(geocodeSearch).mockResolvedValue([oimachiStaWire, oimachiTownWire]);
   const { seen, recenter } = renderLocate("大井町");
-  await screen.findByText(/first match/i);
+  await screen.findByText(/suggested · approximate/i);
   const row = screen.getByRole("button", { name: /大井町/ });
   expect(row).toHaveAttribute("aria-expanded", "false");
-  expect(screen.getByText(/first match/i)).toBeInTheDocument();
+  expect(screen.getByText(/suggested · approximate/i)).toBeInTheDocument();
   expect(screen.queryByRole("listitem")).toBeNull();
   expect(screen.queryByText(oimachiStaWire.display_name)).toBeNull();
   expect(seen).toEqual([
@@ -182,7 +200,7 @@ test("an unavailable geocoder settles so the drawing can be placed by hand", asy
 test("opening the row lists filename hits; picking one collapses and repositions", async () => {
   vi.mocked(geocodeSearch).mockResolvedValue([oimachiStaWire, oimachiTownWire]);
   const { seen } = renderLocate("大井町");
-  await screen.findByText(/first match/i);
+  await screen.findByText(/suggested · approximate/i);
   const row = screen.getByRole("button", { name: /大井町/ });
   fireEvent.click(row);
   expect(row).toHaveAttribute("aria-expanded", "true");
@@ -204,7 +222,7 @@ test("opening the row lists filename hits; picking one collapses and repositions
 test("picking the already-located place collapses without a second positionBuilding", async () => {
   vi.mocked(geocodeSearch).mockResolvedValue([oimachiStaWire, oimachiTownWire]);
   const { seen } = renderLocate("大井町");
-  await screen.findByText(/first match/i);
+  await screen.findByText(/suggested · approximate/i);
   fireEvent.click(screen.getByRole("button", { name: /大井町/ }));
   fireEvent.click(screen.getByRole("button", { name: oimachiStaWire.display_name }));
   expect(seen).toEqual([
@@ -265,7 +283,7 @@ test("opening the row focuses the query field so Escape from the input closes", 
 test("reopening after a pick lists cached hits without a second geocode", async () => {
   vi.mocked(geocodeSearch).mockResolvedValue([oimachiStaWire, oimachiTownWire]);
   renderLocate("大井町");
-  await screen.findByText(/first match/i);
+  await screen.findByText(/suggested · approximate/i);
   fireEvent.click(screen.getByRole("button", { name: /大井町/ }));
   fireEvent.click(screen.getByRole("button", { name: oimachiTownWire.display_name }));
   expect(geocodeSearch).toHaveBeenCalledTimes(1);
@@ -285,7 +303,7 @@ const shinjukuStaWire: GeocodeResultItem = {
 test("reopening after a later search keeps that query in the field with those hits", async () => {
   vi.mocked(geocodeSearch).mockResolvedValueOnce([oimachiStaWire, oimachiTownWire]);
   renderLocate("大井町");
-  await screen.findByText(/first match/i);
+  await screen.findByText(/suggested · approximate/i);
   fireEvent.click(screen.getByRole("button", { name: /大井町/ }));
   vi.mocked(geocodeSearch).mockResolvedValueOnce([shinjukuStaWire]);
   const field = screen.getByPlaceholderText(/新宿駅/);
