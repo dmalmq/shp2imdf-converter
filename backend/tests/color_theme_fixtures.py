@@ -243,6 +243,101 @@ def project_members() -> list[tuple[str, bytes, int]]:
     ]
 
 
+# One Shinjuku unit layer's classes, in its order: category, fill, outline. Every outline is 0.3 pt.
+UNIT_CLASSES = [
+    ("ATM", "#E5F8FF", "#B0C4CC"),
+    ("accessible restroom", "#E5E6E6", "#828282"),
+    ("auditorium", "#E5E6E6", "#C8C9CA"),
+    ("clinic", "#E5F8FF", "#B0C4CC"),
+    ("elevator", "#E5E6E6", "#C8C9CA"),
+    ("escalator", "#FFFFFF", "#C8C9CA"),
+    ("information desk", "#E5E6E6", "#C8C9CA"),
+    ("mothersroom", "#E5E6E6", "#828282"),
+    ("nonpublic", "#E5E6E6", "#C8C9CA"),
+    ("opentobelow", "#FFFFFF", "#C8C9CA"),
+    ("pharmacy", "#E5F8FF", "#B0C4CC"),
+    ("platform", "#FFECE6", "#F2CDC2"),
+    ("ramp", "#FFFFFF", "#C8C9CA"),
+    ("ramp_sta", "#FCFCE3", "#999999"),
+    ("restroom.female", "#E5E6E6", "#828282"),
+    ("restroom.male", "#E5E6E6", "#828282"),
+    ("restroom.wheelchair", "#E5E6E6", "#828282"),
+    ("road", "#C8C9CA", "#C8C9CA"),
+    ("smokingarea", "#E5E6E6", "#C8C9CA"),
+    ("stairs", "#FFFFFF", "#C8C9CA"),
+    ("store", "#E5F8FF", "#B0C4CC"),
+    ("store_sta", "#C2E5F2", "#8FBACC"),
+    ("theater", "#E5F8FF", "#B0C4CC"),
+    ("ticket office", "#E5F8FF", "#B0C4CC"),
+    ("unenclosedarea", "#E5E6E6", "#C8C9CA"),
+    ("unspecified", "#E5E6E6", "#C8C9CA"),
+    ("vegetation", "#96CB91", "#C8C9CA"),
+    ("waitingroom", "#E5E6E6", "#C8C9CA"),
+    ("walkway", "#FFFFFF", "#C8C9CA"),
+    ("walkway_sta", "#FCFCE3", "#999999"),
+]
+FIXTURE_CLASSES = [("checkin.kiosk", "#E54A1A", "#686868"), ("equipment", "#E54A1A", "#686868")]
+
+
+def _rgb(hex_colour: str) -> dict[str, Any]:
+    return {"type": "CIMRGBColor", "values": [*(int(hex_colour[index : index + 2], 16) for index in (1, 3, 5)), 100]}
+
+
+def category_class(category: str, fill: str, outline: str) -> dict[str, Any]:
+    """A class as Pro saves it in a Shinjuku unit layer: one category, a 0.3 pt outline over a solid fill."""
+    return {
+        "type": "CIMUniqueValueClass",
+        "label": category,
+        "patch": "Default",
+        "symbol": {
+            "type": "CIMSymbolReference",
+            "symbol": {
+                "type": "CIMPolygonSymbol",
+                "symbolLayers": [
+                    {
+                        "type": "CIMSolidStroke",
+                        "enable": True,
+                        "capStyle": "Round",
+                        "joinStyle": "Round",
+                        "lineStyle3D": "Strip",
+                        "miterLimit": 10,
+                        "width": 0.3,
+                        "color": _rgb(outline),
+                    },
+                    {"type": "CIMSolidFill", "enable": True, "color": _rgb(fill)},
+                ],
+                "angleAlignment": "Map",
+            },
+        },
+        "values": [{"type": "CIMUniqueValue", "fieldValues": [category]}],
+        "visible": True,
+    }
+
+
+def category_layer_definition(name: str, classes: Sequence[tuple[str, str, str]] = UNIT_CLASSES) -> dict[str, Any]:
+    """A layer coloured by ``category`` alone, the way the Revit/IMDF stations (Shinjuku) are; it has no ``color2``."""
+    layer = layer_definition(name)
+    layer["renderer"]["fields"] = ["category"]
+    layer["renderer"]["groups"] = [
+        {"type": "CIMUniqueValueGroup", "heading": "category", "classes": [category_class(*item) for item in classes]}
+    ]
+    return layer
+
+
+def unit_project_members() -> list[tuple[str, bytes, int]]:
+    """An ``.aprx`` shaped like Shinjuku's: two unit layers of 30 classes and a fixture layer the theme does not know."""
+    layers = [
+        category_layer_definition("DemoSta_1_unit"),
+        category_layer_definition("DemoSta_B1_unit"),
+        category_layer_definition("DemoSta_1_fixture", FIXTURE_CLASSES),
+    ]
+    the_map = {"type": "CIMMap", "name": "DemoSta", "layers": [layer["uRI"] for layer in layers]}
+    return [
+        ("map/map.json", _compact(the_map), zipfile.ZIP_DEFLATED),
+        *[(layer["uRI"].removeprefix("CIMPATH="), _compact(layer), zipfile.ZIP_DEFLATED) for layer in layers],
+    ]
+
+
 def _compact(doc: Any) -> bytes:
     return json.dumps(doc, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
@@ -259,10 +354,28 @@ def make_project(members: Sequence[tuple[str, bytes, int]]) -> bytes:
 
 
 def demo_layer_files() -> bytes:
-    """A zip of a layer file and a project for capture.mjs: rewritten layers, a kept value and an Arcade renderer."""
+    """A zip of a layer file and two projects for capture.mjs: rewritten layers, a kept value, an Arcade renderer,
+    and a project whose unit layers are coloured by category."""
     return make_zip(
         [
             ("DemoSta_layers/DemoSta_0_Space.lyrx", LAYER_FILE.read_bytes()),
             ("DemoSta_layers/DemoSta.aprx", make_project(project_members())),
+            ("DemoSta_layers/DemoSta_units.aprx", make_project(unit_project_members())),
         ]
     )
+
+
+def demo_category_station() -> bytes:
+    """A zipped shapefile station with ``category`` and no ``color2``, for capture.mjs: nothing to rewrite, and why."""
+    fields: list[Field] = [("name", "C", 20, 0), ("category", "C", 20, 0)]
+    rows = [[b"room", category.encode("ascii")] for category in ("walkway", "store", "stairs")]
+    members: list[tuple[str, bytes | None]] = []
+    for floor in ("1", "B1"):
+        stem = f"DemoUnits_6677.shp/DemoUnits_{floor}_unit"
+        members += [
+            (f"{stem}.shp", b"shp " + floor.encode()),
+            (f"{stem}.shx", b"shx " + floor.encode()),
+            (f"{stem}.dbf", make_dbf(fields, rows)),
+            (f"{stem}.cpg", b"UTF-8"),
+        ]
+    return make_zip(members)

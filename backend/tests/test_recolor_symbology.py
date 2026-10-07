@@ -1,4 +1,4 @@
-"""Layer files and projects in an upload: only color2 renderers change, every other byte and member comes back."""
+"""Layer files and projects in an upload: only color2 and category renderers change, every other byte and member comes back."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from backend.tests.color_theme_fixtures import (
     project_members,
     read_zip,
     station_members,
+    unit_project_members,
 )
 
 pytestmark = pytest.mark.colortheme
@@ -132,11 +133,41 @@ def test_a_project_changes_only_the_members_with_a_color2_renderer(theme: ColorT
             assert labels(new_layer)[:6] == NEW_LABELS
     assert labels(json.loads(after[4][4])) == [*NEW_LABELS, "赤"]
     ((line),) = report.symbology
-    assert [(r.layer, r.outcome, r.reason, r.kept) for r in line.renderers] == [
-        ("DemoSta_0_Space", "rewritten", None, ()),
-        ("DemoSta_1_Space", "rewritten", None, ("赤",)),
-        ("DemoSta_B1_Space", "left_alone", "expression", ()),
+    assert [(r.layer, r.field, r.outcome, r.reason, r.kept) for r in line.renderers] == [
+        ("DemoSta_0_Space", "color2", "rewritten", None, ()),
+        ("DemoSta_1_Space", "color2", "rewritten", None, ("赤",)),
+        ("DemoSta_B1_Space", "color2", "left_alone", "expression", ()),
     ]
+
+
+def test_a_project_drawn_by_category_changes_only_its_unit_layers_and_a_second_run_changes_nothing(theme: ColorTheme) -> None:
+    source = make_project(unit_project_members())
+    upload = [("DemoSta_units.aprx", source)]
+
+    report = inspect(theme, upload, max_bytes=LIMIT).theme
+    archive = convert(theme, upload, max_bytes=LIMIT)
+
+    output = read_zip(archive.data)["DemoSta_units.aprx"]
+    before, after = _members(source), _members(output)
+    assert [member[:3] for member in after] == [member[:3] for member in before]
+    changed = [new[0] for old, new in zip(before, after) if old != new]
+    assert changed == ["map/demosta_1_unit.json", "map/demosta_b1_unit.json"]
+    for old, new in zip(before, after):
+        if new[0] in changed:
+            old_layer, new_layer = json.loads(old[4]), json.loads(new[4])
+            assert _without_groups(new_layer) == _without_groups(old_layer)
+            assert new_layer["renderer"]["fields"] == ["category"]
+            assert labels(new_layer) == ["改札外通路", "在来線改札内", "施設", "進入制限エリア", "階段・エスカレーター", "vegetation"]
+    ((line),) = report.symbology
+    assert [(r.layer, r.field, r.outcome, r.classes_before, r.classes_after, r.kept) for r in line.renderers] == [
+        ("DemoSta_1_unit", "category", "rewritten", 30, 6, ("vegetation",)),
+        ("DemoSta_B1_unit", "category", "rewritten", 30, 6, ("vegetation",)),
+    ]
+
+    rerun = inspect(theme, [(archive.filename, archive.data)], max_bytes=LIMIT).theme
+    second = convert(theme, [(archive.filename, archive.data)], max_bytes=LIMIT)
+    assert [(r.field, r.outcome, r.classes_after) for r in rerun.symbology[0].renderers] == [("category", "already_new", 6)] * 2
+    assert second.data == archive.data
 
 
 def test_a_project_member_that_does_not_parse_is_reported_and_kept(theme: ColorTheme) -> None:
@@ -147,8 +178,9 @@ def test_a_project_member_that_does_not_parse_is_reported_and_kept(theme: ColorT
     report = inspect(theme, [("p.aprx", make_project(members))], max_bytes=LIMIT).theme
     output = read_zip(convert(theme, [("p.aprx", make_project(members))], max_bytes=LIMIT).data)["p.aprx"]
 
-    assert [(r.layer, r.outcome, r.reason) for r in report.symbology[0].renderers][0] == (
+    assert [(r.layer, r.field, r.outcome, r.reason) for r in report.symbology[0].renderers][0] == (
         "map/broken.json",
+        None,
         "left_alone",
         "unreadable",
     )

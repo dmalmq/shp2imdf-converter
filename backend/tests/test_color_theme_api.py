@@ -45,6 +45,15 @@ def test_the_table_is_served_before_any_upload(test_client) -> None:
     assert toilets["scope"] == {"en": "Toilets coded 濃鼠", "ja": "トイレ（濃鼠）"}
     assert body["totals"]["rows"] == 0
     assert body["symbology"] == []
+    assert (body["field"], body["category_field"]) == ("color2", "category")
+    assert [(line["area"], line["value"], line["hex"], len(line["categories"])) for line in body["category_areas"]] == [
+        ("free_area", "改札外通路", "#FFFFFF", 3),
+        ("paid_area", "在来線改札内", "#F2F7FB", 3),
+        ("facilities", "施設", "#DDEBEC", 11),
+        ("restricted", "進入制限エリア", "#F2F2F2", 9),
+        ("stairs_escalators", "階段・エスカレーター", "#FFFFFF", 3),
+    ]
+    assert body["category_areas"][4]["categories"] == ["stairs", "escalator", "opentobelow"]
 
 
 def test_inspect_reports_each_rule_for_a_dropped_folder(test_client) -> None:
@@ -84,6 +93,7 @@ def test_inspect_reports_each_renderer_of_a_dropped_project(test_client) -> None
     assert (line["path"], line["kind"], line["unreadable"]) == ("DemoSta.aprx", "aprx", False)
     assert line["renderers"][1] == {
         "layer": "DemoSta_1_Space",
+        "field": "color2",
         "outcome": "rewritten",
         "reason": None,
         "classes_before": 15,

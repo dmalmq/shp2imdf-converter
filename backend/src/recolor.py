@@ -1,4 +1,4 @@
-"""Apply the colour theme to one uploaded station. Every file comes back; only ``color2`` changes.
+"""Apply the colour theme to one uploaded station. Every file comes back; only ``color2`` and renderers change.
 
 The upload becomes a ``FileTree``: relative path to bytes, in upload order.
 Entries under a folder named ``*.gdb`` belong to a File Geodatabase;
@@ -15,7 +15,8 @@ table: a table without edits comes back byte for byte. Stale ``*.lock``
 files inside a ``.gdb`` are left out.
 
 An ``.lyrx`` is parsed as CIM JSON and an ``.aprx`` as a zip of CIM JSON
-members; ``cim_symbology`` rewrites their ``color2`` renderers. A file with
+members; ``cim_symbology`` rewrites their ``color2`` renderers, and the
+``category`` renderers of stations that have no ``color2``. A file with
 nothing to rewrite comes back byte for byte, and in a project every member
 without a rewritten renderer comes back with the same name, date and bytes.
 
@@ -509,8 +510,9 @@ def _expanded_size(project: bytes) -> int:
 
 
 def _retheme_aprx(theme: ColorTheme, data: bytes, *, max_bytes: int) -> tuple[list[RendererChange], bytes | None]:
-    """Each member that holds a renderer naming the field is rethemed; the rest are carried over as they are."""
-    marker, field = b'"CIMUniqueValueRenderer"', theme.field.lower().encode("utf-8")
+    """Each member that holds a renderer naming either theme field is rethemed; the rest are carried over as they are."""
+    marker = b'"CIMUniqueValueRenderer"'
+    fields = [name.lower().encode("utf-8") for name in (theme.field, theme.category_field)]
     changes: list[RendererChange] = []
     members: list[tuple[zipfile.ZipInfo, bytes]] = []
     try:
@@ -521,7 +523,8 @@ def _retheme_aprx(theme: ColorTheme, data: bytes, *, max_bytes: int) -> tuple[li
             comment = archive.comment
             for info in infos:
                 member = archive.read(info)
-                if marker in member and field in member.lower():
+                lowered = member.lower() if marker in member else b""
+                if any(field in lowered for field in fields):
                     found, member = _retheme_member(theme, info.filename, member)
                     changes += found
                 members.append((info, member))
@@ -537,7 +540,14 @@ def _retheme_member(theme: ColorTheme, name: str, member: bytes) -> tuple[list[R
         bom, doc = _parse_json(member)
     except ValueError:
         unreadable = RendererChange(
-            layer=name, outcome="left_alone", reason="unreadable", classes_before=0, classes_after=0, areas=(), kept=()
+            layer=name,
+            field=None,
+            outcome="left_alone",
+            reason="unreadable",
+            classes_before=0,
+            classes_after=0,
+            areas=(),
+            kept=(),
         )
         return [unreadable], member
     changes = retheme_document(doc, theme)

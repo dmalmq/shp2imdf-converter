@@ -1,4 +1,4 @@
-"""Retheme ArcGIS Pro symbology: unique-value renderers keyed on the theme's field, in parsed CIM JSON.
+"""Retheme ArcGIS Pro symbology: unique-value renderers keyed on one of the theme's two fields, in parsed CIM JSON.
 
 Pure: no files, no zips, no ArcGIS. ``recolor.py`` parses ``.lyrx`` files and
 ``.aprx`` members and hands each document here.
@@ -6,15 +6,22 @@ Pure: no files, no zips, no ArcGIS. ``recolor.py`` parses ``.lyrx`` files and
 A renderer keyed on ``color2`` alone is rebuilt as one class per theme area it
 draws, in theme order. Each class lists the area's written value first and
 then every old value whose default rule maps to the area, so a layer draws
-the same before and after its data is converted. Values the theme does not
-know stay in a copy of their old class. Running it on its own output changes
-nothing, because the rebuilt classes rebuild to themselves.
+the same before and after its data is converted.
+
+A renderer keyed on ``category`` alone (the Revit/IMDF stations, which have no
+``color2``) is rebuilt the same way from the theme's category table. Its data
+is never rewritten, so each class lists only the categories the renderer
+already drew.
+
+Either way, values the theme does not know stay in a copy of their old class,
+and running it on its own output changes nothing, because the rebuilt classes
+rebuild to themselves.
 """
 
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 import copy
 from dataclasses import dataclass
 from typing import Any
@@ -42,15 +49,76 @@ class _Class:
     values: tuple[str, ...]
 
 
-def retheme_document(doc: Any, theme: ColorTheme) -> list[RendererChange]:
-    """Rewrite, in place, every unique-value renderer in ``doc`` keyed on the theme's field alone.
+@dataclass(frozen=True, slots=True)
+class _Keying:
+    """One field a renderer can be keyed on, and how its values become theme areas."""
 
-    A renderer that names the field among several, or through an Arcade
-    expression, is left alone and reported. Renderers on other fields are
-    neither touched nor reported.
+    field: str
+    area_of: Mapping[str, AreaKey]
+    """Every value the theme knows in this field, to the area whose class matches it."""
+    listed: Mapping[AreaKey, tuple[str, ...]] | None
+    """The values an area's class always lists, because converting the data writes them.
+
+    None where the data is not converted: the class lists the values the renderer already matched.
     """
+    brings: Mapping[str, tuple[AreaKey, ...]]
+    """Areas a value's rows can be converted to besides its own, whose classes must then exist too."""
+    incidental: bool
+    """The field colours many layers that are none of this tool's business (fixtures, amenity points).
+
+    Such a renderer is taken up only when it is keyed on the field alone, draws polygons and holds a
+    value the theme knows; otherwise it is neither touched nor reported.
+    """
+
+    def claims(self, renderer: dict[str, Any]) -> bool:
+        if not self.incidental:
+            return _names_field(renderer, self.field)
+        fields = renderer.get("fields")
+        return (
+            not renderer.get("valueExpressionInfo")
+            and isinstance(fields, list)
+            and len(fields) == 1
+            and isinstance(fields[0], str)
+            and fields[0].casefold() == self.field.casefold()
+        )
+
+
+def _keyings(theme: ColorTheme) -> tuple[_Keying, _Keying]:
+    """The colour field first: a renderer that names it is never taken for a category renderer."""
+    listed: dict[AreaKey, list[str]] = {area.key: [area.value] for area in theme.areas}
+    brings: dict[str, list[AreaKey]] = {}
+    for rule in theme.rules:
+        if rule.categories is None:
+            listed[rule.area.key].append(rule.old)
+        else:
+            brings.setdefault(rule.old, []).append(rule.area.key)
+    colour = _Keying(
+        field=theme.field,
+        area_of={value: key for key, values in listed.items() for value in values},
+        listed={key: tuple(values) for key, values in listed.items()},
+        brings={old: tuple(keys) for old, keys in brings.items()},
+        incidental=False,
+    )
+    category = _Keying(
+        field=theme.category_field,
+        area_of={name: area.key for name, area in theme.category_areas.items()},
+        listed=None,
+        brings={},
+        incidental=True,
+    )
+    return colour, category
+
+
+def retheme_document(doc: Any, theme: ColorTheme) -> list[RendererChange]:
+    """Rewrite, in place, every unique-value renderer in ``doc`` keyed on the theme's field or category field alone.
+
+    A renderer that names the colour field among several, or through an
+    Arcade expression, is left alone and reported. Renderers on other fields
+    are neither touched nor reported.
+    """
+    keyings = _keyings(theme)
     found = list(_renderers(doc, None))
-    return [change for renderer, layer in found if (change := _retheme(renderer, layer, theme)) is not None]
+    return [change for renderer, layer in found if (change := _retheme(renderer, layer, theme, keyings)) is not None]
 
 
 def _renderers(node: Any, layer: str | None) -> Iterator[tuple[dict[str, Any], str | None]]:
@@ -101,12 +169,6 @@ def _parse_classes(renderer: dict[str, Any]) -> list[_Class] | None:
     return classes
 
 
-def _left_alone(layer: str | None, reason: LeftAloneReason, classes: int) -> RendererChange:
-    return RendererChange(
-        layer=layer, outcome="left_alone", reason=reason, classes_before=classes, classes_after=classes, areas=(), kept=()
-    )
-
-
 def _class_count(renderer: dict[str, Any]) -> int:
     groups = renderer.get("groups")
     if not isinstance(groups, list):
@@ -114,56 +176,80 @@ def _class_count(renderer: dict[str, Any]) -> int:
     return sum(len(group.get("classes") or []) for group in groups if isinstance(group, dict))
 
 
-def _area_values(theme: ColorTheme) -> dict[AreaKey, tuple[str, ...]]:
-    """Each area's written value, then the old values whose default rule maps to it, in rule order."""
-    values: dict[AreaKey, list[str]] = {area.key: [area.value] for area in theme.areas}
-    for rule in theme.rules:
-        if rule.categories is None:
-            values[rule.area.key].append(rule.old)
-    return {key: tuple(items) for key, items in values.items()}
+def _draws_polygons(classes: list[_Class]) -> bool:
+    return all(cls.node["symbol"]["symbol"].get("type") == "CIMPolygonSymbol" for cls in classes)
 
 
-def _retheme(renderer: dict[str, Any], layer: str | None, theme: ColorTheme) -> RendererChange | None:
-    if not _names_field(renderer, theme.field):
+def _retheme(
+    renderer: dict[str, Any], layer: str | None, theme: ColorTheme, keyings: tuple[_Keying, ...]
+) -> RendererChange | None:
+    keying = next((item for item in keyings if item.claims(renderer)), None)
+    if keying is None:
         return None
     before = _class_count(renderer)
-    if renderer.get("valueExpressionInfo"):
-        return _left_alone(layer, "expression", before)
-    if len(renderer.get("fields") or []) != 1:
-        return _left_alone(layer, "several_fields", before)
-    classes = _parse_classes(renderer)
-    if classes is None:
-        return _left_alone(layer, "unrecognised", before)
-    if any(cls.node["symbol"]["symbol"].get("type") != "CIMPolygonSymbol" for cls in classes):
-        return _left_alone(layer, "not_polygon", before)
-    if _colours_set_at_draw_time(renderer, classes):
-        return _left_alone(layer, "unrecognised", before)
 
-    area_values = _area_values(theme)
-    area_of = {value: key for key, values in area_values.items() for value in values}
+    def left_alone(reason: LeftAloneReason) -> RendererChange:
+        return RendererChange(
+            layer=layer,
+            field=keying.field,
+            outcome="left_alone",
+            reason=reason,
+            classes_before=before,
+            classes_after=before,
+            areas=(),
+            kept=(),
+        )
+
+    if renderer.get("valueExpressionInfo"):
+        return left_alone("expression")
+    if len(renderer.get("fields") or []) != 1:
+        return left_alone("several_fields")
+    classes = _parse_classes(renderer)
+    area_of = keying.area_of
+    if keying.incidental:
+        known = classes is not None and any(value in area_of for cls in classes for value in cls.values)
+        if classes is None or not known or not _draws_polygons(classes):
+            return None
+    if classes is None:
+        return left_alone("unrecognised")
+    if not _draws_polygons(classes):
+        return left_alone("not_polygon")
+    if _colours_set_at_draw_time(renderer, classes):
+        return left_alone("unrecognised")
+
     first: dict[AreaKey, _Class] = {}
     shown: set[AreaKey] = set()
+    matched: dict[AreaKey, dict[str, None]] = {}
     for cls in classes:
         for value in cls.values:
             if value in area_of:
                 first.setdefault(area_of[value], cls)
+                matched.setdefault(area_of[value], {})[value] = None
                 if cls.node.get("visible") is not False:
                     shown.add(area_of[value])
     # A row an override converts is written another area's name; without that class it would fall to the default
     # symbol. A class that already draws the area stays its template, hence the second pass.
     for cls in classes:
         for value in cls.values:
-            for rule in theme.rules:
-                if rule.old == value and rule.categories is not None:
-                    first.setdefault(rule.area.key, cls)
-                    if cls.node.get("visible") is not False:
-                        shown.add(rule.area.key)
+            for area_key in keying.brings.get(value, ()):
+                first.setdefault(area_key, cls)
+                if cls.node.get("visible") is not False:
+                    shown.add(area_key)
     if not first:
-        return _left_alone(layer, "no_known_values", before)
+        return left_alone("no_known_values")
 
     width, stroke = _common_stroke(classes)
     rebuilt = [
-        _area_class(first[area.key].node, area_values[area.key], area.hex, theme.outline.hex, stroke, width, area.key in shown)
+        _area_class(
+            first[area.key].node,
+            area.value,
+            tuple(matched[area.key]) if keying.listed is None else keying.listed[area.key],
+            area.hex,
+            theme.outline.hex,
+            stroke,
+            width,
+            area.key in shown,
+        )
         for area in theme.areas
         if area.key in first
     ]
@@ -194,6 +280,7 @@ def _retheme(renderer: dict[str, Any], layer: str | None, theme: ColorTheme) -> 
         renderer["groups"] = groups
     return RendererChange(
         layer=layer,
+        field=keying.field,
         outcome="rewritten" if changed else "already_new",
         reason=None,
         classes_before=before,
@@ -237,6 +324,7 @@ def _common_stroke(classes: list[_Class]) -> tuple[float, dict[str, Any]]:
 
 def _area_class(
     template: dict[str, Any],
+    label: str,
     values: tuple[str, ...],
     fill_hex: str,
     outline_hex: str,
@@ -244,13 +332,13 @@ def _area_class(
     width: float,
     visible: bool,
 ) -> dict[str, Any]:
-    """The template class drawn in the area's fill, labelled and matched by the area's values; key order kept.
+    """The template class drawn in the area's fill, labelled with the area and matched by its values; key order kept.
 
     ``visible`` is whether any class it replaces was shown: hiding the merged class because its template was
     hidden would hide rows that drew before.
     """
     replaced: dict[str, Any] = {
-        "label": values[0],
+        "label": label,
         "symbol": _redrawn(template["symbol"], fill_hex, outline_hex, stroke, width),
         "values": [{"type": "CIMUniqueValue", "fieldValues": [value]} for value in values],
     }

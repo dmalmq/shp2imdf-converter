@@ -39,7 +39,7 @@ SkipReason = Literal["field_not_text", "unreadable", "gdb_unavailable"]
 """``gdb_unavailable``: no Python with GDAL's ``osgeo`` was found, so a geodatabase cannot be edited."""
 
 RendererOutcome = Literal["rewritten", "already_new", "left_alone"]
-"""What retheming did to one unique-value renderer that names the field."""
+"""What retheming did to one unique-value renderer keyed on the field or the category field."""
 
 LeftAloneReason = Literal["several_fields", "expression", "not_polygon", "unrecognised", "no_known_values", "unreadable"]
 """Why a renderer that names the field was left as it was. ``unreadable``: an ``.aprx`` member that is not JSON."""
@@ -359,10 +359,12 @@ class SkippedLine:
 
 @dataclass(frozen=True, slots=True)
 class RendererChange:
-    """One unique-value renderer in a layer file or project that names the field."""
+    """One unique-value renderer in a layer file or project that this tool takes up."""
 
     layer: str | None
     """The enclosing layer's name; the member's path when an ``.aprx`` member could not be parsed."""
+    field: str | None
+    """The theme field the renderer is keyed on: the colour field or the category field. None for an unparsed member."""
     outcome: RendererOutcome
     reason: LeftAloneReason | None
     """Set exactly when ``outcome`` is ``left_alone``."""
@@ -378,6 +380,19 @@ SymbologyKind = Literal["lyrx", "aprx"]
 
 
 @dataclass(frozen=True, slots=True)
+class CategoryAreaLine:
+    """One area of the category table, for the page to show beside the colour table."""
+
+    area: AreaKey
+    area_name: Bilingual
+    value: str
+    """The area's written value, which labels its class."""
+    spec: str
+    hex: str
+    categories: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class SymbologyLine:
     """One ``.lyrx`` or ``.aprx`` in the upload. An unreadable file comes back untouched."""
 
@@ -385,12 +400,16 @@ class SymbologyLine:
     kind: SymbologyKind
     unreadable: bool
     renderers: tuple[RendererChange, ...]
-    """Only renderers that name the field; renderers keyed on other fields are not listed."""
+    """Renderers that name the colour field, and polygon renderers keyed on the category field alone that hold
+    a category the theme knows. Other renderers are not listed."""
 
 
 @dataclass(frozen=True, slots=True)
 class ThemeReport:
     field: str
+    category_field: str
+    category_areas: tuple[CategoryAreaLine, ...]
+    """The category table: each area that categories are drawn as, in theme order."""
     rules: tuple[RuleLine, ...]
     unmapped: tuple[UnmappedLine, ...]
     """Most rows first."""
@@ -484,8 +503,24 @@ def plan(
             )
         )
 
+    drawn_as: dict[AreaKey, list[str]] = {}
+    for category, area in theme.category_areas.items():
+        drawn_as.setdefault(area.key, []).append(category)
     report = ThemeReport(
         field=theme.field,
+        category_field=theme.category_field,
+        category_areas=tuple(
+            CategoryAreaLine(
+                area=area.key,
+                area_name=area.name,
+                value=area.value,
+                spec=area.spec,
+                hex=area.hex,
+                categories=tuple(drawn_as[area.key]),
+            )
+            for area in theme.areas
+            if area.key in drawn_as
+        ),
         rules=tuple(
             RuleLine(
                 rule=rule.id,
