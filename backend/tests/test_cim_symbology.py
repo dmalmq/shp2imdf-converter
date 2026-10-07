@@ -271,6 +271,29 @@ def test_a_switched_off_stroke_does_not_set_the_width_of_an_added_outline(theme:
     assert (symbol_layers(stairs)[0]["enable"], symbol_layers(stairs)[0]["width"]) == (True, 0.3)
 
 
+def test_a_merged_class_is_shown_when_any_class_it_replaces_was_shown(theme: ColorTheme) -> None:
+    hidden_yellow = {**uv_class(["黄"], "#FCFCE3"), "visible": False}
+    hidden_sky = {**uv_class(["薄空"], "#E5F8FF"), "visible": False}
+    doc = layer_doc(renderer([hidden_yellow, uv_class(["薄紅"], "#FFECE6"), hidden_sky]))
+
+    retheme_document(doc, theme)
+
+    assert {cls["label"]: cls["visible"] for cls in classes_of(doc)} == {"在来線改札内": True, "施設": False}
+
+
+def test_alternate_scale_symbols_are_redrawn_like_the_main_symbol(theme: ColorTheme) -> None:
+    cls = uv_class(["薄空"], "#E5F8FF")
+    cls["alternateSymbols"] = [copy.deepcopy(cls["symbol"]), copy.deepcopy(cls["symbol"])]
+    doc = layer_doc(renderer([cls]))
+
+    retheme_document(doc, theme)
+
+    (facilities,) = classes_of(doc)
+    for alternate in facilities["alternateSymbols"]:
+        layers = alternate["symbol"]["symbolLayers"]
+        assert [(layer["type"], _hex(layer["color"])) for layer in layers] == [("CIMSolidStroke", OUTLINE), ("CIMSolidFill", "#DDEBEC")]
+
+
 def _without_classes(doc: dict[str, Any]) -> dict[str, Any]:
     stripped = copy.deepcopy(doc)
     for layer in stripped["layerDefinitions"]:

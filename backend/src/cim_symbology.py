@@ -140,16 +140,19 @@ def _retheme(renderer: dict[str, Any], layer: str | None, theme: ColorTheme) -> 
     area_values = _area_values(theme)
     area_of = {value: key for key, values in area_values.items() for value in values}
     first: dict[AreaKey, _Class] = {}
+    shown: set[AreaKey] = set()
     for cls in classes:
         for value in cls.values:
             if value in area_of:
                 first.setdefault(area_of[value], cls)
+                if cls.node.get("visible") is not False:
+                    shown.add(area_of[value])
     if not first:
         return _left_alone(layer, "no_known_values", before)
 
     width, stroke = _common_stroke(classes)
     rebuilt = [
-        _area_class(first[area.key].node, area_values[area.key], area.hex, theme.outline.hex, stroke, width)
+        _area_class(first[area.key].node, area_values[area.key], area.hex, theme.outline.hex, stroke, width, area.key in shown)
         for area in theme.areas
         if area.key in first
     ]
@@ -213,9 +216,39 @@ def _area_class(
     outline_hex: str,
     stroke: dict[str, Any],
     width: float,
+    visible: bool,
 ) -> dict[str, Any]:
-    """The template class drawn in the area's fill, labelled and matched by the area's values; key order kept."""
-    symbol = copy.deepcopy(template["symbol"])
+    """The template class drawn in the area's fill, labelled and matched by the area's values; key order kept.
+
+    ``visible`` is whether any class it replaces was shown: hiding the merged class because its template was
+    hidden would hide rows that drew before.
+    """
+    replaced: dict[str, Any] = {
+        "label": values[0],
+        "symbol": _redrawn(template["symbol"], fill_hex, outline_hex, stroke, width),
+        "values": [{"type": "CIMUniqueValue", "fieldValues": [value]} for value in values],
+    }
+    if "visible" in template or not visible:
+        replaced["visible"] = visible
+    # ArcGIS draws an alternate symbol in its own scale range, where the old colours would otherwise come back.
+    alternates = template.get("alternateSymbols")
+    if isinstance(alternates, list):
+        replaced["alternateSymbols"] = [
+            _redrawn(item, fill_hex, outline_hex, stroke, width) if _is_polygon_reference(item) else copy.deepcopy(item)
+            for item in alternates
+        ]
+    result = {key: replaced.get(key, copy.deepcopy(value)) for key, value in template.items()}
+    return {**result, **{key: value for key, value in replaced.items() if key not in result}}
+
+
+def _is_polygon_reference(item: Any) -> bool:
+    symbol = item.get("symbol") if isinstance(item, dict) else None
+    return isinstance(symbol, dict) and symbol.get("type") == "CIMPolygonSymbol" and isinstance(symbol.get("symbolLayers"), list)
+
+
+def _redrawn(reference: dict[str, Any], fill_hex: str, outline_hex: str, stroke: dict[str, Any], width: float) -> dict[str, Any]:
+    """A copy of a polygon symbol reference in the area's fill and the theme's outline."""
+    symbol = copy.deepcopy(reference)
     layers = symbol["symbol"]["symbolLayers"]
     if not _draws(layers, "CIMSolidStroke"):
         # Index 0 draws on top; a stroke under the fill would be hidden by it.
@@ -230,13 +263,7 @@ def _area_class(
             layer["color"] = _rgb(fill_hex, layer.get("color"))
         elif layer.get("type") == "CIMSolidStroke":
             layer["color"] = _rgb(outline_hex, layer.get("color"))
-    replaced = {
-        "label": values[0],
-        "symbol": symbol,
-        "values": [{"type": "CIMUniqueValue", "fieldValues": [value]} for value in values],
-    }
-    result = {key: replaced.get(key, copy.deepcopy(value)) for key, value in template.items()}
-    return {**result, **{key: value for key, value in replaced.items() if key not in result}}
+    return symbol
 
 
 def _draws(layers: list[Any], kind: str) -> bool:
