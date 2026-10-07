@@ -195,6 +195,11 @@ function keptMatchTarget(current: Pick<ShapeMatchState, "referenceName" | "refer
   };
 }
 
+/** The draft has no tab for Shape match, so it reopens on Control points. */
+function tabForMethod(method: AlignMethod): PlacementTab {
+  return method === "move" ? "reference" : "fit";
+}
+
 /** Union of the given pages' content bounds, or null when none are known. */
 function pageUnionBounds(
   preview: IllustratorPreviewResponse,
@@ -436,6 +441,9 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
   const [recenterTo, setRecenterTo] = useState<[number, number] | null>(null);
   const [referenceLayers, setReferenceLayers] = useState<ReferenceLayer[]>([]);
   const [placementTab, setPlacementTab] = useState<PlacementTab>(resumed?.view?.tab ?? "fit");
+  const [alignMethod, setAlignMethod] = useState<AlignMethod>(
+    resumed?.view?.tab === "reference" ? "move" : "points"
+  );
   const [located, setLocated] = useState<Located>(resumed?.view?.located ?? { kind: "none" });
   const [referenceSelection, setReferenceSelection] = useState<ReferenceSelection>(
     resumed?.view?.references ?? NO_REFERENCES
@@ -613,7 +621,7 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
     station: shellStation,
     current: placing && placementTab === "export" ? "deliver" : null,
     targets: placing ? [placementTab === "export" ? "place" : "deliver"] : [],
-    go: { place: () => setPlacementTab("fit"), deliver: () => setPlacementTab("export") },
+    go: { place: () => setPlacementTab(tabForMethod(alignMethod)), deliver: () => setPlacementTab("export") },
     floorsAligned: placing ? { aligned: alignedFloors, total: state.floors.length } : null,
     artworkRead: preview
       ? { pages: preview.pages.length, floors: placing ? state.floors.length : null }
@@ -635,28 +643,31 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
       : null
   );
 
-  // A floor that did not stack opens on its recommended method; the other stays one click away.
-  const [alignMethod, setAlignMethod] = useState<AlignMethod>(
-    resumed?.view?.tab === "reference" ? "move" : "points"
-  );
-  const recommendFor = (label: string | null) => {
-    const floor = state.floors.find((item) => item.label === label);
-    if (!floor || statuses.get(floor.label)?.kind === "aligned") return;
-    // With no station pin the building has not been found yet, so that comes first.
-    setAlignMethod(
-      recommendedAlignment(state, floor).kind === "match-floor"
-        ? "shape"
-        : state.stationPin
-          ? "points"
-          : "move"
-    );
+  // The draft's tab follows the method so a reload reopens it. The recommendation made as
+  // the page opens is left out: opening a project must not save anything.
+  const showMethod = (method: AlignMethod, remember = true) => {
+    setAlignMethod(method);
+    if (remember) setPlacementTab((tab) => (tab === "export" ? tab : tabForMethod(method)));
   };
-  useEffect(() => recommendFor(state.activeFloorLabel), [state.activeFloorLabel, placing]);
+  // A floor that did not stack opens on its recommended method; the other stays one click away.
+  const recommendFor = (label: string | null, remember = true): AlignMethod => {
+    const floor = state.floors.find((item) => item.label === label);
+    if (!floor || statuses.get(floor.label)?.kind === "aligned") return alignMethod;
+    // With no station pin the building has not been found yet, so that comes first.
+    const method =
+      recommendedAlignment(state, floor).kind === "match-floor" ? "shape" : state.stationPin ? "points" : "move";
+    showMethod(method, remember);
+    return method;
+  };
+  const opened = useRef(false);
+  useEffect(() => {
+    recommendFor(state.activeFloorLabel, opened.current);
+    opened.current = true;
+  }, [state.activeFloorLabel, placing]);
 
   const reviewFloor = (label: string) => {
     if (label !== state.activeFloorLabel) dispatch({ type: "setActiveFloor", label });
-    else recommendFor(label);
-    setPlacementTab("fit");
+    setPlacementTab(tabForMethod(recommendFor(label)));
   };
 
   const floorLayers: FloorLayer[] = useMemo(() => {
@@ -1378,7 +1389,7 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
           }}
           shapeMatch={shapeMatchModel}
           alignMethod={alignMethod}
-          onAlignMethodChange={setAlignMethod}
+          onAlignMethodChange={showMethod}
           statuses={statuses}
           references={currentReferences}
           surveySnap={surveySnapModel}
@@ -1571,7 +1582,7 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
             onExport={() => void download()}
             error={error}
             onReview={reviewFloor}
-            onBackToMap={() => setPlacementTab("fit")}
+            onBackToMap={() => setPlacementTab(tabForMethod(alignMethod))}
           />
       </div>
     </div>

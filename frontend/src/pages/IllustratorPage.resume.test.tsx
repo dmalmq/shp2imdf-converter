@@ -24,6 +24,7 @@ type SidebarProps = {
   state: PlacementState;
   dispatch: Dispatch<PlacementAction>;
   mode: string;
+  onAlignMethodChange: (method: "move" | "points" | "shape") => void;
   onReferenceLayersChange: (layers: ReferenceLayer[]) => void;
 };
 
@@ -49,8 +50,14 @@ const STATION_PG: ReferenceLayer = {
 };
 
 vi.mock("../components/illustrator/AlignPanel", () => ({
-  AlignPanel: ({ state, dispatch, mode, onReferenceLayersChange }: SidebarProps) => (
+  AlignPanel: ({ state, dispatch, mode, onAlignMethodChange, onReferenceLayersChange }: SidebarProps) => (
     <section>
+      <button type="button" onClick={() => onAlignMethodChange("move")}>
+        Move
+      </button>
+      <button type="button" onClick={() => onAlignMethodChange("points")}>
+        Control points
+      </button>
       <button type="button" onClick={() => dispatch({ type: "rotateFrame", rotationDeg: 45 })}>
         Rotate
       </button>
@@ -287,4 +294,16 @@ test("a draft whose floors were moved off the default spot shows no such notice"
   };
   render(<IllustratorPage restored={conversion({ draft: moved })} />);
   expect(screen.queryByTestId("lookup-failed")).toBeNull();
+});
+
+test.each([
+  { saved: "fit", choose: "Move", stored: "reference" },
+  { saved: "reference", choose: "Control points", stored: "fit" }
+] as const)("choosing $choose on a draft saved on $saved is saved as $stored", async ({ saved, choose, stored }) => {
+  render(<IllustratorPage restored={conversion({ draft: { ...DRAFT, view: { ...DRAFT.view, tab: saved } } })} />);
+  fireEvent.click(screen.getByRole("button", { name: choose }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(save.mock.calls.at(-1)?.[2].view.tab).toBe(stored);
 });
