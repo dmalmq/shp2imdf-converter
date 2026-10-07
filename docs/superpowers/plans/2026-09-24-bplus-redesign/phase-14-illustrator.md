@@ -49,3 +49,5 @@ Back to [overview](overview.md).
   - after aligning 2F, the status reads "Aligned", and moving it again reopens it;
   - reloading `/a/:id` restores every floor's placement and status;
   - a synthetic filename shows the lookup failure.
+
+**Part b(ii) (restyle) landed on top.** Name floors, Place on map and Deliver follow page 112:2: the page list with boxes drawn in place, the to-do column and one Align panel, and Deliver's per-floor table. Design gaps are in decisions.md.

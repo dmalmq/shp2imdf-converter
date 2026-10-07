@@ -5,7 +5,6 @@ import type { FeatureCollection, Polygon } from "geojson";
 import { assignFloors, previewIllustrator, snapIllustratorSurvey } from "../api/client";
 import type * as ApiClient from "../api/client";
 import type { ShapeMatchPanelModel } from "../components/illustrator/ShapeMatchPanel";
-import type { PlacementTab } from "../components/illustrator/PlacementSidebar";
 import {
   type AdjustmentMode,
   type PlacementAction,
@@ -67,25 +66,21 @@ type SidebarProps = {
   state: PlacementState;
   dispatch: Dispatch<PlacementAction>;
   mode: AdjustmentMode;
-  tab: PlacementTab;
   shapeMatch: ShapeMatchPanelModel;
   onReferenceLayersChange: (layers: (typeof STATION_PG)[]) => void;
   alignMethod: string;
   statuses: Map<string, FloorStatus>;
-  onReviewFloor: (label: string) => void;
 };
 
-vi.mock("../components/illustrator/PlacementSidebar", () => ({
-  PlacementSidebar: ({
+vi.mock("../components/illustrator/AlignPanel", () => ({
+  AlignPanel: ({
     state,
     dispatch,
     mode,
-    tab,
     shapeMatch,
     onReferenceLayersChange,
     alignMethod,
-    statuses,
-    onReviewFloor
+    statuses
   }: SidebarProps) => (
     <section>
       <button
@@ -107,15 +102,11 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
       <button type="button" onClick={shapeMatch.onStartArtworkMatch}>
         Match 4F to 3F
       </button>
-      <button type="button" onClick={() => onReviewFloor("4F")}>
-        Review 4F
-      </button>
       <output data-testid="align-method">{alignMethod}</output>
       <output data-testid="statuses">
         {[...statuses.values()].map((status) => status.kind).join(",")}
       </output>
       <output data-testid="mode">{mode}</output>
-      <output data-testid="tab">{tab}</output>
       <output data-testid="match-target">
         {shapeMatch.referenceFloorLabel || shapeMatch.referenceName || "none"}
       </output>
@@ -128,6 +119,26 @@ vi.mock("../components/illustrator/PlacementSidebar", () => ({
           {floor.mapAnchor[0]},{floor.mapAnchor[1]}
         </output>
       ))}
+    </section>
+  )
+}));
+
+vi.mock("../components/illustrator/ArtworkDeliver", () => ({
+  ArtworkDeliver: ({
+    outputCrs,
+    onExport,
+    error
+  }: {
+    outputCrs: string;
+    onExport: () => void;
+    error: string | null;
+  }) => (
+    <section data-testid="deliver">
+      <button type="button" onClick={onExport}>
+        Export
+      </button>
+      <output data-testid="output-crs">{outputCrs}</output>
+      <output data-testid="sidebar-error">{error ?? ""}</output>
     </section>
   )
 }));
@@ -264,7 +275,7 @@ test("an unstacked 4F stays unlinked, follows the pin, and matches onto 3F", asy
 
   fireEvent.click(screen.getByRole("button", { name: "Match 4F to 3F" }));
   expect(screen.getByTestId("mode")).toHaveTextContent("individual");
-  expect(screen.getByTestId("tab")).toHaveTextContent("fit");
+  expect(screen.getByTestId("deliver").closest("[hidden]")).not.toBeNull();
   expect(screen.getByTestId("shape-pick")).toHaveTextContent("picking");
   expect(screen.getByTestId("match-target")).toHaveTextContent("3F");
 });
@@ -278,10 +289,10 @@ test("an automatic snap aligns nothing, and reviewing the unstacked 4F opens its
   expect(screen.getByTestId("statuses")).toHaveTextContent(
     "needs-alignment,needs-alignment,needs-alignment,needs-alignment"
   );
-  expect(screen.getByTestId("align-method")).toHaveTextContent("points");
+  expect(screen.getByTestId("align-method")).toHaveTextContent("move");
 
-  fireEvent.click(screen.getByRole("button", { name: "Review 4F" }));
+  fireEvent.click(screen.getByRole("button", { name: "Align 4F to 3F" }));
   await waitFor(() => expect(screen.getByTestId("align-method")).toHaveTextContent("shape"));
-  expect(screen.getByTestId("tab")).toHaveTextContent("fit");
+  expect(screen.getByTestId("deliver").closest("[hidden]")).not.toBeNull();
   expect(screen.getByTestId("artwork-match-target")).toHaveTextContent("3F");
 });

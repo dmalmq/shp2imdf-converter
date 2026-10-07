@@ -178,7 +178,10 @@ export function usePageShell(page: PageShell | null) {
       page?.save?.state,
       page?.save?.savedAt,
       page?.floorsAligned?.aligned,
-      page?.floorsAligned?.total
+      page?.floorsAligned?.total,
+      page?.artworkRead?.pages,
+      page?.artworkRead?.named?.floors,
+      page?.artworkRead?.named?.pages
     ]
   );
 }

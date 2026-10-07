@@ -76,6 +76,11 @@ export type PageStages = {
   bringInNeeds?: number | null;
   /** Artwork floors whose status is Aligned, of all floors; null before floors are named. */
   floorsAligned?: { aligned: number; total: number } | null;
+  /**
+   * The converted artwork's page count and, once floors are named, how many there are
+   * and how many pages they came from: a page marked "Not a floor plan" is read but not named.
+   */
+  artworkRead?: { pages: number; named: { floors: number; pages: number } | null } | null;
 };
 
 const SHAPEFILE_STAGE_IDS: ReadonlyArray<ShapefileStageId> = ["bring-in", "set-up", "check", "deliver"];
@@ -238,6 +243,20 @@ export function pageStages(flow: Exclude<Flow, "shapefiles">, fallback: number, 
   return stages.map(({ id, label }, index) => {
     const stage: Stage = { id, label, status: statusFor(index, current) };
     if (stage.status !== "current") stage.target = pageTarget(page, id);
+    const read = page?.artworkRead;
+    if (id === "bring-in-artwork" && read) {
+      stage.detail =
+        read.pages === 1 ? { en: "1 page read", ja: "1 ページ読み込み済み" } : { en: `${read.pages} pages read`, ja: `${read.pages} ページ読み込み済み` };
+    }
+    if (id === "name-floors" && read) {
+      stage.detail =
+        read.named === null
+          ? { en: "Say which floor each page is", ja: "各ページのフロアを指定" }
+          : {
+              en: `${read.named.floors} ${read.named.floors === 1 ? "floor" : "floors"} from ${read.named.pages} ${read.named.pages === 1 ? "page" : "pages"}`,
+              ja: `${read.named.pages} ページから ${read.named.floors} フロア`
+            };
+    }
     if (id === "place" && floors) {
       stage.detail =
         left > 0

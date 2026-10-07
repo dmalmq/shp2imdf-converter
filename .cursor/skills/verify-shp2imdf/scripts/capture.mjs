@@ -283,17 +283,17 @@ async function captureIllustratorFlow(page, shoot, artwork) {
   await shoot("illustrator-bring-in");
 
   await page.locator("#illustrator-georef-input").setInputFiles(artwork);
-  await page.getByRole("heading", { name: "Name each floor", level: 1 }).waitFor({ timeout: 60000 });
+  await page.getByRole("heading", { name: /Name each page|Mark each floor/, level: 1 }).waitFor({ timeout: 60000 });
   await shoot("illustrator-name-floors", { wait: 800 });
 
   await page.getByRole("button", { name: "Done assigning", exact: true }).click();
-  await page.getByRole("tab", { name: "Place", exact: true }).waitFor({ timeout: 30000 });
+  await page.getByTestId("align-panel").waitFor({ timeout: 30000 });
   await page.getByTestId("placement-hold").waitFor({ state: "detached", timeout: 30000 }).catch(() => {
     console.log("illustrator-place: station lookup did not settle; capturing the held state");
   });
   await shoot("illustrator-place", { wait: 2500 });
 
-  await page.getByRole("tab", { name: "Export", exact: true }).click();
+  await page.getByRole("button", { name: "Deliver →", exact: true }).click();
   await shoot("illustrator-export", { wait: 800 });
 }
 
