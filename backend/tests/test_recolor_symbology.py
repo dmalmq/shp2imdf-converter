@@ -174,6 +174,20 @@ def test_projects_in_one_upload_share_the_expansion_limit(theme: ColorTheme) -> 
     assert [line.unreadable for line in report.symbology] == [False, True]
 
 
+def test_a_project_that_fails_while_being_read_still_uses_up_the_expansion_limit(theme: ColorTheme) -> None:
+    source = make_project(project_members())
+    with zipfile.ZipFile(BytesIO(source)) as archive:
+        first = archive.infolist()[0]
+        expanded = sum(info.file_size for info in archive.infolist())
+    corrupt = bytearray(source)
+    middle = first.header_offset + 30 + len(first.filename.encode()) + first.compress_size // 2
+    corrupt[middle] ^= 0xFF
+
+    report = inspect(theme, [("st/a.aprx", bytes(corrupt)), ("st/b.aprx", source)], max_bytes=expanded + expanded // 2).theme
+
+    assert [line.unreadable for line in report.symbology] == [True, True]
+
+
 def test_a_station_zip_with_layer_files_rewrites_rows_and_renderers_in_one_pass(theme: ColorTheme) -> None:
     project = make_project(project_members())
     upload = [

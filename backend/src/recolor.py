@@ -357,7 +357,7 @@ def _survey(
         if entry.data is None or kind is None or _gdb_root(entry.path) is not None:
             continue
         line, data = _retheme_file(theme, entry.path, entry.data, kind, max_bytes=remaining)
-        if kind == "aprx" and not line.unreadable:
+        if kind == "aprx":
             remaining -= _expanded_size(entry.data)
         symbology.append(line)
         if data is not None:
@@ -496,8 +496,12 @@ def _retheme_lyrx(theme: ColorTheme, data: bytes) -> tuple[list[RendererChange],
 
 
 def _expanded_size(project: bytes) -> int:
-    with zipfile.ZipFile(BytesIO(project)) as archive:
-        return sum(info.file_size for info in archive.infolist())
+    """What the project declares it inflates to; a project that then fails to read has still cost that much."""
+    try:
+        with zipfile.ZipFile(BytesIO(project)) as archive:
+            return sum(info.file_size for info in archive.infolist())
+    except (zipfile.BadZipFile, zipfile.LargeZipFile):
+        return 0
 
 
 def _retheme_aprx(theme: ColorTheme, data: bytes, *, max_bytes: int) -> tuple[list[RendererChange], bytes | None]:

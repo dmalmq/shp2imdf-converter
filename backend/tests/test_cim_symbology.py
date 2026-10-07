@@ -313,6 +313,18 @@ def test_a_renderer_whose_colours_are_overridden_at_draw_time_is_left_alone(them
     assert doc["layerDefinitions"][:2] == before["layerDefinitions"][:2]
 
 
+def test_an_old_value_with_a_category_override_also_brings_the_class_its_override_writes(theme: ColorTheme) -> None:
+    doc = layer_doc(renderer([uv_class(["濃鼠"], "#E5E6E6")]))
+
+    retheme_document(doc, theme)
+
+    drawn = {cls["label"]: (values_of(cls), fills(cls)) for cls in classes_of(doc)}
+    assert drawn == {
+        "改札外通路": (["改札外通路", "ラチ外白", "濃鼠", "道白"], ["#FFFFFF"]),
+        "施設": (["施設", "薄空", "濃空", "トイレ"], ["#DDEBEC"]),
+    }
+
+
 def _without_classes(doc: dict[str, Any]) -> dict[str, Any]:
     stripped = copy.deepcopy(doc)
     for layer in stripped["layerDefinitions"]:

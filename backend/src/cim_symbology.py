@@ -149,6 +149,15 @@ def _retheme(renderer: dict[str, Any], layer: str | None, theme: ColorTheme) -> 
                 first.setdefault(area_of[value], cls)
                 if cls.node.get("visible") is not False:
                     shown.add(area_of[value])
+    # A row an override converts is written another area's name; without that class it would fall to the default
+    # symbol. A class that already draws the area stays its template, hence the second pass.
+    for cls in classes:
+        for value in cls.values:
+            for rule in theme.rules:
+                if rule.old == value and rule.categories is not None:
+                    first.setdefault(rule.area.key, cls)
+                    if cls.node.get("visible") is not False:
+                        shown.add(rule.area.key)
     if not first:
         return _left_alone(layer, "no_known_values", before)
 
