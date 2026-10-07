@@ -174,10 +174,18 @@ describe("artwork flow", () => {
   });
 
   test("the first two artwork stages say what was read and named", () => {
-    const naming = pageStages("artwork", 1, { artworkRead: { pages: 3, floors: null } });
+    const naming = pageStages("artwork", 1, { artworkRead: { pages: 3, named: null } });
     expect([naming[0].detail?.en, naming[1].detail?.en]).toEqual(["3 pages read", "Say which floor each page is"]);
-    const placing = pageStages("artwork", 2, { artworkRead: { pages: 3, floors: 2 } });
+    const placing = pageStages("artwork", 2, { artworkRead: { pages: 3, named: { floors: 2, pages: 3 } } });
     expect(placing[1].detail?.en).toBe("2 floors from 3 pages");
+  });
+
+  test("Name floors counts the pages the floors came from, Bring in every page read", () => {
+    const stages = pageStages("artwork", 2, { artworkRead: { pages: 4, named: { floors: 3, pages: 3 } } });
+    expect([stages[0].detail, stages[1].detail]).toEqual([
+      { en: "4 pages read", ja: "4 ページ読み込み済み" },
+      { en: "3 floors from 3 pages", ja: "3 ページから 3 フロア" }
+    ]);
   });
 
   test("stages are links only where the page can switch to them", () => {

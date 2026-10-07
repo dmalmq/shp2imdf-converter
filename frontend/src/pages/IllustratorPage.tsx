@@ -200,6 +200,16 @@ function tabForMethod(method: AlignMethod): PlacementTab {
   return method === "move" ? "reference" : "fit";
 }
 
+/** Pages the floors were named from; a floor with no page restriction spans all of them. */
+function pagesNamed(regions: AssignedRegion[], total: number): number {
+  const pages = new Set<number>();
+  for (const region of regions) {
+    if (!region.pages) return total;
+    region.pages.forEach((page) => pages.add(page));
+  }
+  return pages.size;
+}
+
 /** Union of the given pages' content bounds, or null when none are known. */
 function pageUnionBounds(
   preview: IllustratorPreviewResponse,
@@ -624,7 +634,13 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
     go: { place: () => setPlacementTab(tabForMethod(alignMethod)), deliver: () => setPlacementTab("export") },
     floorsAligned: placing ? { aligned: alignedFloors, total: state.floors.length } : null,
     artworkRead: preview
-      ? { pages: preview.pages.length, floors: placing ? state.floors.length : null }
+      ? {
+          pages: preview.pages.length,
+          named:
+            placing && assignment
+              ? { floors: state.floors.length, pages: pagesNamed(assignment, preview.pages.length) }
+              : null
+        }
       : null,
     save: placing
       ? {

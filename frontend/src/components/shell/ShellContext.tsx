@@ -180,7 +180,8 @@ export function usePageShell(page: PageShell | null) {
       page?.floorsAligned?.aligned,
       page?.floorsAligned?.total,
       page?.artworkRead?.pages,
-      page?.artworkRead?.floors
+      page?.artworkRead?.named?.floors,
+      page?.artworkRead?.named?.pages
     ]
   );
 }

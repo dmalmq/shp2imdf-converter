@@ -11,7 +11,14 @@ import {
 import type * as ApiClient from "../api/client";
 import type { ReferenceLayer } from "../components/illustrator/PlacementMap";
 import { type PlacementAction, type PlacementState } from "../hooks/useIllustratorPlacement";
+import { usePageShell } from "../components/shell/ShellContext";
+import type * as Shell from "../components/shell/ShellContext";
 import { IllustratorPage } from "./IllustratorPage";
+
+vi.mock("../components/shell/ShellContext", async (importOriginal) => {
+  const actual = await importOriginal<typeof Shell>();
+  return { ...actual, usePageShell: vi.fn(actual.usePageShell) };
+});
 
 vi.mock("../api/client", async (importOriginal) => ({
   ...(await importOriginal<typeof ApiClient>()),
@@ -281,6 +288,20 @@ test("the placement under Deliver is inert, and is not while placing", () => {
 
   render(<IllustratorPage restored={conversion({ draft: null })} />);
   expect(screen.getByTestId("map").closest("[inert]")).toBeNull();
+});
+
+test("the stage track counts the pages floors were named from, not a page left out", () => {
+  const page = (index: number) => ({ ...PREVIEW.pages[0], index });
+  const preview = { ...PREVIEW, pages: [page(1), page(2), page(3)] };
+  const floors = [
+    { label: "1F", box: null, pages: [1], layer_names: null },
+    { label: "2F", box: null, pages: [3], layer_names: null }
+  ];
+  render(<IllustratorPage restored={conversion({ preview, floors, draft: null })} />);
+  expect(vi.mocked(usePageShell).mock.lastCall?.[0]?.artworkRead).toEqual({
+    pages: 3,
+    named: { floors: 2, pages: 2 }
+  });
 });
 
 test("a project with no floors yet opens on naming them", () => {
