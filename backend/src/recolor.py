@@ -350,8 +350,11 @@ def _survey(
         geodatabases.append(_Geodatabase(path=root, directory=directory, python=gdal_python, layers=ids))
     symbology: list[SymbologyLine] = []
     rewritten: dict[TreePath, bytes] = {}
-    # One allowance for every project in the upload, or many small ones could each inflate to the whole limit.
-    remaining = max_bytes
+    # One allowance for the whole upload: the files already unpacked count, and every project draws on what is
+    # left, or a project beside a large station, or many small projects, could inflate well past the limit.
+    remaining = max_bytes - sum(
+        len(entry.data) for entry in tree.entries if entry.data is not None and _symbology_kind(entry.path) != "aprx"
+    )
     for entry in tree.entries:
         kind = _symbology_kind(entry.path)
         if entry.data is None or kind is None or _gdb_root(entry.path) is not None:
@@ -470,7 +473,8 @@ def _retheme_file(
             renderers, rewritten = _retheme_lyrx(theme, data)
         else:
             renderers, rewritten = _retheme_aprx(theme, data, max_bytes=max_bytes)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # RecursionError: JSON nested deeper than Python will parse or walk.
         return SymbologyLine(path=path, kind=kind, unreadable=True, renderers=()), None
     return SymbologyLine(path=path, kind=kind, unreadable=False, renderers=tuple(renderers)), rewritten
 

@@ -188,6 +188,29 @@ def test_a_project_that_fails_while_being_read_still_uses_up_the_expansion_limit
     assert [line.unreadable for line in report.symbology] == [True, True]
 
 
+def test_other_files_in_the_upload_count_against_a_projects_expansion_limit(theme: ColorTheme) -> None:
+    source = make_project(project_members())
+    with zipfile.ZipFile(BytesIO(source)) as archive:
+        expanded = sum(info.file_size for info in archive.infolist())
+    filler = b"x" * expanded
+    limit = len(filler) + len(source) + expanded // 2
+
+    report = inspect(theme, [("st/notes.txt", filler), ("st/a.aprx", source)], max_bytes=limit).theme
+
+    assert report.symbology[0].unreadable
+
+
+def test_a_layer_file_nested_too_deep_to_walk_is_reported_and_comes_back_untouched(theme: ColorTheme) -> None:
+    source = (b"[" * 5000) + (b"]" * 5000)
+
+    report = inspect(theme, [("deep.lyrx", source)], max_bytes=LIMIT).theme
+    output = convert(theme, [("deep.lyrx", source)], max_bytes=LIMIT)
+
+    assert report.symbology[0].unreadable
+    with zipfile.ZipFile(BytesIO(output.data)) as archive:
+        assert archive.read("deep.lyrx") == source
+
+
 def test_a_station_zip_with_layer_files_rewrites_rows_and_renderers_in_one_pass(theme: ColorTheme) -> None:
     project = make_project(project_members())
     upload = [
