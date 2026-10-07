@@ -60,7 +60,7 @@ slice of the suite:
 pytest -m phase3     # wizard mapping (mapper, config, generation setup)
 pytest -m phase5     # validation and export (converter, validator, autofix)
 pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
-pytest -m colortheme # station colour theme (table, DBF patch, upload tree, geodatabases)
+pytest -m colortheme # station colour theme (tables, DBF patch, upload tree, geodatabases, symbology)
 ```
 
 `phase0` generates test fixtures; `phase1`–`phase6` run foundation → polish.
@@ -171,3 +171,18 @@ pytest -m colortheme # station colour theme (table, DBF patch, upload tree, geod
   licence (`backend/tests/esri_cim.py`), but it accepts unknown properties and a value
   in two classes, so it proves parsing, not rendering. `TOKYO_APRX` points the
   real-data test at a copy of the station project.
+  Stations from the Revit/IMDF pipeline (Shinjuku, Ikebukuro) have no `color2`: their
+  `unit` layers are drawn by a unique-value renderer on `category`. The theme's second
+  table, `category_areas`, maps category to area for exactly that case, and the same
+  rewrite runs from it (`_Keying` in `cim_symbology.py`; do not fork a second path).
+  Three things differ on purpose. The data is never edited, so a class lists only the
+  categories the renderer already drew and no written value. A category outside the
+  table (`vegetation`) keeps its class and is reported. And a `category` renderer is
+  taken up only when it is keyed on that field alone, draws polygons and holds a known
+  category, otherwise it is neither touched nor reported: fixture and amenity layers
+  are coloured by `category` too (Shinjuku has 6 such layers, Tokyo 20), and reporting
+  them would bury the real findings. Tokyo's project has two such unit layers of its
+  own, so it rewrites 129 members, not 127. `SHINJUKU_APRX` points a real-data test at
+  a copy of Shinjuku's project (58 unit layers). A geodatabase or shapefile set with
+  `category` and no `color2` has nothing to rewrite; `DatasetInfo.category_only_tables`
+  is what lets the page say the colours live in the layer file or project.

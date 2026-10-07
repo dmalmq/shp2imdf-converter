@@ -1,6 +1,6 @@
 # Recolour a station
 
-The colour tool takes one station's shapefile folder, its File Geodatabase (`.gdb` folder), its ArcGIS Pro layer files (`.lyrx`) or project (`.aprx`), or a zip of any of them, shows how each old `color2` value maps to a new area name, and returns every file as one zip with only `color2` rewritten. Shapefiles are patched byte for byte. A geodatabase is updated in place by GDAL in a Python that has `osgeo` (ArcGIS Pro's on this PC), so its edited tables are rewritten and every other table comes back byte for byte. In a layer file or project, each unique-value renderer keyed on `color2` alone becomes six classes in the new fills, outlined in `#657678`; in a project every other member comes back unchanged.
+The colour tool takes one station's shapefile folder, its File Geodatabase (`.gdb` folder), its ArcGIS Pro layer files (`.lyrx`) or project (`.aprx`), or a zip of any of them, shows how each old `color2` value maps to a new area name, and returns every file as one zip with only `color2` rewritten. Shapefiles are patched byte for byte. A geodatabase is updated in place by GDAL in a Python that has `osgeo` (ArcGIS Pro's on this PC), so its edited tables are rewritten and every other table comes back byte for byte. In a layer file or project, each unique-value renderer keyed on `color2` alone becomes six classes in the new fills, outlined in `#657678`; in a project every other member comes back unchanged. A station from the Revit/IMDF pipeline (Shinjuku, Ikebukuro) has no `color2`: its unit layers are keyed on `category`, and each such polygon renderer becomes one class per area its categories map to, by the second table in `backend/config/color_theme.json`. Its data is never edited.
 
 ## Sub-features
 
@@ -9,7 +9,8 @@ The colour tool takes one station's shapefile folder, its File Geodatabase (`.gd
 - `color-theme-attention` lists the values the table does not know and the new values that do not fit the field.
 - `color-theme-download` downloads `<station>_new-colors.zip` and moves the stage track to `Deliver`.
 - `color-theme-gdb` does the same for a zipped geodatabase: its feature classes in the tables, widths in characters, the geodatabase paragraph under `What comes back`, and the stale lock files left out.
-- `color-theme-symbology` does it for a zip of a layer file and a project: the `Symbology` section, renderers left alone under `Needs attention`, and the layer-file paragraph under `What comes back`.
+- `color-theme-symbology` does it for a zip of a layer file and two projects: the `Symbology` section with the field each layer is coloured by, renderers left alone under `Needs attention`, and the layer-file paragraphs under `What comes back`.
+- `color-theme-category` checks a station that has `category` and no `color2`: nothing to rewrite, and the summary says the colours live in its layer file or project.
 
 ## How to get to it (user POV)
 
@@ -28,6 +29,7 @@ Preconditions:
 
 - **Enter.** From `/`, choose `Recolour a station`. Run `getByRole('button', { name: /Recolour a station/ }).click()`. URL is `/color-theme`. The `Stages` nav reads `1 · Bring in`, `2 · Check`, `3 · Deliver`.
 - **Table before upload.** Heading `Recolour a station` and the table `How color2 changes` are visible, with 15 rules under `Old`, `Covered` and `New area, written to color2`. Each rule's new cell leads with the value written to `color2` (the Japanese area name), then the English area name in English and the spec name. The table is the answer to `GET /api/color-theme`.
+- **Category table.** Below it, under `No color2: category → new area`, the table `How layers coloured by category are redrawn` has five rows, an area and the categories drawn as it: `改札外通路` with `walkway, ramp, road`, down to `階段・エスカレーター` with `stairs, escalator, opentobelow`. `新幹線改札内` has no row, and `vegetation` is in none.
 - **Upload.** Set `[data-testid="color-theme-zip-input"]` to the zip. Wait for the heading `Recolour DemoSta_6677`. The current stage is `2 · Check`.
 - **Counts.** The region `What this station gets` reads `Changes 129`, `Layers 2`, `Left as is 6`, `Files back untouched 11 / 13`. The table gains a `Rows` column: `白` reads `40` with `3 left as is`, and `進入制限あり` reads `0`.
 - **Needs attention.** The region `Needs attention` lists `赤` (3 rows, not in the table) and `DemoSta_B1_Space.dbf` (3 rows, the new value does not fit `color2 (24 bytes)`). A station with nothing to report shows `Nothing needs attention` instead.
@@ -46,16 +48,26 @@ Preconditions: the backend found a Python with `osgeo` at startup (`GDB_GDAL_PYT
 - **What comes back.** Only the geodatabase paragraph (GDAL rewrites each changed row, `Shape_Area` and `Shape_Length` are recomputed, convert a copy and open it in ArcGIS Pro first), and `Left out: 2 stale geodatabase lock files.`
 - **Download.** As above. The bar reads `Downloaded DemoSta_3857_new-colors.zip`. The download is the real GDAL update, not a mock.
 
-### Layer files and a project
+### Layer files and projects
 
-Preconditions: none beyond the station's. `capture.mjs` builds `DemoSta_layers.zip` from `demo_layer_files()` in `backend/tests/color_theme_fixtures.py`: `DemoSta_0_Space.lyrx` (one Tokyo layer, its 14 classes) and `DemoSta.aprx` (that layer, `DemoSta_1_Space` with an extra `赤` class, `DemoSta_1_Facility` coloured by `category`, and `DemoSta_B1_Space` coloured by an Arcade expression on `color2`).
+Preconditions: none beyond the station's. `capture.mjs` builds `DemoSta_layers.zip` from `demo_layer_files()` in `backend/tests/color_theme_fixtures.py`: `DemoSta_0_Space.lyrx` (one Tokyo layer, its 14 classes), `DemoSta.aprx` (that layer, `DemoSta_1_Space` with an extra `赤` class, `DemoSta_1_Facility` coloured by `category` with old-colour values, and `DemoSta_B1_Space` coloured by an Arcade expression on `color2`) and `DemoSta_units.aprx` (shaped like Shinjuku's: `DemoSta_1_unit` and `DemoSta_B1_unit` with its 30 `category` classes, and `DemoSta_1_fixture` with `checkin.kiosk` and `equipment`).
 
 - **Upload.** Set `[data-testid="color-theme-zip-input"]` to the zip. Wait for the heading `Recolour DemoSta_layers`.
-- **Counts.** `What this station gets` reads `Changes 0`, `Layers 0`, `Layers redrawn 3` and `Files back untouched 0 / 2`. There is no `Layers (n)` row list and the rule table has no `Rows` column, because no table carries `color2`. `capture.mjs` scrolls to the `Symbology` region before both shots.
-- **Symbology.** The region `Symbology` has one card per file. `DemoSta_0_Space.lyrx` reads `Layer file` and `1 redrawn`. `DemoSta.aprx` reads `Project`, `2 redrawn · 1 left as is` and the caveat that Esri does not document editing a project outside ArcGIS Pro. Each card's `Layers (n)` is open (eight renderers or fewer). `DemoSta_1_Space` reads `15 → 7`, six swatches, `Redrawn` and `Kept as it was: 赤`. `DemoSta_B1_Space` reads `Coloured by an Arcade expression on color2; left as it is`. `DemoSta_1_Facility` is not listed: renderers on other fields are neither touched nor reported.
-- **Needs attention.** `DemoSta_B1_Space` (the Arcade reason) and `DemoSta_1_Space` (`赤` kept in its old class), each with `DemoSta.aprx`.
-- **What comes back.** Only the layer-file paragraph (six classes, TurquoiseGray 1000 outline, old colours still listed, the 濃鼠 toilet exception). No shapefile or geodatabase paragraph.
-- **Download.** The bar's title reads `3 layers are redrawn`. After the download it reads `Downloaded DemoSta_layers_new-colors.zip`.
+- **Counts.** `What this station gets` reads `Changes 0`, `Layers 0`, `Layers redrawn 5` and `Files back untouched 0 / 3`. There is no `Layers (n)` row list and the rule table has no `Rows` column, because no table carries `color2`. `capture.mjs` scrolls to the `Symbology` region before both shots.
+- **Symbology.** The region `Symbology` has one card per file. `DemoSta_0_Space.lyrx` reads `Layer file` and `1 redrawn`. `DemoSta.aprx` reads `Project`, `2 redrawn · 1 left as is` and the caveat that Esri does not document editing a project outside ArcGIS Pro. Each card's `Layers (n)` is open (eight renderers or fewer), and its `Coloured by` column reads `color2` or `category`. `DemoSta_1_Space` reads `color2`, `15 → 7`, six swatches, `Redrawn` and `Kept as it was: 赤`. `DemoSta_B1_Space` reads `Coloured by an Arcade expression on color2; left as it is`. `DemoSta_units.aprx` reads `2 redrawn`; each unit layer reads `category`, `30 → 6`, five swatches (no `新幹線改札内`), `Redrawn` and `Kept as it was: vegetation`.
+- **Not listed.** `DemoSta_1_Facility` and `DemoSta_1_fixture`. A renderer keyed on `category` is taken up only when it draws polygons and holds a category the table knows; fixture and amenity layers are coloured by `category` too, and are neither touched nor reported.
+- **Needs attention.** `DemoSta_B1_Space` (the Arcade reason), `DemoSta_1_Space` (`赤` kept in its old class), and one line `2 layers` for `DemoSta_units.aprx` (`vegetation` kept in their old classes). Layers of one file that keep the same values share a line: Shinjuku's project shows one line for its 58 unit layers.
+- **What comes back.** The layer-file paragraph (six classes, TurquoiseGray 1000 outline, old colours still listed, the 濃鼠 toilet exception) and the category paragraph (one class per area the categories belong to, data not changed, a category outside the table keeps its class). No shapefile or geodatabase paragraph. A project with only category layers shows the category paragraph alone.
+- **Download.** The bar's title reads `5 layers are redrawn`. After the download it reads `Downloaded DemoSta_layers_new-colors.zip`.
+
+### A station with `category` and no `color2`
+
+Preconditions: none. `capture.mjs` builds `DemoUnits_6677.zip` from `demo_category_station()`: two unit tables with `name` and `category`.
+
+- **Upload.** Set `[data-testid="color-theme-zip-input"]` to the zip. Wait for the heading `Recolour DemoUnits_6677`.
+- **Summary.** `What this station gets` reads `Changes 0`, `Layers 0`, `Left as is 0`, `Files back untouched 8 / 8`, and under the counts: `No layer here has a color2 field. This station is coloured by category in its layer file or project, so drop its .lyrx or .aprx to recolour it.` A geodatabase says the same (Shinjuku's reads 529 tables, 449 of them with `category`). Tables with neither field read `No layer here has a color2 field, so there is nothing to rewrite.`
+- **Download.** Disabled. The bar reads `Nothing to change` and `No layer has a color2 field.` There is no delivered screen.
+- **Not shown.** The sentence is absent when a table carries `color2`, when the upload is only layer files, and when the station's own project came with it and was redrawn.
 
 ## Gotchas
 
@@ -65,6 +77,8 @@ Preconditions: none beyond the station's. `capture.mjs` builds `DemoSta_layers.z
 - A single `.zip` is read as a zipped station and its stem names the station. A zip inside a folder upload is one more file that comes back untouched.
 - The page has three file inputs. `color-theme-drop-input` is the page-wide drop zone, `color-theme-folder-input` is `Choose folder` and takes a folder path, and `color-theme-zip-input` is `Choose file`, the only one with an `accept` filter (`.zip,.lyrx,.aprx`).
 - A lone `.lyrx` or `.aprx` is a file, not a station zip: the download is `<its stem>_new-colors.zip` holding it. A second run reports every renderer `Already new` and Download is disabled with `Every value is already new.`
+- A category class lists only the categories the layer already drew, never the area name, because the data keeps its categories. A unit layer's `vegetation` class, and any category outside the table, keeps its own symbol and label after the area classes.
+- Tokyo's project holds two unit layers keyed on `category` (`TOFROM_YAESU_1_unit`, `TOFROM_YAESU_B2_unit`) beside its 127 `color2` layers, so it reads `129 redrawn`.
 - Upload the download again and `Download` is disabled. The bar reads `Nothing to change` with the reason `Rows match an old colour, but the new value does not fit color2.`, because the B1 rows are still too narrow. `Changes` is `0` and `Files back untouched` is `13 / 13`. A second run changes nothing by design.
 - Japanese labels are `駅の色を新しくする`, `要確認`, `ダウンロード` and `もう一度ダウンロード`. The values written to `color2` are Japanese in both languages.
 - A backend with no `osgeo` Python lists the geodatabase under `Needs attention` as one that cannot be edited on this server, and it comes back as uploaded. Shapefiles in the same upload still convert.
