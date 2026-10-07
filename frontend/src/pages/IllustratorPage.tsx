@@ -1346,6 +1346,9 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
 
   return (
     <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      {/* Covered by Deliver but still mounted, so it has to leave the tab order and the
+          accessibility tree. React 18 only passes `inert` through as a string. */}
+      <div className="contents" {...(placementTab === "export" ? { inert: "" } : null)}>
       <PlacementTodo
         state={state}
         dispatch={dispatch}
@@ -1555,6 +1558,7 @@ export function IllustratorPage({ initialFile, restored, onConversion }: Props =
           statuses={statuses}
           toolsInset={372}
         />
+      </div>
       </div>
 
       {/* Over the placement rather than instead of it: the map, the locate

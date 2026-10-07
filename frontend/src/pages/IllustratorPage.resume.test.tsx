@@ -272,6 +272,17 @@ test("saved floors the assignment no longer has are dropped, and missing ones st
   expect(sent.placement.floors[1]).toEqual(DRAFT.placement.floors[1]);
 });
 
+test("the placement under Deliver is inert, and is not while placing", () => {
+  const delivering = render(<IllustratorPage restored={conversion()} />);
+  expect(screen.getByTestId("map").closest("[inert]")).not.toBeNull();
+  expect(screen.getByRole("button", { name: "Rotate", hidden: true }).closest("[inert]")).not.toBeNull();
+  expect(screen.getByTestId("deliver").closest("[inert]")).toBeNull();
+  delivering.unmount();
+
+  render(<IllustratorPage restored={conversion({ draft: null })} />);
+  expect(screen.getByTestId("map").closest("[inert]")).toBeNull();
+});
+
 test("a project with no floors yet opens on naming them", () => {
   render(<IllustratorPage restored={conversion({ floors: null, draft: null, draft_revision: 0 })} />);
   expect(screen.getByRole("heading", { name: "Mark each floor" })).toBeInTheDocument();
