@@ -260,6 +260,7 @@ test("the template preview says which floors keep their place and which take its
   );
   expect(preview).toEqual({
     matched: ["1F"],
+    pinned: [],
     // 3F has its own frame and stays; 2F is linked and turns with the template's frame.
     kept: ["3F"],
     reframed: ["2F"],
@@ -267,4 +268,16 @@ test("the template preview says which floors keep their place and which take its
     size: { saved: [300, 160], current: [200, 160] },
     reopens: ["1F", "2F"]
   });
+});
+
+test("the template preview lists a pinned floor the template names as left alone, not placed", () => {
+  const state = run(fitted(), { type: "setFloorPinned", label: "1F", pinned: true });
+  const moved = { ...toFloorPayloads(state)[0].transform, map_anchor: [139.77, 35.69] as [number, number] };
+  const floors = [{ label: "1F", transform: moved }];
+  const preview = templatePreview(state, { floors, artwork_bounds: [0, 0, 200, 160] }, [0, 0, 200, 160], REFS);
+  expect(preview.matched).toEqual([]);
+  expect(preview.pinned).toEqual(["1F"]);
+  expect(preview.kept).toEqual(["2F", "3F"]);
+  const after = placementReducer(state, { type: "applyFloors", floors });
+  expect(after.floors[0].mapAnchor).toEqual(state.floors[0].mapAnchor);
 });

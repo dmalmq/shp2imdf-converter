@@ -29,6 +29,8 @@ type Props = {
 export type TemplatePreview = {
   /** Floors here that the template places. */
   matched: string[];
+  /** Floors the template names that are pinned here, so applying leaves them where they are. */
+  pinned: string[];
   /** Floors here the template has nothing for that stay exactly where they are. */
   kept: string[];
   /** Floors the template has nothing for that are linked, so they take its scale and rotation. */
@@ -62,7 +64,8 @@ export function templatePreview(
       Math.abs(currentSize[1] - savedSize[1]) / savedSize[1] > 0.01);
   const after = placementReducer(state, { type: "applyFloors", floors: placement.floors });
   return {
-    matched: state.floors.filter((f) => saved.has(f.label)).map((f) => f.label),
+    matched: state.floors.filter((f) => saved.has(f.label) && !f.pinned).map((f) => f.label),
+    pinned: state.floors.filter((f) => saved.has(f.label) && f.pinned).map((f) => f.label),
     kept: state.floors
       .filter((f, index) => !saved.has(f.label) && samePose(poseOf(state, f), poseOf(after, after.floors[index])))
       .map((f) => f.label),
@@ -150,6 +153,14 @@ export function PlacementLibrary({ state, dispatch, artworkBounds, references }:
               ? t(`Places ${preview.matched.join(", ")}.`, `${preview.matched.join("、")}を配置します。`)
               : t("No floor here has a name the template knows.", "テンプレートと同じ名前のフロアがありません。")}
           </p>
+          {preview.pinned.length > 0 ? (
+            <p className="text-warning-foreground">
+              {t(
+                `Pinned, so the template does not move ${preview.pinned.length === 1 ? "it" : "them"}: ${preview.pinned.join(", ")}.`,
+                `ピン留め中のためテンプレートでは動きません：${preview.pinned.join("、")}`
+              )}
+            </p>
+          ) : null}
           {preview.kept.length > 0 ? (
             <p className="text-warning-foreground">
               {t(
