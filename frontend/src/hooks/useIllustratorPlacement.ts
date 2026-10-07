@@ -871,12 +871,16 @@ export function currentResiduals(
   return active ? floorResiduals(state, active) : null;
 }
 
-/** Residuals of one floor's control points under its current transform, or null below the minimum. */
+/**
+ * Residuals of one floor's control points under its current transform, or null below
+ * `minimum` pairs: by default what a new fit needs under the scale lock as it is now.
+ */
 export function floorResiduals(
   state: PlacementState,
-  floor: FloorPlacement
+  floor: FloorPlacement,
+  minimum: number = minControlPoints(state)
 ): { perPoint: number[]; rmse: number } | null {
-  if (floor.controlPoints.length < minControlPoints(state)) return null;
+  if (floor.controlPoints.length < minimum) return null;
   const [lon0, lat0] = floor.mapAnchor;
   const enu = floor.controlPoints.map((p) => lngLatToEnu(p.map[0], p.map[1], lon0, lat0));
   return residuals(

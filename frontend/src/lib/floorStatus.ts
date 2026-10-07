@@ -129,7 +129,9 @@ export function floorFit(
   if (status.kind !== "aligned" || status.basis.kind !== "points" || status.basis.floor !== floor.label) {
     return null;
   }
-  return floorResiduals(state, floor)?.rmse ?? null;
+  // The fit was accepted under the scale lock of its time; unlocking afterwards raises
+  // the minimum for a new fit, not for the one this floor already has.
+  return floorResiduals(state, floor, 2)?.rmse ?? null;
 }
 
 /** A floor that did not stack is matched to a floor that did; any other starts with pairs. */
