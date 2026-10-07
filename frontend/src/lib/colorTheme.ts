@@ -1,6 +1,12 @@
 import type { FileWithPath } from "react-dropzone";
 
-import type { ColorThemeInspection, ColorThemeRule, DatasetFile } from "../api/client";
+import type {
+  ColorThemeInspection,
+  ColorThemeRenderer,
+  ColorThemeReport,
+  ColorThemeRule,
+  DatasetFile
+} from "../api/client";
 import type { ColorThemeStageId } from "../components/shell/stages";
 
 /** What one drop sends, and how many stale lock files inside a `.gdb` it kept back. */
@@ -105,8 +111,34 @@ export function datasetFiles(files: ReadonlyArray<FileWithPath>): DatasetUpload 
   return { files: kept, lockFilesLeftOut: all.length - kept.length };
 }
 
+/** What the layer files and projects in an upload come to. */
+export type SymbologyTally = {
+  files: number;
+  /** Files with a renderer rewritten: the only ones that come back changed. */
+  changedFiles: number;
+  rewritten: number;
+  alreadyNew: number;
+  /** Renderers left alone, project members that did not parse among them. */
+  leftAlone: number;
+  unreadableFiles: number;
+};
+
+export function symbologyTally(report: Pick<ColorThemeReport, "symbology">): SymbologyTally {
+  const renderers = report.symbology.flatMap((file) => file.renderers);
+  const count = (outcome: ColorThemeRenderer["outcome"]) => renderers.filter((renderer) => renderer.outcome === outcome).length;
+  return {
+    files: report.symbology.length,
+    changedFiles: report.symbology.filter((file) => file.renderers.some((renderer) => renderer.outcome === "rewritten")).length,
+    rewritten: count("rewritten"),
+    alreadyNew: count("already_new"),
+    leftAlone: count("left_alone"),
+    unreadableFiles: report.symbology.filter((file) => file.unreadable).length
+  };
+}
+
 /**
- * Why Download cannot run, in the operator's language; null when it can.
+ * Why Download cannot run, in the operator's language; null when it can,
+ * which is when rows or renderers would be rewritten.
  * Each reason is a whole sentence: it is read under the bar's "Nothing to
  * change", under the Deliver stage, and alone as the button's hint.
  */
@@ -115,11 +147,13 @@ export function downloadBlockedReason(
   t: (english: string, japanese: string) => string
 ): string | null {
   const { field, layers, skipped, totals } = inspection.theme;
-  if (totals.recolor > 0) return null;
-  if (layers.length === 0 && skipped.length === 0) {
+  const symbology = symbologyTally(inspection.theme);
+  if (totals.recolor > 0 || symbology.rewritten > 0) return null;
+  const editable = layers.length + symbology.alreadyNew;
+  if (editable === 0 && skipped.length + symbology.leftAlone + symbology.unreadableFiles === 0) {
     return t(`No layer has a ${field} field.`, `${field} フィールドのあるレイヤーがありません。`);
   }
-  if (layers.length === 0) {
+  if (editable === 0) {
     return t(`No ${field} field here can be edited.`, `編集できる ${field} フィールドがありません。`);
   }
   // Before "already new" and "no match": these rows do match, and a wider field would let them change.
@@ -129,7 +163,7 @@ export function downloadBlockedReason(
       `旧カラーに一致する行はありますが、新しい値が ${field} に収まりません。`
     );
   }
-  if (totals.already_new > 0 && totals.unmapped + totals.undecodable === 0) {
+  if ((totals.already_new > 0 || symbology.alreadyNew > 0) && totals.unmapped + totals.undecodable === 0) {
     return t("Every value is already new.", "すべての値がすでに新しい色です。");
   }
   return t("No value matches an old colour.", "旧カラーに一致する値がありません。");

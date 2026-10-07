@@ -11,7 +11,9 @@ import pytest
 from backend.tests.color_theme_fixtures import (
     SPACE_FIELDS,
     make_dbf,
+    make_project,
     make_zip,
+    project_members,
     read_zip,
     space_row,
     station_members,
@@ -42,6 +44,7 @@ def test_the_table_is_served_before_any_upload(test_client) -> None:
     assert (toilets["value"], toilets["spec"], toilets["hex"]) == ("施設", "Turquoise 150", "#DDEBEC")
     assert toilets["scope"] == {"en": "Toilets coded 濃鼠", "ja": "トイレ（濃鼠）"}
     assert body["totals"]["rows"] == 0
+    assert body["symbology"] == []
 
 
 def test_inspect_reports_each_rule_for_a_dropped_folder(test_client) -> None:
@@ -69,6 +72,26 @@ def test_inspect_reports_each_rule_for_a_dropped_folder(test_client) -> None:
         "JRTokyoSta_6677.shp/1/Space.dbf",
     ]
     assert body["theme"]["layers"][0]["encoding"] == {"codec": "utf-8", "source": "cpg"}
+
+
+def test_inspect_reports_each_renderer_of_a_dropped_project(test_client) -> None:
+    files, data = _folder([("DemoSta.aprx", make_project(project_members()))])
+
+    response = test_client.post("/api/color-theme/inspect", files=files, data=data)
+
+    assert response.status_code == 200, response.text
+    (line,) = response.json()["theme"]["symbology"]
+    assert (line["path"], line["kind"], line["unreadable"]) == ("DemoSta.aprx", "aprx", False)
+    assert line["renderers"][1] == {
+        "layer": "DemoSta_1_Space",
+        "outcome": "rewritten",
+        "reason": None,
+        "classes_before": 15,
+        "classes_after": 7,
+        "areas": ["free_area", "paid_area", "paid_area_shinkansen", "facilities", "restricted", "stairs_escalators"],
+        "kept": ["赤"],
+    }
+    assert line["renderers"][2]["reason"] == "expression"
 
 
 def test_convert_downloads_the_station_under_its_japanese_name(test_client) -> None:

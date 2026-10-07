@@ -660,6 +660,31 @@ export type ColorThemeReport = {
    */
   skipped: { id: string; reason: "field_not_text" | "unreadable" | "gdb_unavailable" }[];
   totals: ColorThemeCounts;
+  /** Every `.lyrx` and `.aprx` in the upload, in upload order. */
+  symbology: ColorThemeSymbologyFile[];
+};
+
+/** One unique-value renderer that names the field. Renderers keyed on other fields are not listed. */
+export type ColorThemeRenderer = {
+  /** The layer's name; an `.aprx` member's path when the member is not JSON. */
+  layer: string | null;
+  outcome: "rewritten" | "already_new" | "left_alone";
+  /** Set exactly when `outcome` is "left_alone". */
+  reason: "several_fields" | "expression" | "not_polygon" | "unrecognised" | "no_known_values" | "unreadable" | null;
+  classes_before: number;
+  classes_after: number;
+  /** Area keys the renderer draws after the rewrite, in theme order. */
+  areas: string[];
+  /** Class values the theme does not know, kept in their old classes. */
+  kept: string[];
+};
+
+export type ColorThemeSymbologyFile = {
+  path: string;
+  kind: "lyrx" | "aprx";
+  /** It did not parse, and comes back untouched. */
+  unreadable: boolean;
+  renderers: ColorThemeRenderer[];
 };
 
 export type ColorThemeInspection = {

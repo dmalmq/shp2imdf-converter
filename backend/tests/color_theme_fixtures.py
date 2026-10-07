@@ -8,7 +8,11 @@ are arbitrary bytes on purpose, since the tool must never read them.
 from __future__ import annotations
 
 from collections.abc import Sequence
+import copy
 from io import BytesIO
+import json
+from pathlib import Path
+from typing import Any
 import zipfile
 
 Field = tuple[str, str, int, int]
@@ -189,3 +193,76 @@ def demo_station() -> bytes:
         ("DemoSta_6677.shp/acad.err", b"acad error log"),
     ]
     return make_zip(members)
+
+
+LAYER_FILE = Path(__file__).resolve().parent / "fixtures" / "color_theme" / "DemoSta_0_Space.lyrx"
+"""One layer of the Tokyo station project as a layer file: its 14 color2 classes, with names and paths replaced."""
+
+
+def layer_definition(name: str) -> dict[str, Any]:
+    """The Tokyo layer, renamed: a ``CIMFeatureLayer`` with a ``color2`` unique-value renderer."""
+    layer = copy.deepcopy(json.loads(LAYER_FILE.read_text(encoding="utf-8-sig"))["layerDefinitions"][0])
+    layer["name"] = name
+    layer["uRI"] = f"CIMPATH=map/{name.lower()}.json"
+    return layer
+
+
+def project_members() -> list[tuple[str, bytes, int]]:
+    """An ``.aprx``'s members as (name, bytes, compression), one layer per member, as Pro 3.6 saves them.
+
+    ``DemoSta_1_Space`` has a class of a value the theme does not know,
+    ``DemoSta_1_Facility`` colours by ``category`` and ``DemoSta_B1_Space``
+    by an Arcade expression on ``color2``; only the two Space layers before
+    it can be rewritten.
+    """
+    space_1 = layer_definition("DemoSta_1_Space")
+    red = copy.deepcopy(space_1["renderer"]["groups"][0]["classes"][0])
+    red["label"] = "赤"
+    red["values"] = [{"type": "CIMUniqueValue", "fieldValues": ["赤"]}]
+    space_1["renderer"]["groups"][0]["classes"].append(red)
+    facility = layer_definition("DemoSta_1_Facility")
+    facility["renderer"]["fields"] = ["category"]
+    arcade = layer_definition("DemoSta_B1_Space")
+    arcade["renderer"]["fields"] = []
+    arcade["renderer"]["valueExpressionInfo"] = {
+        "type": "CIMExpressionInfo",
+        "title": "Area",
+        "expression": "Upper($feature.color2)",
+        "returnType": "Default",
+    }
+    layers = [layer_definition("DemoSta_0_Space"), space_1, facility, arcade]
+    the_map = {"type": "CIMMap", "name": "DemoSta", "layers": [layer["uRI"] for layer in layers]}
+    index = {"type": "CIMIndex", "nodes": [layer["uRI"].removeprefix("CIMPATH=") for layer in layers]}
+    info = b"<CIMDocumentInfo><Version>3.6.0</Version><Build>59530</Build></CIMDocumentInfo>"
+    return [
+        ("DocumentInfo.xml", info, zipfile.ZIP_DEFLATED),
+        ("Index.json", _compact(index), zipfile.ZIP_DEFLATED),
+        ("map/map.json", _compact(the_map), zipfile.ZIP_DEFLATED),
+        *[(layer["uRI"].removeprefix("CIMPATH="), _compact(layer), zipfile.ZIP_DEFLATED) for layer in layers],
+        ("Thumbnail/thumbnail.png", b"\x89PNG\r\n\x1a\n" + bytes(range(256)), zipfile.ZIP_STORED),
+    ]
+
+
+def _compact(doc: Any) -> bytes:
+    return json.dumps(doc, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def make_project(members: Sequence[tuple[str, bytes, int]]) -> bytes:
+    """Pro dates every member 1980-00-00, a DOS date of zero."""
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, data, compression in members:
+            info = zipfile.ZipInfo(name, date_time=(1980, 0, 0, 0, 0, 0))
+            info.compress_type = compression
+            archive.writestr(info, data)
+    return buffer.getvalue()
+
+
+def demo_layer_files() -> bytes:
+    """A zip of a layer file and a project for capture.mjs: rewritten layers, a kept value and an Arcade renderer."""
+    return make_zip(
+        [
+            ("DemoSta_layers/DemoSta_0_Space.lyrx", LAYER_FILE.read_bytes()),
+            ("DemoSta_layers/DemoSta.aprx", make_project(project_members())),
+        ]
+    )

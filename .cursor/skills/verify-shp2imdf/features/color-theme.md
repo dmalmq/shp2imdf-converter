@@ -1,6 +1,6 @@
 # Recolour a station
 
-The colour tool takes one station's shapefile folder, its File Geodatabase (`.gdb` folder), or a zip of either, shows how each old `color2` value maps to a new area name, and returns every file as one zip with only `color2` rewritten. Shapefiles are patched byte for byte. A geodatabase is updated in place by GDAL in a Python that has `osgeo` (ArcGIS Pro's on this PC), so its edited tables are rewritten and every other table comes back byte for byte.
+The colour tool takes one station's shapefile folder, its File Geodatabase (`.gdb` folder), its ArcGIS Pro layer files (`.lyrx`) or project (`.aprx`), or a zip of any of them, shows how each old `color2` value maps to a new area name, and returns every file as one zip with only `color2` rewritten. Shapefiles are patched byte for byte. A geodatabase is updated in place by GDAL in a Python that has `osgeo` (ArcGIS Pro's on this PC), so its edited tables are rewritten and every other table comes back byte for byte. In a layer file or project, each unique-value renderer keyed on `color2` alone becomes six classes in the new fills, outlined in `#657678`; in a project every other member comes back unchanged.
 
 ## Sub-features
 
@@ -9,12 +9,13 @@ The colour tool takes one station's shapefile folder, its File Geodatabase (`.gd
 - `color-theme-attention` lists the values the table does not know and the new values that do not fit the field.
 - `color-theme-download` downloads `<station>_new-colors.zip` and moves the stage track to `Deliver`.
 - `color-theme-gdb` does the same for a zipped geodatabase: its feature classes in the tables, widths in characters, the geodatabase paragraph under `What comes back`, and the stale lock files left out.
+- `color-theme-symbology` does it for a zip of a layer file and a project: the `Symbology` section, renderers left alone under `Needs attention`, and the layer-file paragraph under `What comes back`.
 
 ## How to get to it (user POV)
 
 - On the hub (`/`), under `Tools` below the drop zone, choose `Recolour a station`.
 - Open `/color-theme` directly.
-- On the page, drop the station folder or its zip anywhere, or use `Choose folder` or `Choose zip`.
+- On the page, drop the station folder, its zip, a `.lyrx` or an `.aprx` anywhere, or use `Choose folder` or `Choose file`.
 
 ## Driving it with control.mjs
 
@@ -45,13 +46,25 @@ Preconditions: the backend found a Python with `osgeo` at startup (`GDB_GDAL_PYT
 - **What comes back.** Only the geodatabase paragraph (GDAL rewrites each changed row, `Shape_Area` and `Shape_Length` are recomputed, convert a copy and open it in ArcGIS Pro first), and `Left out: 2 stale geodatabase lock files.`
 - **Download.** As above. The bar reads `Downloaded DemoSta_3857_new-colors.zip`. The download is the real GDAL update, not a mock.
 
+### Layer files and a project
+
+Preconditions: none beyond the station's. `capture.mjs` builds `DemoSta_layers.zip` from `demo_layer_files()` in `backend/tests/color_theme_fixtures.py`: `DemoSta_0_Space.lyrx` (one Tokyo layer, its 14 classes) and `DemoSta.aprx` (that layer, `DemoSta_1_Space` with an extra `赤` class, `DemoSta_1_Facility` coloured by `category`, and `DemoSta_B1_Space` coloured by an Arcade expression on `color2`).
+
+- **Upload.** Set `[data-testid="color-theme-zip-input"]` to the zip. Wait for the heading `Recolour DemoSta_layers`.
+- **Counts.** `What this station gets` reads `Changes 0`, `Layers 0`, `Layers redrawn 3` and `Files back untouched 0 / 2`. There is no `Layers (n)` row list and the rule table has no `Rows` column, because no table carries `color2`. `capture.mjs` scrolls to the `Symbology` region before both shots.
+- **Symbology.** The region `Symbology` has one card per file. `DemoSta_0_Space.lyrx` reads `Layer file` and `1 redrawn`. `DemoSta.aprx` reads `Project`, `2 redrawn · 1 left as is` and the caveat that Esri does not document editing a project outside ArcGIS Pro. Each card's `Layers (n)` is open (eight renderers or fewer). `DemoSta_1_Space` reads `15 → 7`, six swatches, `Redrawn` and `Kept as it was: 赤`. `DemoSta_B1_Space` reads `Coloured by an Arcade expression on color2; left as it is`. `DemoSta_1_Facility` is not listed: renderers on other fields are neither touched nor reported.
+- **Needs attention.** `DemoSta_B1_Space` (the Arcade reason) and `DemoSta_1_Space` (`赤` kept in its old class), each with `DemoSta.aprx`.
+- **What comes back.** Only the layer-file paragraph (six classes, TurquoiseGray 1000 outline, old colours still listed, the 濃鼠 toilet exception). No shapefile or geodatabase paragraph.
+- **Download.** The bar's title reads `3 layers are redrawn`. After the download it reads `Downloaded DemoSta_layers_new-colors.zip`.
+
 ## Gotchas
 
 - The page scrolls inside the shell and the table is taller than 1440×960, so `fullPage: true` still cuts it off. `capture.mjs` uses a 1440×1700 viewport for these screens.
 - The hub's drop zone never opens this tool. It reads a station folder or zip as a shapefile import, so choose `Recolour a station` under `Tools` first.
 - Nothing is stored on the server and no project appears on the hub. The files stay in the browser tab, `Download` sends them again, and a reload returns to the empty page.
 - A single `.zip` is read as a zipped station and its stem names the station. A zip inside a folder upload is one more file that comes back untouched.
-- The page has three file inputs. `color-theme-drop-input` is the page-wide drop zone, `color-theme-folder-input` is `Choose folder` and takes a folder path, and `color-theme-zip-input` is `Choose zip`, the only one with an `accept` filter.
+- The page has three file inputs. `color-theme-drop-input` is the page-wide drop zone, `color-theme-folder-input` is `Choose folder` and takes a folder path, and `color-theme-zip-input` is `Choose file`, the only one with an `accept` filter (`.zip,.lyrx,.aprx`).
+- A lone `.lyrx` or `.aprx` is a file, not a station zip: the download is `<its stem>_new-colors.zip` holding it. A second run reports every renderer `Already new` and Download is disabled with `Every value is already new.`
 - Upload the download again and `Download` is disabled. The bar reads `Nothing to change` with the reason `Rows match an old colour, but the new value does not fit color2.`, because the B1 rows are still too narrow. `Changes` is `0` and `Files back untouched` is `13 / 13`. A second run changes nothing by design.
 - Japanese labels are `駅の色を新しくする`, `要確認`, `ダウンロード` and `もう一度ダウンロード`. The values written to `color2` are Japanese in both languages.
 - A backend with no `osgeo` Python lists the geodatabase under `Needs attention` as one that cannot be edited on this server, and it comes back as uploaded. Shapefiles in the same upload still convert.

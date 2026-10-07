@@ -302,7 +302,9 @@ async function captureIllustratorFlow(page, shoot, artwork) {
 // checked page shows every kind of row it has. The zip's stem is the station
 // name the page reports. The geodatabase, when this machine has a GDAL Python
 // to build it, is then dropped as a second station and converted for real.
-async function captureColorThemeFlow(page, shoot, zip, gdbZip) {
+// Last comes a zip of a layer file and a project, which shows the Symbology
+// section with a kept value and an Arcade renderer left alone.
+async function captureColorThemeFlow(page, shoot, zip, gdbZip, layersZip) {
   await gotoHub(page);
   await page.getByRole("button", { name: /Recolour a station/ }).scrollIntoViewIfNeeded();
   await shoot("color-theme-hub");
@@ -313,9 +315,12 @@ async function captureColorThemeFlow(page, shoot, zip, gdbZip) {
 
   await checkAndDownloadStation(page, shoot, zip, "color-theme");
   if (gdbZip) await checkAndDownloadStation(page, shoot, gdbZip, "color-theme-gdb");
+  // The rule table fills the viewport, so the Symbology section is scrolled to.
+  const symbology = page.getByRole("region", { name: "Symbology" });
+  await checkAndDownloadStation(page, shoot, layersZip, "color-theme-symbology", symbology);
 }
 
-async function checkAndDownloadStation(page, shoot, zip, prefix) {
+async function checkAndDownloadStation(page, shoot, zip, prefix, reveal = null) {
   const station = path.basename(zip, ".zip");
   await page.locator('[data-testid="color-theme-zip-input"]').setInputFiles(zip);
   await page.getByRole("heading", { name: `Recolour ${station}`, level: 1 }).waitFor({ timeout: 60000 });
@@ -324,12 +329,14 @@ async function checkAndDownloadStation(page, shoot, zip, prefix) {
   await page.locator("details").first().evaluate((details) => {
     details.open = true;
   });
+  if (reveal) await reveal.scrollIntoViewIfNeeded();
   await shoot(`${prefix}-checked`);
 
   const download = page.waitForEvent("download", { timeout: 60000 });
   await page.getByRole("region", { name: "Next step" }).getByRole("button", { name: "Download", exact: true }).click();
   await download;
   await page.getByText(`Downloaded ${station}_new-colors.zip`).waitFor({ timeout: 30000 });
+  if (reveal) await reveal.scrollIntoViewIfNeeded();
   await shoot(`${prefix}-delivered`);
 }
 
@@ -374,6 +381,7 @@ async function capture(options) {
   const artwork = writeFixture(options.out, "0001_東京.ai", "backend.tests.test_illustrator_import", "_build_multipage_ai_pdf");
   const station = writeFixture(options.out, "DemoSta_6677.zip", "backend.tests.color_theme_fixtures", "demo_station");
   const geodatabase = writeGeodatabaseFixture(options.out);
+  const layerFiles = writeFixture(options.out, "DemoSta_layers.zip", "backend.tests.color_theme_fixtures", "demo_layer_files");
   const manifest = [];
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: true });
@@ -383,7 +391,7 @@ async function capture(options) {
     for (const flow of [
       (page, shoot) => captureShapefileFlow(page, shoot),
       (page, shoot) => captureIllustratorFlow(page, shoot, artwork),
-      (page, shoot) => captureColorThemeFlow(page, shoot, station, geodatabase)
+      (page, shoot) => captureColorThemeFlow(page, shoot, station, geodatabase, layerFiles)
     ]) {
       const context = await browser.newContext({ viewport: VIEWPORT });
       await context.addInitScript(() => {

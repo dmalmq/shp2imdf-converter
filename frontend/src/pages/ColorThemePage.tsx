@@ -8,6 +8,7 @@ import {
   inspectColorTheme,
   type ColorThemeInspection,
   type ColorThemeLayer,
+  type ColorThemeRenderer,
   type ColorThemeReport
 } from "../api/client";
 import { toErrorMessage } from "../api/errors";
@@ -26,6 +27,7 @@ import {
   downloadBlockedReason,
   inGeodatabase,
   initialColorThemeState,
+  symbologyTally,
   type ColorThemeState,
   type DatasetUpload
 } from "../lib/colorTheme";
@@ -195,7 +197,7 @@ export function ColorThemePage() {
       </Button>
       <Button variant="outline" size="sm" onClick={() => zipInput.current?.click()}>
         <FileArchive aria-hidden="true" />
-        {t("Choose zip", "zip を選択")}
+        {t("Choose file", "ファイルを選択")}
       </Button>
     </div>
   );
@@ -213,7 +215,14 @@ export function ColorThemePage() {
         data-testid="color-theme-folder-input"
         onChange={picked}
       />
-      <input ref={zipInput} type="file" accept=".zip" className="hidden" data-testid="color-theme-zip-input" onChange={picked} />
+      <input
+        ref={zipInput}
+        type="file"
+        accept=".zip,.lyrx,.aprx"
+        className="hidden"
+        data-testid="color-theme-zip-input"
+        onChange={picked}
+      />
 
       <div className="flex flex-1 items-start gap-8 overflow-auto px-14 pb-6 pt-7">
         <main className="flex min-w-0 flex-1 flex-col gap-5">
@@ -225,8 +234,8 @@ export function ColorThemePage() {
             </h1>
             <p className="max-w-[46rem] text-[15px] leading-[1.55] text-muted-foreground">
               {t(
-                "Drop one station’s shapefile folder, its File Geodatabase (.gdb folder), or a zip of either. Each color2 value is rewritten to its new area name, as the table shows.",
-                "駅のシェープファイルのフォルダ、ファイルジオデータベース（.gdb フォルダ）、またはそのどちらかの zip をドロップしてください。color2 の値を表のとおり新しいエリア名に書き換えます。"
+                "Drop one station’s shapefile folder, its File Geodatabase (.gdb folder), its ArcGIS Pro layer files (.lyrx) or project (.aprx), or a zip of any of them. Each color2 value is rewritten to its new area name, as the table shows, and each layer coloured by color2 is redrawn in the new colours.",
+                "駅のシェープファイルのフォルダ、ファイルジオデータベース（.gdb フォルダ）、ArcGIS Pro のレイヤーファイル（.lyrx）やプロジェクト（.aprx）、またはそれらの zip をドロップしてください。color2 の値を表のとおり新しいエリア名に書き換え、color2 で色分けしたレイヤーを新しい色で描き直します。"
               )}
             </p>
           </div>
@@ -240,7 +249,11 @@ export function ColorThemePage() {
           <section aria-labelledby="color-theme-table" className="flex flex-col gap-2.5">
             <MicroLabel id="color-theme-table">{t("Old colour → new area", "旧カラー → 新エリア")}</MicroLabel>
             {report ? (
-              <RuleTable report={report} counted={inspection !== null} />
+              // Rows are counted only where the upload has a table to count them in, not for layer files alone.
+              <RuleTable
+                report={report}
+                counted={inspection !== null && inspection.theme.layers.length + inspection.theme.skipped.length > 0}
+              />
             ) : mapping.state === "failed" ? (
               <p role="alert" className="rounded-xl border border-border bg-card px-4 py-3 text-sm text-destructive">
                 {t("The colour table did not load.", "カラー表を読み込めませんでした。")} {mapping.message}
@@ -250,7 +263,8 @@ export function ColorThemePage() {
             )}
           </section>
 
-          {inspection ? <LayerTable layers={inspection.theme.layers} /> : null}
+          {inspection && inspection.theme.layers.length > 0 ? <LayerTable layers={inspection.theme.layers} /> : null}
+          {inspection && inspection.theme.symbology.length > 0 ? <Symbology report={inspection.theme} /> : null}
         </main>
 
         <aside className="flex w-[360px] shrink-0 flex-col gap-4">
@@ -283,16 +297,25 @@ export function ColorThemePage() {
 function nextStep(state: ColorThemeState, inspection: ColorThemeInspection, blocked: string | null, t: T) {
   const { totals, layers } = inspection.theme;
   const changed = layers.filter((layer) => layer.counts.recolor > 0).length;
+  const { rewritten } = symbologyTally(inspection.theme);
   const delivered = state.phase === "checked" ? state.delivered : null;
   const error = state.phase === "checked" ? state.error : null;
+  const changes = [
+    totals.recolor > 0
+      ? t(
+          `${plural(totals.recolor, "value changes", "values change")} in ${plural(changed, "layer", "layers")}`,
+          `${formatCount(changed)} レイヤーの ${formatCount(totals.recolor)} 件の値を変更します`
+        )
+      : null,
+    rewritten > 0
+      ? t(`${plural(rewritten, "layer is", "layers are")} redrawn`, `${formatCount(rewritten)} レイヤーのシンボルを描き直します`)
+      : null
+  ].filter((part): part is string => part !== null);
   const title = blocked
     ? t("Nothing to change", "変更はありません")
     : delivered
       ? t(`Downloaded ${delivered}`, `${delivered} をダウンロードしました`)
-      : t(
-          `${plural(totals.recolor, "value changes", "values change")} in ${plural(changed, "layer", "layers")}`,
-          `${formatCount(changed)} レイヤーの ${formatCount(totals.recolor)} 件の値を変更します`
-        );
+      : changes.join(" · ");
   // GDAL rewrites a geodatabase's changed rows whole (Shape_Area recomputed), so only shapefiles get the stronger promise.
   const unchanged =
     inspection.dataset.geodatabases > 0
@@ -348,7 +371,10 @@ function DropArea({ state, dragging, pickers }: { state: ColorThemeState; draggi
       <p className="text-sm font-medium text-foreground">
         {dragging
           ? t("Drop to check it", "ドロップして確認")
-          : t("Drop the station’s shapefile folder, .gdb folder or zip here", "駅のシェープファイルのフォルダ、.gdb フォルダ、または zip をここにドロップ")}
+          : t(
+              "Drop the station’s shapefile folder, .gdb folder, .lyrx, .aprx or zip here",
+              "駅のシェープファイルのフォルダ、.gdb フォルダ、.lyrx、.aprx、または zip をここにドロップ"
+            )}
       </p>
       <p className="text-[12.5px] text-muted-foreground">
         {t(
@@ -371,6 +397,7 @@ function Summary({ inspection, pickers }: { inspection: ColorThemeInspection; pi
   const { dataset, theme } = inspection;
   const leftAsIs = theme.totals.unmapped + theme.totals.too_wide + theme.totals.undecodable;
   const changedLayers = theme.layers.filter((layer) => layer.counts.recolor > 0).length;
+  const symbology = symbologyTally(theme);
   return (
     <section
       aria-label={t("What this station gets", "この駅の変更内容")}
@@ -380,13 +407,14 @@ function Summary({ inspection, pickers }: { inspection: ColorThemeInspection; pi
         <Stat label={t("Changes", "変更")} value={formatCount(theme.totals.recolor)} />
         <Stat label={t("Layers", "レイヤー")} value={formatCount(theme.layers.length)} />
         <Stat label={t("Left as is", "変更しない")} value={formatCount(leftAsIs)} warning={leftAsIs > 0} />
+        {symbology.files > 0 ? <Stat label={t("Layers redrawn", "描き直すレイヤー")} value={formatCount(symbology.rewritten)} /> : null}
         {/* One file per changed layer holds only for shapefiles: an edited feature class changes several and GDAL adds .freelist files. */}
         {dataset.geodatabases > 0 ? (
           <Stat label={t("Geodatabases", "ジオデータベース")} value={formatCount(dataset.geodatabases)} />
         ) : (
           <Stat
             label={t("Files back untouched", "そのまま戻るファイル")}
-            value={`${formatCount(dataset.files - changedLayers)} / ${formatCount(dataset.files)}`}
+            value={`${formatCount(dataset.files - changedLayers - symbology.changedFiles)} / ${formatCount(dataset.files)}`}
           />
         )}
       </div>
@@ -505,7 +533,7 @@ function RuleTable({ report, counted }: { report: ColorThemeReport; counted: boo
 
 function Attention({ inspection }: { inspection: ColorThemeInspection }) {
   const { t } = useUiLanguage();
-  const { field, unmapped, layers, skipped } = inspection.theme;
+  const { field, unmapped, layers, skipped, symbology } = inspection.theme;
   const fileName = (id: string) => (
     <span className="font-mono text-xs" title={id}>
       {baseName(id)}
@@ -545,7 +573,31 @@ function Attention({ inspection }: { inspection: ColorThemeInspection }) {
       key: `skipped-${layer.id}`,
       title: fileName(layer.id),
       detail: skipDetail(layer, field, t)
-    }))
+    })),
+    ...symbology.flatMap((file) => [
+      ...(file.unreadable
+        ? [
+            {
+              key: `symbology-${file.path}`,
+              title: fileName(file.path),
+              detail: t("Could not be read as a layer file or project; it comes back untouched", "レイヤーファイルまたはプロジェクトとして読めないため、そのまま戻します")
+            }
+          ]
+        : []),
+      ...file.renderers
+        .filter((renderer) => renderer.outcome === "left_alone" || renderer.kept.length > 0)
+        .map((renderer, index) => ({
+          key: `renderer-${file.path}-${index}`,
+          title: <span className="font-mono text-xs">{renderer.layer ?? baseName(file.path)}</span>,
+          detail:
+            renderer.outcome === "left_alone"
+              ? `${baseName(file.path)} · ${leftAloneDetail(renderer.reason, field, t)}`
+              : t(
+                  `${baseName(file.path)} · not in the table, kept in its old class: ${renderer.kept.join(", ")}`,
+                  `${baseName(file.path)} · 表にない値のため元のクラスのまま: ${renderer.kept.join("、")}`
+                )
+        }))
+    ])
   ];
 
   return (
@@ -588,12 +640,15 @@ function Attention({ inspection }: { inspection: ColorThemeInspection }) {
 }
 
 /** Which formats the download holds, so each promise is made only where it is true. Both until an upload says. */
-function returnedFormats(inspection: ColorThemeInspection | null): { shapefile: boolean; geodatabase: boolean } {
-  if (!inspection) return { shapefile: true, geodatabase: true };
+function returnedFormats(inspection: ColorThemeInspection | null): { shapefile: boolean; geodatabase: boolean; symbology: boolean } {
+  if (!inspection) return { shapefile: true, geodatabase: true, symbology: true };
   const { dataset, theme } = inspection;
   return {
-    shapefile: dataset.geodatabases === 0 || [...theme.layers, ...theme.skipped].some(({ id }) => !inGeodatabase(id)),
-    geodatabase: dataset.geodatabases > 0
+    shapefile:
+      (dataset.geodatabases === 0 && theme.symbology.length === 0) ||
+      [...theme.layers, ...theme.skipped].some(({ id }) => !inGeodatabase(id)),
+    geodatabase: dataset.geodatabases > 0,
+    symbology: theme.symbology.length > 0
   };
 }
 
@@ -628,6 +683,14 @@ function WhatComesBack({
           {t(
             "In a geodatabase, GDAL rewrites each changed row. Other tables, fields and indexes stay as they were; Shape_Area and Shape_Length are recomputed. Convert a copy and open it in ArcGIS Pro before replacing the original.",
             "ジオデータベースでは、変更する行を GDAL が書き直します。ほかのテーブル、フィールド、インデックスはそのままですが、Shape_Area と Shape_Length は再計算されます。元のデータを置き換える前に、コピーを変換して ArcGIS Pro で開いて確認してください。"
+          )}
+        </p>
+      ) : null}
+      {formats.symbology ? (
+        <p className={paragraph}>
+          {t(
+            `Layer files (.lyrx) and projects (.aprx) come back with each layer coloured by ${field} redrawn: one class per new area, in its new fill, outlined in TurquoiseGray 1000. Each class also lists the old colours, so data not yet converted draws the same. Everything else in them stays as it was. One exception: an old 濃鼠 toilet (B007–B014) draws white until its data is converted.`,
+            `レイヤーファイル（.lyrx）とプロジェクト（.aprx）は、${field} で色分けした各レイヤーを描き直して戻ります。新エリアごとに 1 クラス、新しい塗りと TurquoiseGray 1000 の枠線です。各クラスは旧カラーも含むため、変換前のデータも同じ色で描かれます。ほかはそのままです。例外として、旧 濃鼠 のトイレ（B007–B014）はデータを変換するまで白で描かれます。`
           )}
         </p>
       ) : null}
@@ -711,5 +774,142 @@ function LayerTable({ layers }: { layers: ColorThemeLayer[] }) {
         </table>
       </div>
     </details>
+  );
+}
+
+function leftAloneDetail(reason: ColorThemeRenderer["reason"], field: string, t: T): string {
+  switch (reason) {
+    case "several_fields":
+      return t(`Coloured by ${field} and other fields; left as it is`, `${field} とほかのフィールドで色分けしているため、そのままにします`);
+    case "expression":
+      return t(`Coloured by an Arcade expression on ${field}; left as it is`, `${field} の Arcade 式で色分けしているため、そのままにします`);
+    case "not_polygon":
+      return t("Not drawn with polygon symbols; left as it is", "ポリゴンシンボルではないため、そのままにします");
+    case "no_known_values":
+      return t("No class is an old or new colour; left as it is", "旧カラーにも新しい色にも一致するクラスがないため、そのままにします");
+    case "unreadable":
+      return t("This part of the project could not be read; it comes back untouched", "プロジェクトのこの部分を読めないため、そのまま戻します");
+    case "unrecognised":
+    case null:
+      return t("Its classes are in a form this tool does not rewrite; left as it is", "クラスの形式を書き換えられないため、そのままにします");
+  }
+}
+
+function Symbology({ report }: { report: ColorThemeReport }) {
+  const { t } = useUiLanguage();
+  const areas = new Map(report.rules.map((rule) => [rule.area, rule]));
+  const head = "px-3 py-2 text-left text-[11px] font-medium text-muted-foreground";
+  return (
+    <section aria-labelledby="color-theme-symbology" className="flex flex-col gap-2.5">
+      <MicroLabel id="color-theme-symbology">{t("Symbology", "シンボル")}</MicroLabel>
+      {report.symbology.map((file) => {
+        const redrawn = file.renderers.filter((renderer) => renderer.outcome === "rewritten").length;
+        const leftAlone = file.renderers.filter((renderer) => renderer.outcome === "left_alone").length;
+        const note = file.unreadable
+          ? t("Could not be read; it comes back untouched.", "読み込めないため、そのまま戻します。")
+          : file.renderers.length === 0
+            ? t(`No layer here is coloured by ${report.field}; it comes back untouched.`, `${report.field} で色分けしたレイヤーがないため、そのまま戻します。`)
+            : null;
+        return (
+          <div key={file.path} className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 px-4 py-3">
+              <span className="flex min-w-0 items-baseline gap-2.5">
+                <span className="break-all font-mono text-[12px] font-medium text-foreground">{file.path}</span>
+                <span className="whitespace-nowrap text-[11.5px] text-muted-foreground">
+                  {file.kind === "aprx" ? t("Project", "プロジェクト") : t("Layer file", "レイヤーファイル")}
+                </span>
+              </span>
+              {file.renderers.length > 0 ? (
+                <span className="whitespace-nowrap text-[12px] tabular-nums text-muted-foreground">
+                  {t(`${formatCount(redrawn)} redrawn`, `${formatCount(redrawn)} 件描き直し`)}
+                  {leftAlone > 0 ? (
+                    <span className="text-warning-foreground">
+                      {" · "}
+                      {t(`${formatCount(leftAlone)} left as is`, `${formatCount(leftAlone)} 件そのまま`)}
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
+            </div>
+            {note ? <p className="border-t border-border px-4 py-2.5 text-[12.5px] text-muted-foreground">{note}</p> : null}
+            {file.kind === "aprx" && !file.unreadable ? (
+              <p className="border-t border-border px-4 py-2.5 text-[12.5px] leading-[1.45] text-muted-foreground">
+                {t(
+                  "Esri does not document editing a project outside ArcGIS Pro. Keep the original, and open the new copy in Pro before you use it.",
+                  "ArcGIS Pro の外でのプロジェクト編集は Esri が文書化していません。元のファイルを残し、新しいコピーを Pro で開いて確認してから使ってください。"
+                )}
+              </p>
+            ) : null}
+            {file.renderers.length > 0 ? (
+              <details className="group border-t border-border" open={file.renderers.length <= 8}>
+                <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 px-4 py-2.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:text-foreground">
+                  <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+                  {t(`Layers (${file.renderers.length})`, `レイヤー（${file.renderers.length}）`)}
+                </summary>
+                <table className="w-full border-collapse text-[12.5px]">
+                  <thead className="border-y border-border">
+                    <tr>
+                      <th scope="col" className={head}>
+                        {t("Layer", "レイヤー")}
+                      </th>
+                      <th scope="col" className={cn(head, "text-right")}>
+                        {t("Classes", "クラス")}
+                      </th>
+                      <th scope="col" className={head}>
+                        {t("Draws", "描く色")}
+                      </th>
+                      <th scope="col" className={head}>
+                        {t("Result", "結果")}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {file.renderers.map((renderer, index) => (
+                      <tr key={`${renderer.layer}-${index}`}>
+                        <td className="break-all px-3 py-2 font-mono text-[11.5px] text-foreground">{renderer.layer ?? "—"}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-muted-foreground">
+                          {renderer.outcome === "rewritten"
+                            ? `${renderer.classes_before} → ${renderer.classes_after}`
+                            : formatCount(renderer.classes_after)}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="flex gap-1">
+                            {renderer.areas.map((key) => {
+                              const area = areas.get(key);
+                              return area ? (
+                                <span key={key} className="flex" title={`${area.value} · ${area.spec}`}>
+                                  <Swatch hex={area.hex} />
+                                </span>
+                              ) : null;
+                            })}
+                          </span>
+                        </td>
+                        <td
+                          className={cn(
+                            "px-3 py-2 text-[12px]",
+                            renderer.outcome === "left_alone" ? "text-warning-foreground" : "text-muted-foreground"
+                          )}
+                        >
+                          {renderer.outcome === "rewritten"
+                            ? t("Redrawn", "描き直し")
+                            : renderer.outcome === "already_new"
+                              ? t("Already new", "すでに新しい色")
+                              : leftAloneDetail(renderer.reason, report.field, t)}
+                          {renderer.kept.length > 0 ? (
+                            <span className="block text-warning-foreground">
+                              {t(`Kept as it was: ${renderer.kept.join(", ")}`, `そのまま: ${renderer.kept.join("、")}`)}
+                            </span>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </details>
+            ) : null}
+          </div>
+        );
+      })}
+    </section>
   );
 }

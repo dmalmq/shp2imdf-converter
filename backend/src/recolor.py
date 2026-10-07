@@ -14,6 +14,11 @@ GDAL rewrites each edited row, so for a geodatabase the guarantee is per
 table: a table without edits comes back byte for byte. Stale ``*.lock``
 files inside a ``.gdb`` are left out.
 
+An ``.lyrx`` is parsed as CIM JSON and an ``.aprx`` as a zip of CIM JSON
+members; ``cim_symbology`` rewrites their ``color2`` renderers. A file with
+nothing to rewrite comes back byte for byte, and in a project every member
+without a rewritten renderer comes back with the same name, date and bytes.
+
 ``inspect`` and ``convert`` share one private pass, so the report the
 operator checks and the archive they download come from the same plan.
 """
@@ -23,19 +28,25 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from io import BytesIO
+import json
 from pathlib import Path, PurePosixPath
 import re
 from tempfile import TemporaryDirectory
 import time
-from typing import NewType
+from typing import Any, NewType
 import zipfile
+import zlib
 
+from backend.src.cim_symbology import retheme_document
 from backend.src.color_theme import (
     ColorTheme,
     Encoding,
     LayerInput,
+    RendererChange,
     Row,
     SkippedLayer,
+    SymbologyKind,
+    SymbologyLine,
     ThemePlan,
     ThemeReport,
     plan,
@@ -110,6 +121,7 @@ def convert(
     replaced = {
         path: _patch(table, survey.plan.edits[path]) for path, table in survey.tables.items() if path in survey.plan.edits
     }
+    replaced.update(survey.symbology)
     return Archive(filename=survey.dataset.download_name, data=_write_zip(tree, replaced))
 
 
@@ -282,6 +294,8 @@ class _Survey:
     tables: Mapping[str, _Table]
     geodatabases: tuple[_Geodatabase, ...]
     """The ones that were read; none without a GDAL Python."""
+    symbology: Mapping[TreePath, bytes]
+    """Layer files and projects with a rewritten renderer, as they come back."""
     plan: ThemePlan
 
 
@@ -334,6 +348,23 @@ def _survey(
         layers += read
         ids = tuple(layer.id for layer in read if isinstance(layer, LayerInput))
         geodatabases.append(_Geodatabase(path=root, directory=directory, python=gdal_python, layers=ids))
+    symbology: list[SymbologyLine] = []
+    rewritten: dict[TreePath, bytes] = {}
+    # One allowance for the whole upload: the files already unpacked count, and every project draws on what is
+    # left, or a project beside a large station, or many small projects, could inflate well past the limit.
+    remaining = max_bytes - sum(
+        len(entry.data) for entry in tree.entries if entry.data is not None and _symbology_kind(entry.path) != "aprx"
+    )
+    for entry in tree.entries:
+        kind = _symbology_kind(entry.path)
+        if entry.data is None or kind is None or _gdb_root(entry.path) is not None:
+            continue
+        line, data = _retheme_file(theme, entry.path, entry.data, kind, max_bytes=remaining)
+        if kind == "aprx":
+            remaining -= _expanded_size(entry.data)
+        symbology.append(line)
+        if data is not None:
+            rewritten[entry.path] = data
     dataset = DatasetInfo(
         name=tree.name,
         download_name=f"{tree.name}{DOWNLOAD_SUFFIX}.zip",
@@ -341,7 +372,14 @@ def _survey(
         geodatabases=len(roots),
         lock_files_dropped=len(uploaded.entries) - len(tree.entries),
     )
-    return _Survey(tree=tree, dataset=dataset, tables=tables, geodatabases=tuple(geodatabases), plan=plan(theme, layers))
+    return _Survey(
+        tree=tree,
+        dataset=dataset,
+        tables=tables,
+        geodatabases=tuple(geodatabases),
+        symbology=rewritten,
+        plan=plan(theme, layers, symbology),
+    )
 
 
 def _read_geodatabase(
@@ -416,3 +454,108 @@ def _decode(raw: bytes, codec: str) -> str | None:
 def _patch(table: _Table, edits: Mapping[int, str]) -> bytes:
     """The encode side of the boundary, and the only write."""
     return table.table.with_text(table.field, {row: value.encode(table.codec) for row, value in edits.items()})
+
+
+_BOM = b"\xef\xbb\xbf"
+_SYMBOLOGY_SUFFIXES: dict[str, SymbologyKind] = {".lyrx": "lyrx", ".aprx": "aprx"}
+
+
+def _symbology_kind(path: str) -> SymbologyKind | None:
+    return _SYMBOLOGY_SUFFIXES.get(PurePosixPath(path).suffix.lower())
+
+
+def _retheme_file(
+    theme: ColorTheme, path: str, data: bytes, kind: SymbologyKind, *, max_bytes: int
+) -> tuple[SymbologyLine, bytes | None]:
+    """The report line, and the file as it comes back when a renderer was rewritten. An unreadable file passes through."""
+    try:
+        if kind == "lyrx":
+            renderers, rewritten = _retheme_lyrx(theme, data)
+        else:
+            renderers, rewritten = _retheme_aprx(theme, data, max_bytes=max_bytes)
+    except (ValueError, RecursionError):
+        # RecursionError: JSON nested deeper than Python will parse or walk.
+        return SymbologyLine(path=path, kind=kind, unreadable=True, renderers=()), None
+    return SymbologyLine(path=path, kind=kind, unreadable=False, renderers=tuple(renderers)), rewritten
+
+
+def _parse_json(data: bytes) -> tuple[bytes, Any]:
+    """The leading BOM, if any, and the document. ValueError covers bad UTF-8 and bad JSON."""
+    bom = _BOM if data.startswith(_BOM) else b""
+    return bom, json.loads(data[len(bom) :].decode("utf-8"))
+
+
+def _any_rewritten(changes: Sequence[RendererChange]) -> bool:
+    return any(change.outcome == "rewritten" for change in changes)
+
+
+def _retheme_lyrx(theme: ColorTheme, data: bytes) -> tuple[list[RendererChange], bytes | None]:
+    bom, doc = _parse_json(data)
+    changes = retheme_document(doc, theme)
+    if not _any_rewritten(changes):
+        return changes, None
+    # Pro's own layout for a layer file; JSON escapes any newline inside a string, so only the layout's change.
+    text = json.dumps(doc, ensure_ascii=False, indent=2, separators=(",", " : ")).replace("\n", "\r\n")
+    return changes, bom + text.encode("utf-8")
+
+
+def _expanded_size(project: bytes) -> int:
+    """What the project declares it inflates to; a project that then fails to read has still cost that much."""
+    try:
+        with zipfile.ZipFile(BytesIO(project)) as archive:
+            return sum(info.file_size for info in archive.infolist())
+    except (zipfile.BadZipFile, zipfile.LargeZipFile):
+        return 0
+
+
+def _retheme_aprx(theme: ColorTheme, data: bytes, *, max_bytes: int) -> tuple[list[RendererChange], bytes | None]:
+    """Each member that holds a renderer naming the field is rethemed; the rest are carried over as they are."""
+    marker, field = b'"CIMUniqueValueRenderer"', theme.field.lower().encode("utf-8")
+    changes: list[RendererChange] = []
+    members: list[tuple[zipfile.ZipInfo, bytes]] = []
+    try:
+        with zipfile.ZipFile(BytesIO(data)) as archive:
+            infos = archive.infolist()
+            if sum(info.file_size for info in infos) > max_bytes:
+                raise ValueError(EXPANDED_LIMIT_MESSAGE)
+            comment = archive.comment
+            for info in infos:
+                member = archive.read(info)
+                if marker in member and field in member.lower():
+                    found, member = _retheme_member(theme, info.filename, member)
+                    changes += found
+                members.append((info, member))
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, zlib.error, RuntimeError, NotImplementedError, EOFError) as exc:
+        raise ValueError(f"Not a readable project: {exc}") from exc
+    if not _any_rewritten(changes):
+        return changes, None
+    return changes, _write_project(members, comment)
+
+
+def _retheme_member(theme: ColorTheme, name: str, member: bytes) -> tuple[list[RendererChange], bytes]:
+    try:
+        bom, doc = _parse_json(member)
+    except ValueError:
+        unreadable = RendererChange(
+            layer=name, outcome="left_alone", reason="unreadable", classes_before=0, classes_after=0, areas=(), kept=()
+        )
+        return [unreadable], member
+    changes = retheme_document(doc, theme)
+    if not _any_rewritten(changes):
+        return changes, member
+    # Pro saves project members as compact JSON.
+    return changes, bom + json.dumps(doc, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def _write_project(members: Sequence[tuple[zipfile.ZipInfo, bytes]], comment: bytes) -> bytes:
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.comment = comment
+        for source, data in members:
+            info = zipfile.ZipInfo(source.filename, date_time=source.date_time)
+            info.compress_type = source.compress_type
+            info.external_attr = source.external_attr
+            info.create_system = source.create_system
+            info.comment = source.comment
+            archive.writestr(info, data)
+    return buffer.getvalue()

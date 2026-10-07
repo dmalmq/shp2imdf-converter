@@ -14,6 +14,8 @@ import {
   colorThemeReport,
   colorThemeRules,
   counts,
+  layerFilesInspection,
+  layerFilesRerunInspection,
   rerunInspection,
   TOKYO_GDB,
   tokyoGeodatabaseInspection,
@@ -121,6 +123,64 @@ test("a picked folder is sent with its layout and checked rule by rule", async (
   expect(screen.getByRole("heading", { name: "Nothing needs attention" })).toBeInTheDocument();
   expect(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByText("JRTokyoSta_6677")).toBeInTheDocument();
   expect(within(screen.getByRole("navigation", { name: "Stages" })).getByText("2 · Check")).toBeInTheDocument();
+});
+
+test("layer files and projects are listed layer by layer, with what was left alone, and can be downloaded", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValue(layerFilesInspection());
+  renderPage();
+  await screen.findByRole("table", { name: "How color2 changes" });
+  expect((screen.getByTestId("color-theme-zip-input") as HTMLInputElement).accept).toBe(".zip,.lyrx,.aprx");
+
+  pickFolder([inFolder("DemoSta_0_Space.lyrx", "DemoSta_layers"), inFolder("DemoSta.aprx", "DemoSta_layers")]);
+
+  await screen.findByRole("heading", { level: 1, name: "Recolour DemoSta_layers" });
+  expect(within(table()).queryByRole("columnheader", { name: "Rows" })).toBeNull();
+  const symbology = screen.getByRole("region", { name: "Symbology" });
+  expect(symbology).toHaveTextContent("DemoSta_layers/DemoSta_0_Space.lyrxLayer file1 redrawn");
+  expect(symbology).toHaveTextContent("DemoSta_layers/DemoSta.aprxProject2 redrawn · 1 left as is");
+  expect(symbology).toHaveTextContent("Esri does not document editing a project outside ArcGIS Pro. Keep the original");
+  const row = (layer: string, index = 0) => within(symbology).getAllByText(layer)[index].closest("tr") as HTMLElement;
+  expect(Array.from(row("DemoSta_1_Space").children, (cell) => cell.textContent)).toEqual([
+    "DemoSta_1_Space",
+    "15 → 7",
+    "",
+    "RedrawnKept as it was: 赤"
+  ]);
+  expect(within(row("DemoSta_1_Space")).getAllByTitle(/·/).map((swatch) => swatch.title)).toEqual([
+    "改札外通路 · Mono 000",
+    "在来線改札内 · PaleBlue 050",
+    "新幹線改札内 · PaleBlue 100",
+    "施設 · Turquoise 150",
+    "進入制限エリア · Mono 050",
+    "階段・エスカレーター · Mono 000"
+  ]);
+  expect(row("DemoSta_B1_Space")).toHaveTextContent("Coloured by an Arcade expression on color2; left as it is");
+
+  const attention = screen.getByRole("region", { name: "Needs attention" });
+  expect(attention).toHaveTextContent("DemoSta_B1_SpaceDemoSta.aprx · Coloured by an Arcade expression on color2; left as it is");
+  expect(attention).toHaveTextContent("DemoSta_1_SpaceDemoSta.aprx · not in the table, kept in its old class: 赤");
+
+  const summary = screen.getByRole("region", { name: "What this station gets" });
+  expect(summary).toHaveTextContent("Layers redrawn3");
+  expect(summary).toHaveTextContent("Files back untouched0 / 2");
+  const returns = screen.getByRole("region", { name: "What comes back" });
+  expect(returns).toHaveTextContent(/Layer files \(\.lyrx\) and projects \(\.aprx\) come back with each layer coloured by color2 redrawn/);
+  expect(returns).toHaveTextContent("an old 濃鼠 toilet (B007–B014) draws white until its data is converted");
+  expect(returns).not.toHaveTextContent(/Shapefiles come back/);
+  const next = screen.getByRole("region", { name: "Next step" });
+  expect(next).toHaveTextContent("3 layers are redrawn");
+  expect(within(next).getByRole("button", { name: "Download" })).toBeEnabled();
+});
+
+test("layer files run a second time have nothing to download", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValue(layerFilesRerunInspection());
+  renderPage();
+  pickFolder([inFolder("DemoSta.aprx", "DemoSta_layers")]);
+
+  await screen.findByRole("heading", { level: 1, name: "Recolour DemoSta_layers" });
+  expect(screen.getByRole("region", { name: "Symbology" })).toHaveTextContent("Already new");
+  expect(screen.getByRole("region", { name: "Next step" })).toHaveTextContent("Nothing to change");
+  expect(screen.getByRole("button", { name: "Download" })).toBeDisabled();
 });
 
 test("a drop sends every file, whatever its kind", async () => {

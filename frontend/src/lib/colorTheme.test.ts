@@ -10,7 +10,16 @@ import {
   type ColorThemeState,
   type DatasetUpload
 } from "./colorTheme";
-import { colorThemeRules, counts, rerunInspection, TOKYO_GDB, tokyoGeodatabaseInspection, tokyoInspection } from "./colorTheme.fixtures";
+import {
+  colorThemeRules,
+  counts,
+  layerFilesInspection,
+  layerFilesRerunInspection,
+  rerunInspection,
+  TOKYO_GDB,
+  tokyoGeodatabaseInspection,
+  tokyoInspection
+} from "./colorTheme.fixtures";
 
 const english = (en: string) => en;
 const japanese = (_en: string, ja: string) => ja;
@@ -153,6 +162,22 @@ describe("downloadBlockedReason", () => {
 
     const locked = { ...none, theme: { ...none.theme, skipped: [{ id: "a.dbf", reason: "unreadable" as const }] } };
     expect(downloadBlockedReason(locked, english)).toBe("No color2 field here can be edited.");
+  });
+
+  test("lets layer files alone download when a renderer would be redrawn, and says why not once they are new", () => {
+    expect(downloadBlockedReason(layerFilesInspection(), english)).toBeNull();
+    expect(downloadBlockedReason(layerFilesRerunInspection(), english)).toBe("Every value is already new.");
+  });
+
+  test("says nothing can be edited when every layer file is unreadable or its renderers are left alone", () => {
+    const files = layerFilesInspection();
+    const [lyrx, aprx] = files.theme.symbology;
+    const leftAlone = { ...files, theme: { ...files.theme, symbology: [{ ...aprx, renderers: aprx.renderers.slice(2) }] } };
+    expect(downloadBlockedReason(leftAlone, english)).toBe("No color2 field here can be edited.");
+    const unreadable = { ...files, theme: { ...files.theme, symbology: [{ ...lyrx, unreadable: true, renderers: [] }] } };
+    expect(downloadBlockedReason(unreadable, english)).toBe("No color2 field here can be edited.");
+    const noColor2 = { ...files, theme: { ...files.theme, symbology: [{ ...lyrx, renderers: [] }] } };
+    expect(downloadBlockedReason(noColor2, english)).toBe("No layer has a color2 field.");
   });
 
   test("says nothing can be edited when every geodatabase is skipped for want of GDAL", () => {
