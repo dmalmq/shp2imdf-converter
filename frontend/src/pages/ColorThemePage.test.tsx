@@ -17,6 +17,8 @@ import {
   layerFilesInspection,
   layerFilesRerunInspection,
   rerunInspection,
+  shinjukuGeodatabaseInspection,
+  shinjukuProjectInspection,
   TOKYO_GDB,
   tokyoGeodatabaseInspection,
   tokyoInspection
@@ -87,6 +89,23 @@ test("shows the whole mapping before anything is uploaded", async () => {
   expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
 });
 
+test("the category table is shown before anything is uploaded, an area and its categories to a row", async () => {
+  renderPage();
+  const categories = await screen.findByRole("table", { name: "How layers coloured by category are redrawn" });
+
+  const rows = within(categories).getAllByRole("row").slice(1);
+  expect(rows.map((row) => within(row).getByRole("rowheader").textContent)).toEqual([
+    "改札外通路Free area outside the gates · Mono 000",
+    "在来線改札内Paid area, conventional lines · PaleBlue 050",
+    "施設Facilities · Turquoise 150",
+    "進入制限エリアRestricted area · Mono 050",
+    "階段・エスカレーターStairs and escalators · Mono 000"
+  ]);
+  expect(within(rows[0]).getByRole("cell")).toHaveTextContent("walkway, ramp, road");
+  expect(within(rows[4]).getByRole("cell")).toHaveTextContent("stairs, escalator, opentobelow");
+  expect(categories).not.toHaveTextContent("vegetation");
+});
+
 test("in Japanese each rule names its new area once, as the value written", async () => {
   useAppStore.setState({ uiLanguage: "ja" });
   renderPage();
@@ -131,7 +150,9 @@ test("layer files and projects are listed layer by layer, with what was left alo
   await screen.findByRole("table", { name: "How color2 changes" });
   expect((screen.getByTestId("color-theme-zip-input") as HTMLInputElement).accept).toBe(".zip,.lyrx,.aprx");
 
-  pickFolder([inFolder("DemoSta_0_Space.lyrx", "DemoSta_layers"), inFolder("DemoSta.aprx", "DemoSta_layers")]);
+  pickFolder(
+    ["DemoSta_0_Space.lyrx", "DemoSta.aprx", "DemoSta_units.aprx"].map((name) => inFolder(name, "DemoSta_layers"))
+  );
 
   await screen.findByRole("heading", { level: 1, name: "Recolour DemoSta_layers" });
   expect(within(table()).queryByRole("columnheader", { name: "Rows" })).toBeNull();
@@ -142,9 +163,25 @@ test("layer files and projects are listed layer by layer, with what was left alo
   const row = (layer: string, index = 0) => within(symbology).getAllByText(layer)[index].closest("tr") as HTMLElement;
   expect(Array.from(row("DemoSta_1_Space").children, (cell) => cell.textContent)).toEqual([
     "DemoSta_1_Space",
+    "color2",
     "15 → 7",
     "",
     "RedrawnKept as it was: 赤"
+  ]);
+  expect(symbology).toHaveTextContent("DemoSta_layers/DemoSta_units.aprxProject2 redrawn");
+  expect(Array.from(row("DemoSta_1_unit").children, (cell) => cell.textContent)).toEqual([
+    "DemoSta_1_unit",
+    "category",
+    "30 → 6",
+    "",
+    "RedrawnKept as it was: vegetation"
+  ]);
+  expect(within(row("DemoSta_1_unit")).getAllByTitle(/·/).map((swatch) => swatch.title)).toEqual([
+    "改札外通路 · Mono 000",
+    "在来線改札内 · PaleBlue 050",
+    "施設 · Turquoise 150",
+    "進入制限エリア · Mono 050",
+    "階段・エスカレーター · Mono 000"
   ]);
   expect(within(row("DemoSta_1_Space")).getAllByTitle(/·/).map((swatch) => swatch.title)).toEqual([
     "改札外通路 · Mono 000",
@@ -159,17 +196,84 @@ test("layer files and projects are listed layer by layer, with what was left alo
   const attention = screen.getByRole("region", { name: "Needs attention" });
   expect(attention).toHaveTextContent("DemoSta_B1_SpaceDemoSta.aprx · Coloured by an Arcade expression on color2; left as it is");
   expect(attention).toHaveTextContent("DemoSta_1_SpaceDemoSta.aprx · not in the table, kept in its old class: 赤");
+  expect(attention).toHaveTextContent("2 layersDemoSta_units.aprx · not in the table, kept in their old classes: vegetation");
+  expect(within(attention).getAllByRole("listitem")).toHaveLength(3);
 
   const summary = screen.getByRole("region", { name: "What this station gets" });
-  expect(summary).toHaveTextContent("Layers redrawn3");
-  expect(summary).toHaveTextContent("Files back untouched0 / 2");
+  expect(summary).toHaveTextContent("Layers redrawn5");
+  expect(summary).toHaveTextContent("Files back untouched0 / 3");
+  expect(summary).not.toHaveTextContent(/No layer here has a color2 field/);
   const returns = screen.getByRole("region", { name: "What comes back" });
   expect(returns).toHaveTextContent(/Layer files \(\.lyrx\) and projects \(\.aprx\) come back with each layer coloured by color2 redrawn/);
   expect(returns).toHaveTextContent("an old 濃鼠 toilet (B007–B014) draws white until its data is converted");
+  expect(returns).toHaveTextContent(/A layer coloured by category alone, in a station with no color2, is redrawn too/);
   expect(returns).not.toHaveTextContent(/Shapefiles come back/);
   const next = screen.getByRole("region", { name: "Next step" });
-  expect(next).toHaveTextContent("3 layers are redrawn");
+  expect(next).toHaveTextContent("5 layers are redrawn");
   expect(within(next).getByRole("button", { name: "Download" })).toBeEnabled();
+});
+
+test("a project drawn by category reads as category layers: one line for the 58 that keep vegetation, and no color2 promise", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  renderPage();
+  pickFolder([new File(["x"], "shinjuku.aprx")]);
+
+  await screen.findByRole("heading", { level: 1, name: "Recolour shinjuku" });
+  const symbology = screen.getByRole("region", { name: "Symbology" });
+  expect(symbology).toHaveTextContent("shinjuku.aprxProject58 redrawn");
+  expect(within(symbology).getAllByRole("cell", { name: "category" })).toHaveLength(58);
+  expect(within(symbology).queryByRole("cell", { name: "color2" })).toBeNull();
+  const attention = screen.getByRole("region", { name: "Needs attention" });
+  expect(within(attention).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+    "58 layersshinjuku.aprx · not in the table, kept in their old classes: vegetation"
+  ]);
+  const returns = screen.getByRole("region", { name: "What comes back" });
+  expect(returns).toHaveTextContent(
+    "one class per new area its categories belong to, in the same fills and outline. Its data is not changed. A category that is not in the table keeps its own class and colour."
+  );
+  expect(returns).not.toHaveTextContent(/coloured by color2 redrawn/);
+  expect(returns).not.toHaveTextContent(/濃鼠/);
+  expect(screen.getByRole("region", { name: "Next step" })).toHaveTextContent("58 layers are redrawn");
+});
+
+test("a station with no color2 says so in the summary, and one drawn by category is told to drop its layer file or project", async () => {
+  const summary = () => screen.getByRole("region", { name: "What this station gets" });
+  const drawnByCategory =
+    "No layer here has a color2 field. This station is coloured by category in its layer file or project, so drop its .lyrx or .aprx to recolour it.";
+  const shinjuku = shinjukuGeodatabaseInspection();
+  vi.mocked(inspectColorTheme)
+    .mockResolvedValueOnce(shinjuku)
+    .mockResolvedValueOnce({ ...shinjuku, dataset: { ...shinjuku.dataset, name: "Plain", category_only_tables: 0 } })
+    .mockResolvedValueOnce(tokyoInspection());
+  renderPage();
+
+  pickFolder([inFolder("a00000001.gdbtable", "JRShinjukuSta.gdb")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRShinjukuSta" });
+  expect(summary()).toHaveTextContent("Changes0Layers0Left as is0Geodatabases1");
+  expect(summary()).toHaveTextContent(drawnByCategory);
+  expect(screen.getByRole("region", { name: "Next step" })).toHaveTextContent("Nothing to changeNo layer has a color2 field.");
+  expect(screen.getByRole("button", { name: "Download" })).toBeDisabled();
+
+  pickFolder([inFolder("a00000001.gdbtable", "Plain.gdb")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour Plain" });
+  expect(summary()).toHaveTextContent("No layer here has a color2 field, so there is nothing to rewrite.");
+  expect(summary()).not.toHaveTextContent(/coloured by category/);
+
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_6677" });
+  expect(summary()).not.toHaveTextContent(/No layer here has a color2 field/);
+});
+
+test("in Japanese a station drawn by category is told the same in two sentences", async () => {
+  useAppStore.setState({ uiLanguage: "ja" });
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuGeodatabaseInspection());
+  renderPage();
+  pickFolder([inFolder("a00000001.gdbtable", "JRShinjukuSta.gdb")]);
+
+  await screen.findByRole("heading", { level: 1, name: "JRShinjukuSta の色を新しくする" });
+  expect(screen.getByRole("region", { name: "この駅の変更内容" })).toHaveTextContent(
+    "color2 フィールドのあるレイヤーがありません。この駅はレイヤーファイルまたはプロジェクトで category により色分けされているため、.lyrx か .aprx をドロップして色を新しくしてください。"
+  );
 });
 
 test("layer files run a second time have nothing to download", async () => {

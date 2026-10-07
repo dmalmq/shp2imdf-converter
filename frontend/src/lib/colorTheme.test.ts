@@ -5,7 +5,9 @@ import {
   datasetFiles,
   datasetPath,
   downloadBlockedReason,
+  fieldPresence,
   initialColorThemeState,
+  keptGroups,
   type ColorThemeEvent,
   type ColorThemeState,
   type DatasetUpload
@@ -16,6 +18,8 @@ import {
   layerFilesInspection,
   layerFilesRerunInspection,
   rerunInspection,
+  shinjukuGeodatabaseInspection,
+  shinjukuProjectInspection,
   TOKYO_GDB,
   tokyoGeodatabaseInspection,
   tokyoInspection
@@ -208,6 +212,67 @@ describe("downloadBlockedReason", () => {
       expect(downloadBlockedReason(case_, english)).not.toMatch(/Nothing to change/);
       expect(downloadBlockedReason(case_, japanese)).not.toMatch(/変更なし/);
     }
+  });
+});
+
+describe("fieldPresence", () => {
+  test("a geodatabase whose tables carry category and not color2 is drawn by category", () => {
+    expect(fieldPresence(shinjukuGeodatabaseInspection())).toBe("drawn_by_category");
+  });
+
+  test("tables with neither field, or a geodatabase that reports no table, have no field", () => {
+    const gdb = shinjukuGeodatabaseInspection();
+    expect(fieldPresence({ ...gdb, dataset: { ...gdb.dataset, category_only_tables: 0 } })).toBe("no_field");
+    expect(fieldPresence({ ...gdb, dataset: { ...gdb.dataset, tables: 0, category_only_tables: 0 } })).toBe("no_field");
+    const shapefiles = { ...gdb.dataset, geodatabases: 0, tables: 4, category_only_tables: 0 };
+    expect(fieldPresence({ ...gdb, dataset: shapefiles })).toBe("no_field");
+  });
+
+  test("an upload with a color2 layer, even a skipped one, is not missing the field", () => {
+    expect(fieldPresence(tokyoInspection())).toBe("has_field");
+    expect(fieldPresence(rerunInspection())).toBe("has_field");
+    const gdb = shinjukuGeodatabaseInspection();
+    const skipped = { ...gdb.theme, skipped: [{ id: "JRShinjukuSta.gdb", reason: "gdb_unavailable" as const }] };
+    expect(fieldPresence({ ...gdb, theme: skipped })).toBe("has_field");
+  });
+
+  test("layer files alone are not a station without the field", () => {
+    expect(fieldPresence(layerFilesInspection())).toBe("has_field");
+    expect(fieldPresence(shinjukuProjectInspection())).toBe("has_field");
+    const files = layerFilesInspection();
+    const nothing = { ...files, theme: { ...files.theme, symbology: [{ ...files.theme.symbology[0], renderers: [] }] } };
+    expect(fieldPresence(nothing)).toBe("has_field");
+  });
+
+  test("a category station dropped with its project is not told to drop the project", () => {
+    const gdb = shinjukuGeodatabaseInspection();
+    const project = shinjukuProjectInspection().theme.symbology;
+    expect(fieldPresence({ ...gdb, theme: { ...gdb.theme, symbology: project } })).toBe("has_field");
+    const rerun = project.map((file) => ({
+      ...file,
+      renderers: file.renderers.map((item) => ({ ...item, outcome: "already_new" as const }))
+    }));
+    expect(fieldPresence({ ...gdb, theme: { ...gdb.theme, symbology: rerun } })).toBe("has_field");
+    const unrelated = [{ ...project[0], renderers: [] }];
+    expect(fieldPresence({ ...gdb, theme: { ...gdb.theme, symbology: unrelated } })).toBe("no_field");
+  });
+});
+
+describe("keptGroups", () => {
+  test("layers of one file that keep the same values are one group, in layer order", () => {
+    const [group, ...rest] = keptGroups(shinjukuProjectInspection().theme);
+    expect(rest).toEqual([]);
+    expect(group.path).toBe("shinjuku.aprx");
+    expect(group.kept).toEqual(["vegetation"]);
+    expect(group.layers).toHaveLength(58);
+    expect(group.layers.slice(0, 2)).toEqual(["JRShinjukuSta_0_unit", "JRShinjukuSta_1_unit"]);
+  });
+
+  test("different files and different kept values stay apart, and a layer that kept nothing is in no group", () => {
+    expect(keptGroups(layerFilesInspection().theme)).toEqual([
+      { path: "DemoSta_layers/DemoSta.aprx", layers: ["DemoSta_1_Space"], kept: ["赤"] },
+      { path: "DemoSta_layers/DemoSta_units.aprx", layers: ["DemoSta_1_unit", "DemoSta_B1_unit"], kept: ["vegetation"] }
+    ]);
   });
 });
 

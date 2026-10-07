@@ -25,8 +25,10 @@ import {
   colorThemeStage,
   datasetFiles,
   downloadBlockedReason,
+  fieldPresence,
   inGeodatabase,
   initialColorThemeState,
+  keptGroups,
   symbologyTally,
   type ColorThemeState,
   type DatasetUpload
@@ -67,7 +69,7 @@ function skipDetail({ id, reason }: ColorThemeReport["skipped"][number], field: 
   }
 }
 
-/** /color-theme: drop one station, check what changes, download the same files with color2 rewritten. */
+/** /color-theme: drop one station, check what changes, download the same files with color2 rewritten and its layers redrawn. */
 export function ColorThemePage() {
   const { t } = useUiLanguage();
   const pushToast = useToast();
@@ -234,8 +236,8 @@ export function ColorThemePage() {
             </h1>
             <p className="max-w-[46rem] text-[15px] leading-[1.55] text-muted-foreground">
               {t(
-                "Drop one station’s shapefile folder, its File Geodatabase (.gdb folder), its ArcGIS Pro layer files (.lyrx) or project (.aprx), or a zip of any of them. Each color2 value is rewritten to its new area name, as the table shows, and each layer coloured by color2 is redrawn in the new colours.",
-                "駅のシェープファイルのフォルダ、ファイルジオデータベース（.gdb フォルダ）、ArcGIS Pro のレイヤーファイル（.lyrx）やプロジェクト（.aprx）、またはそれらの zip をドロップしてください。color2 の値を表のとおり新しいエリア名に書き換え、color2 で色分けしたレイヤーを新しい色で描き直します。"
+                "Drop one station’s shapefile folder, its File Geodatabase (.gdb folder), its ArcGIS Pro layer files (.lyrx) or project (.aprx), or a zip of any of them. Each color2 value is rewritten to its new area name, as the table shows, and each layer coloured by color2 is redrawn in the new colours. A station with no color2 is coloured by category in its layer file or project, and those layers are redrawn by area.",
+                "駅のシェープファイルのフォルダ、ファイルジオデータベース（.gdb フォルダ）、ArcGIS Pro のレイヤーファイル（.lyrx）やプロジェクト（.aprx）、またはそれらの zip をドロップしてください。color2 の値を表のとおり新しいエリア名に書き換え、color2 で色分けしたレイヤーを新しい色で描き直します。color2 のない駅はレイヤーファイルやプロジェクトで category により色分けされており、そのレイヤーをエリアごとに描き直します。"
               )}
             </p>
           </div>
@@ -263,13 +265,20 @@ export function ColorThemePage() {
             )}
           </section>
 
+          {report ? <CategoryTable report={report} /> : null}
+
           {inspection && inspection.theme.layers.length > 0 ? <LayerTable layers={inspection.theme.layers} /> : null}
           {inspection && inspection.theme.symbology.length > 0 ? <Symbology report={inspection.theme} /> : null}
         </main>
 
         <aside className="flex w-[360px] shrink-0 flex-col gap-4">
           {inspection ? <Attention inspection={inspection} /> : null}
-          <WhatComesBack field={report?.field ?? "color2"} inspection={inspection} lockFiles={lockFiles} />
+          <WhatComesBack
+            field={report?.field ?? "color2"}
+            categoryField={report?.category_field ?? "category"}
+            inspection={inspection}
+            lockFiles={lockFiles}
+          />
         </aside>
       </div>
 
@@ -398,6 +407,7 @@ function Summary({ inspection, pickers }: { inspection: ColorThemeInspection; pi
   const leftAsIs = theme.totals.unmapped + theme.totals.too_wide + theme.totals.undecodable;
   const changedLayers = theme.layers.filter((layer) => layer.counts.recolor > 0).length;
   const symbology = symbologyTally(theme);
+  const presence = fieldPresence(inspection);
   return (
     <section
       aria-label={t("What this station gets", "この駅の変更内容")}
@@ -422,6 +432,20 @@ function Summary({ inspection, pickers }: { inspection: ColorThemeInspection; pi
         <span className="text-xs text-muted-foreground">{t("Another station?", "別の駅？")}</span>
         {pickers}
       </div>
+      {presence === "has_field" ? null : (
+        <p className="flex basis-full items-start gap-2.5 border-t border-border pt-3.5 text-[13px] leading-[1.5] text-foreground">
+          <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warning-foreground" />
+          {presence === "drawn_by_category"
+            ? t(
+                `No layer here has a ${theme.field} field. This station is coloured by ${theme.category_field} in its layer file or project, so drop its .lyrx or .aprx to recolour it.`,
+                `${theme.field} フィールドのあるレイヤーがありません。この駅はレイヤーファイルまたはプロジェクトで ${theme.category_field} により色分けされているため、.lyrx か .aprx をドロップして色を新しくしてください。`
+              )
+            : t(
+                `No layer here has a ${theme.field} field, so there is nothing to rewrite.`,
+                `${theme.field} フィールドのあるレイヤーがないため、書き換えるものがありません。`
+              )}
+        </p>
+      )}
     </section>
   );
 }
@@ -531,6 +555,57 @@ function RuleTable({ report, counted }: { report: ColorThemeReport; counted: boo
   );
 }
 
+/** The second mapping: which categories a layer coloured by category alone draws as which area. */
+function CategoryTable({ report }: { report: ColorThemeReport }) {
+  const { t, isJapanese } = useUiLanguage();
+  const head = "px-3 py-2 text-left text-[11px] font-medium text-muted-foreground";
+  return (
+    <section aria-labelledby="color-theme-categories" className="flex flex-col gap-2.5">
+      <MicroLabel id="color-theme-categories">
+        {t(`No ${report.field}: ${report.category_field} → new area`, `${report.field} がない駅: ${report.category_field} → 新エリア`)}
+      </MicroLabel>
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        <table className="w-full border-collapse text-[13px]">
+          <caption className="sr-only">
+            {t(`How layers coloured by ${report.category_field} are redrawn`, `${report.category_field} で色分けしたレイヤーの描き直し`)}
+          </caption>
+          <thead className="border-b border-border">
+            <tr>
+              <th scope="col" className={head}>
+                {t("New area", "新エリア")}
+              </th>
+              <th scope="col" className={head}>
+                {t(`Drawn for these ${report.category_field} values`, `この ${report.category_field} の値を描く`)}
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {report.category_areas.map((line) => (
+              <tr key={line.area}>
+                <th scope="row" className="px-3 py-2.5 text-left align-top font-normal">
+                  <span className="flex items-center gap-2.5">
+                    <Swatch hex={line.hex} />
+                    <span className="flex flex-col whitespace-nowrap">
+                      <span className="font-medium leading-5 text-foreground">{line.value}</span>
+                      <span className="text-[11.5px] leading-4 text-muted-foreground">
+                        {isJapanese ? null : `${line.area_name.en} · `}
+                        <span className="font-mono text-[10.5px]">{line.spec}</span>
+                      </span>
+                    </span>
+                  </span>
+                </th>
+                <td className="px-3 py-2.5 font-mono text-[11.5px] leading-[1.6] text-muted-foreground">
+                  {line.categories.join(", ")}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function Attention({ inspection }: { inspection: ColorThemeInspection }) {
   const { t } = useUiLanguage();
   const { field, unmapped, layers, skipped, symbology } = inspection.theme;
@@ -585,19 +660,32 @@ function Attention({ inspection }: { inspection: ColorThemeInspection }) {
           ]
         : []),
       ...file.renderers
-        .filter((renderer) => renderer.outcome === "left_alone" || renderer.kept.length > 0)
+        .filter((renderer) => renderer.outcome === "left_alone")
         .map((renderer, index) => ({
           key: `renderer-${file.path}-${index}`,
           title: <span className="font-mono text-xs">{renderer.layer ?? baseName(file.path)}</span>,
-          detail:
-            renderer.outcome === "left_alone"
-              ? `${baseName(file.path)} · ${leftAloneDetail(renderer.reason, field, t)}`
-              : t(
-                  `${baseName(file.path)} · not in the table, kept in its old class: ${renderer.kept.join(", ")}`,
-                  `${baseName(file.path)} · 表にない値のため元のクラスのまま: ${renderer.kept.join("、")}`
-                )
+          detail: `${baseName(file.path)} · ${leftAloneDetail(renderer.reason, renderer.field ?? field, t)}`
         }))
-    ])
+    ]),
+    ...keptGroups(inspection.theme).map((group, index) => ({
+      key: `kept-${group.path}-${index}`,
+      title:
+        group.layers.length === 1 ? (
+          <span className="font-mono text-xs">{group.layers[0] ?? baseName(group.path)}</span>
+        ) : (
+          t(plural(group.layers.length, "layer", "layers"), `${formatCount(group.layers.length)} レイヤー`)
+        ),
+      detail:
+        group.layers.length === 1
+          ? t(
+              `${baseName(group.path)} · not in the table, kept in its old class: ${group.kept.join(", ")}`,
+              `${baseName(group.path)} · 表にない値のため元のクラスのまま: ${group.kept.join("、")}`
+            )
+          : t(
+              `${baseName(group.path)} · not in the table, kept in their old classes: ${group.kept.join(", ")}`,
+              `${baseName(group.path)} · 表にない値のため元のクラスのまま: ${group.kept.join("、")}`
+            )
+    }))
   ];
 
   return (
@@ -639,25 +727,39 @@ function Attention({ inspection }: { inspection: ColorThemeInspection }) {
   );
 }
 
-/** Which formats the download holds, so each promise is made only where it is true. Both until an upload says. */
-function returnedFormats(inspection: ColorThemeInspection | null): { shapefile: boolean; geodatabase: boolean; symbology: boolean } {
-  if (!inspection) return { shapefile: true, geodatabase: true, symbology: true };
+type ReturnedFormats = {
+  shapefile: boolean;
+  geodatabase: boolean;
+  /** Layer files or projects with layers coloured by the colour field, or with none the tool takes up. */
+  symbology: boolean;
+  /** Layer files or projects with a layer coloured by the category field. */
+  categorySymbology: boolean;
+};
+
+/** Which formats the download holds, so each promise is made only where it is true. All until an upload says. */
+function returnedFormats(inspection: ColorThemeInspection | null): ReturnedFormats {
+  if (!inspection) return { shapefile: true, geodatabase: true, symbology: true, categorySymbology: true };
   const { dataset, theme } = inspection;
+  const renderers = theme.symbology.flatMap((file) => file.renderers);
+  const byCategory = renderers.some((renderer) => renderer.field === theme.category_field);
   return {
     shapefile:
       (dataset.geodatabases === 0 && theme.symbology.length === 0) ||
       [...theme.layers, ...theme.skipped].some(({ id }) => !inGeodatabase(id)),
     geodatabase: dataset.geodatabases > 0,
-    symbology: theme.symbology.length > 0
+    symbology: theme.symbology.length > 0 && (!byCategory || renderers.some((renderer) => renderer.field !== theme.category_field)),
+    categorySymbology: byCategory
   };
 }
 
 function WhatComesBack({
   field,
+  categoryField,
   inspection,
   lockFiles
 }: {
   field: string;
+  categoryField: string;
   inspection: ColorThemeInspection | null;
   /** Left out by the page before sending and by the server from a zip, together. */
   lockFiles: number;
@@ -691,6 +793,14 @@ function WhatComesBack({
           {t(
             `Layer files (.lyrx) and projects (.aprx) come back with each layer coloured by ${field} redrawn: one class per new area, in its new fill, outlined in TurquoiseGray 1000. Each class also lists the old colours, so data not yet converted draws the same. Everything else in them stays as it was. One exception: an old 濃鼠 toilet (B007–B014) draws white until its data is converted.`,
             `レイヤーファイル（.lyrx）とプロジェクト（.aprx）は、${field} で色分けした各レイヤーを描き直して戻ります。新エリアごとに 1 クラス、新しい塗りと TurquoiseGray 1000 の枠線です。各クラスは旧カラーも含むため、変換前のデータも同じ色で描かれます。ほかはそのままです。例外として、旧 濃鼠 のトイレ（B007–B014）はデータを変換するまで白で描かれます。`
+          )}
+        </p>
+      ) : null}
+      {formats.categorySymbology ? (
+        <p className={paragraph}>
+          {t(
+            `A layer coloured by ${categoryField} alone, in a station with no ${field}, is redrawn too: one class per new area its categories belong to, in the same fills and outline. Its data is not changed. A category that is not in the table keeps its own class and colour.`,
+            `${field} のない駅で ${categoryField} だけで色分けしたレイヤーも描き直します。カテゴリが属する新エリアごとに 1 クラス、同じ塗りと枠線です。データは変更しません。表にないカテゴリは元のクラスと色のままです。`
           )}
         </p>
       ) : null}
@@ -808,7 +918,10 @@ function Symbology({ report }: { report: ColorThemeReport }) {
         const note = file.unreadable
           ? t("Could not be read; it comes back untouched.", "読み込めないため、そのまま戻します。")
           : file.renderers.length === 0
-            ? t(`No layer here is coloured by ${report.field}; it comes back untouched.`, `${report.field} で色分けしたレイヤーがないため、そのまま戻します。`)
+            ? t(
+                `No layer here is coloured by ${report.field}, or by a ${report.category_field} in the table; it comes back untouched.`,
+                `${report.field} で色分けしたレイヤーも、表にある ${report.category_field} で色分けしたレイヤーもないため、そのまま戻します。`
+              )
             : null;
         return (
           <div key={file.path} className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
@@ -852,6 +965,9 @@ function Symbology({ report }: { report: ColorThemeReport }) {
                       <th scope="col" className={head}>
                         {t("Layer", "レイヤー")}
                       </th>
+                      <th scope="col" className={head}>
+                        {t("Coloured by", "色分け")}
+                      </th>
                       <th scope="col" className={cn(head, "text-right")}>
                         {t("Classes", "クラス")}
                       </th>
@@ -867,6 +983,9 @@ function Symbology({ report }: { report: ColorThemeReport }) {
                     {file.renderers.map((renderer, index) => (
                       <tr key={`${renderer.layer}-${index}`}>
                         <td className="break-all px-3 py-2 font-mono text-[11.5px] text-foreground">{renderer.layer ?? "—"}</td>
+                        <td className="whitespace-nowrap px-3 py-2 font-mono text-[11.5px] text-muted-foreground">
+                          {renderer.field ?? "—"}
+                        </td>
                         <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-muted-foreground">
                           {renderer.outcome === "rewritten"
                             ? `${renderer.classes_before} → ${renderer.classes_after}`
@@ -894,7 +1013,7 @@ function Symbology({ report }: { report: ColorThemeReport }) {
                             ? t("Redrawn", "描き直し")
                             : renderer.outcome === "already_new"
                               ? t("Already new", "すでに新しい色")
-                              : leftAloneDetail(renderer.reason, report.field, t)}
+                              : leftAloneDetail(renderer.reason, renderer.field ?? report.field, t)}
                           {renderer.kept.length > 0 ? (
                             <span className="block text-warning-foreground">
                               {t(`Kept as it was: ${renderer.kept.join(", ")}`, `そのまま: ${renderer.kept.join("、")}`)}

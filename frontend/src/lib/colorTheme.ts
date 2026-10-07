@@ -137,6 +137,43 @@ export function symbologyTally(report: Pick<ColorThemeReport, "symbology">): Sym
 }
 
 /**
+ * Why an upload that holds tables comes to nothing: `no_field` when none of them carries the colour field,
+ * `drawn_by_category` when they carry the category field instead and no layer file or project came with them.
+ * `has_field` whenever a table carries the field or the upload's layer files did the work.
+ */
+export type FieldPresence = "has_field" | "no_field" | "drawn_by_category";
+
+export function fieldPresence(inspection: ColorThemeInspection): FieldPresence {
+  const { dataset, theme } = inspection;
+  const symbology = symbologyTally(theme);
+  if (theme.layers.length + theme.skipped.length > 0) return "has_field";
+  if (dataset.tables + dataset.geodatabases === 0) return "has_field";
+  if (symbology.rewritten + symbology.alreadyNew > 0) return "has_field";
+  return dataset.category_only_tables > 0 && symbology.files === 0 ? "drawn_by_category" : "no_field";
+}
+
+/** One line under Needs attention for the layers of one file that kept the same unknown values. */
+export type KeptGroup = { path: string; layers: (string | null)[]; kept: string[] };
+
+/**
+ * Renderers that kept a class the table does not know, grouped by file and by what they kept:
+ * Shinjuku's 58 unit layers all keep `vegetation`, which is one thing to read, not 58.
+ */
+export function keptGroups(report: Pick<ColorThemeReport, "symbology">): KeptGroup[] {
+  const groups = new Map<string, KeptGroup>();
+  for (const file of report.symbology) {
+    for (const renderer of file.renderers) {
+      if (renderer.outcome === "left_alone" || renderer.kept.length === 0) continue;
+      const key = JSON.stringify([file.path, renderer.kept]);
+      const group = groups.get(key) ?? { path: file.path, layers: [], kept: renderer.kept };
+      group.layers.push(renderer.layer);
+      groups.set(key, group);
+    }
+  }
+  return [...groups.values()];
+}
+
+/**
  * Why Download cannot run, in the operator's language; null when it can,
  * which is when rows or renderers would be rewritten.
  * Each reason is a whole sentence: it is read under the bar's "Nothing to

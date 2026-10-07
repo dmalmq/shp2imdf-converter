@@ -647,8 +647,23 @@ export type ColorThemeLayer = {
   counts: ColorThemeCounts;
 };
 
+/** One area of the category table: the categories a layer coloured by `category_field` alone draws as it. */
+export type ColorThemeCategoryArea = {
+  area: string;
+  area_name: Bilingual;
+  /** The area's written value, which labels its class. */
+  value: string;
+  spec: string;
+  hex: string;
+  categories: string[];
+};
+
 export type ColorThemeReport = {
   field: string;
+  /** A station with no `field` is coloured by this one, in its layer file or project. */
+  category_field: string;
+  /** Areas in theme order; an area no category is drawn as is absent. */
+  category_areas: ColorThemeCategoryArea[];
   /** Every rule in config order, those no row matched included. */
   rules: ColorThemeRule[];
   /** Values no rule knows, most rows first. */
@@ -664,10 +679,15 @@ export type ColorThemeReport = {
   symbology: ColorThemeSymbologyFile[];
 };
 
-/** One unique-value renderer that names the field. Renderers keyed on other fields are not listed. */
+/**
+ * One unique-value renderer the tool takes up: it names `field`, or it draws polygons, is keyed on
+ * `category_field` alone and holds a category in the table. Other renderers are not listed.
+ */
 export type ColorThemeRenderer = {
   /** The layer's name; an `.aprx` member's path when the member is not JSON. */
   layer: string | null;
+  /** The field it is keyed on, `field` or `category_field`; null for a member that is not JSON. */
+  field: string | null;
   outcome: "rewritten" | "already_new" | "left_alone";
   /** Set exactly when `outcome` is "left_alone". */
   reason: "several_fields" | "expression" | "not_polygon" | "unrecognised" | "no_known_values" | "unreadable" | null;
@@ -697,6 +717,10 @@ export type ColorThemeInspection = {
     geodatabases: number;
     /** Stale `*.lock` files inside a `.gdb` that reached the server (in a zip) and are left out of the download. */
     lock_files_dropped: number;
+    /** Attribute tables read: each shapefile `.dbf` and each geodatabase feature class or table. */
+    tables: number;
+    /** Of those, the ones with `category_field` and without `field`. */
+    category_only_tables: number;
   };
   theme: ColorThemeReport;
 };
