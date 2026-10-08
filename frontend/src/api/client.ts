@@ -677,6 +677,22 @@ export type ColorThemeReport = {
   totals: ColorThemeCounts;
   /** Every `.lyrx` and `.aprx` in the upload, in upload order. */
   symbology: ColorThemeSymbologyFile[];
+  /** The style files a download can carry, two per polygon shapefile the theme can colour, in upload order. */
+  style_files: ColorThemeStyleFile[];
+};
+
+/** A QGIS `.qml` or an ArcGIS Pro `.lyrx` beside one polygon shapefile. */
+export type ColorThemeStyleFile = {
+  path: string;
+  kind: "qml" | "lyrx";
+  /** The shapefile it styles, as a path inside the upload. */
+  layer: string;
+  /** The field its renderer is keyed on, `field` or `category_field`. */
+  field: string;
+  /** Area keys it draws, one class each, in theme order. */
+  classes: string[];
+  /** "kept": the upload already has a file of that name, which comes back instead of a generated one. */
+  outcome: "added" | "kept";
 };
 
 /**
@@ -737,8 +753,14 @@ export function inspectColorTheme(files: DatasetFile[], options: SendFormOptions
   return sendForm<ColorThemeInspection>("/api/color-theme/inspect", datasetForm(files), options);
 }
 
-export function convertColorTheme(files: DatasetFile[], options: SendFormOptions): Promise<ExportArchiveResponse> {
-  return sendForm("/api/color-theme/convert", datasetForm(files), { ...options, download: "new-colors.zip" });
+/** `styleFiles` adds the inspection's "added" style files to the zip; without it the zip holds the upload's files only. */
+export function convertColorTheme(
+  files: DatasetFile[],
+  { styleFiles, ...options }: SendFormOptions & { styleFiles: boolean }
+): Promise<ExportArchiveResponse> {
+  const form = datasetForm(files);
+  form.append("style_files", String(styleFiles));
+  return sendForm("/api/color-theme/convert", form, { ...options, download: "new-colors.zip" });
 }
 
 /** Multipart names carry no folders, so each file's path travels beside it, pairwise. */

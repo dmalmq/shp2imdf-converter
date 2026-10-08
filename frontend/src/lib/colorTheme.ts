@@ -5,6 +5,7 @@ import type {
   ColorThemeRenderer,
   ColorThemeReport,
   ColorThemeRule,
+  ColorThemeStyleFile,
   DatasetFile
 } from "../api/client";
 import type { ColorThemeStageId } from "../components/shell/stages";
@@ -173,19 +174,41 @@ export function keptGroups(report: Pick<ColorThemeReport, "symbology">): KeptGro
   return [...groups.values()];
 }
 
+/** One polygon shapefile and the style files beside it: those a download adds and those it already had. */
+export type StyledLayer = { layer: string; field: string; classes: string[]; added: ColorThemeStyleFile[]; kept: ColorThemeStyleFile[] };
+
+/** The report's style files by the layer they style, in upload order. */
+export function styledLayers(report: Pick<ColorThemeReport, "style_files">): StyledLayer[] {
+  const layers = new Map<string, StyledLayer>();
+  for (const file of report.style_files) {
+    const entry = layers.get(file.layer) ?? { layer: file.layer, field: file.field, classes: file.classes, added: [], kept: [] };
+    entry[file.outcome].push(file);
+    layers.set(file.layer, entry);
+  }
+  return [...layers.values()];
+}
+
+/** How many files asking for style files adds to the download. */
+export function styleFilesAdded(report: Pick<ColorThemeReport, "style_files">): number {
+  return report.style_files.filter((file) => file.outcome === "added").length;
+}
+
 /**
  * Why Download cannot run, in the operator's language; null when it can,
- * which is when rows or renderers would be rewritten.
+ * which is when rows or renderers would be rewritten, or style files are
+ * asked for and there are some to add.
  * Each reason is a whole sentence: it is read under the bar's "Nothing to
  * change", under the Deliver stage, and alone as the button's hint.
  */
 export function downloadBlockedReason(
   inspection: ColorThemeInspection,
-  t: (english: string, japanese: string) => string
+  t: (english: string, japanese: string) => string,
+  styleFiles = false
 ): string | null {
   const { field, layers, skipped, totals } = inspection.theme;
   const symbology = symbologyTally(inspection.theme);
   if (totals.recolor > 0 || symbology.rewritten > 0) return null;
+  if (styleFiles && styleFilesAdded(inspection.theme) > 0) return null;
   const editable = layers.length + symbology.alreadyNew;
   if (editable === 0 && skipped.length + symbology.leftAlone + symbology.unreadableFiles === 0) {
     return t(`No layer has a ${field} field.`, `${field} フィールドのあるレイヤーがありません。`);

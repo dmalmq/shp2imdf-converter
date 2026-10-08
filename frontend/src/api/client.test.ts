@@ -155,7 +155,7 @@ describe("colour theme upload", () => {
 
   it("downloads the converted zip as bytes, under the server's Japanese name", async () => {
     vi.stubGlobal("XMLHttpRequest", FakeRequest);
-    const pending = convertColorTheme(files, {});
+    const pending = convertColorTheme(files, { styleFiles: false });
     const request = lastRequest();
     expect(request.url).toBe("/api/color-theme/convert");
     expect(request.responseType).toBe("arraybuffer");
@@ -169,9 +169,20 @@ describe("colour theme upload", () => {
     expect(blob.type).toBe("application/zip");
   });
 
+  it.each([true, false])("tells the server whether the zip is to carry style files: %s", async (styleFiles) => {
+    vi.stubGlobal("XMLHttpRequest", FakeRequest);
+    const pending = convertColorTheme(files, { styleFiles });
+    const request = lastRequest();
+    const form = request.body as FormData;
+    expect(form.getAll("style_files")).toEqual([String(styleFiles)]);
+    expect(form.getAll("paths")).toEqual(files.map(({ path }) => path));
+    request.respond(200, "PK", { "content-type": "application/zip" });
+    await pending;
+  });
+
   it("still reports the server's error when the answer was asked for as bytes", async () => {
     vi.stubGlobal("XMLHttpRequest", FakeRequest);
-    const pending = convertColorTheme(files, {});
+    const pending = convertColorTheme(files, { styleFiles: false });
     lastRequest().respond(400, JSON.stringify({ detail: "Two files differ only in case", code: "CASE_COLLISION" }));
     await expect(pending).rejects.toMatchObject({ status: 400, code: "CASE_COLLISION", detail: "Two files differ only in case" });
   });
