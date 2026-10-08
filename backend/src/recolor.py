@@ -20,6 +20,12 @@ members; ``cim_symbology`` rewrites their ``color2`` renderers, and the
 nothing to rewrite comes back byte for byte, and in a project every member
 without a rewritten renderer comes back with the same name, date and bytes.
 
+Asked for, style files are added beside each polygon shapefile the theme can
+colour: a QGIS ``.qml`` and an ArcGIS Pro ``.lyrx``, so a station delivered
+without a project still opens in the new colours. They are new entries after
+their layer's files. Which shapefiles are polygons is read from the shape
+type in the ``.shp`` header, and nothing else of a ``.shp`` is.
+
 ``inspect`` and ``convert`` share one private pass, so the report the
 operator checks and the archive they download come from the same plan.
 """
@@ -38,23 +44,28 @@ from typing import Any, NewType
 import zipfile
 import zlib
 
-from backend.src.cim_symbology import retheme_document
+from backend.src.cim_symbology import layer_document, layer_file_text, retheme_document
 from backend.src.color_theme import (
     ColorTheme,
     Encoding,
     LayerInput,
+    LayerStyle,
     RendererChange,
     Row,
     SkippedLayer,
+    StyleFileLine,
+    StyleKind,
     SymbologyKind,
     SymbologyLine,
     ThemePlan,
     ThemeReport,
+    layer_style,
     plan,
 )
 from backend.src.dbf_table import DbfField, DbfLayoutError, DbfTable, resolve_codec
 from backend.src.gdb import GdbRead, apply_edits, read_layers
 from backend.src.importer import zip_member_name
+from backend.src.qgis_style import layer_style_xml
 
 DOWNLOAD_SUFFIX = "_new-colors"
 """The archive is ``<station><suffix>.zip``."""
@@ -103,7 +114,12 @@ def inspect(
 
 
 def convert(
-    theme: ColorTheme, blobs: Sequence[tuple[str, bytes]], *, max_bytes: int, gdal_python: Path | None = None
+    theme: ColorTheme,
+    blobs: Sequence[tuple[str, bytes]],
+    *,
+    max_bytes: int,
+    gdal_python: Path | None = None,
+    style_files: bool = False,
 ) -> Archive:
     """The upload as a zip with the theme applied: same entries, same order, same bytes but the edits.
 
@@ -111,6 +127,10 @@ def convert(
     rewrote them and files GDAL added follow its last entry. Converting a
     converted upload finds every value already new and returns the same
     entries with the same bytes.
+
+    ``style_files`` adds the report's ``added`` style files, each after the
+    last file of its layer. A converted upload already holds them, so they
+    are kept and none is added twice.
     """
     with _workspace() as workspace:
         survey = _survey(theme, blobs, max_bytes=max_bytes, gdal_python=gdal_python, workspace=Path(workspace))
@@ -128,6 +148,8 @@ def convert(
         path: _patch(table, survey.plan.edits[path]) for path, table in survey.tables.items() if path in survey.plan.edits
     }
     replaced.update(survey.symbology)
+    if style_files:
+        tree = _with_style_files(tree, survey.style_files)
     return Archive(filename=survey.dataset.download_name, data=_write_zip(tree, replaced))
 
 
@@ -293,6 +315,14 @@ class _Geodatabase:
 
 
 @dataclass(frozen=True, slots=True)
+class _StyleFile:
+    path: TreePath
+    data: bytes
+    stem: str
+    """The layer's path without its extension; the file goes after the last entry named ``<stem>.*``."""
+
+
+@dataclass(frozen=True, slots=True)
 class _Survey:
     tree: FileTree
     """The upload without its lock files."""
@@ -302,6 +332,8 @@ class _Survey:
     """The ones that were read; none without a GDAL Python."""
     symbology: Mapping[TreePath, bytes]
     """Layer files and projects with a rewritten renderer, as they come back."""
+    style_files: tuple[_StyleFile, ...]
+    """The style files to add when they are asked for."""
     plan: ThemePlan
 
 
@@ -376,6 +408,7 @@ def _survey(
         symbology.append(line)
         if data is not None:
             rewritten[entry.path] = data
+    style_lines, style_files = _style_files(theme, tree, files)
     dataset = DatasetInfo(
         name=tree.name,
         download_name=f"{tree.name}{DOWNLOAD_SUFFIX}.zip",
@@ -391,8 +424,108 @@ def _survey(
         tables=tables,
         geodatabases=tuple(geodatabases),
         symbology=rewritten,
-        plan=plan(theme, layers, symbology),
+        style_files=tuple(style_files),
+        plan=plan(theme, layers, symbology, style_lines),
     )
+
+
+_POLYGON_SHAPE_TYPES = frozenset({5, 15, 25})
+"""Polygon, PolygonZ and PolygonM, as a ``.shp`` header names them."""
+
+
+def _is_polygon_shapefile(shp: bytes) -> bool:
+    """Read from the 100-byte header alone: the file code, then the shape type. No record is looked at."""
+    return (
+        len(shp) >= 100
+        and int.from_bytes(shp[0:4], "big") == 9994
+        and int.from_bytes(shp[32:36], "little") in _POLYGON_SHAPE_TYPES
+    )
+
+
+def _table_style(theme: ColorTheme, table: DbfTable, cpg: bytes | None) -> LayerStyle | None:
+    """The style for a shapefile's table; None when the theme has nothing to colour it by."""
+    field = table.field(theme.field)
+    if field is not None and field.type == "C":
+        return layer_style(theme, has_field=True, categories=None)
+    category = table.field(theme.category_field)
+    if category is None or category.type != "C":
+        return None
+    codec = resolve_codec(table, cpg).name
+    return layer_style(
+        theme, has_field=False, categories=(_decode(table.text(row, category), codec) or "" for row in table.live_rows())
+    )
+
+
+_STYLE_KINDS: tuple[StyleKind, ...] = ("qml", "lyrx")
+
+
+def _style_files(
+    theme: ColorTheme, tree: FileTree, files: Mapping[str, bytes]
+) -> tuple[list[StyleFileLine], list[_StyleFile]]:
+    """The report lines, and the files to add, for every polygon shapefile outside a geodatabase the theme can colour.
+
+    A style file the upload already has under that name is reported
+    ``kept`` and not built: it may be the operator's own, or this tool's
+    from an earlier run.
+    """
+    present = {entry.path.casefold(): entry.path for entry in tree.entries}
+    lines: list[StyleFileLine] = []
+    added: list[_StyleFile] = []
+    for entry in tree.entries:
+        if entry.data is None or not entry.path.lower().endswith(".shp") or _gdb_root(entry.path) is not None:
+            continue
+        stem = entry.path[:-4]
+        dbf = files.get(stem.casefold() + ".dbf")
+        if dbf is None or not _is_polygon_shapefile(entry.data):
+            continue
+        try:
+            table = DbfTable.parse(dbf)
+        except DbfLayoutError:
+            continue
+        style = _table_style(theme, table, files.get(stem.casefold() + ".cpg"))
+        if style is None:
+            continue
+        name = PurePosixPath(stem).name
+        for kind in _STYLE_KINDS:
+            path = TreePath(f"{stem}.{kind}")
+            existing = present.get(path.casefold())
+            lines.append(
+                StyleFileLine(
+                    path=existing or path,
+                    kind=kind,
+                    layer=entry.path,
+                    field=style.field,
+                    classes=tuple(item.area.key for item in style.classes),
+                    outcome="kept" if existing else "added",
+                )
+            )
+            if existing:
+                continue
+            if kind == "qml":
+                text = layer_style_xml(theme, style)
+            else:
+                text = layer_file_text(layer_document(theme, style, name=name, shapefile=PurePosixPath(entry.path).name))
+            added.append(_StyleFile(path=path, data=text.encode("utf-8"), stem=stem))
+    return lines, added
+
+
+def _with_style_files(tree: FileTree, style_files: Sequence[_StyleFile]) -> FileTree:
+    """``tree`` with each style file after the last entry of its layer, so a layer's files stay together."""
+    last: dict[str, int] = {}
+    stems = {style.stem.casefold() for style in style_files}
+    for index, entry in enumerate(tree.entries):
+        lowered = entry.path.casefold()
+        for end in (position for position, character in enumerate(lowered) if character == "."):
+            if lowered[:end] in stems:
+                last[lowered[:end]] = index
+    after: dict[int, list[TreeEntry]] = {}
+    for style in style_files:
+        after.setdefault(last[style.stem.casefold()], []).append(TreeEntry(path=style.path, data=style.data, source=None))
+    entries: list[TreeEntry] = []
+    for index, entry in enumerate(tree.entries):
+        entries.append(entry)
+        entries += after.get(index, [])
+    return replace(tree, entries=tuple(entries))
 
 
 def _read_geodatabase(theme: ColorTheme, tree: FileTree, root: TreePath, directory: Path, python: Path) -> GdbRead:
@@ -505,9 +638,7 @@ def _retheme_lyrx(theme: ColorTheme, data: bytes) -> tuple[list[RendererChange],
     changes = retheme_document(doc, theme)
     if not _any_rewritten(changes):
         return changes, None
-    # Pro's own layout for a layer file; JSON escapes any newline inside a string, so only the layout's change.
-    text = json.dumps(doc, ensure_ascii=False, indent=2, separators=(",", " : ")).replace("\n", "\r\n")
-    return changes, bom + text.encode("utf-8")
+    return changes, bom + layer_file_text(doc).encode("utf-8")
 
 
 def _expanded_size(project: bytes) -> int:

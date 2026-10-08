@@ -21,7 +21,9 @@ SKIP_REASON = "needs ArcGIS Pro's ArcGIS.Core.dll and PowerShell 7"
 
 
 def esri_read(path: Path, field: str = "color2") -> dict[str, Any]:
-    """``{"layers": [{name, fields, classes: [{label, values, layers, fill, stroke}]}], "failed": [member, ...]}``.
+    """``{"layers": [{name, fields, source, other, classes: [{label, values, layers, fill, stroke}]}], "failed": [member, ...]}``.
+
+    ``source`` is the layer's data connection and ``other`` its default symbol.
 
     From a project, the layers whose renderer is keyed on ``field`` alone. Raises CalledProcessError when a
     layer file does not parse.
