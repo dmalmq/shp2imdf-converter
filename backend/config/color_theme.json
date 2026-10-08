@@ -1,8 +1,9 @@
 {
-  "source": "Figma IiM1QNaEzWOM4uZCvsbor5 'Setting up a new map design in ArcGIS Pro': section 1:2613 (Old and New エリアカラー tables), variables in frame 5:914 (MapBackground/*); outline is the 枠線 colour. old_hex is the Old swatch fill sampled from Figma's own render, display only. category_areas is the operator-approved table for stations whose unit layers are drawn by category (Shinjuku, Ikebukuro); a category it does not list is left as it is.",
+  "source": "Figma IiM1QNaEzWOM4uZCvsbor5 'Setting up a new map design in ArcGIS Pro': section 1:2613 (Old and New エリアカラー tables), variables in frame 5:914 (MapBackground/*); outline is the 枠線 colour. old_hex is the Old swatch fill sampled from Figma's own render, display only. category_areas is the operator-approved table for stations whose unit layers are drawn by category (Shinjuku, Ikebukuro); a category it does not list is left as it is. outline.width_pt is the stroke the real projects draw most areas with, used where the tool draws a symbol from nothing; other is how a generated style file draws a value the tables do not know, a neutral grey that is none of the area fills.",
   "field": "color2",
   "category_field": "category",
-  "outline": { "spec": "TurquoiseGray 1000", "hex": "#657678" },
+  "outline": { "spec": "TurquoiseGray 1000", "hex": "#657678", "width_pt": 0.3 },
+  "other": { "name": { "en": "Other", "ja": "その他" }, "hex": "#D9D9D9" },
   "areas": [
     { "key": "free_area", "name": { "en": "Free area outside the gates", "ja": "改札外通路" }, "value": "改札外通路", "spec": "Mono 000", "hex": "#FFFFFF" },
     { "key": "paid_area", "name": { "en": "Paid area, conventional lines", "ja": "在来線改札内" }, "value": "在来線改札内", "spec": "PaleBlue 050", "hex": "#F2F7FB" },

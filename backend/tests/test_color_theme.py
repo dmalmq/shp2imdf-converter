@@ -131,7 +131,12 @@ def test_the_written_vocabulary_is_the_six_area_names(theme: ColorTheme) -> None
 
 
 def test_layer_files_are_outlined_in_the_figma_border_colour(theme: ColorTheme) -> None:
-    assert (theme.outline.spec, theme.outline.hex) == ("TurquoiseGray 1000", "#657678")
+    assert (theme.outline.spec, theme.outline.hex, theme.outline.width_pt) == ("TurquoiseGray 1000", "#657678", 0.3)
+
+
+def test_an_unknown_value_is_drawn_in_a_grey_that_is_no_areas_fill(theme: ColorTheme) -> None:
+    assert (theme.other.label, theme.other.hex) == ("その他 (Other)", "#D9D9D9")
+    assert theme.other.hex not in {area.hex for area in theme.areas}
 
 
 @pytest.mark.parametrize(
@@ -178,6 +183,11 @@ BROKEN = {
     "empty override": lambda c: _rule(c, "濃鼠", override=True).update(categories=[]),
     "no outline": lambda c: c.pop("outline"),
     "bad outline colour": lambda c: c["outline"].update(hex="#65767"),
+    "no outline width": lambda c: c["outline"].pop("width_pt"),
+    "outline width of zero": lambda c: c["outline"].update(width_pt=0),
+    "outline width that is not a number": lambda c: c["outline"].update(width_pt="0.3"),
+    "no symbol for unknown values": lambda c: c.pop("other"),
+    "unknown values without a Japanese name": lambda c: c["other"]["name"].pop("ja"),
     "no category table": lambda c: c.pop("category_areas"),
     "category in an unknown area": lambda c: c["category_areas"][0].update(area="outside"),
     "category in two areas": lambda c: c["category_areas"][1]["categories"].append("walkway"),
