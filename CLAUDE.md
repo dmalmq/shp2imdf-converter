@@ -196,8 +196,10 @@ pytest -m colortheme # station colour theme (tables, DBF patch, upload tree, geo
   being a fixed point of `retheme_document` and a second run starts rewriting the tool's
   own output. "Polygon" is the shape type in the `.shp` header (5, 15, 25) and that is all
   the tool may read of a `.shp`: no record, and never through GDAL. A `.qml` or `.lyrx`
-  already there is kept and reported, never replaced. The rule is on the data, not the
-  file name, so Shinjuku's `_level` shapefiles (`category = unspecified`) get a style too.
+  already there is kept and reported, never replaced. The category table is the unit
+  catalogue's, so a category style or retheme needs `unit` in the layer, dataset or file
+  name: Shinjuku's `_level` shapefiles are all `category = unspecified`, a word the table
+  lists for units, and were once styled as restricted areas.
   The `.qml` is the QGIS-notes lesson again: it reads correctly as XML whether or not QGIS
   draws anything (drop the category whose value is empty and unknown values are simply not
   drawn), so `test_style_files_qgis.py` opens a converted download in the real QGIS and

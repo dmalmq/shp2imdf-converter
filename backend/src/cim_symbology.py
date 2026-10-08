@@ -140,6 +140,11 @@ _UNIT_LAYER = "unit"
 unspecified) and means something else by them, so only a layer named for units, or reading a units dataset, is taken."""
 
 
+def is_unit_layer(*names: str) -> bool:
+    """Whether a layer's name, dataset or file name says it holds units."""
+    return any(_UNIT_LAYER in name.casefold() for name in names)
+
+
 def _renderers(node: Any, layer: str | None, units: bool) -> Iterator[tuple[dict[str, Any], str | None, bool]]:
     if isinstance(node, dict):
         kind = node.get("type")
@@ -148,8 +153,7 @@ def _renderers(node: Any, layer: str | None, units: bool) -> Iterator[tuple[dict
             table = node.get("featureTable")
             connection = table.get("dataConnection") if isinstance(table, dict) else None
             dataset = connection.get("dataset") if isinstance(connection, dict) else None
-            names = [layer, dataset if isinstance(dataset, str) else ""]
-            units = any(_UNIT_LAYER in name.casefold() for name in names)
+            units = is_unit_layer(layer, dataset if isinstance(dataset, str) else "")
         if kind == "CIMUniqueValueRenderer":
             yield node, layer, units
         for value in node.values():

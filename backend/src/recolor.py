@@ -44,7 +44,7 @@ from typing import Any, NewType
 import zipfile
 import zlib
 
-from backend.src.cim_symbology import layer_document, layer_file_text, retheme_document
+from backend.src.cim_symbology import is_unit_layer, layer_document, layer_file_text, retheme_document
 from backend.src.color_theme import (
     ColorTheme,
     Encoding,
@@ -442,13 +442,13 @@ def _is_polygon_shapefile(shp: bytes) -> bool:
     )
 
 
-def _table_style(theme: ColorTheme, table: DbfTable, cpg: bytes | None) -> LayerStyle | None:
+def _table_style(theme: ColorTheme, table: DbfTable, cpg: bytes | None, name: str) -> LayerStyle | None:
     """The style for a shapefile's table; None when the theme has nothing to colour it by."""
     field = table.field(theme.field)
     if field is not None and field.type == "C":
         return layer_style(theme, has_field=True, categories=None)
     category = table.field(theme.category_field)
-    if category is None or category.type != "C":
+    if category is None or category.type != "C" or not is_unit_layer(name):
         return None
     codec = resolve_codec(table, cpg).name
     return layer_style(
@@ -482,7 +482,7 @@ def _style_files(
             table = DbfTable.parse(dbf)
         except DbfLayoutError:
             continue
-        style = _table_style(theme, table, files.get(stem.casefold() + ".cpg"))
+        style = _table_style(theme, table, files.get(stem.casefold() + ".cpg"), PurePosixPath(stem).name)
         if style is None:
             continue
         name = PurePosixPath(stem).name

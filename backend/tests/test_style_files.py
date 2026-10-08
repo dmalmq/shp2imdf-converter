@@ -239,6 +239,18 @@ def test_a_line_point_or_uncolourable_layer_gets_no_style_file(theme: ColorTheme
     assert sorted(line.path for line in report.style_files) == added
 
 
+def test_a_category_layer_that_is_not_a_unit_layer_gets_no_style_file(theme: ColorTheme) -> None:
+    upload = [
+        *layer("st/1_level", unit_dbf("unspecified")),
+        *layer("st/1_section", unit_dbf("walkway", "platform")),
+        *layer("st/1_UNIT", unit_dbf("walkway")),
+    ]
+
+    report = inspect(theme, upload, max_bytes=LIMIT).theme
+
+    assert sorted({line.layer for line in report.style_files}) == ["st/1_UNIT.shp"]
+
+
 @pytest.mark.parametrize("shape_type", [POLYGON_Z, POLYGON_M])
 def test_a_polygon_layer_with_z_or_m_is_styled(theme: ColorTheme, shape_type: int) -> None:
     upload = layer("st/1_Space", make_dbf(SPACE_FIELDS, [space_row("黄", "B999")]), square_shapefile(1, shape_type)[0])
