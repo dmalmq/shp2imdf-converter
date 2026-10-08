@@ -243,12 +243,14 @@ def test_a_category_layer_that_is_not_a_unit_layer_gets_no_style_file(theme: Col
     upload = [
         *layer("st/1_level", unit_dbf("unspecified")),
         *layer("st/1_section", unit_dbf("walkway", "platform")),
+        *layer("st/community", unit_dbf("walkway")),
         *layer("st/1_UNIT", unit_dbf("walkway")),
+        *layer("st/B1 units", unit_dbf("walkway")),
     ]
 
     report = inspect(theme, upload, max_bytes=LIMIT).theme
 
-    assert sorted({line.layer for line in report.style_files}) == ["st/1_UNIT.shp"]
+    assert sorted({line.layer for line in report.style_files}) == ["st/1_UNIT.shp", "st/B1 units.shp"]
 
 
 @pytest.mark.parametrize("shape_type", [POLYGON_Z, POLYGON_M])

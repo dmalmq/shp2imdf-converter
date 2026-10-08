@@ -25,6 +25,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterator, Mapping
 import copy
+import re
 from dataclasses import dataclass
 import json
 from typing import Any
@@ -135,14 +136,14 @@ def retheme_document(doc: Any, theme: ColorTheme) -> list[RendererChange]:
     ]
 
 
-_UNIT_LAYER = "unit"
+_UNIT_WORD = re.compile(r"(?<![A-Za-z])units?(?![A-Za-z])", re.IGNORECASE)
 """The category table is the unit catalogue's. A section or facility layer shares words with it (walkway, platform,
 unspecified) and means something else by them, so only a layer named for units, or reading a units dataset, is taken."""
 
 
 def is_unit_layer(*names: str) -> bool:
-    """Whether a layer's name, dataset or file name says it holds units."""
-    return any(_UNIT_LAYER in name.casefold() for name in names)
+    """Whether a layer's name, dataset or file name says it holds units: "unit" or "units" as a word of its own."""
+    return any(_UNIT_WORD.search(name) for name in names)
 
 
 def _renderers(node: Any, layer: str | None, units: bool) -> Iterator[tuple[dict[str, Any], str | None, bool]]:
