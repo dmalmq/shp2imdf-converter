@@ -2,6 +2,8 @@
 
 The colour tool takes one station's shapefile folder, its File Geodatabase (`.gdb` folder), its ArcGIS Pro layer files (`.lyrx`) or project (`.aprx`), or a zip of any of them, shows how each old `color2` value maps to a new area name, and returns every file as one zip with only `color2` rewritten. Shapefiles are patched byte for byte. A geodatabase is updated in place by GDAL in a Python that has `osgeo` (ArcGIS Pro's on this PC), so its edited tables are rewritten and every other table comes back byte for byte. In a layer file or project, each unique-value renderer keyed on `color2` alone becomes six classes in the new fills, outlined in `#657678`; in a project every other member comes back unchanged. A station from the Revit/IMDF pipeline (Shinjuku, Ikebukuro) has no `color2`: its unit layers are keyed on `category`, and each such polygon renderer becomes one class per area its categories map to, by the second table in `backend/config/color_theme.json`. Its data is never edited.
 
+With `Add style files for QGIS and ArcGIS Pro` checked, which it is by default, the zip also gains a `<stem>.qml` and a `<stem>.lyrx` beside each polygon shapefile the theme can colour, so a station delivered without a project opens in the new colours. A table with a text `color2` is classed by `color2`: six classes in theme order, each matching the area's new name and the old values that become it. Otherwise a table with a text `category` holding at least one category of the second table is classed by `category`: five classes with that table's categories. Any other value draws in `#D9D9D9` as `その他 (Other)`. Outlines are `#657678` at 0.3 pt. The `.qml` is proven in real QGIS (`backend/tests/test_style_files_qgis.py`). The `.lyrx` is read back by Esri's deserializer, which proves it parses; **ArcGIS Pro opening the shapefile through it and drawing it has not been verified**, and the page says so. Geodatabases get no style files.
+
 ## Sub-features
 
 - `color-theme-open` reaches `/color-theme` from the hub and shows the whole old → new table before any upload.
@@ -11,6 +13,7 @@ The colour tool takes one station's shapefile folder, its File Geodatabase (`.gd
 - `color-theme-gdb` does the same for a zipped geodatabase: its feature classes in the tables, widths in characters, the geodatabase paragraph under `What comes back`, and the stale lock files left out.
 - `color-theme-symbology` does it for a zip of a layer file and two projects: the `Symbology` section with the field each layer is coloured by, renderers left alone under `Needs attention`, and the layer-file paragraphs under `What comes back`.
 - `color-theme-category` checks a station that has `category` and no `color2`: nothing to rewrite, and the summary says the colours live in its layer file or project.
+- `color-theme-styles` shows the `Style files` section for a shapefile station, and for the `category` station the download that holds only style files, the option switched off, and the delivered page.
 
 ## How to get to it (user POV)
 
@@ -31,10 +34,11 @@ Preconditions:
 - **Table before upload.** Heading `Recolour a station` and the table `How color2 changes` are visible, with 15 rules under `Old`, `Covered` and `New area, written to color2`. Each rule's new cell leads with the value written to `color2` (the Japanese area name), then the English area name in English and the spec name. The table is the answer to `GET /api/color-theme`.
 - **Category table.** Below it, under `No color2: category → new area`, the table `How layers coloured by category are redrawn` has five rows, an area and the categories drawn as it: `改札外通路` with `walkway, ramp, road`, down to `階段・エスカレーター` with `stairs, escalator, opentobelow`. `新幹線改札内` has no row, and `vegetation` is in none.
 - **Upload.** Set `[data-testid="color-theme-zip-input"]` to the zip. Wait for the heading `Recolour DemoSta_6677`. The current stage is `2 · Check`.
-- **Counts.** The region `What this station gets` reads `Changes 129`, `Layers 2`, `Left as is 6`, `Files back untouched 11 / 13`. The table gains a `Rows` column: `白` reads `40` with `3 left as is`, and `進入制限あり` reads `0`.
+- **Counts.** The region `What this station gets` reads `Changes 129`, `Layers 2`, `Left as is 6`, `Style files added 4`, `Files back untouched 11 / 13`. The bar reads `129 values change in 2 layers · 4 style files are added`. The table gains a `Rows` column: `白` reads `40` with `3 left as is`, and `進入制限あり` reads `0`.
 - **Needs attention.** The region `Needs attention` lists `赤` (3 rows, not in the table) and `DemoSta_B1_Space.dbf` (3 rows, the new value does not fit `color2 (24 bytes)`). A station with nothing to report shows `Nothing needs attention` instead.
 - **Layers.** Choose `Layers (2)`. Run `getByText(/^Layers \(\d+\)$/).click()`. Each row gives the path, encoding, width, changes and the rows left as is. `DemoSta_B1_Space.dbf` is `24 bytes` wide, and `階段・エスカレーター` is 30 bytes in UTF-8, so `白` stays as it is there.
 - **Download.** Run `getByRole('region', { name: 'Next step' }).getByRole('button', { name: 'Download', exact: true }).click()` and wait for the browser's `download` event. The bar reads `Downloaded DemoSta_6677_new-colors.zip` (the file name appears once), the button becomes `Download again`, and the current stage is `3 · Deliver`.
+- **Style files.** Below the layer list, the region `Style files` holds the checkbox `Add style files for QGIS and ArcGIS Pro`, checked, with `4 files beside 2 polygon layers` and the sentence that ArcGIS Pro drawing the `.lyrx` has not been verified. Its `Layers (2)` table gives each shapefile, `color2` under `Coloured by`, six swatches and `.qml · .lyrx` under `Added`. `capture.mjs` scrolls to it for `color-theme-styles`. Run `getByRole('checkbox', { name: /Add style files/ }).click()` to switch it off: the stat and the bar's second clause go, the table dims, and Download sends `style_files=false`.
 - **Proof.** Screenshot the checked page and the delivered page, and record the download's suggested file name. Write `artifacts/verify-shp2imdf/color-theme/`.
 
 ### A geodatabase
@@ -62,11 +66,13 @@ Preconditions: none beyond the station's. `capture.mjs` builds `DemoSta_layers.z
 
 ### A station with `category` and no `color2`
 
-Preconditions: none. `capture.mjs` builds `DemoUnits_6677.zip` from `demo_category_station()`: two unit tables with `name` and `category`.
+Preconditions: none. `capture.mjs` builds `DemoUnits_6677.zip` from `demo_category_station()`: two polygon unit shapefiles whose tables have `name` and `category`.
 
 - **Upload.** Set `[data-testid="color-theme-zip-input"]` to the zip. Wait for the heading `Recolour DemoUnits_6677`.
-- **Summary.** `What this station gets` reads `Changes 0`, `Layers 0`, `Left as is 0`, `Files back untouched 8 / 8`, and under the counts: `No layer here has a color2 field. This station is coloured by category in its layer file or project, so drop its .lyrx or .aprx to recolour it.` A geodatabase says the same (Shinjuku's reads 529 tables, 449 of them with `category`). Tables with neither field read `No layer here has a color2 field, so there is nothing to rewrite.`
-- **Download.** Disabled. The bar reads `Nothing to change` and `No layer has a color2 field.` There is no delivered screen.
+- **Summary.** `What this station gets` reads `Changes 0`, `Layers 0`, `Left as is 0`, `Style files added 4`, `Files back untouched 8 / 8`, and under the counts: `No layer here has a color2 field. This station is coloured by category in its layer file or project, so drop its .lyrx or .aprx to recolour it. The style files below still draw 2 polygon layers in the new colours.` A geodatabase gets the first two sentences only (Shinjuku's reads 529 tables, 449 of them with `category`). Tables with neither field read `No layer here has a color2 field, so there is nothing to rewrite.`
+- **Style files.** The `Style files` region lists both unit shapefiles with `category` and five swatches (`color-theme-category-styles`). The bar reads `4 style files are added` and Download is enabled.
+- **Option off.** Uncheck the option: the bar reads `Nothing to change` and `No layer has a color2 field.`, Download is disabled and the last summary sentence goes (`color-theme-category-styles-off`).
+- **Download.** With the option back on, the download is the eight uploaded files, byte for byte, and four style files. The bar reads `Downloaded DemoUnits_6677_new-colors.zip` (`color-theme-category-delivered`).
 - **Not shown.** The sentence is absent when a table carries `color2`, when the upload is only layer files, and when the station's own project came with it and was redrawn.
 
 ## Gotchas
@@ -79,6 +85,10 @@ Preconditions: none. `capture.mjs` builds `DemoUnits_6677.zip` from `demo_catego
 - A lone `.lyrx` or `.aprx` is a file, not a station zip: the download is `<its stem>_new-colors.zip` holding it. A second run reports every renderer `Already new` and Download is disabled with `Every value is already new.`
 - A category class lists only the categories the layer already drew, never the area name, because the data keeps its categories. A unit layer's `vegetation` class, and any category outside the table, keeps its own symbol and label after the area classes.
 - Tokyo's project holds two unit layers keyed on `category` (`TOFROM_YAESU_1_unit`, `TOFROM_YAESU_B2_unit`) beside its 127 `color2` layers, so it reads `129 redrawn`.
+- Style files are decided from the data, not the file name: any polygon shapefile whose `category` holds one value of the second table gets them. Shinjuku's `_level` shapefiles carry `category = unspecified`, which the table lists for units, so each level footprint gets a style that draws it as `進入制限エリア`. `_fixture` (`checkin.kiosk`), `_venue` (`trainstation`), `_opening` and `_detail` (lines) and `_building` (points) get none.
+- A `.qml` or `.lyrx` already in the upload under a layer's name is never replaced. The `Style files` table reads `Already here, kept as it is: <name>`, and when every layer has both the checkbox is disabled. That is also why the download uploaded again adds nothing; its generated `.lyrx` files then appear under `Symbology` as `Already new`.
+- The style files are the only new entries a download ever has. Each follows the last file of its layer (`<stem>.*`), `.qml` before `.lyrx`. `convert` without `style_files=true` returns exactly the upload's entries.
+- A generated `.lyrx` names its data as `DATABASE=.` and `<stem>.shp`, so it works only while it sits beside the shapefile. Its legend's catch-all reads `その他 (Other)` in both languages, like the area names.
 - Upload the download again and `Download` is disabled. The bar reads `Nothing to change` with the reason `Rows match an old colour, but the new value does not fit color2.`, because the B1 rows are still too narrow. `Changes` is `0` and `Files back untouched` is `13 / 13`. A second run changes nothing by design.
 - Japanese labels are `駅の色を新しくする`, `要確認`, `ダウンロード` and `もう一度ダウンロード`. The values written to `color2` are Japanese in both languages.
 - A backend with no `osgeo` Python lists the geodatabase under `Needs attention` as one that cannot be edited on this server, and it comes back as uploaded. Shapefiles in the same upload still convert.
