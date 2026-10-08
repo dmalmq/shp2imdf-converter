@@ -117,22 +117,36 @@ def retheme_document(doc: Any, theme: ColorTheme) -> list[RendererChange]:
     are neither touched nor reported.
     """
     keyings = _keyings(theme)
-    found = list(_renderers(doc, None))
-    return [change for renderer, layer in found if (change := _retheme(renderer, layer, theme, keyings)) is not None]
+    found = list(_renderers(doc, None, False))
+    return [
+        change
+        for renderer, layer, units in found
+        if (change := _retheme(renderer, layer, units, theme, keyings)) is not None
+    ]
 
 
-def _renderers(node: Any, layer: str | None) -> Iterator[tuple[dict[str, Any], str | None]]:
+_UNIT_LAYER = "unit"
+"""The category table is the unit catalogue's. A section or facility layer shares words with it (walkway, platform,
+unspecified) and means something else by them, so only a layer named for units, or reading a units dataset, is taken."""
+
+
+def _renderers(node: Any, layer: str | None, units: bool) -> Iterator[tuple[dict[str, Any], str | None, bool]]:
     if isinstance(node, dict):
         kind = node.get("type")
         if isinstance(kind, str) and kind.endswith("Layer") and isinstance(node.get("name"), str):
             layer = node["name"]
+            table = node.get("featureTable")
+            connection = table.get("dataConnection") if isinstance(table, dict) else None
+            dataset = connection.get("dataset") if isinstance(connection, dict) else None
+            names = [layer, dataset if isinstance(dataset, str) else ""]
+            units = any(_UNIT_LAYER in name.casefold() for name in names)
         if kind == "CIMUniqueValueRenderer":
-            yield node, layer
+            yield node, layer, units
         for value in node.values():
-            yield from _renderers(value, layer)
+            yield from _renderers(value, layer, units)
     elif isinstance(node, list):
         for value in node:
-            yield from _renderers(value, layer)
+            yield from _renderers(value, layer, units)
 
 
 def _names_field(renderer: dict[str, Any], field: str) -> bool:
@@ -181,7 +195,7 @@ def _draws_polygons(classes: list[_Class]) -> bool:
 
 
 def _retheme(
-    renderer: dict[str, Any], layer: str | None, theme: ColorTheme, keyings: tuple[_Keying, ...]
+    renderer: dict[str, Any], layer: str | None, units: bool, theme: ColorTheme, keyings: tuple[_Keying, ...]
 ) -> RendererChange | None:
     keying = next((item for item in keyings if item.claims(renderer)), None)
     if keying is None:
@@ -208,7 +222,7 @@ def _retheme(
     area_of = keying.area_of
     if keying.incidental:
         known = classes is not None and any(value in area_of for cls in classes for value in cls.values)
-        if classes is None or not known or not _draws_polygons(classes):
+        if not units or classes is None or not known or not _draws_polygons(classes):
             return None
     if classes is None:
         return left_alone("unrecognised")

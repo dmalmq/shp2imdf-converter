@@ -133,7 +133,13 @@ def layer_doc(*renderers: dict[str, Any]) -> dict[str, Any]:
         "type": "CIMLayerDocument",
         "version": "3.6.0",
         "layerDefinitions": [
-            {"type": "CIMFeatureLayer", "name": f"Layer{index}", "renderer": item} for index, item in enumerate(renderers)
+            {
+                "type": "CIMFeatureLayer",
+                "name": f"Layer{index}",
+                "featureTable": {"type": "CIMFeatureTable", "dataConnection": {"dataset": f"DemoSta_{index}_unit"}},
+                "renderer": item,
+            }
+            for index, item in enumerate(renderers)
         ],
     }
 
@@ -242,6 +248,19 @@ def test_a_category_class_matches_only_the_categories_the_layer_already_drew(the
         ("plaza", ["plaza"]),
     ]
     assert change.kept == ("plaza",)
+
+
+def test_a_category_layer_that_is_not_a_unit_layer_is_neither_touched_nor_reported(theme: ColorTheme) -> None:
+    section = category_layer_definition("DemoSta_1_section", [("walkway", "#FFFFFF", "#C8C9CA"), ("platform", "#FFECE6", "#C8C9CA")])
+    by_dataset = category_layer_definition("1F 部屋", [("walkway", "#FFFFFF", "#C8C9CA")])
+    by_dataset["featureTable"] = {"type": "CIMFeatureTable", "dataConnection": {"type": "CIMStandardDataConnection", "dataset": "DemoSta_1_unit"}}
+    doc = {"type": "CIMLayerDocument", "layerDefinitions": [section, by_dataset]}
+    before = copy.deepcopy(section)
+
+    changes = retheme_document(doc, theme)
+
+    assert [(change.layer, change.outcome) for change in changes] == [("1F 部屋", "rewritten")]
+    assert doc["layerDefinitions"][0] == before
 
 
 def test_a_category_layer_the_table_knows_nothing_of_is_neither_touched_nor_reported(theme: ColorTheme) -> None:
