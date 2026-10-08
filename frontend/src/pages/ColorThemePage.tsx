@@ -470,10 +470,11 @@ function Summary({
                 `${theme.field} フィールドのあるレイヤーがないため、書き換えるものがありません。`
               )}
           {added > 0
-            ? ` ${t(
-                `The style files below still draw ${plural(styled, "polygon layer", "polygon layers")} in the new colours.`,
+            ? // Japanese sets no space between sentences.
+              t(
+                ` The style files below still draw ${plural(styled, "polygon layer", "polygon layers")} in the new colours.`,
                 `下のスタイルファイルを追加すれば、ポリゴンレイヤー ${formatCount(styled)} 件は新しい色で描かれます。`
-              )}`
+              )
             : null}
         </p>
       )}
