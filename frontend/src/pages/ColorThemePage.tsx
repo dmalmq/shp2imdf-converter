@@ -9,14 +9,15 @@ import {
   type ColorThemeInspection,
   type ColorThemeLayer,
   type ColorThemeRenderer,
-  type ColorThemeReport
+  type ColorThemeReport,
+  type ColorThemeStyleFile
 } from "../api/client";
 import { toErrorMessage } from "../api/errors";
 import { NextBar } from "../components/bringIn/NextBar";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
 import { usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
-import { Button, Metric } from "../components/ui";
+import { Button, Checkbox, Metric } from "../components/ui";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import {
@@ -29,6 +30,8 @@ import {
   inGeodatabase,
   initialColorThemeState,
   keptGroups,
+  styledLayers,
+  styleFilesAdded,
   symbologyTally,
   type ColorThemeState,
   type DatasetUpload
@@ -76,6 +79,8 @@ export function ColorThemePage() {
   const handleApiError = useApiErrorHandler();
   const [state, dispatch] = useReducer(colorThemeReducer, initialColorThemeState);
   const [mapping, setMapping] = useState<Mapping>({ state: "loading" });
+  // Kept across stations: an operator who turns style files off means it for the next drop too.
+  const [styleFiles, setStyleFiles] = useState(true);
   const inflight = useRef<AbortController | null>(null);
   const anchor = useRef<HTMLDivElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
@@ -124,12 +129,13 @@ export function ColorThemePage() {
   };
 
   const download = async () => {
-    if (state.phase !== "checked" || downloadBlockedReason(state.inspection, t)) return;
+    if (state.phase !== "checked" || downloadBlockedReason(state.inspection, t, styleFiles)) return;
     const { upload } = state;
     const signal = begin();
     dispatch({ type: "convertStarted" });
     try {
       const { blob, filename } = await convertColorTheme(upload.files, {
+        styleFiles,
         signal,
         onProgress: (percent) => dispatch({ type: "progress", upload, percent })
       });
@@ -169,7 +175,7 @@ export function ColorThemePage() {
 
   const checked = state.phase === "checked" || state.phase === "converting" ? state : null;
   const inspection = checked?.inspection ?? null;
-  const blocked = inspection ? downloadBlockedReason(inspection, t) : null;
+  const blocked = inspection ? downloadBlockedReason(inspection, t, styleFiles) : null;
   const lockFiles = checked ? checked.upload.lockFilesLeftOut + checked.inspection.dataset.lock_files_dropped : 0;
 
   usePageShell({
@@ -243,7 +249,7 @@ export function ColorThemePage() {
           </div>
 
           {inspection ? (
-            <Summary inspection={inspection} pickers={pickers} />
+            <Summary inspection={inspection} pickers={pickers} styleFiles={styleFiles} />
           ) : (
             <DropArea state={state} dragging={isDragActive} pickers={pickers} />
           )}
@@ -269,6 +275,9 @@ export function ColorThemePage() {
 
           {inspection && inspection.theme.layers.length > 0 ? <LayerTable layers={inspection.theme.layers} /> : null}
           {inspection && inspection.theme.symbology.length > 0 ? <Symbology report={inspection.theme} /> : null}
+          {inspection && inspection.theme.style_files.length > 0 ? (
+            <StyleFiles report={inspection.theme} wanted={styleFiles} onWanted={setStyleFiles} />
+          ) : null}
         </main>
 
         <aside className="flex w-[360px] shrink-0 flex-col gap-4">
@@ -285,7 +294,7 @@ export function ColorThemePage() {
       {inspection ? (
         <NextBar
           ref={anchor}
-          step={nextStep(state, inspection, blocked, t)}
+          step={nextStep(state, inspection, blocked, styleFiles, t)}
           progress={state.phase === "converting" ? state.progress : null}
           busyLabel={{ en: "Preparing…", ja: "準備中…" }}
           onGo={() => void download()}
@@ -303,10 +312,11 @@ export function ColorThemePage() {
   );
 }
 
-function nextStep(state: ColorThemeState, inspection: ColorThemeInspection, blocked: string | null, t: T) {
+function nextStep(state: ColorThemeState, inspection: ColorThemeInspection, blocked: string | null, styleFiles: boolean, t: T) {
   const { totals, layers } = inspection.theme;
   const changed = layers.filter((layer) => layer.counts.recolor > 0).length;
   const { rewritten } = symbologyTally(inspection.theme);
+  const added = styleFiles ? styleFilesAdded(inspection.theme) : 0;
   const delivered = state.phase === "checked" ? state.delivered : null;
   const error = state.phase === "checked" ? state.error : null;
   const changes = [
@@ -318,6 +328,9 @@ function nextStep(state: ColorThemeState, inspection: ColorThemeInspection, bloc
       : null,
     rewritten > 0
       ? t(`${plural(rewritten, "layer is", "layers are")} redrawn`, `${formatCount(rewritten)} レイヤーのシンボルを描き直します`)
+      : null,
+    added > 0
+      ? t(`${plural(added, "style file is", "style files are")} added`, `スタイルファイル ${formatCount(added)} 個を追加します`)
       : null
   ].filter((part): part is string => part !== null);
   const title = blocked
@@ -401,9 +414,20 @@ function DropArea({ state, dragging, pickers }: { state: ColorThemeState; draggi
   );
 }
 
-function Summary({ inspection, pickers }: { inspection: ColorThemeInspection; pickers: ReactNode }) {
+function Summary({
+  inspection,
+  pickers,
+  styleFiles
+}: {
+  inspection: ColorThemeInspection;
+  pickers: ReactNode;
+  /** Whether the download is to carry style files. */
+  styleFiles: boolean;
+}) {
   const { t } = useUiLanguage();
   const { dataset, theme } = inspection;
+  const added = styleFiles ? styleFilesAdded(theme) : 0;
+  const styled = styledLayers(theme).filter((layer) => layer.added.length > 0).length;
   const leftAsIs = theme.totals.unmapped + theme.totals.too_wide + theme.totals.undecodable;
   const changedLayers = theme.layers.filter((layer) => layer.counts.recolor > 0).length;
   const symbology = symbologyTally(theme);
@@ -418,6 +442,7 @@ function Summary({ inspection, pickers }: { inspection: ColorThemeInspection; pi
         <Stat label={t("Layers", "レイヤー")} value={formatCount(theme.layers.length)} />
         <Stat label={t("Left as is", "変更しない")} value={formatCount(leftAsIs)} warning={leftAsIs > 0} />
         {symbology.files > 0 ? <Stat label={t("Layers redrawn", "描き直すレイヤー")} value={formatCount(symbology.rewritten)} /> : null}
+        {added > 0 ? <Stat label={t("Style files added", "追加するスタイルファイル")} value={formatCount(added)} /> : null}
         {/* One file per changed layer holds only for shapefiles: an edited feature class changes several and GDAL adds .freelist files. */}
         {dataset.geodatabases > 0 ? (
           <Stat label={t("Geodatabases", "ジオデータベース")} value={formatCount(dataset.geodatabases)} />
@@ -444,6 +469,13 @@ function Summary({ inspection, pickers }: { inspection: ColorThemeInspection; pi
                 `No layer here has a ${theme.field} field, so there is nothing to rewrite.`,
                 `${theme.field} フィールドのあるレイヤーがないため、書き換えるものがありません。`
               )}
+          {added > 0
+            ? // Japanese sets no space between sentences.
+              t(
+                ` The style files below still draw ${plural(styled, "polygon layer", "polygon layers")} in the new colours.`,
+                `下のスタイルファイルを追加すれば、ポリゴンレイヤー ${formatCount(styled)} 件は新しい色で描かれます。`
+              )
+            : null}
         </p>
       )}
     </section>
@@ -729,6 +761,8 @@ function Attention({ inspection }: { inspection: ColorThemeInspection }) {
 
 type ReturnedFormats = {
   shapefile: boolean;
+  /** Shapefiles a style file can go beside. */
+  styleFiles: boolean;
   geodatabase: boolean;
   /** Layer files or projects with layers coloured by the colour field, or with none the tool takes up. */
   symbology: boolean;
@@ -738,7 +772,7 @@ type ReturnedFormats = {
 
 /** Which formats the download holds, so each promise is made only where it is true. All until an upload says. */
 function returnedFormats(inspection: ColorThemeInspection | null): ReturnedFormats {
-  if (!inspection) return { shapefile: true, geodatabase: true, symbology: true, categorySymbology: true };
+  if (!inspection) return { shapefile: true, styleFiles: true, geodatabase: true, symbology: true, categorySymbology: true };
   const { dataset, theme } = inspection;
   const renderers = theme.symbology.flatMap((file) => file.renderers);
   const byCategory = renderers.some((renderer) => renderer.field === theme.category_field);
@@ -746,6 +780,7 @@ function returnedFormats(inspection: ColorThemeInspection | null): ReturnedForma
     shapefile:
       (dataset.geodatabases === 0 && theme.symbology.length === 0) ||
       [...theme.layers, ...theme.skipped].some(({ id }) => !inGeodatabase(id)),
+    styleFiles: theme.style_files.length > 0,
     geodatabase: dataset.geodatabases > 0,
     symbology: theme.symbology.length > 0 && (!byCategory || renderers.some((renderer) => renderer.field !== theme.category_field)),
     categorySymbology: byCategory
@@ -777,6 +812,14 @@ function WhatComesBack({
           {t(
             `Shapefiles come back as the same files in the same folders, in one zip. Only ${field} changes. Geometry, every other field, .prj, .cpg and the indexes come back byte for byte.`,
             `シェープファイルは同じフォルダ構成の同じファイルとして 1 つの zip で戻ります。変わるのは ${field} だけです。ジオメトリ、ほかのフィールド、.prj、.cpg、インデックスはそのまま戻ります。`
+          )}
+        </p>
+      ) : null}
+      {formats.styleFiles ? (
+        <p className={paragraph}>
+          {t(
+            `With style files on, each polygon shapefile that has ${field}, or a ${categoryField} in the second table, also gets a .qml for QGIS and a .lyrx for ArcGIS Pro: one class per new area, and grey for any other value. QGIS loads the .qml with the shapefile by itself. ArcGIS Pro drawing the .lyrx has not been verified. A geodatabase gets none.`,
+            `スタイルファイルを追加する場合、${field} か 2 つ目の表にある ${categoryField} を持つポリゴンのシェープファイルごとに、QGIS 用の .qml と ArcGIS Pro 用の .lyrx が付きます。新エリアごとに 1 クラスで、ほかの値はグレーで描きます。QGIS はシェープファイルと一緒に .qml を自動で読み込みます。ArcGIS Pro で .lyrx が正しく描かれるかは未確認です。ジオデータベースには付きません。`
           )}
         </p>
       ) : null}
@@ -1029,6 +1072,113 @@ function Symbology({ report }: { report: ColorThemeReport }) {
           </div>
         );
       })}
+    </section>
+  );
+}
+
+const STYLE_KIND: Record<ColorThemeStyleFile["kind"], string> = { qml: ".qml", lyrx: ".lyrx" };
+
+/** The option, and the layers it covers: which shapefiles get a .qml and a .lyrx, and what each is coloured by. */
+function StyleFiles({
+  report,
+  wanted,
+  onWanted
+}: {
+  report: ColorThemeReport;
+  wanted: boolean;
+  onWanted: (wanted: boolean) => void;
+}) {
+  const { t } = useUiLanguage();
+  const areas = new Map(report.rules.map((rule) => [rule.area, rule]));
+  const layers = styledLayers(report);
+  const added = styleFilesAdded(report);
+  const head = "px-3 py-2 text-left text-[11px] font-medium text-muted-foreground";
+  return (
+    <section aria-labelledby="color-theme-style-files" className="flex flex-col gap-2.5">
+      <MicroLabel id="color-theme-style-files">{t("Style files", "スタイルファイル")}</MicroLabel>
+      <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+        <label className="flex cursor-pointer items-start gap-3 px-4 py-3">
+          <Checkbox
+            className="mt-0.5"
+            checked={wanted}
+            disabled={added === 0}
+            onCheckedChange={(next) => onWanted(next === true)}
+          />
+          <span className="flex min-w-0 flex-col gap-1">
+            <span className="text-[13px] font-medium text-foreground">
+              {t("Add style files for QGIS and ArcGIS Pro", "QGIS と ArcGIS Pro 用のスタイルファイルを追加")}
+            </span>
+            <span className="text-[12.5px] leading-[1.45] text-muted-foreground">
+              {added > 0
+                ? t(
+                    `${plural(added, "file", "files")} beside ${plural(layers.filter((layer) => layer.added.length > 0).length, "polygon layer", "polygon layers")}, so the shapefiles open in the new colours. QGIS loads a .qml with its shapefile by itself. ArcGIS Pro drawing the .lyrx has not been verified, so open one in Pro before you rely on it.`,
+                    `ポリゴンレイヤー ${formatCount(layers.filter((layer) => layer.added.length > 0).length)} 件の横に ${formatCount(added)} ファイルを追加し、シェープファイルを新しい色で開けるようにします。QGIS は .qml をシェープファイルと一緒に自動で読み込みます。ArcGIS Pro で .lyrx が正しく描かれるかは未確認のため、使う前に Pro で開いて確認してください。`
+                  )
+                : t(
+                    "Every layer here already has both style files, so there is none to add.",
+                    "どのレイヤーにもスタイルファイルがすでにあるため、追加するものはありません。"
+                  )}
+            </span>
+          </span>
+        </label>
+        <details className="group border-t border-border" open={layers.length <= 8}>
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 px-4 py-2.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:text-foreground">
+            <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+            {t(`Layers (${layers.length})`, `レイヤー（${layers.length}）`)}
+          </summary>
+          <table className={cn("w-full border-collapse text-[12.5px]", !wanted && "opacity-50")}>
+            <thead className="border-y border-border">
+              <tr>
+                <th scope="col" className={head}>
+                  {t("Shapefile", "シェープファイル")}
+                </th>
+                <th scope="col" className={head}>
+                  {t("Coloured by", "色分け")}
+                </th>
+                <th scope="col" className={head}>
+                  {t("Draws", "描く色")}
+                </th>
+                <th scope="col" className={head}>
+                  {t("Added", "追加")}
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {layers.map((layer) => (
+                <tr key={layer.layer}>
+                  <td className="break-all px-3 py-2 font-mono text-[11.5px] text-foreground">{layer.layer}</td>
+                  <td className="whitespace-nowrap px-3 py-2 font-mono text-[11.5px] text-muted-foreground">{layer.field}</td>
+                  <td className="px-3 py-2">
+                    <span className="flex gap-1">
+                      {layer.classes.map((key) => {
+                        const area = areas.get(key);
+                        return area ? (
+                          <span key={key} className="flex" title={`${area.value} · ${area.spec}`}>
+                            <Swatch hex={area.hex} />
+                          </span>
+                        ) : null;
+                      })}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-[12px] text-muted-foreground">
+                    <span className="font-mono text-[11.5px]">
+                      {layer.added.length > 0 ? layer.added.map((file) => STYLE_KIND[file.kind]).join(" · ") : "—"}
+                    </span>
+                    {layer.kept.length > 0 ? (
+                      <span className="block text-warning-foreground">
+                        {t(
+                          `Already here, kept as it is: ${layer.kept.map((file) => baseName(file.path)).join(", ")}`,
+                          `すでにあるためそのまま: ${layer.kept.map((file) => baseName(file.path)).join("、")}`
+                        )}
+                      </span>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      </div>
     </section>
   );
 }

@@ -1,8 +1,10 @@
 """Station uploads for the colour tool, built from raw bytes.
 
 Never through geopandas: a geopandas write would itself change widths and
-types and hide the defects the tests exist to catch. .shp and .shx contents
-are arbitrary bytes on purpose, since the tool must never read them.
+types and hide the defects the tests exist to catch. Most .shp and .shx
+contents are arbitrary bytes on purpose, since the tool reads nothing of
+them but the shape type in a .shp header. ``square_shapefile`` writes a real
+one, for the layers a style file is expected beside and for QGIS to open.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import copy
 from io import BytesIO
 import json
 from pathlib import Path
+import struct
 from typing import Any
 import zipfile
 
@@ -62,6 +65,35 @@ def make_dbf(
             assert len(cell) <= width
             body += cell.ljust(width, pad)
     return bytes(header + body + b"\x1a")
+
+
+POLYGON, POLYGON_Z, POLYGON_M = 5, 15, 25
+POLYLINE, POINT = 3, 1
+
+
+def shp_header(shape_type: int, *, words: int = 50, box: tuple[float, float, float, float] = (0, 0, 0, 0)) -> bytes:
+    """The 100 bytes every .shp and .shx starts with; ``words`` is the file's length in 16-bit words."""
+    return struct.pack(">i5ii", 9994, 0, 0, 0, 0, 0, words) + struct.pack("<ii4d4d", 1000, shape_type, *box, 0, 0, 0, 0)
+
+
+def square_shapefile(count: int, shape_type: int = POLYGON) -> tuple[bytes, bytes]:
+    """A .shp and its .shx: ``count`` unit squares in a row, two units apart, record n matching row n of the table.
+
+    ``shape_type`` only relabels the header, for the layers whose records are never read.
+    """
+    records = bytearray()
+    index = bytearray()
+    for number in range(count):
+        left = number * 2.0
+        ring = [(left, 0.0), (left, 1.0), (left + 1.0, 1.0), (left + 1.0, 0.0), (left, 0.0)]
+        content = struct.pack("<i4dii i", POLYGON, left, 0.0, left + 1.0, 1.0, 1, len(ring), 0)
+        content += b"".join(struct.pack("<2d", *point) for point in ring)
+        index += struct.pack(">ii", 50 + len(records) // 2, len(content) // 2)
+        records += struct.pack(">ii", number + 1, len(content) // 2) + content
+    box = (0.0, 0.0, max(count * 2.0 - 1.0, 0.0), 1.0)
+    shp = shp_header(shape_type, words=50 + len(records) // 2, box=box) + bytes(records)
+    shx = shp_header(shape_type, words=50 + len(index) // 2, box=box) + bytes(index)
+    return shp, shx
 
 
 def space_row(color2: str, category: str, codec: str = "utf-8", *, color: str = "白", name: str = "room") -> list[bytes]:
@@ -175,14 +207,16 @@ DEMO_FLOOR_B1 = [*[("白", "B021")] * 3, *[("黄", "B999")] * 2]
 
 def demo_station() -> bytes:
     """A zipped station for capture.mjs to screenshot: every rule but the GDB-only 進入制限あり, three
-    unmapped rows, and a B1 layer whose color2 is too narrow (C(24)) for 階段・エスカレーター in UTF-8."""
+    unmapped rows, and a B1 layer whose color2 is too narrow (C(24)) for 階段・エスカレーター in UTF-8.
+    Both Space layers are polygon shapefiles, so each gets a style file of either kind."""
     narrow = [(name, kind, 24 if name == "color2" else width, dec) for name, kind, width, dec in SPACE_FIELDS]
     members: list[tuple[str, bytes | None]] = []
     for floor, fields, rows in (("1", SPACE_FIELDS, DEMO_FLOOR_1), ("B1", narrow, DEMO_FLOOR_B1)):
         stem = f"DemoSta_6677.shp/DemoSta_{floor}_Space"
+        shp, shx = square_shapefile(len(rows))
         members += [
-            (f"{stem}.shp", b"shp " + floor.encode()),
-            (f"{stem}.shx", b"shx " + floor.encode()),
+            (f"{stem}.shp", shp),
+            (f"{stem}.shx", shx),
             (f"{stem}.dbf", make_dbf(fields, [space_row(value, category) for value, category in rows])),
             (f"{stem}.prj", b'PROJCS["JGD2011 / Japan Plane Rectangular CS IX"]'),
             (f"{stem}.cpg", b"UTF-8"),
@@ -375,15 +409,17 @@ def demo_layer_files() -> bytes:
 
 
 def demo_category_station() -> bytes:
-    """A zipped shapefile station with ``category`` and no ``color2``, for capture.mjs: nothing to rewrite, and why."""
+    """A zipped shapefile station with ``category`` and no ``color2``, for capture.mjs: no data to rewrite,
+    and two polygon unit layers that style files can still draw in the new colours."""
     fields: list[Field] = [("name", "C", 20, 0), ("category", "C", 20, 0)]
     rows = [[b"room", category.encode("ascii")] for category in ("walkway", "store", "stairs")]
+    shp, shx = square_shapefile(len(rows))
     members: list[tuple[str, bytes | None]] = []
     for floor in ("1", "B1"):
         stem = f"DemoUnits_6677.shp/DemoUnits_{floor}_unit"
         members += [
-            (f"{stem}.shp", b"shp " + floor.encode()),
-            (f"{stem}.shx", b"shx " + floor.encode()),
+            (f"{stem}.shp", shp),
+            (f"{stem}.shx", shx),
             (f"{stem}.dbf", make_dbf(fields, rows)),
             (f"{stem}.cpg", b"UTF-8"),
         ]

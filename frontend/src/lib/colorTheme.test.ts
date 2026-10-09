@@ -8,6 +8,8 @@ import {
   fieldPresence,
   initialColorThemeState,
   keptGroups,
+  styledLayers,
+  styleFilesAdded,
   type ColorThemeEvent,
   type ColorThemeState,
   type DatasetUpload
@@ -20,6 +22,8 @@ import {
   rerunInspection,
   shinjukuGeodatabaseInspection,
   shinjukuProjectInspection,
+  shinjukuShapefileInspection,
+  styleFilesFor,
   TOKYO_GDB,
   tokyoGeodatabaseInspection,
   tokyoInspection
@@ -212,6 +216,35 @@ describe("downloadBlockedReason", () => {
       expect(downloadBlockedReason(case_, english)).not.toMatch(/Nothing to change/);
       expect(downloadBlockedReason(case_, japanese)).not.toMatch(/変更なし/);
     }
+  });
+});
+
+describe("style files", () => {
+  test("a station with nothing to rewrite can still be downloaded for its style files, but only when they are asked for", () => {
+    const shinjuku = shinjukuShapefileInspection();
+    expect(downloadBlockedReason(shinjuku, english, true)).toBeNull();
+    expect(downloadBlockedReason(shinjuku, english, false)).toBe("No layer has a color2 field.");
+  });
+
+  test("style files the upload already has are not a reason to download", () => {
+    const shinjuku = shinjukuShapefileInspection();
+    const kept = shinjuku.theme.style_files.map((file) => ({ ...file, outcome: "kept" as const }));
+    const rerun = { ...shinjuku, theme: { ...shinjuku.theme, style_files: kept } };
+    expect(styleFilesAdded(rerun.theme)).toBe(0);
+    expect(downloadBlockedReason(rerun, english, true)).toBe("No layer has a color2 field.");
+  });
+
+  test("the files of one shapefile are one layer, split into those added and those it already had", () => {
+    const [qml, lyrx] = styleFilesFor("st/1_Space.shp");
+    const unit = styleFilesFor("st/1_unit.shp", "category");
+    const layers = styledLayers({ style_files: [{ ...qml, path: "st/1_SPACE.QML", outcome: "kept" }, lyrx, ...unit] });
+    expect(layers.map((layer) => [layer.layer, layer.field, layer.classes.length])).toEqual([
+      ["st/1_Space.shp", "color2", 6],
+      ["st/1_unit.shp", "category", 5]
+    ]);
+    expect(layers[0].kept.map((file) => file.path)).toEqual(["st/1_SPACE.QML"]);
+    expect(layers[0].added.map((file) => file.path)).toEqual(["st/1_Space.lyrx"]);
+    expect(styleFilesAdded({ style_files: [{ ...qml, outcome: "kept" }, lyrx, ...unit] })).toBe(3);
   });
 });
 

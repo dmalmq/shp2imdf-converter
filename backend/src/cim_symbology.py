@@ -1,7 +1,9 @@
 """Retheme ArcGIS Pro symbology: unique-value renderers keyed on one of the theme's two fields, in parsed CIM JSON.
 
 Pure: no files, no zips, no ArcGIS. ``recolor.py`` parses ``.lyrx`` files and
-``.aprx`` members and hands each document here.
+``.aprx`` members and hands each document here. ``layer_document`` goes the
+other way and writes a layer file for a shapefile that has none; retheming
+what it wrote changes nothing.
 
 A renderer keyed on ``color2`` alone is rebuilt as one class per theme area it
 draws, in theme order. Each class lists the area's written value first and
@@ -23,23 +25,34 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterator, Mapping
 import copy
+import re
 from dataclasses import dataclass
+import json
 from typing import Any
 
-from backend.src.color_theme import AreaKey, ColorTheme, LeftAloneReason, RendererChange
+from backend.src.color_theme import (
+    AreaKey,
+    ColorTheme,
+    LayerStyle,
+    LeftAloneReason,
+    RendererChange,
+    category_classes,
+    colour_classes,
+)
 
-_DEFAULT_WIDTH = 0.3
-_STROKE = {
-    "type": "CIMSolidStroke",
-    "enable": True,
-    "capStyle": "Round",
-    "joinStyle": "Round",
-    "lineStyle3D": "Strip",
-    "miterLimit": 10,
-    "width": _DEFAULT_WIDTH,
-    "height3D": 1,
-    "anchor3D": "Center",
-}
+def _stroke(width: float) -> dict[str, Any]:
+    """A solid stroke as Pro saves one, in Pro's key order and without a colour."""
+    return {
+        "type": "CIMSolidStroke",
+        "enable": True,
+        "capStyle": "Round",
+        "joinStyle": "Round",
+        "lineStyle3D": "Strip",
+        "miterLimit": 10,
+        "width": width,
+        "height3D": 1,
+        "anchor3D": "Center",
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,23 +98,21 @@ class _Keying:
 
 def _keyings(theme: ColorTheme) -> tuple[_Keying, _Keying]:
     """The colour field first: a renderer that names it is never taken for a category renderer."""
-    listed: dict[AreaKey, list[str]] = {area.key: [area.value] for area in theme.areas}
+    listed = {item.area.key: item.values for item in colour_classes(theme)}
     brings: dict[str, list[AreaKey]] = {}
     for rule in theme.rules:
-        if rule.categories is None:
-            listed[rule.area.key].append(rule.old)
-        else:
+        if rule.categories is not None:
             brings.setdefault(rule.old, []).append(rule.area.key)
     colour = _Keying(
         field=theme.field,
         area_of={value: key for key, values in listed.items() for value in values},
-        listed={key: tuple(values) for key, values in listed.items()},
+        listed=listed,
         brings={old: tuple(keys) for old, keys in brings.items()},
         incidental=False,
     )
     category = _Keying(
         field=theme.category_field,
-        area_of={name: area.key for name, area in theme.category_areas.items()},
+        area_of={value: item.area.key for item in category_classes(theme) for value in item.values},
         listed=None,
         brings={},
         incidental=True,
@@ -125,9 +136,14 @@ def retheme_document(doc: Any, theme: ColorTheme) -> list[RendererChange]:
     ]
 
 
-_UNIT_LAYER = "unit"
+_UNIT_WORD = re.compile(r"(?<![A-Za-z])units?(?![A-Za-z])", re.IGNORECASE)
 """The category table is the unit catalogue's. A section or facility layer shares words with it (walkway, platform,
 unspecified) and means something else by them, so only a layer named for units, or reading a units dataset, is taken."""
+
+
+def is_unit_layer(*names: str) -> bool:
+    """Whether a layer's name, dataset or file name says it holds units: "unit" or "units" as a word of its own."""
+    return any(_UNIT_WORD.search(name) for name in names)
 
 
 def _renderers(node: Any, layer: str | None, units: bool) -> Iterator[tuple[dict[str, Any], str | None, bool]]:
@@ -138,8 +154,7 @@ def _renderers(node: Any, layer: str | None, units: bool) -> Iterator[tuple[dict
             table = node.get("featureTable")
             connection = table.get("dataConnection") if isinstance(table, dict) else None
             dataset = connection.get("dataset") if isinstance(connection, dict) else None
-            names = [layer, dataset if isinstance(dataset, str) else ""]
-            units = any(_UNIT_LAYER in name.casefold() for name in names)
+            units = is_unit_layer(layer, dataset if isinstance(dataset, str) else "")
         if kind == "CIMUniqueValueRenderer":
             yield node, layer, units
         for value in node.values():
@@ -252,7 +267,7 @@ def _retheme(
     if not first:
         return left_alone("no_known_values")
 
-    width, stroke = _common_stroke(classes)
+    width, stroke = _common_stroke(classes, theme.outline.width_pt)
     rebuilt = [
         _area_class(
             first[area.key].node,
@@ -319,8 +334,11 @@ def _colours_set_at_draw_time(renderer: dict[str, Any], classes: list[_Class]) -
     return False
 
 
-def _common_stroke(classes: list[_Class]) -> tuple[float, dict[str, Any]]:
-    """The width most strokes in the renderer have (the first seen on a tie), and a stroke of that width to copy."""
+def _common_stroke(classes: list[_Class], fallback: float) -> tuple[float, dict[str, Any]]:
+    """The width most strokes in the renderer have (the first seen on a tie), and a stroke of that width to copy.
+
+    A renderer that draws no stroke at all gets one of the ``fallback`` width.
+    """
     strokes = [
         layer
         for cls in classes
@@ -331,7 +349,7 @@ def _common_stroke(classes: list[_Class]) -> tuple[float, dict[str, Any]]:
         and isinstance(layer.get("width"), (int, float))
     ]
     if not strokes:
-        return _DEFAULT_WIDTH, _STROKE
+        return fallback, _stroke(fallback)
     width = Counter(stroke["width"] for stroke in strokes).most_common(1)[0][0]
     return width, next(stroke for stroke in strokes if stroke["width"] == width)
 
@@ -408,3 +426,85 @@ def _rgb(hex_colour: str, previous: Any) -> dict[str, Any]:
             alpha = old[3]
     red, green, blue = (int(hex_colour[index : index + 2], 16) for index in (1, 3, 5))
     return {"type": "CIMRGBColor", "values": [red, green, blue, alpha]}
+
+
+def layer_file_text(doc: Any) -> str:
+    """Pro's own layout for a layer file. JSON escapes any newline inside a string, so only the layout's change."""
+    return json.dumps(doc, ensure_ascii=False, indent=2, separators=(",", " : ")).replace("\n", "\r\n")
+
+
+def layer_document(theme: ColorTheme, style: LayerStyle, *, name: str, shapefile: str) -> dict[str, Any]:
+    """A layer file for the shapefile beside it: the fewest CIM properties that name the data and draw it.
+
+    Written by hand and not copied from a project's layer, so it carries no
+    field list, labelling or scale range that might not hold for this
+    shapefile. ``shapefile`` is the ``.shp``'s file name; the connection is
+    relative, so the pair can be moved together.
+    """
+    uri = "CIMPATH=map/layer.json"
+    return {
+        "type": "CIMLayerDocument",
+        "version": "3.0.0",
+        "layers": [uri],
+        "layerDefinitions": [
+            {
+                "type": "CIMFeatureLayer",
+                "name": name,
+                "uRI": uri,
+                "layerType": "Operational",
+                "showLegends": True,
+                "visibility": True,
+                "showPopups": True,
+                "featureTable": {
+                    "type": "CIMFeatureTable",
+                    "dataConnection": {
+                        "type": "CIMStandardDataConnection",
+                        "workspaceConnectionString": "DATABASE=.",
+                        "workspaceFactory": "Shapefile",
+                        "dataset": shapefile,
+                        "datasetType": "esriDTFeatureClass",
+                    },
+                },
+                "selectable": True,
+                "renderer": {
+                    "type": "CIMUniqueValueRenderer",
+                    "defaultLabel": theme.other.label,
+                    "defaultSymbol": _polygon_symbol(theme, theme.other.hex),
+                    "defaultSymbolPatch": "Default",
+                    "fields": [style.field],
+                    "groups": [
+                        {
+                            "type": "CIMUniqueValueGroup",
+                            "classes": [
+                                {
+                                    "type": "CIMUniqueValueClass",
+                                    "label": item.area.value,
+                                    "patch": "Default",
+                                    "symbol": _polygon_symbol(theme, item.area.hex),
+                                    "values": [{"type": "CIMUniqueValue", "fieldValues": [value]} for value in item.values],
+                                    "visible": True,
+                                }
+                                for item in style.classes
+                            ],
+                            "heading": style.field,
+                        }
+                    ],
+                    "useDefaultSymbol": True,
+                    "polygonSymbolColorTarget": "Fill",
+                },
+            }
+        ],
+    }
+
+
+def _polygon_symbol(theme: ColorTheme, fill_hex: str) -> dict[str, Any]:
+    return {
+        "type": "CIMSymbolReference",
+        "symbol": {
+            "type": "CIMPolygonSymbol",
+            "symbolLayers": [
+                {**_stroke(theme.outline.width_pt), "color": _rgb(theme.outline.hex, None)},
+                {"type": "CIMSolidFill", "enable": True, "color": _rgb(fill_hex, None)},
+            ],
+        },
+    }

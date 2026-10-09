@@ -5,6 +5,7 @@ import type {
   ColorThemeRenderer,
   ColorThemeReport,
   ColorThemeRule,
+  ColorThemeStyleFile,
   ColorThemeSymbologyFile
 } from "../api/client";
 
@@ -121,7 +122,8 @@ export function colorThemeReport(): ColorThemeReport {
     layers: [],
     skipped: [],
     totals: counts(),
-    symbology: []
+    symbology: [],
+    style_files: []
   };
 }
 
@@ -352,6 +354,41 @@ export function layerFilesRerunInspection(): ColorThemeInspection {
           item.outcome === "rewritten" ? { ...item, outcome: "already_new" as const, classes_before: item.classes_after } : item
         )
       }))
+    }
+  };
+}
+
+const CATEGORY_AREAS = ALL_AREAS.filter((area) => area !== "paid_area_shinkansen");
+
+/** The two style files the server reports for one polygon shapefile. */
+export function styleFilesFor(layer: string, field: "color2" | "category" = "color2"): ColorThemeStyleFile[] {
+  const stem = layer.replace(/\.shp$/, "");
+  const classes = field === "color2" ? ALL_AREAS : CATEGORY_AREAS;
+  return (["qml", "lyrx"] as const).map((kind) => ({ path: `${stem}.${kind}`, kind, layer, field, classes, outcome: "added" }));
+}
+
+/** Tokyo's ten Space layers, each a polygon shapefile with color2: twenty style files to add. */
+export function tokyoStyledInspection(): ColorThemeInspection {
+  const tokyo = tokyoInspection();
+  const style_files = tokyo.theme.layers.flatMap((layer) => styleFilesFor(layer.id.replace(/\.dbf$/, ".shp")));
+  return { ...tokyo, theme: { ...tokyo.theme, style_files } };
+}
+
+/** `shape_data/JRShinjukuSta_6677.zip`: shapefiles with category and no color2, two of them polygon unit layers. */
+export function shinjukuShapefileInspection(): ColorThemeInspection {
+  return {
+    dataset: {
+      name: "JRShinjukuSta_6677",
+      download_name: "JRShinjukuSta_6677_new-colors.zip",
+      files: 107,
+      geodatabases: 0,
+      lock_files_dropped: 0,
+      tables: 16,
+      category_only_tables: 10
+    },
+    theme: {
+      ...colorThemeReport(),
+      style_files: ["1", "2"].flatMap((floor) => styleFilesFor(`JRShinjukuSta_${floor}_unit.shp`, "category"))
     }
   };
 }

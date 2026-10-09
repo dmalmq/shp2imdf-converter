@@ -9,6 +9,7 @@ sees these requests.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -36,14 +37,27 @@ def _gdal_python(request: Request) -> Path | None:
     return request.app.state.gdal_python
 
 
-async def _station(request: Request) -> list[tuple[str, bytes]]:
+@dataclass(frozen=True, slots=True)
+class _Station:
+    blobs: list[tuple[str, bytes]]
+    style_files: bool
+    """The ``style_files`` part: ``true`` to add style files to the download. Left out, none are added."""
+
+
+_FLAGS = {"true": True, "false": False}
+
+
+async def _station(request: Request) -> _Station:
     """``files`` parts with a ``paths`` part each, in the same order; paths may be left out for bare names."""
     async with request.form(max_files=_FORM_PARTS, max_fields=_FORM_PARTS) as form:
         files = form.getlist("files")
         paths = form.getlist("paths")
         if not all(isinstance(item, UploadFile) for item in files) or not all(isinstance(item, str) for item in paths):
             raise ValueError("Send each file as a 'files' file part and its path as a 'paths' text part.")
-        return await read_uploads(request, files, names=paths or None)
+        flag = form.get("style_files", "false")
+        if flag not in _FLAGS:
+            raise ValueError("style_files must be 'true' or 'false'.")
+        return _Station(blobs=await read_uploads(request, files, names=paths or None), style_files=_FLAGS[flag])
 
 
 @router.get("", response_model=ThemeReport)
@@ -54,16 +68,21 @@ def color_theme(request: Request) -> ThemeReport:
 
 @router.post("/inspect", response_model=Inspection)
 async def inspect_color_theme(request: Request) -> Inspection:
-    blobs = await _station(request)
+    station = await _station(request)
     return await run_in_threadpool(
-        inspect, _theme(request), blobs, max_bytes=max_upload_bytes(request), gdal_python=_gdal_python(request)
+        inspect, _theme(request), station.blobs, max_bytes=max_upload_bytes(request), gdal_python=_gdal_python(request)
     )
 
 
 @router.post("/convert")
 async def convert_color_theme(request: Request) -> Response:
-    blobs = await _station(request)
+    station = await _station(request)
     archive = await run_in_threadpool(
-        convert, _theme(request), blobs, max_bytes=max_upload_bytes(request), gdal_python=_gdal_python(request)
+        convert,
+        _theme(request),
+        station.blobs,
+        max_bytes=max_upload_bytes(request),
+        gdal_python=_gdal_python(request),
+        style_files=station.style_files,
     )
     return attachment_response(archive.data, archive.filename)

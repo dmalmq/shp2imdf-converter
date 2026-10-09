@@ -21,9 +21,24 @@ function Hex($colour) {
 
 function Describe($layer) {
     $renderer = $layer.Renderer
+    $connection = $layer.FeatureTable.DataConnection
+    $other = @($renderer.DefaultSymbol.Symbol.SymbolLayers)
     [ordered]@{
         name    = $layer.Name
         fields  = @($renderer.Fields)
+        source  = [ordered]@{
+            type      = if ($connection) { $connection.GetType().Name } else { $null }
+            factory   = "$($connection.WorkspaceFactory)"
+            workspace = $connection.WorkspaceConnectionString
+            dataset   = $connection.Dataset
+            kind      = "$($connection.DatasetType)"
+        }
+        other   = [ordered]@{
+            used   = $renderer.UseDefaultSymbol
+            label  = $renderer.DefaultLabel
+            fill   = Hex (($other | Where-Object { $_.GetType().Name -eq "CIMSolidFill" } | Select-Object -First 1).Color)
+            stroke = Hex (($other | Where-Object { $_.GetType().Name -eq "CIMSolidStroke" } | Select-Object -First 1).Color)
+        }
         classes = @($renderer.Groups | ForEach-Object { $_.Classes } | ForEach-Object {
                 $layers = @($_.Symbol.Symbol.SymbolLayers)
                 [ordered]@{
