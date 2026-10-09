@@ -27,10 +27,10 @@ OUTLINE = "#657678"
 # What a unit layer draws afterwards, typed out from the operator-approved table: label, fill, and the categories
 # in the order the layer lists them. vegetation is in no area and keeps its own green.
 UNIT_CLASSES = [
-    ("改札外通路", "#FFFFFF", ["ramp", "road", "walkway"]),
-    ("在来線改札内", "#F2F7FB", ["platform", "ramp_sta", "walkway_sta"]),
+    ("改札外通路 (Mono 000)", "#FFFFFF", ["ramp", "road", "walkway"]),
+    ("在来線改札内 (PaleBlue 050)", "#F2F7FB", ["platform", "ramp_sta", "walkway_sta"]),
     (
-        "施設",
+        "施設 (Turquoise 150)",
         "#DDEBEC",
         [
             "ATM",
@@ -47,7 +47,7 @@ UNIT_CLASSES = [
         ],
     ),
     (
-        "進入制限エリア",
+        "進入制限エリア (Mono 050)",
         "#F2F2F2",
         [
             "auditorium",
@@ -61,7 +61,7 @@ UNIT_CLASSES = [
             "waitingroom",
         ],
     ),
-    ("階段・エスカレーター", "#FFFFFF", ["escalator", "opentobelow", "stairs"]),
+    ("階段・エスカレーター (Mono 000)", "#FFFFFF", ["escalator", "opentobelow", "stairs"]),
     ("vegetation", "#96CB91", ["vegetation"]),
 ]
 

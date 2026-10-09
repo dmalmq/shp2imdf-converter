@@ -25,7 +25,7 @@ pytestmark = pytest.mark.colortheme
 
 CONFIG = Path(__file__).resolve().parents[1] / "config" / "color_theme.json"
 PROBE = Path(__file__).with_name("qgis_style_probe.py")
-OUTLINE = {"layer": "SimpleFill", "outline": "#657678", "width": 0.3, "unit": "Point"}
+OUTLINE = {"layer": "SimpleFill", "outline": "#657678", "width": 0.5, "unit": "Point"}
 OTHER = "#D9D9D9"
 
 # A row's color2 as uploaded, and the fill QGIS must draw it in once converted. 濃鼠 B008 is a toilet the
@@ -43,12 +43,12 @@ SPACE_ROWS = [
     ("", "B019", OTHER),
 ]
 SPACE_CATEGORIES = [
-    ("改札外通路", "#FFFFFF", ["改札外通路", "ラチ外白", "濃鼠", "道白"]),
-    ("在来線改札内", "#F2F7FB", ["在来線改札内", "黄", "薄紅"]),
-    ("新幹線改札内", "#E5EFF7", ["新幹線改札内", "橙", "緑", "濃紅"]),
-    ("施設", "#DDEBEC", ["施設", "薄空", "濃空", "トイレ"]),
-    ("進入制限エリア", "#F2F2F2", ["進入制限エリア", "薄鼠", "進入制限あり"]),
-    ("階段・エスカレーター", "#FFFFFF", ["階段・エスカレーター", "白"]),
+    ("改札外通路 (Mono 000)", "#FFFFFF", ["改札外通路", "ラチ外白", "濃鼠", "道白"]),
+    ("在来線改札内 (PaleBlue 050)", "#F2F7FB", ["在来線改札内", "黄", "薄紅"]),
+    ("新幹線改札内 (PaleBlue 100)", "#E5EFF7", ["新幹線改札内", "橙", "緑", "濃紅"]),
+    ("施設 (Turquoise 150)", "#DDEBEC", ["施設", "薄空", "濃空", "トイレ"]),
+    ("進入制限エリア (Mono 050)", "#F2F2F2", ["進入制限エリア", "薄鼠", "進入制限あり"]),
+    ("階段・エスカレーター (Mono 000)", "#FFFFFF", ["階段・エスカレーター", "白"]),
     ("その他 (Other)", OTHER, [""]),
 ]
 UNIT_ROWS = [
@@ -60,11 +60,11 @@ UNIT_ROWS = [
     ("vegetation", OTHER),
 ]
 UNIT_CATEGORIES = [
-    ("改札外通路", "#FFFFFF", 3),
-    ("在来線改札内", "#F2F7FB", 3),
-    ("施設", "#DDEBEC", 11),
-    ("進入制限エリア", "#F2F2F2", 9),
-    ("階段・エスカレーター", "#FFFFFF", 3),
+    ("改札外通路 (Mono 000)", "#FFFFFF", 3),
+    ("在来線改札内 (PaleBlue 050)", "#F2F7FB", 3),
+    ("施設 (Turquoise 150)", "#DDEBEC", 11),
+    ("進入制限エリア (Mono 050)", "#F2F2F2", 9),
+    ("階段・エスカレーター (Mono 000)", "#FFFFFF", 3),
     ("その他 (Other)", OTHER, 1),
 ]
 

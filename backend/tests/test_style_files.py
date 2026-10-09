@@ -41,18 +41,18 @@ OUTLINE = "#657678"
 OTHER = ("その他 (Other)", "#D9D9D9")
 
 COLOUR_CLASSES = [
-    ("改札外通路", "#FFFFFF", ["改札外通路", "ラチ外白", "濃鼠", "道白"]),
-    ("在来線改札内", "#F2F7FB", ["在来線改札内", "黄", "薄紅"]),
-    ("新幹線改札内", "#E5EFF7", ["新幹線改札内", "橙", "緑", "濃紅"]),
-    ("施設", "#DDEBEC", ["施設", "薄空", "濃空", "トイレ"]),
-    ("進入制限エリア", "#F2F2F2", ["進入制限エリア", "薄鼠", "進入制限あり"]),
-    ("階段・エスカレーター", "#FFFFFF", ["階段・エスカレーター", "白"]),
+    ("改札外通路 (Mono 000)", "#FFFFFF", ["改札外通路", "ラチ外白", "濃鼠", "道白"]),
+    ("在来線改札内 (PaleBlue 050)", "#F2F7FB", ["在来線改札内", "黄", "薄紅"]),
+    ("新幹線改札内 (PaleBlue 100)", "#E5EFF7", ["新幹線改札内", "橙", "緑", "濃紅"]),
+    ("施設 (Turquoise 150)", "#DDEBEC", ["施設", "薄空", "濃空", "トイレ"]),
+    ("進入制限エリア (Mono 050)", "#F2F2F2", ["進入制限エリア", "薄鼠", "進入制限あり"]),
+    ("階段・エスカレーター (Mono 000)", "#FFFFFF", ["階段・エスカレーター", "白"]),
 ]
 CATEGORY_CLASSES = [
-    ("改札外通路", "#FFFFFF", ["walkway", "ramp", "road"]),
-    ("在来線改札内", "#F2F7FB", ["walkway_sta", "ramp_sta", "platform"]),
+    ("改札外通路 (Mono 000)", "#FFFFFF", ["walkway", "ramp", "road"]),
+    ("在来線改札内 (PaleBlue 050)", "#F2F7FB", ["walkway_sta", "ramp_sta", "platform"]),
     (
-        "施設",
+        "施設 (Turquoise 150)",
         "#DDEBEC",
         [
             "store",
@@ -69,7 +69,7 @@ CATEGORY_CLASSES = [
         ],
     ),
     (
-        "進入制限エリア",
+        "進入制限エリア (Mono 050)",
         "#F2F2F2",
         [
             "elevator",
@@ -83,7 +83,7 @@ CATEGORY_CLASSES = [
             "waitingroom",
         ],
     ),
-    ("階段・エスカレーター", "#FFFFFF", ["stairs", "escalator", "opentobelow"]),
+    ("階段・エスカレーター (Mono 000)", "#FFFFFF", ["stairs", "escalator", "opentobelow"]),
 ]
 SIX_AREAS = ["free_area", "paid_area", "paid_area_shinkansen", "facilities", "restricted", "stairs_escalators"]
 FIVE_AREAS = [key for key in SIX_AREAS if key != "paid_area_shinkansen"]
@@ -191,13 +191,13 @@ def test_a_color2_layer_is_classed_by_area_with_new_and_old_values_in_the_theme_
     qml = read_qml(output["st/1_Space.qml"])
     assert (qml["type"], qml["field"]) == ("categorizedSymbol", "color2")
     assert qml["classes"] == [*COLOUR_CLASSES, (OTHER[0], OTHER[1], [""])]
-    assert qml["outlines"] == {("SimpleFill", OUTLINE, "0.3", "Point")}
+    assert qml["outlines"] == {("SimpleFill", OUTLINE, "0.5", "Point")}
 
     lyrx = read_lyrx(output["st/1_Space.lyrx"])
     assert (lyrx["type"], lyrx["fields"]) == ("CIMUniqueValueRenderer", ["color2"])
     assert lyrx["classes"] == COLOUR_CLASSES
     assert lyrx["other"] == (True, *OTHER)
-    assert lyrx["outlines"] == {(OUTLINE, 0.3)}
+    assert lyrx["outlines"] == {(OUTLINE, 0.5)}
 
 
 def test_a_category_layer_is_classed_by_the_category_table(theme: ColorTheme) -> None:
@@ -206,13 +206,13 @@ def test_a_category_layer_is_classed_by_the_category_table(theme: ColorTheme) ->
     qml = read_qml(output["st/1_unit.qml"])
     assert (qml["type"], qml["field"]) == ("categorizedSymbol", "category")
     assert qml["classes"] == [*CATEGORY_CLASSES, (OTHER[0], OTHER[1], [""])]
-    assert qml["outlines"] == {("SimpleFill", OUTLINE, "0.3", "Point")}
+    assert qml["outlines"] == {("SimpleFill", OUTLINE, "0.5", "Point")}
 
     lyrx = read_lyrx(output["st/1_unit.lyrx"])
     assert lyrx["fields"] == ["category"]
     assert lyrx["classes"] == CATEGORY_CLASSES
     assert lyrx["other"] == (True, *OTHER)
-    assert lyrx["outlines"] == {(OUTLINE, 0.3)}
+    assert lyrx["outlines"] == {(OUTLINE, 0.5)}
 
 
 def test_the_layer_file_points_at_the_shapefile_beside_it(theme: ColorTheme) -> None:

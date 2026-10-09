@@ -22,21 +22,21 @@ OUTLINE = "#657678"
 
 # The Figma New table, typed out independently of the config: label, values in order, fill.
 NEW_CLASSES = [
-    ("改札外通路", ["改札外通路", "ラチ外白", "濃鼠", "道白"], "#FFFFFF"),
-    ("在来線改札内", ["在来線改札内", "黄", "薄紅"], "#F2F7FB"),
-    ("新幹線改札内", ["新幹線改札内", "橙", "緑", "濃紅"], "#E5EFF7"),
-    ("施設", ["施設", "薄空", "濃空", "トイレ"], "#DDEBEC"),
-    ("進入制限エリア", ["進入制限エリア", "薄鼠", "進入制限あり"], "#F2F2F2"),
-    ("階段・エスカレーター", ["階段・エスカレーター", "白"], "#FFFFFF"),
+    ("改札外通路 (Mono 000)", ["改札外通路", "ラチ外白", "濃鼠", "道白"], "#FFFFFF"),
+    ("在来線改札内 (PaleBlue 050)", ["在来線改札内", "黄", "薄紅"], "#F2F7FB"),
+    ("新幹線改札内 (PaleBlue 100)", ["新幹線改札内", "橙", "緑", "濃紅"], "#E5EFF7"),
+    ("施設 (Turquoise 150)", ["施設", "薄空", "濃空", "トイレ"], "#DDEBEC"),
+    ("進入制限エリア (Mono 050)", ["進入制限エリア", "薄鼠", "進入制限あり"], "#F2F2F2"),
+    ("階段・エスカレーター (Mono 000)", ["階段・エスカレーター", "白"], "#FFFFFF"),
 ]
 
 # The operator-approved category table, typed out independently of the config: label, the categories a Shinjuku unit
 # layer draws as that area in the layer's own order, fill. vegetation is in no area.
 CATEGORY_CLASSES = [
-    ("改札外通路", ["ramp", "road", "walkway"], "#FFFFFF"),
-    ("在来線改札内", ["platform", "ramp_sta", "walkway_sta"], "#F2F7FB"),
+    ("改札外通路 (Mono 000)", ["ramp", "road", "walkway"], "#FFFFFF"),
+    ("在来線改札内 (PaleBlue 050)", ["platform", "ramp_sta", "walkway_sta"], "#F2F7FB"),
     (
-        "施設",
+        "施設 (Turquoise 150)",
         [
             "ATM",
             "accessible restroom",
@@ -53,7 +53,7 @@ CATEGORY_CLASSES = [
         "#DDEBEC",
     ),
     (
-        "進入制限エリア",
+        "進入制限エリア (Mono 050)",
         [
             "auditorium",
             "elevator",
@@ -67,7 +67,7 @@ CATEGORY_CLASSES = [
         ],
         "#F2F2F2",
     ),
-    ("階段・エスカレーター", ["escalator", "opentobelow", "stairs"], "#FFFFFF"),
+    ("階段・エスカレーター (Mono 000)", ["escalator", "opentobelow", "stairs"], "#FFFFFF"),
 ]
 
 
@@ -175,8 +175,8 @@ def test_tokyo_layer_becomes_six_classes_in_the_new_fills_outlined_in_the_border
         strokes = [layer for layer in symbol_layers(cls) if layer["type"] == "CIMSolidStroke"]
         assert len(strokes) == 1 and symbol_layers(cls)[0] is strokes[0], cls["label"]
         outlines.append((_hex(strokes[0]["color"]), strokes[0]["width"]))
-    # Widths are kept: 66 of Tokyo's 127 layers, this one among them, draw 白 at 0.7 pt.
-    assert outlines == [(OUTLINE, 0.3)] * 5 + [(OUTLINE, 0.7)]
+    # 66 of Tokyo's 127 layers, this one among them, drew 白 at 0.7 pt and the rest at 0.3 pt.
+    assert outlines == [(OUTLINE, 0.5)] * 6
     assert [(c.layer, c.field, c.outcome, c.classes_before, c.classes_after, c.kept) for c in changes] == [
         ("DemoSta_0_Space", "color2", "rewritten", 14, 6, ())
     ]
@@ -196,7 +196,7 @@ def test_unconverted_data_still_draws_because_each_class_lists_its_old_values(th
     retheme_document(doc, theme)
 
     assert [(cls["label"], values_of(cls), fills(cls)) for cls in classes_of(doc)] == [
-        ("在来線改札内", ["在来線改札内", "黄", "薄紅"], ["#F2F7FB"])
+        ("在来線改札内 (PaleBlue 050)", ["在来線改札内", "黄", "薄紅"], ["#F2F7FB"])
     ]
 
 
@@ -227,7 +227,7 @@ def test_a_unit_layer_keyed_on_category_becomes_five_area_classes_and_keeps_vege
     ]
     for cls in classes[:5]:
         assert [(layer["type"], layer.get("width")) for layer in symbol_layers(cls)] == [
-            ("CIMSolidStroke", 0.3),
+            ("CIMSolidStroke", 0.5),
             ("CIMSolidFill", None),
         ], cls["label"]
         assert _hex(symbol_layers(cls)[0]["color"]) == OUTLINE, cls["label"]
@@ -243,8 +243,8 @@ def test_a_category_class_matches_only_the_categories_the_layer_already_drew(the
     (change,) = retheme_document(doc, theme)
 
     assert [(cls["label"], values_of(cls)) for cls in classes_of(doc)] == [
-        ("改札外通路", ["walkway"]),
-        ("階段・エスカレーター", ["stairs"]),
+        ("改札外通路 (Mono 000)", ["walkway"]),
+        ("階段・エスカレーター (Mono 000)", ["stairs"]),
         ("plaza", ["plaza"]),
     ]
     assert change.kept == ("plaza",)
@@ -320,13 +320,13 @@ def test_category_classes_follow_the_symbol_rules_of_color2_classes(theme: Color
 
     by_label = {cls["label"]: cls for cls in classes_of(doc)}
     assert {label: cls["visible"] for label, cls in by_label.items()} == {
-        "改札外通路": False,
-        "施設": True,
-        "階段・エスカレーター": True,
+        "改札外通路 (Mono 000)": False,
+        "施設 (Turquoise 150)": True,
+        "階段・エスカレーター (Mono 000)": True,
     }
-    drawn = [layer for layer in symbol_layers(by_label["施設"]) if layer.get("enable") is not False]
+    drawn = [layer for layer in symbol_layers(by_label["施設 (Turquoise 150)"]) if layer.get("enable") is not False]
     assert [(layer["type"], _hex(layer["color"])) for layer in drawn] == [("CIMSolidStroke", OUTLINE), ("CIMSolidFill", "#DDEBEC")]
-    stairs = by_label["階段・エスカレーター"]
+    stairs = by_label["階段・エスカレーター (Mono 000)"]
     for layers in (symbol_layers(stairs), stairs["alternateSymbols"][0]["symbol"]["symbolLayers"]):
         assert [(layer["type"], _hex(layer["color"]), layer["color"]["values"][3]) for layer in layers] == [
             ("CIMSolidStroke", OUTLINE, 100),
@@ -361,9 +361,9 @@ def test_values_the_theme_does_not_know_keep_their_old_class_after_the_new_ones(
 
     classes = classes_of(doc)
     assert [(cls["label"], values_of(cls), fills(cls)) for cls in classes] == [
-        ("在来線改札内", ["在来線改札内", "黄", "薄紅"], ["#F2F7FB"]),
-        ("施設", ["施設", "薄空", "濃空", "トイレ"], ["#DDEBEC"]),
-        ("階段・エスカレーター", ["階段・エスカレーター", "白"], ["#FFFFFF"]),
+        ("在来線改札内 (PaleBlue 050)", ["在来線改札内", "黄", "薄紅"], ["#F2F7FB"]),
+        ("施設 (Turquoise 150)", ["施設", "薄空", "濃空", "トイレ"], ["#DDEBEC"]),
+        ("階段・エスカレーター (Mono 000)", ["階段・エスカレーター", "白"], ["#FFFFFF"]),
         ("赤", ["赤"], ["#FCFCE3"]),
         ("Blue", ["青"], ["#0000FF"]),
     ]
@@ -372,13 +372,13 @@ def test_values_the_theme_does_not_know_keep_their_old_class_after_the_new_ones(
     assert (change.classes_before, change.classes_after) == (5, 5)
 
 
-def test_an_added_outline_is_drawn_on_top_at_the_renderers_common_width(theme: ColorTheme) -> None:
+def test_every_outline_is_the_theme_width_and_an_added_one_is_drawn_on_top(theme: ColorTheme) -> None:
     doc = layer_doc(
         renderer(
             [
                 uv_class(["白"], "#FFFFFF", strokes=[]),
-                uv_class(["黄"], "#FCFCE3", strokes=[stroke(width=0.5)]),
-                uv_class(["薄空"], "#E5F8FF", strokes=[stroke(width=0.5)]),
+                uv_class(["黄"], "#FCFCE3", strokes=[stroke(width=0.7)]),
+                uv_class(["薄空"], "#E5F8FF", strokes=[stroke(width=0.7)]),
                 uv_class(["薄鼠"], "#E5E6E6", strokes=[stroke(width=0.3)]),
             ]
         ),
@@ -387,15 +387,16 @@ def test_an_added_outline_is_drawn_on_top_at_the_renderers_common_width(theme: C
 
     retheme_document(doc, theme)
 
-    stairs = next(cls for cls in classes_of(doc, 0) if cls["label"] == "階段・エスカレーター")
+    stairs = next(cls for cls in classes_of(doc, 0) if cls["label"] == "階段・エスカレーター (Mono 000)")
     first = symbol_layers(stairs)[0]
     assert (first["type"], first["width"], _hex(first["color"])) == ("CIMSolidStroke", 0.5, OUTLINE)
     assert [layer["type"] for layer in symbol_layers(stairs)] == ["CIMSolidStroke", "CIMSolidFill"]
-    restricted = next(cls for cls in classes_of(doc, 0) if cls["label"] == "進入制限エリア")
-    assert symbol_layers(restricted)[0]["width"] == 0.3
+    restricted = next(cls for cls in classes_of(doc, 0) if cls["label"] == "進入制限エリア (Mono 050)")
+    assert symbol_layers(restricted)[0]["width"] == 0.5
+    assert {symbol_layers(cls)[0]["width"] for cls in classes_of(doc, 0)} == {0.5}
     (lone,) = classes_of(doc, 1)
     assert [(layer["type"], layer.get("width")) for layer in symbol_layers(lone)] == [
-        ("CIMSolidStroke", 0.3),
+        ("CIMSolidStroke", 0.5),
         ("CIMSolidFill", None),
     ]
 
@@ -441,17 +442,17 @@ def test_a_fully_transparent_fill_or_outline_comes_back_opaque_and_a_tinted_one_
     retheme_document(doc, theme)
 
     by_label = {cls["label"]: cls for cls in classes_of(doc)}
-    assert [layer["color"]["values"][3] for layer in symbol_layers(by_label["施設"])] == [100, 100]
-    assert symbol_layers(by_label["在来線改札内"])[-1]["color"]["values"][3] == 40
+    assert [layer["color"]["values"][3] for layer in symbol_layers(by_label["施設 (Turquoise 150)"])] == [100, 100]
+    assert symbol_layers(by_label["在来線改札内 (PaleBlue 050)"])[-1]["color"]["values"][3] == 40
 
 
-def test_a_switched_off_stroke_does_not_set_the_width_of_an_added_outline(theme: ColorTheme) -> None:
+def test_a_switched_off_stroke_keeps_its_width_and_the_added_outline_is_the_theme_width(theme: ColorTheme) -> None:
     doc = layer_doc(renderer([uv_class(["白"], "#FFFFFF", strokes=[{**stroke(width=10), "enable": False}])]))
 
     retheme_document(doc, theme)
 
     (stairs,) = classes_of(doc)
-    assert (symbol_layers(stairs)[0]["enable"], symbol_layers(stairs)[0]["width"]) == (True, 0.3)
+    assert [(layer["enable"], layer["width"]) for layer in symbol_layers(stairs)[:2]] == [(True, 0.5), (False, 10)]
 
 
 def test_a_merged_class_is_shown_when_any_class_it_replaces_was_shown(theme: ColorTheme) -> None:
@@ -461,7 +462,7 @@ def test_a_merged_class_is_shown_when_any_class_it_replaces_was_shown(theme: Col
 
     retheme_document(doc, theme)
 
-    assert {cls["label"]: cls["visible"] for cls in classes_of(doc)} == {"在来線改札内": True, "施設": False}
+    assert {cls["label"]: cls["visible"] for cls in classes_of(doc)} == {"在来線改札内 (PaleBlue 050)": True, "施設 (Turquoise 150)": False}
 
 
 def test_alternate_scale_symbols_are_redrawn_like_the_main_symbol(theme: ColorTheme) -> None:
@@ -503,8 +504,8 @@ def test_an_old_value_with_a_category_override_also_brings_the_class_its_overrid
 
     drawn = {cls["label"]: (values_of(cls), fills(cls)) for cls in classes_of(doc)}
     assert drawn == {
-        "改札外通路": (["改札外通路", "ラチ外白", "濃鼠", "道白"], ["#FFFFFF"]),
-        "施設": (["施設", "薄空", "濃空", "トイレ"], ["#DDEBEC"]),
+        "改札外通路 (Mono 000)": (["改札外通路", "ラチ外白", "濃鼠", "道白"], ["#FFFFFF"]),
+        "施設 (Turquoise 150)": (["施設", "薄空", "濃空", "トイレ"], ["#DDEBEC"]),
     }
 
 

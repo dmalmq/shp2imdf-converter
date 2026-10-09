@@ -834,8 +834,8 @@ function WhatComesBack({
       {formats.symbology ? (
         <p className={paragraph}>
           {t(
-            `Layer files (.lyrx) and projects (.aprx) come back with each layer coloured by ${field} redrawn: one class per new area, in its new fill, outlined in TurquoiseGray 1000. Each class also lists the old colours, so data not yet converted draws the same. Everything else in them stays as it was. One exception: an old 濃鼠 toilet (B007–B014) draws white until its data is converted.`,
-            `レイヤーファイル（.lyrx）とプロジェクト（.aprx）は、${field} で色分けした各レイヤーを描き直して戻ります。新エリアごとに 1 クラス、新しい塗りと TurquoiseGray 1000 の枠線です。各クラスは旧カラーも含むため、変換前のデータも同じ色で描かれます。ほかはそのままです。例外として、旧 濃鼠 のトイレ（B007–B014）はデータを変換するまで白で描かれます。`
+            `Layer files (.lyrx) and projects (.aprx) come back with each layer coloured by ${field} redrawn: one class per new area, in its new fill, outlined in TurquoiseGray 1000 at 0.5 pt and labelled with its colour name, as in 施設 (Turquoise 150). Each class also lists the old colours, so data not yet converted draws the same. Everything else in them stays as it was. One exception: an old 濃鼠 toilet (B007–B014) draws white until its data is converted.`,
+            `レイヤーファイル（.lyrx）とプロジェクト（.aprx）は、${field} で色分けした各レイヤーを描き直して戻ります。新エリアごとに 1 クラス、新しい塗りと TurquoiseGray 1000・0.5 pt の枠線で、凡例には「施設 (Turquoise 150)」のようにカラー名が付きます。各クラスは旧カラーも含むため、変換前のデータも同じ色で描かれます。ほかはそのままです。例外として、旧 濃鼠 のトイレ（B007–B014）はデータを変換するまで白で描かれます。`
           )}
         </p>
       ) : null}

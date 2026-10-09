@@ -68,6 +68,11 @@ class Area:
     spec: str
     hex: str
 
+    @property
+    def legend(self) -> str:
+        """How a class for this area is labelled in a legend: a symbol's colour cannot carry its spec name, a label can."""
+        return f"{self.value} ({self.spec})"
+
 
 @dataclass(frozen=True, slots=True)
 class Outline:

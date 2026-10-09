@@ -22,7 +22,6 @@ rebuild to themselves.
 
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Iterator, Mapping
 import copy
 import re
@@ -267,11 +266,12 @@ def _retheme(
     if not first:
         return left_alone("no_known_values")
 
-    width, stroke = _common_stroke(classes, theme.outline.width_pt)
+    width = theme.outline.width_pt
+    stroke = _template_stroke(classes, width)
     rebuilt = [
         _area_class(
             first[area.key].node,
-            area.value,
+            area.legend,
             tuple(matched[area.key]) if keying.listed is None else keying.listed[area.key],
             area.hex,
             theme.outline.hex,
@@ -334,24 +334,13 @@ def _colours_set_at_draw_time(renderer: dict[str, Any], classes: list[_Class]) -
     return False
 
 
-def _common_stroke(classes: list[_Class], fallback: float) -> tuple[float, dict[str, Any]]:
-    """The width most strokes in the renderer have (the first seen on a tie), and a stroke of that width to copy.
-
-    A renderer that draws no stroke at all gets one of the ``fallback`` width.
-    """
-    strokes = [
-        layer
-        for cls in classes
-        for layer in cls.node["symbol"]["symbol"]["symbolLayers"]
-        if isinstance(layer, dict)
-        and layer.get("type") == "CIMSolidStroke"
-        and layer.get("enable") is not False
-        and isinstance(layer.get("width"), (int, float))
-    ]
-    if not strokes:
-        return fallback, _stroke(fallback)
-    width = Counter(stroke["width"] for stroke in strokes).most_common(1)[0][0]
-    return width, next(stroke for stroke in strokes if stroke["width"] == width)
+def _template_stroke(classes: list[_Class], width: float) -> dict[str, Any]:
+    """The stroke a class without one is given: the renderer's first drawn stroke, for its cap and join, else Pro's."""
+    for cls in classes:
+        for layer in cls.node["symbol"]["symbol"]["symbolLayers"]:
+            if isinstance(layer, dict) and layer.get("type") == "CIMSolidStroke" and layer.get("enable") is not False:
+                return layer
+    return _stroke(width)
 
 
 def _area_class(
@@ -409,6 +398,8 @@ def _redrawn(reference: dict[str, Any], fill_hex: str, outline_hex: str, stroke:
             layer["color"] = _rgb(fill_hex, layer.get("color"))
         elif layer.get("type") == "CIMSolidStroke":
             layer["color"] = _rgb(outline_hex, layer.get("color"))
+            if layer.get("enable") is not False:
+                layer["width"] = width
     return symbol
 
 
@@ -478,7 +469,7 @@ def layer_document(theme: ColorTheme, style: LayerStyle, *, name: str, shapefile
                             "classes": [
                                 {
                                     "type": "CIMUniqueValueClass",
-                                    "label": item.area.value,
+                                    "label": item.area.legend,
                                     "patch": "Default",
                                     "symbol": _polygon_symbol(theme, item.area.hex),
                                     "values": [{"type": "CIMUniqueValue", "fieldValues": [value]} for value in item.values],

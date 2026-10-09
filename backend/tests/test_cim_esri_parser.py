@@ -23,12 +23,12 @@ CONFIG = Path(__file__).resolve().parents[1] / "config" / "color_theme.json"
 
 # label -> fill, typed out from the Figma New table.
 FILLS = [
-    ("改札外通路", "#FFFFFF"),
-    ("在来線改札内", "#F2F7FB"),
-    ("新幹線改札内", "#E5EFF7"),
-    ("施設", "#DDEBEC"),
-    ("進入制限エリア", "#F2F2F2"),
-    ("階段・エスカレーター", "#FFFFFF"),
+    ("改札外通路 (Mono 000)", "#FFFFFF"),
+    ("在来線改札内 (PaleBlue 050)", "#F2F7FB"),
+    ("新幹線改札内 (PaleBlue 100)", "#E5EFF7"),
+    ("施設 (Turquoise 150)", "#DDEBEC"),
+    ("進入制限エリア (Mono 050)", "#F2F2F2"),
+    ("階段・エスカレーター (Mono 000)", "#FFFFFF"),
 ]
 
 
@@ -95,11 +95,11 @@ def test_esri_reads_a_generated_category_layer_file_with_the_category_tables_cla
     ((layer),) = read["layers"]
     assert layer["fields"] == ["category"]
     assert [(cls["label"], cls["fill"], len(cls["values"])) for cls in layer["classes"]] == [
-        ("改札外通路", "#FFFFFF", 3),
-        ("在来線改札内", "#F2F7FB", 3),
-        ("施設", "#DDEBEC", 11),
-        ("進入制限エリア", "#F2F2F2", 9),
-        ("階段・エスカレーター", "#FFFFFF", 3),
+        ("改札外通路 (Mono 000)", "#FFFFFF", 3),
+        ("在来線改札内 (PaleBlue 050)", "#F2F7FB", 3),
+        ("施設 (Turquoise 150)", "#DDEBEC", 11),
+        ("進入制限エリア (Mono 050)", "#F2F2F2", 9),
+        ("階段・エスカレーター (Mono 000)", "#FFFFFF", 3),
     ]
     assert layer["classes"][4]["values"] == ["stairs", "escalator", "opentobelow"]
     assert layer["other"]["fill"] == "#D9D9D9"

@@ -20,7 +20,7 @@ def layer_style_xml(theme: ColorTheme, style: LayerStyle) -> str:
     symbols = []
     for index, item in enumerate(style.classes):
         values = "".join(f'<val type="string" value={quoteattr(value)}/>' for value in item.values)
-        categories.append(f'<category symbol="{index}" label={quoteattr(item.area.value)} render="true">{values}</category>')
+        categories.append(f'<category symbol="{index}" label={quoteattr(item.area.legend)} render="true">{values}</category>')
         symbols.append(_symbol(index, item.area.hex, theme))
     other = len(style.classes)
     # QGIS draws a value that matches no category with the category whose value is empty; without one such

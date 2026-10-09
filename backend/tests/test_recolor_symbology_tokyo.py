@@ -23,12 +23,12 @@ TOKYO = Path(os.getenv("TOKYO_APRX", "")) if os.getenv("TOKYO_APRX") else None
 CONFIG = Path(__file__).resolve().parents[1] / "config" / "color_theme.json"
 LIMIT = 1024 * 1024 * 1024
 FILLS = [
-    ("改札外通路", "#FFFFFF"),
-    ("在来線改札内", "#F2F7FB"),
-    ("新幹線改札内", "#E5EFF7"),
-    ("施設", "#DDEBEC"),
-    ("進入制限エリア", "#F2F2F2"),
-    ("階段・エスカレーター", "#FFFFFF"),
+    ("改札外通路 (Mono 000)", "#FFFFFF"),
+    ("在来線改札内 (PaleBlue 050)", "#F2F7FB"),
+    ("新幹線改札内 (PaleBlue 100)", "#E5EFF7"),
+    ("施設 (Turquoise 150)", "#DDEBEC"),
+    ("進入制限エリア (Mono 050)", "#F2F2F2"),
+    ("階段・エスカレーター (Mono 000)", "#FFFFFF"),
 ]
 
 pytestmark = [
@@ -37,7 +37,7 @@ pytestmark = [
 ]
 
 
-UNIT_LABELS = ["改札外通路", "在来線改札内", "施設", "進入制限エリア", "階段・エスカレーター", "vegetation"]
+UNIT_LABELS = ["改札外通路 (Mono 000)", "在来線改札内 (PaleBlue 050)", "施設 (Turquoise 150)", "進入制限エリア (Mono 050)", "階段・エスカレーター (Mono 000)", "vegetation"]
 
 
 def test_tokyo_project_has_its_127_color2_layers_and_2_unit_layers_rewritten_and_nothing_else(tmp_path: Path) -> None:

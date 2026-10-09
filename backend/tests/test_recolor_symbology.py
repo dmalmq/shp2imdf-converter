@@ -27,7 +27,7 @@ pytestmark = pytest.mark.colortheme
 
 CONFIG = Path(__file__).resolve().parents[1] / "config" / "color_theme.json"
 LIMIT = 64 * 1024 * 1024
-NEW_LABELS = ["改札外通路", "在来線改札内", "新幹線改札内", "施設", "進入制限エリア", "階段・エスカレーター"]
+NEW_LABELS = ["改札外通路 (Mono 000)", "在来線改札内 (PaleBlue 050)", "新幹線改札内 (PaleBlue 100)", "施設 (Turquoise 150)", "進入制限エリア (Mono 050)", "階段・エスカレーター (Mono 000)"]
 
 
 @pytest.fixture(scope="module")
@@ -150,7 +150,7 @@ def test_a_project_drawn_by_category_changes_only_its_unit_layers_and_a_second_r
             old_layer, new_layer = json.loads(old[4]), json.loads(new[4])
             assert _without_groups(new_layer) == _without_groups(old_layer)
             assert new_layer["renderer"]["fields"] == ["category"]
-            assert labels(new_layer) == ["改札外通路", "在来線改札内", "施設", "進入制限エリア", "階段・エスカレーター", "vegetation"]
+            assert labels(new_layer) == ["改札外通路 (Mono 000)", "在来線改札内 (PaleBlue 050)", "施設 (Turquoise 150)", "進入制限エリア (Mono 050)", "階段・エスカレーター (Mono 000)", "vegetation"]
     ((line),) = report.symbology
     assert [(r.layer, r.field, r.outcome, r.classes_before, r.classes_after, r.kept) for r in line.renderers] == [
         ("DemoSta_1_unit", "category", "rewritten", 30, 6, ("vegetation",)),
