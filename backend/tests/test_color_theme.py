@@ -44,6 +44,38 @@ FIGMA = {
 }
 NEW_VALUES = {"改札外通路", "在来線改札内", "新幹線改札内", "施設", "進入制限エリア", "階段・エスカレーター"}
 RESTROOMS = [f"B{n:03d}" for n in range(7, 15)]
+
+# The operator-approved category -> area table for stations drawn by category, typed out independently of the config.
+# written area name and fill -> the categories drawn as it
+CATEGORY_TABLE = {
+    ("改札外通路", "#FFFFFF"): ["walkway", "ramp", "road"],
+    ("在来線改札内", "#F2F7FB"): ["walkway_sta", "ramp_sta", "platform"],
+    ("施設", "#DDEBEC"): [
+        "store",
+        "store_sta",
+        "ATM",
+        "clinic",
+        "pharmacy",
+        "theater",
+        "ticket office",
+        "restroom.female",
+        "restroom.male",
+        "restroom.wheelchair",
+        "accessible restroom",
+    ],
+    ("進入制限エリア", "#F2F2F2"): [
+        "elevator",
+        "auditorium",
+        "information desk",
+        "mothersroom",
+        "nonpublic",
+        "smokingarea",
+        "unenclosedarea",
+        "unspecified",
+        "waitingroom",
+    ],
+    ("階段・エスカレーター", "#FFFFFF"): ["stairs", "escalator", "opentobelow"],
+}
 UTF8 = Encoding("utf-8", "cpg")
 
 
@@ -63,6 +95,18 @@ def test_every_old_value_maps_as_the_figma_table_says(theme: ColorTheme) -> None
     for old, expected in FIGMA.items():
         assert _written(theme, old, None) == expected, old
         assert _written(theme, old, "B999") == expected, old
+
+
+def test_every_category_is_drawn_as_the_area_the_operator_approved(theme: ColorTheme) -> None:
+    expected = {category: area for area, categories in CATEGORY_TABLE.items() for category in categories}
+    assert len(expected) == 29
+
+    assert {category: (area.value, area.hex) for category, area in theme.category_areas.items()} == expected
+
+
+@pytest.mark.parametrize("category", ["vegetation", "checkin.kiosk", "equipment", "Walkway", "atm", "B021", ""])
+def test_a_category_outside_the_table_has_no_area(theme: ColorTheme, category: str) -> None:
+    assert category not in theme.category_areas
 
 
 def test_dark_grey_on_a_restroom_becomes_facilities(theme: ColorTheme) -> None:
@@ -87,7 +131,12 @@ def test_the_written_vocabulary_is_the_six_area_names(theme: ColorTheme) -> None
 
 
 def test_layer_files_are_outlined_in_the_figma_border_colour(theme: ColorTheme) -> None:
-    assert (theme.outline.spec, theme.outline.hex) == ("TurquoiseGray 1000", "#657678")
+    assert (theme.outline.spec, theme.outline.hex, theme.outline.width_pt) == ("TurquoiseGray 1000", "#657678", 0.3)
+
+
+def test_an_unknown_value_is_drawn_in_a_grey_that_is_no_areas_fill(theme: ColorTheme) -> None:
+    assert (theme.other.label, theme.other.hex) == ("その他 (Other)", "#D9D9D9")
+    assert theme.other.hex not in {area.hex for area in theme.areas}
 
 
 @pytest.mark.parametrize(
@@ -134,6 +183,21 @@ BROKEN = {
     "empty override": lambda c: _rule(c, "濃鼠", override=True).update(categories=[]),
     "no outline": lambda c: c.pop("outline"),
     "bad outline colour": lambda c: c["outline"].update(hex="#65767"),
+    "no outline width": lambda c: c["outline"].pop("width_pt"),
+    "outline width of zero": lambda c: c["outline"].update(width_pt=0),
+    "outline width that is not a number": lambda c: c["outline"].update(width_pt="0.3"),
+    "no symbol for unknown values": lambda c: c.pop("other"),
+    "unknown values without a Japanese name": lambda c: c["other"]["name"].pop("ja"),
+    "no category table": lambda c: c.pop("category_areas"),
+    "category in an unknown area": lambda c: c["category_areas"][0].update(area="outside"),
+    "category in two areas": lambda c: c["category_areas"][1]["categories"].append("walkway"),
+    "category twice in one area": lambda c: c["category_areas"][0]["categories"].append("walkway"),
+    "area listed twice": lambda c: c["category_areas"].append({"area": "free_area", "categories": ["plaza"]}),
+    "unknown key in the category table": lambda c: c["category_areas"][0].update(catagories=["plaza"]),
+    "area without categories": lambda c: c["category_areas"][0].update(categories=[]),
+    "padded category": lambda c: c["category_areas"][0]["categories"].append("plaza "),
+    "category that is not text": lambda c: c["category_areas"][0]["categories"].append(7),
+    "one field for both tables": lambda c: c.update(category_field="COLOR2"),
 }
 
 

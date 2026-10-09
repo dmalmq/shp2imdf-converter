@@ -1,11 +1,16 @@
-"""The station colour theme: which old ``color2`` values become which area names, and what a dataset will see.
+"""The station colour theme: which old ``color2`` values, and which categories, become which areas.
 
 Format-neutral on purpose. Nothing here knows about DBF bytes, zips or GDAL: a
 layer is an id plus its decoded rows and its target field's width, and the
 answer is a report plus per-layer edits. ``recolor.py`` feeds it from
 shapefiles, and ``gdb.py`` from File Geodatabases, as the same ``LayerInput``s.
 Layer files and projects are rethemed by ``cim_symbology.py`` and only
-reported here.
+reported here. A station drawn by ``category`` has no ``color2`` to rewrite,
+so its data is never edited and only its renderers change.
+
+``colour_classes`` and ``category_classes`` are the one answer to "which
+values does an area's class match". The retheming of existing renderers and
+the style files written beside a shapefile both draw from them.
 
 ``load_color_theme`` checks the invariants once, at startup. The one that
 matters most: the old vocabulary and the written vocabulary are disjoint, so
@@ -16,7 +21,7 @@ second run changes nothing.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -37,7 +42,7 @@ SkipReason = Literal["field_not_text", "unreadable", "gdb_unavailable"]
 """``gdb_unavailable``: no Python with GDAL's ``osgeo`` was found, so a geodatabase cannot be edited."""
 
 RendererOutcome = Literal["rewritten", "already_new", "left_alone"]
-"""What retheming did to one unique-value renderer that names the field."""
+"""What retheming did to one unique-value renderer keyed on the field or the category field."""
 
 LeftAloneReason = Literal["several_fields", "expression", "not_polygon", "unrecognised", "no_known_values", "unreadable"]
 """Why a renderer that names the field was left as it was. ``unreadable``: an ``.aprx`` member that is not JSON."""
@@ -65,9 +70,24 @@ class Area:
 
 
 @dataclass(frozen=True, slots=True)
-class Swatch:
+class Outline:
     spec: str
     hex: str
+    width_pt: float
+    """The stroke width of a symbol this tool draws from nothing; a rethemed renderer keeps its own widths."""
+
+
+@dataclass(frozen=True, slots=True)
+class OtherSymbol:
+    """How a generated style draws a value the theme does not know, so that no feature goes undrawn."""
+
+    name: Bilingual
+    hex: str
+
+    @property
+    def label(self) -> str:
+        """One legend entry serves both languages, as the area names do."""
+        return f"{self.name.ja} ({self.name.en})"
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,12 +112,18 @@ class OldValue:
 class ColorTheme:
     field: str
     category_field: str
-    outline: Swatch
-    """The Figma 枠線 colour every area is outlined in, in layer files and projects."""
+    outline: Outline
+    """The Figma 枠線 colour every area is outlined in, in layer files, projects and style files."""
+    other: OtherSymbol
     areas: tuple[Area, ...]
     rules: tuple[Rule, ...]
     new_values: frozenset[str]
     by_old: Mapping[str, OldValue]
+    category_areas: Mapping[str, Area]
+    """The area a unit of this category is drawn as, where a layer is coloured by ``category_field`` alone.
+
+    In config order. A category that is absent keeps the symbol it has.
+    """
 
     def classify(self, value: str, category: str | None) -> Rule | Keep:
         """The rule that rewrites ``value``, or why it stays.
@@ -119,10 +145,12 @@ class ColorTheme:
 
 
 _HEX = re.compile(r"#[0-9A-Fa-f]{6}")
-_TOP_KEYS = {"source", "field", "category_field", "outline", "areas", "rules"}
-_SWATCH_KEYS = {"spec", "hex"}
+_TOP_KEYS = {"source", "field", "category_field", "outline", "other", "areas", "rules", "category_areas"}
+_OUTLINE_KEYS = {"spec", "hex", "width_pt"}
+_OTHER_KEYS = {"name", "hex"}
 _AREA_KEYS = {"key", "name", "value", "spec", "hex"}
 _RULE_KEYS = {"old", "old_hex", "scope", "area", "categories"}
+_CATEGORY_AREA_KEYS = {"area", "categories"}
 _BILINGUAL_KEYS = {"en", "ja"}
 
 
@@ -155,9 +183,17 @@ def _bilingual(value: Any, where: str) -> Bilingual:
     return Bilingual(en=_text(obj["en"], f"{where}.en"), ja=_text(obj["ja"], f"{where}.ja"))
 
 
-def _swatch(value: Any, where: str) -> Swatch:
-    obj = _keys(value, _SWATCH_KEYS, where)
-    return Swatch(spec=_text(obj["spec"], f"{where}.spec"), hex=_hex(obj["hex"], f"{where}.hex"))
+def _outline(value: Any, where: str) -> Outline:
+    obj = _keys(value, _OUTLINE_KEYS, where)
+    width = obj["width_pt"]
+    if isinstance(width, bool) or not isinstance(width, (int, float)) or width <= 0:
+        raise ValueError(f"{where}.width_pt must be a positive number of points")
+    return Outline(spec=_text(obj["spec"], f"{where}.spec"), hex=_hex(obj["hex"], f"{where}.hex"), width_pt=width)
+
+
+def _other(value: Any, where: str) -> OtherSymbol:
+    obj = _keys(value, _OTHER_KEYS, where)
+    return OtherSymbol(name=_bilingual(obj["name"], f"{where}.name"), hex=_hex(obj["hex"], f"{where}.hex"))
 
 
 def load_color_theme(path: Path) -> ColorTheme:
@@ -225,15 +261,97 @@ def load_color_theme(path: Path) -> ColorTheme:
     new_values = frozenset(written)
     if clash := sorted(new_values & set(by_old)):
         raise ValueError(f"Written values must not also be old values (a second run would rewrite them): {', '.join(clash)}")
+
+    category_areas: dict[str, Area] = {}
+    listed: set[str] = set()
+    for index, item in enumerate(raw["category_areas"]):
+        where = f"category_areas[{index}]"
+        obj = _keys(item, _CATEGORY_AREA_KEYS, where)
+        area_key = obj["area"]
+        if area_key not in areas:
+            raise ValueError(f"{where} names unknown area {area_key!r}")
+        if area_key in listed:
+            raise ValueError(f"{where}: area {area_key!r} is listed twice")
+        listed.add(area_key)
+        categories = obj["categories"]
+        if not isinstance(categories, list) or not categories:
+            raise ValueError(f"{where}.categories must be a non-empty list")
+        for category in categories:
+            if _text(category, f"{where}.categories") in category_areas:
+                raise ValueError(f"{where}: category {category!r} is listed twice")
+            category_areas[category] = areas[area_key]
+
+    field = _text(raw["field"], "field")
+    category_field = _text(raw["category_field"], "category_field")
+    if field.casefold() == category_field.casefold():
+        # A renderer keyed on that one field would belong to both tables.
+        raise ValueError(f"field and category_field must differ, both are {field!r}")
     return ColorTheme(
-        field=_text(raw["field"], "field"),
-        category_field=_text(raw["category_field"], "category_field"),
-        outline=_swatch(raw["outline"], "outline"),
+        field=field,
+        category_field=category_field,
+        outline=_outline(raw["outline"], "outline"),
+        other=_other(raw["other"], "other"),
         areas=tuple(areas.values()),
         rules=tuple(rules),
         new_values=new_values,
         by_old=MappingProxyType(by_old),
+        category_areas=MappingProxyType(category_areas),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class AreaClass:
+    """One class of a renderer: the area it draws and the field values that select it."""
+
+    area: Area
+    values: tuple[str, ...]
+
+
+def colour_classes(theme: ColorTheme) -> tuple[AreaClass, ...]:
+    """A class per area for a renderer on the colour field, in theme order.
+
+    Each lists the area's written value and then every old value whose
+    default rule maps to it, so one renderer draws data before and after it
+    is converted. A category override is not a value of the field, so a row
+    it will convert draws as its default rule's area until then.
+    """
+    return tuple(
+        AreaClass(
+            area=area,
+            values=(area.value, *(rule.old for rule in theme.rules if rule.area is area and rule.categories is None)),
+        )
+        for area in theme.areas
+    )
+
+
+def category_classes(theme: ColorTheme) -> tuple[AreaClass, ...]:
+    """A class per area the category table draws, in theme order, each with its categories in table order."""
+    drawn_as: dict[AreaKey, list[str]] = {}
+    for category, area in theme.category_areas.items():
+        drawn_as.setdefault(area.key, []).append(category)
+    return tuple(AreaClass(area=area, values=tuple(drawn_as[area.key])) for area in theme.areas if area.key in drawn_as)
+
+
+@dataclass(frozen=True, slots=True)
+class LayerStyle:
+    """How a style file written beside a polygon shapefile classes it."""
+
+    field: str
+    classes: tuple[AreaClass, ...]
+
+
+def layer_style(theme: ColorTheme, *, has_field: bool, categories: Iterable[str] | None) -> LayerStyle | None:
+    """The style for a table: by the colour field where it has one, else by a category the table knows.
+
+    ``categories`` are the table's category values, or None without a text
+    category field; they are only read when the colour field is absent.
+    None when the theme has nothing to colour the layer by.
+    """
+    if has_field:
+        return LayerStyle(field=theme.field, classes=colour_classes(theme))
+    if categories is not None and any(category in theme.category_areas for category in categories):
+        return LayerStyle(field=theme.category_field, classes=category_classes(theme))
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,10 +443,12 @@ class SkippedLine:
 
 @dataclass(frozen=True, slots=True)
 class RendererChange:
-    """One unique-value renderer in a layer file or project that names the field."""
+    """One unique-value renderer in a layer file or project that this tool takes up."""
 
     layer: str | None
     """The enclosing layer's name; the member's path when an ``.aprx`` member could not be parsed."""
+    field: str | None
+    """The theme field the renderer is keyed on: the colour field or the category field. None for an unparsed member."""
     outcome: RendererOutcome
     reason: LeftAloneReason | None
     """Set exactly when ``outcome`` is ``left_alone``."""
@@ -344,6 +464,19 @@ SymbologyKind = Literal["lyrx", "aprx"]
 
 
 @dataclass(frozen=True, slots=True)
+class CategoryAreaLine:
+    """One area of the category table, for the page to show beside the colour table."""
+
+    area: AreaKey
+    area_name: Bilingual
+    value: str
+    """The area's written value, which labels its class."""
+    spec: str
+    hex: str
+    categories: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class SymbologyLine:
     """One ``.lyrx`` or ``.aprx`` in the upload. An unreadable file comes back untouched."""
 
@@ -351,12 +484,38 @@ class SymbologyLine:
     kind: SymbologyKind
     unreadable: bool
     renderers: tuple[RendererChange, ...]
-    """Only renderers that name the field; renderers keyed on other fields are not listed."""
+    """Renderers that name the colour field, and polygon renderers keyed on the category field alone that hold
+    a category the theme knows. Other renderers are not listed."""
+
+
+StyleKind = Literal["qml", "lyrx"]
+"""A QGIS layer style, loaded with the shapefile of the same name, or an ArcGIS Pro layer file pointing at it."""
+
+StyleOutcome = Literal["added", "kept"]
+"""``kept``: the upload already holds a file of that name, which comes back instead of a generated one."""
+
+
+@dataclass(frozen=True, slots=True)
+class StyleFileLine:
+    """One style file beside a polygon shapefile the theme can colour."""
+
+    path: str
+    kind: StyleKind
+    layer: str
+    """The shapefile it styles, as a path inside the upload."""
+    field: str
+    """The field its renderer is keyed on: the colour field or the category field."""
+    classes: tuple[AreaKey, ...]
+    """The areas it draws, one class each, in theme order. Any other value draws as the theme's ``other`` symbol."""
+    outcome: StyleOutcome
 
 
 @dataclass(frozen=True, slots=True)
 class ThemeReport:
     field: str
+    category_field: str
+    category_areas: tuple[CategoryAreaLine, ...]
+    """The category table: each area that categories are drawn as, in theme order."""
     rules: tuple[RuleLine, ...]
     unmapped: tuple[UnmappedLine, ...]
     """Most rows first."""
@@ -364,6 +523,8 @@ class ThemeReport:
     skipped: tuple[SkippedLine, ...]
     totals: Counts
     symbology: tuple[SymbologyLine, ...]
+    style_files: tuple[StyleFileLine, ...]
+    """What asking for style files adds, and the files of those names the upload already has."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -395,7 +556,10 @@ def _fits(value: str, layer: LayerInput) -> bool:
 
 
 def plan(
-    theme: ColorTheme, layers: Sequence[LayerInput | SkippedLayer], symbology: Sequence[SymbologyLine] = ()
+    theme: ColorTheme,
+    layers: Sequence[LayerInput | SkippedLayer],
+    symbology: Sequence[SymbologyLine] = (),
+    style_files: Sequence[StyleFileLine] = (),
 ) -> ThemePlan:
     """Classify every row of every layer once; the report and the edits come from that one pass.
 
@@ -452,6 +616,18 @@ def plan(
 
     report = ThemeReport(
         field=theme.field,
+        category_field=theme.category_field,
+        category_areas=tuple(
+            CategoryAreaLine(
+                area=item.area.key,
+                area_name=item.area.name,
+                value=item.area.value,
+                spec=item.area.spec,
+                hex=item.area.hex,
+                categories=item.values,
+            )
+            for item in category_classes(theme)
+        ),
         rules=tuple(
             RuleLine(
                 rule=rule.id,
@@ -477,5 +653,6 @@ def plan(
         skipped=tuple(skipped),
         totals=_counts(totals),
         symbology=tuple(symbology),
+        style_files=tuple(style_files),
     )
     return ThemePlan(report=report, edits=MappingProxyType(edits))

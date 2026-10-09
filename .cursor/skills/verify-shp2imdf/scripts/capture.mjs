@@ -302,9 +302,12 @@ async function captureIllustratorFlow(page, shoot, artwork) {
 // checked page shows every kind of row it has. The zip's stem is the station
 // name the page reports. The geodatabase, when this machine has a GDAL Python
 // to build it, is then dropped as a second station and converted for real.
-// Last comes a zip of a layer file and a project, which shows the Symbology
-// section with a kept value and an Arcade renderer left alone.
-async function captureColorThemeFlow(page, shoot, zip, gdbZip, layersZip) {
+// Then comes a zip of a layer file and two projects, which shows the Symbology
+// section with a kept value, an Arcade renderer left alone and unit layers
+// coloured by category. Last is a station with category and no color2: nothing
+// to rewrite, the summary saying where its colours live, and a download that
+// holds only what the style files option adds.
+async function captureColorThemeFlow(page, shoot, zip, gdbZip, layersZip, categoryZip) {
   await gotoHub(page);
   await page.getByRole("button", { name: /Recolour a station/ }).scrollIntoViewIfNeeded();
   await shoot("color-theme-hub");
@@ -314,10 +317,39 @@ async function captureColorThemeFlow(page, shoot, zip, gdbZip, layersZip) {
   await shoot("color-theme-empty");
 
   await checkAndDownloadStation(page, shoot, zip, "color-theme");
+  // Below the rule table: the option, on by default, and the two Space layers it adds a .qml and a .lyrx beside.
+  const styleFiles = page.getByRole("region", { name: "Style files" });
+  await styleFiles.scrollIntoViewIfNeeded();
+  await shoot("color-theme-styles");
   if (gdbZip) await checkAndDownloadStation(page, shoot, gdbZip, "color-theme-gdb");
   // The rule table fills the viewport, so the Symbology section is scrolled to.
   const symbology = page.getByRole("region", { name: "Symbology" });
   await checkAndDownloadStation(page, shoot, layersZip, "color-theme-symbology", symbology);
+
+  await page.locator('[data-testid="color-theme-zip-input"]').setInputFiles(categoryZip);
+  const heading = page.getByRole("heading", { name: `Recolour ${path.basename(categoryZip, ".zip")}`, level: 1 });
+  await heading.waitFor({ timeout: 60000 });
+  const summary = page.getByRole("region", { name: "What this station gets" });
+  await summary.getByText(/coloured by category in its layer file or project/).waitFor({ timeout: 15000 });
+  // The page is still scrolled to the previous station's Symbology section.
+  await heading.evaluate((element) => element.scrollIntoView({ block: "end" }));
+  await shoot("color-theme-category-checked");
+
+  // No data changes, yet there is a download: the style files for its two unit layers. Switched off, there is none.
+  const bar = page.getByRole("region", { name: "Next step" });
+  await bar.getByText("4 style files are added").waitFor({ timeout: 15000 });
+  await styleFiles.scrollIntoViewIfNeeded();
+  await shoot("color-theme-category-styles");
+  const option = styleFiles.getByRole("checkbox", { name: /Add style files for QGIS and ArcGIS Pro/ });
+  await option.click();
+  await bar.getByText("Nothing to change").waitFor({ timeout: 15000 });
+  await shoot("color-theme-category-styles-off");
+  await option.click();
+  const download = page.waitForEvent("download", { timeout: 60000 });
+  await bar.getByRole("button", { name: "Download", exact: true }).click();
+  await download;
+  await page.getByText(`Downloaded ${path.basename(categoryZip, ".zip")}_new-colors.zip`).waitFor({ timeout: 30000 });
+  await shoot("color-theme-category-delivered");
 }
 
 async function checkAndDownloadStation(page, shoot, zip, prefix, reveal = null) {
@@ -382,6 +414,7 @@ async function capture(options) {
   const station = writeFixture(options.out, "DemoSta_6677.zip", "backend.tests.color_theme_fixtures", "demo_station");
   const geodatabase = writeGeodatabaseFixture(options.out);
   const layerFiles = writeFixture(options.out, "DemoSta_layers.zip", "backend.tests.color_theme_fixtures", "demo_layer_files");
+  const categoryStation = writeFixture(options.out, "DemoUnits_6677.zip", "backend.tests.color_theme_fixtures", "demo_category_station");
   const manifest = [];
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: true });
@@ -391,7 +424,7 @@ async function capture(options) {
     for (const flow of [
       (page, shoot) => captureShapefileFlow(page, shoot),
       (page, shoot) => captureIllustratorFlow(page, shoot, artwork),
-      (page, shoot) => captureColorThemeFlow(page, shoot, station, geodatabase, layerFiles)
+      (page, shoot) => captureColorThemeFlow(page, shoot, station, geodatabase, layerFiles, categoryStation)
     ]) {
       const context = await browser.newContext({ viewport: VIEWPORT });
       await context.addInitScript(() => {

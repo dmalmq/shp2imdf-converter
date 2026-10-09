@@ -17,9 +17,14 @@ import {
   layerFilesInspection,
   layerFilesRerunInspection,
   rerunInspection,
+  shinjukuGeodatabaseInspection,
+  shinjukuProjectInspection,
+  shinjukuShapefileInspection,
+  styleFilesFor,
   TOKYO_GDB,
   tokyoGeodatabaseInspection,
-  tokyoInspection
+  tokyoInspection,
+  tokyoStyledInspection
 } from "../lib/colorTheme.fixtures";
 import { useAppStore } from "../store/useAppStore";
 import { ColorThemePage } from "./ColorThemePage";
@@ -87,6 +92,23 @@ test("shows the whole mapping before anything is uploaded", async () => {
   expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
 });
 
+test("the category table is shown before anything is uploaded, an area and its categories to a row", async () => {
+  renderPage();
+  const categories = await screen.findByRole("table", { name: "How layers coloured by category are redrawn" });
+
+  const rows = within(categories).getAllByRole("row").slice(1);
+  expect(rows.map((row) => within(row).getByRole("rowheader").textContent)).toEqual([
+    "改札外通路Free area outside the gates · Mono 000",
+    "在来線改札内Paid area, conventional lines · PaleBlue 050",
+    "施設Facilities · Turquoise 150",
+    "進入制限エリアRestricted area · Mono 050",
+    "階段・エスカレーターStairs and escalators · Mono 000"
+  ]);
+  expect(within(rows[0]).getByRole("cell")).toHaveTextContent("walkway, ramp, road");
+  expect(within(rows[4]).getByRole("cell")).toHaveTextContent("stairs, escalator, opentobelow");
+  expect(categories).not.toHaveTextContent("vegetation");
+});
+
 test("in Japanese each rule names its new area once, as the value written", async () => {
   useAppStore.setState({ uiLanguage: "ja" });
   renderPage();
@@ -131,7 +153,9 @@ test("layer files and projects are listed layer by layer, with what was left alo
   await screen.findByRole("table", { name: "How color2 changes" });
   expect((screen.getByTestId("color-theme-zip-input") as HTMLInputElement).accept).toBe(".zip,.lyrx,.aprx");
 
-  pickFolder([inFolder("DemoSta_0_Space.lyrx", "DemoSta_layers"), inFolder("DemoSta.aprx", "DemoSta_layers")]);
+  pickFolder(
+    ["DemoSta_0_Space.lyrx", "DemoSta.aprx", "DemoSta_units.aprx"].map((name) => inFolder(name, "DemoSta_layers"))
+  );
 
   await screen.findByRole("heading", { level: 1, name: "Recolour DemoSta_layers" });
   expect(within(table()).queryByRole("columnheader", { name: "Rows" })).toBeNull();
@@ -142,9 +166,25 @@ test("layer files and projects are listed layer by layer, with what was left alo
   const row = (layer: string, index = 0) => within(symbology).getAllByText(layer)[index].closest("tr") as HTMLElement;
   expect(Array.from(row("DemoSta_1_Space").children, (cell) => cell.textContent)).toEqual([
     "DemoSta_1_Space",
+    "color2",
     "15 → 7",
     "",
     "RedrawnKept as it was: 赤"
+  ]);
+  expect(symbology).toHaveTextContent("DemoSta_layers/DemoSta_units.aprxProject2 redrawn");
+  expect(Array.from(row("DemoSta_1_unit").children, (cell) => cell.textContent)).toEqual([
+    "DemoSta_1_unit",
+    "category",
+    "30 → 6",
+    "",
+    "RedrawnKept as it was: vegetation"
+  ]);
+  expect(within(row("DemoSta_1_unit")).getAllByTitle(/·/).map((swatch) => swatch.title)).toEqual([
+    "改札外通路 · Mono 000",
+    "在来線改札内 · PaleBlue 050",
+    "施設 · Turquoise 150",
+    "進入制限エリア · Mono 050",
+    "階段・エスカレーター · Mono 000"
   ]);
   expect(within(row("DemoSta_1_Space")).getAllByTitle(/·/).map((swatch) => swatch.title)).toEqual([
     "改札外通路 · Mono 000",
@@ -159,17 +199,84 @@ test("layer files and projects are listed layer by layer, with what was left alo
   const attention = screen.getByRole("region", { name: "Needs attention" });
   expect(attention).toHaveTextContent("DemoSta_B1_SpaceDemoSta.aprx · Coloured by an Arcade expression on color2; left as it is");
   expect(attention).toHaveTextContent("DemoSta_1_SpaceDemoSta.aprx · not in the table, kept in its old class: 赤");
+  expect(attention).toHaveTextContent("2 layersDemoSta_units.aprx · not in the table, kept in their old classes: vegetation");
+  expect(within(attention).getAllByRole("listitem")).toHaveLength(3);
 
   const summary = screen.getByRole("region", { name: "What this station gets" });
-  expect(summary).toHaveTextContent("Layers redrawn3");
-  expect(summary).toHaveTextContent("Files back untouched0 / 2");
+  expect(summary).toHaveTextContent("Layers redrawn5");
+  expect(summary).toHaveTextContent("Files back untouched0 / 3");
+  expect(summary).not.toHaveTextContent(/No layer here has a color2 field/);
   const returns = screen.getByRole("region", { name: "What comes back" });
   expect(returns).toHaveTextContent(/Layer files \(\.lyrx\) and projects \(\.aprx\) come back with each layer coloured by color2 redrawn/);
   expect(returns).toHaveTextContent("an old 濃鼠 toilet (B007–B014) draws white until its data is converted");
+  expect(returns).toHaveTextContent(/A layer coloured by category alone, in a station with no color2, is redrawn too/);
   expect(returns).not.toHaveTextContent(/Shapefiles come back/);
   const next = screen.getByRole("region", { name: "Next step" });
-  expect(next).toHaveTextContent("3 layers are redrawn");
+  expect(next).toHaveTextContent("5 layers are redrawn");
   expect(within(next).getByRole("button", { name: "Download" })).toBeEnabled();
+});
+
+test("a project drawn by category reads as category layers: one line for the 58 that keep vegetation, and no color2 promise", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  renderPage();
+  pickFolder([new File(["x"], "shinjuku.aprx")]);
+
+  await screen.findByRole("heading", { level: 1, name: "Recolour shinjuku" });
+  const symbology = screen.getByRole("region", { name: "Symbology" });
+  expect(symbology).toHaveTextContent("shinjuku.aprxProject58 redrawn");
+  expect(within(symbology).getAllByRole("cell", { name: "category" })).toHaveLength(58);
+  expect(within(symbology).queryByRole("cell", { name: "color2" })).toBeNull();
+  const attention = screen.getByRole("region", { name: "Needs attention" });
+  expect(within(attention).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+    "58 layersshinjuku.aprx · not in the table, kept in their old classes: vegetation"
+  ]);
+  const returns = screen.getByRole("region", { name: "What comes back" });
+  expect(returns).toHaveTextContent(
+    "one class per new area its categories belong to, in the same fills and outline. Its data is not changed. A category that is not in the table keeps its own class and colour."
+  );
+  expect(returns).not.toHaveTextContent(/coloured by color2 redrawn/);
+  expect(returns).not.toHaveTextContent(/濃鼠/);
+  expect(screen.getByRole("region", { name: "Next step" })).toHaveTextContent("58 layers are redrawn");
+});
+
+test("a station with no color2 says so in the summary, and one drawn by category is told to drop its layer file or project", async () => {
+  const summary = () => screen.getByRole("region", { name: "What this station gets" });
+  const drawnByCategory =
+    "No layer here has a color2 field. This station is coloured by category in its layer file or project, so drop its .lyrx or .aprx to recolour it.";
+  const shinjuku = shinjukuGeodatabaseInspection();
+  vi.mocked(inspectColorTheme)
+    .mockResolvedValueOnce(shinjuku)
+    .mockResolvedValueOnce({ ...shinjuku, dataset: { ...shinjuku.dataset, name: "Plain", category_only_tables: 0 } })
+    .mockResolvedValueOnce(tokyoInspection());
+  renderPage();
+
+  pickFolder([inFolder("a00000001.gdbtable", "JRShinjukuSta.gdb")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRShinjukuSta" });
+  expect(summary()).toHaveTextContent("Changes0Layers0Left as is0Geodatabases1");
+  expect(summary()).toHaveTextContent(drawnByCategory);
+  expect(screen.getByRole("region", { name: "Next step" })).toHaveTextContent("Nothing to changeNo layer has a color2 field.");
+  expect(screen.getByRole("button", { name: "Download" })).toBeDisabled();
+
+  pickFolder([inFolder("a00000001.gdbtable", "Plain.gdb")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour Plain" });
+  expect(summary()).toHaveTextContent("No layer here has a color2 field, so there is nothing to rewrite.");
+  expect(summary()).not.toHaveTextContent(/coloured by category/);
+
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_6677" });
+  expect(summary()).not.toHaveTextContent(/No layer here has a color2 field/);
+});
+
+test("in Japanese a station drawn by category is told the same in two sentences", async () => {
+  useAppStore.setState({ uiLanguage: "ja" });
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuGeodatabaseInspection());
+  renderPage();
+  pickFolder([inFolder("a00000001.gdbtable", "JRShinjukuSta.gdb")]);
+
+  await screen.findByRole("heading", { level: 1, name: "JRShinjukuSta の色を新しくする" });
+  expect(screen.getByRole("region", { name: "この駅の変更内容" })).toHaveTextContent(
+    "color2 フィールドのあるレイヤーがありません。この駅はレイヤーファイルまたはプロジェクトで category により色分けされているため、.lyrx か .aprx をドロップして色を新しくしてください。"
+  );
 });
 
 test("layer files run a second time have nothing to download", async () => {
@@ -428,3 +535,123 @@ test("a failed check says why beside the drop area", async () => {
   expect(screen.getByRole("button", { name: "Choose folder" })).toBeInTheDocument();
 });
 
+
+const styleOption = () => screen.getByRole("checkbox", { name: /Add style files for QGIS and ArcGIS Pro/ });
+
+test("style files are on by default: the page counts them, lists their layers, and Download asks for them", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValue(tokyoStyledInspection());
+  vi.mocked(convertColorTheme).mockResolvedValue({ blob: new Blob(["zip"]), filename: "JRTokyoSta_6677_new-colors.zip" });
+  renderPage();
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf"), inFolder("JRTokyoSta_1_Space.shp")]);
+
+  const bar = await screen.findByRole("region", { name: "Next step" });
+  expect(styleOption()).toBeChecked();
+  expect(bar).toHaveTextContent("2,164 values change in 10 layers · 20 style files are added");
+  expect(screen.getByRole("region", { name: "What this station gets" })).toHaveTextContent("Style files added20");
+  const section = screen.getByRole("region", { name: "Style files" });
+  expect(section).toHaveTextContent("20 files beside 10 polygon layers");
+  expect(within(section).getAllByRole("row")[1]).toHaveTextContent("JRTokyoSta_6677.shp/JRTokyoSta_0_Space.shpcolor2.qml · .lyrx");
+  expect(within(within(section).getAllByRole("row")[1]).getAllByTitle(/ · /)).toHaveLength(6);
+
+  fireEvent.click(within(bar).getByRole("button", { name: "Download" }));
+  await waitFor(() => expect(saved).toEqual(["JRTokyoSta_6677_new-colors.zip"]));
+  expect(vi.mocked(convertColorTheme).mock.calls[0][1]).toMatchObject({ styleFiles: true });
+});
+
+test("with style files switched off the page promises none and Download asks for none", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValue(tokyoStyledInspection());
+  vi.mocked(convertColorTheme).mockResolvedValue({ blob: new Blob(["zip"]), filename: "JRTokyoSta_6677_new-colors.zip" });
+  renderPage();
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+  const bar = await screen.findByRole("region", { name: "Next step" });
+
+  fireEvent.click(styleOption());
+
+  expect(styleOption()).not.toBeChecked();
+  expect(bar).toHaveTextContent("2,164 values change in 10 layers");
+  expect(bar).not.toHaveTextContent(/style file/);
+  expect(screen.getByRole("region", { name: "What this station gets" })).not.toHaveTextContent(/Style files added/);
+  fireEvent.click(within(bar).getByRole("button", { name: "Download" }));
+  await waitFor(() => expect(saved).toHaveLength(1));
+  expect(vi.mocked(convertColorTheme).mock.calls[0][1]).toMatchObject({ styleFiles: false });
+});
+
+test("a shapefile station drawn by category can be downloaded for its style files, and not once they are switched off", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuShapefileInspection());
+  renderPage();
+  pickFolder([inFolder("JRShinjukuSta_1_unit.dbf", "JRShinjukuSta_6677")]);
+
+  const bar = await screen.findByRole("region", { name: "Next step" });
+  expect(bar).toHaveTextContent("4 style files are added");
+  expect(within(bar).getByRole("button", { name: "Download" })).toBeEnabled();
+  expect(screen.getByRole("region", { name: "What this station gets" })).toHaveTextContent(
+    "drop its .lyrx or .aprx to recolour it. The style files below still draw 2 polygon layers in the new colours."
+  );
+  const rows = within(screen.getByRole("region", { name: "Style files" })).getAllByRole("row");
+  expect(rows[1]).toHaveTextContent("JRShinjukuSta_1_unit.shpcategory.qml · .lyrx");
+  expect(within(rows[1]).getAllByTitle(/ · /)).toHaveLength(5);
+
+  fireEvent.click(styleOption());
+
+  expect(bar).toHaveTextContent("Nothing to changeNo layer has a color2 field.");
+  expect(within(bar).getByRole("button", { name: "Download" })).toBeDisabled();
+  expect(screen.getByRole("region", { name: "What this station gets" })).not.toHaveTextContent(/style files below/);
+});
+
+test("a style file the upload already has is shown as kept, and the option is off limits when none is left to add", async () => {
+  const [qml, lyrx] = styleFilesFor("st/1_Space.shp");
+  const mine = { ...qml, path: "st/1_SPACE.QML", outcome: "kept" as const };
+  const tokyo = tokyoInspection();
+  vi.mocked(inspectColorTheme)
+    .mockResolvedValueOnce({ ...tokyo, theme: { ...tokyo.theme, style_files: [mine, lyrx] } })
+    .mockResolvedValueOnce({
+      ...tokyo,
+      dataset: { ...tokyo.dataset, name: "Again" },
+      theme: { ...tokyo.theme, style_files: [mine, { ...lyrx, outcome: "kept" }] }
+    });
+  renderPage();
+
+  pickFolder([inFolder("1_Space.dbf", "st")]);
+  const section = await screen.findByRole("region", { name: "Style files" });
+  expect(section).toHaveTextContent("1 file beside 1 polygon layer");
+  expect(within(section).getAllByRole("row")[1]).toHaveTextContent(".lyrxAlready here, kept as it is: 1_SPACE.QML");
+
+  pickFolder([inFolder("1_Space.dbf", "Again")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour Again" });
+  expect(screen.getByRole("region", { name: "Style files" })).toHaveTextContent("Every layer here already has both style files");
+  expect(styleOption()).toBeDisabled();
+  expect(screen.getByRole("region", { name: "Next step" })).not.toHaveTextContent(/style file/);
+});
+
+test("the page says plainly that ArcGIS Pro drawing the layer file is unverified, before an upload and beside the option", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValue(tokyoStyledInspection());
+  renderPage();
+  const returns = await screen.findByRole("region", { name: "What comes back" });
+  expect(returns).toHaveTextContent("ArcGIS Pro drawing the .lyrx has not been verified.");
+
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+
+  const section = await screen.findByRole("region", { name: "Style files" });
+  expect(section).toHaveTextContent("ArcGIS Pro drawing the .lyrx has not been verified, so open one in Pro before you rely on it.");
+});
+
+test("a geodatabase, which gets no style files, shows neither the option nor its paragraph", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValue(tokyoGeodatabaseInspection());
+  renderPage();
+  pickFolder([inFolder("a00000001.gdbtable", TOKYO_GDB)]);
+
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_3857" });
+  expect(screen.queryByRole("region", { name: "Style files" })).not.toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "What comes back" })).not.toHaveTextContent(/style files/);
+});
+
+test("in Japanese the option and its count read in the page's idiom", async () => {
+  useAppStore.setState({ uiLanguage: "ja" });
+  vi.mocked(inspectColorTheme).mockResolvedValue(tokyoStyledInspection());
+  renderPage();
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+
+  expect(await screen.findByRole("checkbox", { name: /QGIS と ArcGIS Pro 用のスタイルファイルを追加/ })).toBeChecked();
+  expect(screen.getByRole("region", { name: "次のステップ" })).toHaveTextContent("スタイルファイル 20 個を追加します");
+  expect(screen.getByRole("region", { name: "スタイルファイル" })).toHaveTextContent("ArcGIS Pro で .lyrx が正しく描かれるかは未確認");
+});

@@ -1,4 +1,4 @@
-"""Retheming color2 unique-value renderers in CIM JSON: colours, classes, collateral damage and second runs."""
+"""Retheming color2 and category unique-value renderers in CIM JSON: colours, classes, collateral damage and second runs."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import pytest
 
 from backend.src.cim_symbology import retheme_document
 from backend.src.color_theme import ColorTheme, load_color_theme
+from backend.tests.color_theme_fixtures import FIXTURE_CLASSES, category_class, category_layer_definition
 
 pytestmark = pytest.mark.colortheme
 
@@ -29,6 +30,46 @@ NEW_CLASSES = [
     ("階段・エスカレーター", ["階段・エスカレーター", "白"], "#FFFFFF"),
 ]
 
+# The operator-approved category table, typed out independently of the config: label, the categories a Shinjuku unit
+# layer draws as that area in the layer's own order, fill. vegetation is in no area.
+CATEGORY_CLASSES = [
+    ("改札外通路", ["ramp", "road", "walkway"], "#FFFFFF"),
+    ("在来線改札内", ["platform", "ramp_sta", "walkway_sta"], "#F2F7FB"),
+    (
+        "施設",
+        [
+            "ATM",
+            "accessible restroom",
+            "clinic",
+            "pharmacy",
+            "restroom.female",
+            "restroom.male",
+            "restroom.wheelchair",
+            "store",
+            "store_sta",
+            "theater",
+            "ticket office",
+        ],
+        "#DDEBEC",
+    ),
+    (
+        "進入制限エリア",
+        [
+            "auditorium",
+            "elevator",
+            "information desk",
+            "mothersroom",
+            "nonpublic",
+            "smokingarea",
+            "unenclosedarea",
+            "unspecified",
+            "waitingroom",
+        ],
+        "#F2F2F2",
+    ),
+    ("階段・エスカレーター", ["escalator", "opentobelow", "stairs"], "#FFFFFF"),
+]
+
 
 @pytest.fixture(scope="module")
 def theme() -> ColorTheme:
@@ -37,6 +78,11 @@ def theme() -> ColorTheme:
 
 def tokyo_document() -> dict[str, Any]:
     return json.loads(TOKYO_LAYER.read_text(encoding="utf-8-sig"))
+
+
+def unit_document() -> dict[str, Any]:
+    """A Shinjuku unit layer: 30 classes keyed on category, one category each."""
+    return {"type": "CIMLayerDocument", "layerDefinitions": [category_layer_definition("DemoSta_1_unit")]}
 
 
 def _rgb(hex_colour: str) -> dict[str, Any]:
@@ -87,7 +133,13 @@ def layer_doc(*renderers: dict[str, Any]) -> dict[str, Any]:
         "type": "CIMLayerDocument",
         "version": "3.6.0",
         "layerDefinitions": [
-            {"type": "CIMFeatureLayer", "name": f"Layer{index}", "renderer": item} for index, item in enumerate(renderers)
+            {
+                "type": "CIMFeatureLayer",
+                "name": f"Layer{index}",
+                "featureTable": {"type": "CIMFeatureTable", "dataConnection": {"dataset": f"DemoSta_{index}_unit"}},
+                "renderer": item,
+            }
+            for index, item in enumerate(renderers)
         ],
     }
 
@@ -125,8 +177,8 @@ def test_tokyo_layer_becomes_six_classes_in_the_new_fills_outlined_in_the_border
         outlines.append((_hex(strokes[0]["color"]), strokes[0]["width"]))
     # Widths are kept: 66 of Tokyo's 127 layers, this one among them, draw 白 at 0.7 pt.
     assert outlines == [(OUTLINE, 0.3)] * 5 + [(OUTLINE, 0.7)]
-    assert [(c.layer, c.outcome, c.classes_before, c.classes_after, c.kept) for c in changes] == [
-        ("DemoSta_0_Space", "rewritten", 14, 6, ())
+    assert [(c.layer, c.field, c.outcome, c.classes_before, c.classes_after, c.kept) for c in changes] == [
+        ("DemoSta_0_Space", "color2", "rewritten", 14, 6, ())
     ]
     assert changes[0].areas == (
         "free_area",
@@ -162,8 +214,139 @@ def _mixed() -> dict[str, Any]:
     )
 
 
+def test_a_unit_layer_keyed_on_category_becomes_five_area_classes_and_keeps_vegetation(theme: ColorTheme) -> None:
+    doc = unit_document()
+    vegetation = copy.deepcopy(next(cls for cls in classes_of(doc) if cls["label"] == "vegetation"))
+    assert len(classes_of(doc)) == 30
+
+    (change,) = retheme_document(doc, theme)
+
+    classes = classes_of(doc)
+    assert [(cls["label"], values_of(cls), fills(cls)) for cls in classes[:5]] == [
+        (label, values, [fill]) for label, values, fill in CATEGORY_CLASSES
+    ]
+    for cls in classes[:5]:
+        assert [(layer["type"], layer.get("width")) for layer in symbol_layers(cls)] == [
+            ("CIMSolidStroke", 0.3),
+            ("CIMSolidFill", None),
+        ], cls["label"]
+        assert _hex(symbol_layers(cls)[0]["color"]) == OUTLINE, cls["label"]
+    assert classes[5:] == [vegetation]
+    assert (change.layer, change.field, change.outcome, change.reason) == ("DemoSta_1_unit", "category", "rewritten", None)
+    assert (change.classes_before, change.classes_after, change.kept) == (30, 6, ("vegetation",))
+    assert change.areas == ("free_area", "paid_area", "facilities", "restricted", "stairs_escalators")
+
+
+def test_a_category_class_matches_only_the_categories_the_layer_already_drew(theme: ColorTheme) -> None:
+    doc = layer_doc(renderer([uv_class(["walkway"], "#FFFFFF"), uv_class(["stairs", "plaza"], "#FFFFFF")], fields=["category"]))
+
+    (change,) = retheme_document(doc, theme)
+
+    assert [(cls["label"], values_of(cls)) for cls in classes_of(doc)] == [
+        ("改札外通路", ["walkway"]),
+        ("階段・エスカレーター", ["stairs"]),
+        ("plaza", ["plaza"]),
+    ]
+    assert change.kept == ("plaza",)
+
+
+def test_a_category_layer_that_is_not_a_unit_layer_is_neither_touched_nor_reported(theme: ColorTheme) -> None:
+    section = category_layer_definition("DemoSta_1_section", [("walkway", "#FFFFFF", "#C8C9CA"), ("platform", "#FFECE6", "#C8C9CA")])
+    by_dataset = category_layer_definition("1F 部屋", [("walkway", "#FFFFFF", "#C8C9CA")])
+    by_dataset["featureTable"] = {"type": "CIMFeatureTable", "dataConnection": {"type": "CIMStandardDataConnection", "dataset": "DemoSta_1_unit"}}
+    doc = {"type": "CIMLayerDocument", "layerDefinitions": [section, by_dataset]}
+    before = copy.deepcopy(section)
+
+    changes = retheme_document(doc, theme)
+
+    assert [(change.layer, change.outcome) for change in changes] == [("1F 部屋", "rewritten")]
+    assert doc["layerDefinitions"][0] == before
+
+
+def test_a_category_layer_the_table_knows_nothing_of_is_neither_touched_nor_reported(theme: ColorTheme) -> None:
+    fixture = category_layer_definition("DemoSta_1_fixture", FIXTURE_CLASSES)
+    amenity = category_layer_definition("DemoSta_1_amenity", [("elevator", "#E5E6E6", "#C8C9CA")])
+    amenity["renderer"]["groups"][0]["classes"][0]["symbol"]["symbol"]["type"] = "CIMPointSymbol"
+    by_floor = renderer([category_class("stairs", "#FFFFFF", "#C8C9CA")], fields=["category", "floor"])
+    arcade = renderer(
+        [category_class("stairs", "#FFFFFF", "#C8C9CA")],
+        fields=[],
+        valueExpressionInfo={"type": "CIMExpressionInfo", "expression": "$feature.category", "returnType": "Default"},
+    )
+    doc = {
+        "type": "CIMLayerDocument",
+        "layerDefinitions": [fixture, amenity, *layer_doc(by_floor, arcade)["layerDefinitions"]],
+    }
+    before = copy.deepcopy(doc)
+
+    changes = retheme_document(doc, theme)
+
+    assert doc == before
+    assert changes == []
+
+
+def test_category_names_under_color2_and_old_colours_under_category_are_not_rewritten(theme: ColorTheme) -> None:
+    categories_in_color2 = renderer([uv_class(["walkway"], "#FFFFFF"), uv_class(["stairs"], "#FFFFFF")])
+    colours_in_category = renderer([uv_class(["黄"], "#FCFCE3"), uv_class(["施設"], "#DDEBEC")], fields=["category"])
+    doc = layer_doc(categories_in_color2, colours_in_category)
+    before = copy.deepcopy(doc)
+
+    changes = retheme_document(doc, theme)
+
+    assert doc == before
+    assert [(c.layer, c.field, c.outcome, c.reason) for c in changes] == [("Layer0", "color2", "left_alone", "no_known_values")]
+
+
+def test_a_renderer_on_both_fields_is_reported_under_color2_and_left_alone(theme: ColorTheme) -> None:
+    doc = layer_doc(renderer([uv_class(["黄"], "#FCFCE3")], fields=["category", "color2"]))
+    before = copy.deepcopy(doc)
+
+    changes = retheme_document(doc, theme)
+
+    assert doc == before
+    assert [(c.field, c.outcome, c.reason) for c in changes] == [("color2", "left_alone", "several_fields")]
+
+
+def test_category_classes_follow_the_symbol_rules_of_color2_classes(theme: ColorTheme) -> None:
+    hidden_store = {**uv_class(["store"], "#E5F8FF", strokes=[{**stroke(), "enable": False}]), "visible": False}
+    clinic = uv_class(["clinic"], "#E5F8FF")
+    tinted_stairs = uv_class(["stairs"], "#FFFFFF", strokes=[])
+    symbol_layers(tinted_stairs)[-1]["color"]["values"][3] = 40
+    tinted_stairs["alternateSymbols"] = [copy.deepcopy(tinted_stairs["symbol"])]
+    hidden_road = {**uv_class(["road"], "#C8C9CA"), "visible": False}
+    doc = layer_doc(renderer([hidden_store, clinic, tinted_stairs, hidden_road], fields=["category"]))
+
+    retheme_document(doc, theme)
+
+    by_label = {cls["label"]: cls for cls in classes_of(doc)}
+    assert {label: cls["visible"] for label, cls in by_label.items()} == {
+        "改札外通路": False,
+        "施設": True,
+        "階段・エスカレーター": True,
+    }
+    drawn = [layer for layer in symbol_layers(by_label["施設"]) if layer.get("enable") is not False]
+    assert [(layer["type"], _hex(layer["color"])) for layer in drawn] == [("CIMSolidStroke", OUTLINE), ("CIMSolidFill", "#DDEBEC")]
+    stairs = by_label["階段・エスカレーター"]
+    for layers in (symbol_layers(stairs), stairs["alternateSymbols"][0]["symbol"]["symbolLayers"]):
+        assert [(layer["type"], _hex(layer["color"]), layer["color"]["values"][3]) for layer in layers] == [
+            ("CIMSolidStroke", OUTLINE, 100),
+            ("CIMSolidFill", "#FFFFFF", 40),
+        ]
+
+
+def test_a_category_layer_whose_colours_are_overridden_at_draw_time_is_reported_and_left_alone(theme: ColorTheme) -> None:
+    doc = unit_document()
+    doc["layerDefinitions"][0]["renderer"]["visualVariables"] = [{"type": "CIMColorVisualVariable"}]
+    before = copy.deepcopy(doc)
+
+    changes = retheme_document(doc, theme)
+
+    assert doc == before
+    assert [(c.field, c.outcome, c.reason, c.classes_after) for c in changes] == [("category", "left_alone", "unrecognised", 30)]
+
+
 def test_each_value_is_matched_by_exactly_one_class(theme: ColorTheme) -> None:
-    for doc in (tokyo_document(), _mixed()):
+    for doc in (tokyo_document(), _mixed(), unit_document()):
         retheme_document(doc, theme)
 
         counts = Counter(value for cls in classes_of(doc) for value in values_of(cls))
@@ -334,12 +517,12 @@ def _without_classes(doc: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_nothing_outside_the_rewritten_classes_changes(theme: ColorTheme) -> None:
-    doc = tokyo_document()
-    before = _without_classes(doc)
+    for doc in (tokyo_document(), unit_document()):
+        before = _without_classes(doc)
 
-    retheme_document(doc, theme)
+        retheme_document(doc, theme)
 
-    assert _without_classes(doc) == before
+        assert _without_classes(doc) == before
 
 
 def test_renderers_on_other_fields_or_with_several_fields_or_arcade_are_left_alone(theme: ColorTheme) -> None:
@@ -377,7 +560,7 @@ def test_a_renderer_that_knows_no_theme_value_or_draws_points_is_left_alone(them
 
 
 def test_a_second_pass_changes_nothing(theme: ColorTheme) -> None:
-    for doc in (tokyo_document(), _mixed()):
+    for doc in (tokyo_document(), _mixed(), unit_document()):
         retheme_document(doc, theme)
         once = copy.deepcopy(doc)
 

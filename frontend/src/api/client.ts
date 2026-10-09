@@ -647,8 +647,23 @@ export type ColorThemeLayer = {
   counts: ColorThemeCounts;
 };
 
+/** One area of the category table: the categories a layer coloured by `category_field` alone draws as it. */
+export type ColorThemeCategoryArea = {
+  area: string;
+  area_name: Bilingual;
+  /** The area's written value, which labels its class. */
+  value: string;
+  spec: string;
+  hex: string;
+  categories: string[];
+};
+
 export type ColorThemeReport = {
   field: string;
+  /** A station with no `field` is coloured by this one, in its layer file or project. */
+  category_field: string;
+  /** Areas in theme order; an area no category is drawn as is absent. */
+  category_areas: ColorThemeCategoryArea[];
   /** Every rule in config order, those no row matched included. */
   rules: ColorThemeRule[];
   /** Values no rule knows, most rows first. */
@@ -662,12 +677,33 @@ export type ColorThemeReport = {
   totals: ColorThemeCounts;
   /** Every `.lyrx` and `.aprx` in the upload, in upload order. */
   symbology: ColorThemeSymbologyFile[];
+  /** The style files a download can carry, two per polygon shapefile the theme can colour, in upload order. */
+  style_files: ColorThemeStyleFile[];
 };
 
-/** One unique-value renderer that names the field. Renderers keyed on other fields are not listed. */
+/** A QGIS `.qml` or an ArcGIS Pro `.lyrx` beside one polygon shapefile. */
+export type ColorThemeStyleFile = {
+  path: string;
+  kind: "qml" | "lyrx";
+  /** The shapefile it styles, as a path inside the upload. */
+  layer: string;
+  /** The field its renderer is keyed on, `field` or `category_field`. */
+  field: string;
+  /** Area keys it draws, one class each, in theme order. */
+  classes: string[];
+  /** "kept": the upload already has a file of that name, which comes back instead of a generated one. */
+  outcome: "added" | "kept";
+};
+
+/**
+ * One unique-value renderer the tool takes up: it names `field`, or it draws polygons, is keyed on
+ * `category_field` alone and holds a category in the table. Other renderers are not listed.
+ */
 export type ColorThemeRenderer = {
   /** The layer's name; an `.aprx` member's path when the member is not JSON. */
   layer: string | null;
+  /** The field it is keyed on, `field` or `category_field`; null for a member that is not JSON. */
+  field: string | null;
   outcome: "rewritten" | "already_new" | "left_alone";
   /** Set exactly when `outcome` is "left_alone". */
   reason: "several_fields" | "expression" | "not_polygon" | "unrecognised" | "no_known_values" | "unreadable" | null;
@@ -697,6 +733,10 @@ export type ColorThemeInspection = {
     geodatabases: number;
     /** Stale `*.lock` files inside a `.gdb` that reached the server (in a zip) and are left out of the download. */
     lock_files_dropped: number;
+    /** Attribute tables read: each shapefile `.dbf` and each geodatabase feature class or table. */
+    tables: number;
+    /** Of those, the ones with `category_field` and without `field`. */
+    category_only_tables: number;
   };
   theme: ColorThemeReport;
 };
@@ -713,8 +753,14 @@ export function inspectColorTheme(files: DatasetFile[], options: SendFormOptions
   return sendForm<ColorThemeInspection>("/api/color-theme/inspect", datasetForm(files), options);
 }
 
-export function convertColorTheme(files: DatasetFile[], options: SendFormOptions): Promise<ExportArchiveResponse> {
-  return sendForm("/api/color-theme/convert", datasetForm(files), { ...options, download: "new-colors.zip" });
+/** `styleFiles` adds the inspection's "added" style files to the zip; without it the zip holds the upload's files only. */
+export function convertColorTheme(
+  files: DatasetFile[],
+  { styleFiles, ...options }: SendFormOptions & { styleFiles: boolean }
+): Promise<ExportArchiveResponse> {
+  const form = datasetForm(files);
+  form.append("style_files", String(styleFiles));
+  return sendForm("/api/color-theme/convert", form, { ...options, download: "new-colors.zip" });
 }
 
 /** Multipart names carry no folders, so each file's path travels beside it, pairwise. */

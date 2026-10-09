@@ -60,7 +60,7 @@ slice of the suite:
 pytest -m phase3     # wizard mapping (mapper, config, generation setup)
 pytest -m phase5     # validation and export (converter, validator, autofix)
 pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
-pytest -m colortheme # station colour theme (table, DBF patch, upload tree, geodatabases)
+pytest -m colortheme # station colour theme (tables, DBF patch, upload tree, geodatabases, symbology)
 ```
 
 `phase0` generates test fixtures; `phase1`–`phase6` run foundation → polish.
@@ -71,7 +71,7 @@ pytest -m colortheme # station colour theme (table, DBF patch, upload tree, geod
 |---|---|
 | `backend/routers/` | FastAPI route modules |
 | `backend/src/` | Conversion core: detection, mapping, generation, validation |
-| `backend/src/color_theme.py`, `dbf_table.py`, `recolor.py`, `gdb.py`, `gdb_worker.py`, `cim_symbology.py` | Station colour-theme tool: the old → new table, DBF byte patch, upload tree, File Geodatabase worker, ArcGIS Pro symbology |
+| `backend/src/color_theme.py`, `dbf_table.py`, `recolor.py`, `gdb.py`, `gdb_worker.py`, `cim_symbology.py`, `qgis_style.py` | Station colour-theme tool: the old → new table, DBF byte patch, upload tree, File Geodatabase worker, ArcGIS Pro symbology, QGIS and ArcGIS Pro style files |
 | `backend/config/` | Server-side configuration |
 | `backend/tests/` | pytest suite (phase-marked) |
 | `frontend/src/` | React wizard, map view, table view |
@@ -171,3 +171,39 @@ pytest -m colortheme # station colour theme (table, DBF patch, upload tree, geod
   licence (`backend/tests/esri_cim.py`), but it accepts unknown properties and a value
   in two classes, so it proves parsing, not rendering. `TOKYO_APRX` points the
   real-data test at a copy of the station project.
+  Stations from the Revit/IMDF pipeline (Shinjuku, Ikebukuro) have no `color2`: their
+  `unit` layers are drawn by a unique-value renderer on `category`. The theme's second
+  table, `category_areas`, maps category to area for exactly that case, and the same
+  rewrite runs from it (`_Keying` in `cim_symbology.py`; do not fork a second path).
+  Three things differ on purpose. The data is never edited, so a class lists only the
+  categories the renderer already drew and no written value. A category outside the
+  table (`vegetation`) keeps its class and is reported. And a `category` renderer is
+  taken up only when it is keyed on that field alone, draws polygons and holds a known
+  category, otherwise it is neither touched nor reported: fixture and amenity layers
+  are coloured by `category` too (Shinjuku has 6 such layers, Tokyo 20), and reporting
+  them would bury the real findings. Tokyo's project has two such unit layers of its
+  own, so it rewrites 129 members, not 127. `SHINJUKU_APRX` points a real-data test at
+  a copy of Shinjuku's project (58 unit layers). A geodatabase or shapefile set with
+  `category` and no `color2` has nothing to rewrite; `DatasetInfo.category_only_tables`
+  is what lets the page say the colours live in the layer file or project.
+  Style files are the one thing the tool adds. With `style_files=true` (the page's
+  checkbox, on by default) each polygon shapefile the theme can colour gets a `<stem>.qml`
+  and a `<stem>.lyrx` after its last file: classed by `color2` where the table has it as
+  text, else by `category` when a row holds a category the table knows. Both writers
+  (`qgis_style.py`, `layer_document` in `cim_symbology.py`) and the retheming of existing
+  renderers take their class lists from `colour_classes` / `category_classes` in
+  `color_theme.py`; add a value there, never in a writer, or a generated `.lyrx` stops
+  being a fixed point of `retheme_document` and a second run starts rewriting the tool's
+  own output. "Polygon" is the shape type in the `.shp` header (5, 15, 25) and that is all
+  the tool may read of a `.shp`: no record, and never through GDAL. A `.qml` or `.lyrx`
+  already there is kept and reported, never replaced. The category table is the unit
+  catalogue's, so a category style or retheme needs `unit` in the layer, dataset or file
+  name: Shinjuku's `_level` shapefiles are all `category = unspecified`, a word the table
+  lists for units, and were once styled as restricted areas.
+  The `.qml` is the QGIS-notes lesson again: it reads correctly as XML whether or not QGIS
+  draws anything (drop the category whose value is empty and unknown values are simply not
+  drawn), so `test_style_files_qgis.py` opens a converted download in the real QGIS and
+  asks which symbol each feature gets; it skips without QGIS and is the one to trust. The
+  `.lyrx` is only proven to parse (`test_cim_esri_parser.py`). ArcGIS Pro resolving
+  `DATABASE=.` + `<stem>.shp` and drawing it is unverified, because `arcpy` needs a licence
+  this machine does not have; do not claim more in the page copy until someone opens one.

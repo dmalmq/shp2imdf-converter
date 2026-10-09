@@ -1,9 +1,11 @@
 import type {
+  ColorThemeCategoryArea,
   ColorThemeCounts,
   ColorThemeInspection,
   ColorThemeRenderer,
   ColorThemeReport,
   ColorThemeRule,
+  ColorThemeStyleFile,
   ColorThemeSymbologyFile
 } from "../api/client";
 
@@ -65,9 +67,64 @@ export function colorThemeRules(rows: Record<string, number> = {}): ColorThemeRu
   });
 }
 
+/** `backend/config/color_theme.json`'s category table, in its order. */
+const CATEGORIES: Array<[area: keyof typeof AREAS, categories: string[]]> = [
+  ["free_area", ["walkway", "ramp", "road"]],
+  ["paid_area", ["walkway_sta", "ramp_sta", "platform"]],
+  [
+    "facilities",
+    [
+      "store",
+      "store_sta",
+      "ATM",
+      "clinic",
+      "pharmacy",
+      "theater",
+      "ticket office",
+      "restroom.female",
+      "restroom.male",
+      "restroom.wheelchair",
+      "accessible restroom"
+    ]
+  ],
+  [
+    "restricted",
+    [
+      "elevator",
+      "auditorium",
+      "information desk",
+      "mothersroom",
+      "nonpublic",
+      "smokingarea",
+      "unenclosedarea",
+      "unspecified",
+      "waitingroom"
+    ]
+  ],
+  ["stairs_escalators", ["stairs", "escalator", "opentobelow"]]
+];
+
+export function colorThemeCategoryAreas(): ColorThemeCategoryArea[] {
+  return CATEGORIES.map(([area, categories]) => {
+    const { name, spec, hex } = AREAS[area];
+    return { area, area_name: name, value: name.ja, spec, hex, categories };
+  });
+}
+
 /** What `GET /api/color-theme` answers: every rule at zero. */
 export function colorThemeReport(): ColorThemeReport {
-  return { field: "color2", rules: colorThemeRules(), unmapped: [], layers: [], skipped: [], totals: counts(), symbology: [] };
+  return {
+    field: "color2",
+    category_field: "category",
+    category_areas: colorThemeCategoryAreas(),
+    rules: colorThemeRules(),
+    unmapped: [],
+    layers: [],
+    skipped: [],
+    totals: counts(),
+    symbology: [],
+    style_files: []
+  };
 }
 
 /** The survey numbers for JRTokyoSta_6677 (501 files, 10 Space layers, 2,164 rewrites). */
@@ -96,10 +153,12 @@ export function tokyoInspection(): ColorThemeInspection {
       download_name: "JRTokyoSta_6677_new-colors.zip",
       files: 501,
       geodatabases: 0,
-      lock_files_dropped: 0
+      lock_files_dropped: 0,
+      tables: 20,
+      category_only_tables: 0
     },
     theme: {
-      field: "color2",
+      ...colorThemeReport(),
       rules: colorThemeRules(TOKYO_ROWS),
       unmapped: [],
       layers: TOKYO_LAYER_CHANGES.map((recolor, index) => ({
@@ -152,10 +211,12 @@ export function tokyoGeodatabaseInspection(): ColorThemeInspection {
       download_name: "JRTokyoSta_3857_new-colors.zip",
       files: 1965,
       geodatabases: 1,
-      lock_files_dropped: 0
+      lock_files_dropped: 0,
+      tables: 127,
+      category_only_tables: 0
     },
     theme: {
-      field: "color2",
+      ...colorThemeReport(),
       rules: colorThemeRules(TOKYO_GDB_ROWS),
       unmapped: [],
       layers: TOKYO_GDB_LAYERS.map(([name, width, recolor]) => ({
@@ -194,6 +255,7 @@ const ALL_AREAS = ["free_area", "paid_area", "paid_area_shinkansen", "facilities
 function renderer(layer: string, overrides: Partial<ColorThemeRenderer> = {}): ColorThemeRenderer {
   return {
     layer,
+    field: "color2",
     outcome: "rewritten",
     reason: null,
     classes_before: 14,
@@ -204,7 +266,47 @@ function renderer(layer: string, overrides: Partial<ColorThemeRenderer> = {}): C
   };
 }
 
-/** `demo_layer_files()` in `backend/tests/color_theme_fixtures.py`: a layer file and a project, nothing else. */
+const UNIT_AREAS = ["free_area", "paid_area", "facilities", "restricted", "stairs_escalators"];
+
+/** A unit layer coloured by category, as Shinjuku's are: 30 classes become five areas and the kept `vegetation`. */
+function unitRenderer(layer: string): ColorThemeRenderer {
+  return renderer(layer, { field: "category", classes_before: 30, classes_after: 6, areas: UNIT_AREAS, kept: ["vegetation"] });
+}
+
+/** shinjuku.aprx: 58 unit layers coloured by category; its fixture layers are not listed. */
+export function shinjukuProjectInspection(): ColorThemeInspection {
+  const renderers = Array.from({ length: 58 }, (_, index) => unitRenderer(`JRShinjukuSta_${index}_unit`));
+  return {
+    dataset: {
+      name: "shinjuku",
+      download_name: "shinjuku_new-colors.zip",
+      files: 1,
+      geodatabases: 0,
+      lock_files_dropped: 0,
+      tables: 0,
+      category_only_tables: 0
+    },
+    theme: { ...colorThemeReport(), symbology: [{ path: "shinjuku.aprx", kind: "aprx", unreadable: false, renderers }] }
+  };
+}
+
+/** JRShinjukuSta.gdb dropped as its folder: 529 tables, none with color2, 449 with category. */
+export function shinjukuGeodatabaseInspection(): ColorThemeInspection {
+  return {
+    dataset: {
+      name: "JRShinjukuSta",
+      download_name: "JRShinjukuSta_new-colors.zip",
+      files: 2662,
+      geodatabases: 1,
+      lock_files_dropped: 0,
+      tables: 529,
+      category_only_tables: 449
+    },
+    theme: colorThemeReport()
+  };
+}
+
+/** `demo_layer_files()` in `backend/tests/color_theme_fixtures.py`: a layer file and two projects, nothing else. */
 export function layerFilesInspection(): ColorThemeInspection {
   const symbology: ColorThemeSymbologyFile[] = [
     { path: "DemoSta_layers/DemoSta_0_Space.lyrx", kind: "lyrx", unreadable: false, renderers: [renderer("DemoSta_0_Space")] },
@@ -217,15 +319,23 @@ export function layerFilesInspection(): ColorThemeInspection {
         renderer("DemoSta_1_Space", { classes_before: 15, classes_after: 7, kept: ["赤"] }),
         renderer("DemoSta_B1_Space", { outcome: "left_alone", reason: "expression", classes_after: 14, areas: [] })
       ]
+    },
+    {
+      path: "DemoSta_layers/DemoSta_units.aprx",
+      kind: "aprx",
+      unreadable: false,
+      renderers: [unitRenderer("DemoSta_1_unit"), unitRenderer("DemoSta_B1_unit")]
     }
   ];
   return {
     dataset: {
       name: "DemoSta_layers",
       download_name: "DemoSta_layers_new-colors.zip",
-      files: 2,
+      files: 3,
       geodatabases: 0,
-      lock_files_dropped: 0
+      lock_files_dropped: 0,
+      tables: 0,
+      category_only_tables: 0
     },
     theme: { ...colorThemeReport(), symbology }
   };
@@ -244,6 +354,41 @@ export function layerFilesRerunInspection(): ColorThemeInspection {
           item.outcome === "rewritten" ? { ...item, outcome: "already_new" as const, classes_before: item.classes_after } : item
         )
       }))
+    }
+  };
+}
+
+const CATEGORY_AREAS = ALL_AREAS.filter((area) => area !== "paid_area_shinkansen");
+
+/** The two style files the server reports for one polygon shapefile. */
+export function styleFilesFor(layer: string, field: "color2" | "category" = "color2"): ColorThemeStyleFile[] {
+  const stem = layer.replace(/\.shp$/, "");
+  const classes = field === "color2" ? ALL_AREAS : CATEGORY_AREAS;
+  return (["qml", "lyrx"] as const).map((kind) => ({ path: `${stem}.${kind}`, kind, layer, field, classes, outcome: "added" }));
+}
+
+/** Tokyo's ten Space layers, each a polygon shapefile with color2: twenty style files to add. */
+export function tokyoStyledInspection(): ColorThemeInspection {
+  const tokyo = tokyoInspection();
+  const style_files = tokyo.theme.layers.flatMap((layer) => styleFilesFor(layer.id.replace(/\.dbf$/, ".shp")));
+  return { ...tokyo, theme: { ...tokyo.theme, style_files } };
+}
+
+/** `shape_data/JRShinjukuSta_6677.zip`: shapefiles with category and no color2, two of them polygon unit layers. */
+export function shinjukuShapefileInspection(): ColorThemeInspection {
+  return {
+    dataset: {
+      name: "JRShinjukuSta_6677",
+      download_name: "JRShinjukuSta_6677_new-colors.zip",
+      files: 107,
+      geodatabases: 0,
+      lock_files_dropped: 0,
+      tables: 16,
+      category_only_tables: 10
+    },
+    theme: {
+      ...colorThemeReport(),
+      style_files: ["1", "2"].flatMap((floor) => styleFilesFor(`JRShinjukuSta_${floor}_unit.shp`, "category"))
     }
   };
 }

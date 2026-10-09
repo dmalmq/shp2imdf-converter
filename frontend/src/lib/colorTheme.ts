@@ -5,6 +5,7 @@ import type {
   ColorThemeRenderer,
   ColorThemeReport,
   ColorThemeRule,
+  ColorThemeStyleFile,
   DatasetFile
 } from "../api/client";
 import type { ColorThemeStageId } from "../components/shell/stages";
@@ -137,18 +138,77 @@ export function symbologyTally(report: Pick<ColorThemeReport, "symbology">): Sym
 }
 
 /**
+ * Why an upload that holds tables comes to nothing: `no_field` when none of them carries the colour field,
+ * `drawn_by_category` when they carry the category field instead and no layer file or project came with them.
+ * `has_field` whenever a table carries the field or the upload's layer files did the work.
+ */
+export type FieldPresence = "has_field" | "no_field" | "drawn_by_category";
+
+export function fieldPresence(inspection: ColorThemeInspection): FieldPresence {
+  const { dataset, theme } = inspection;
+  const symbology = symbologyTally(theme);
+  if (theme.layers.length + theme.skipped.length > 0) return "has_field";
+  if (dataset.tables + dataset.geodatabases === 0) return "has_field";
+  if (symbology.rewritten + symbology.alreadyNew > 0) return "has_field";
+  return dataset.category_only_tables > 0 && symbology.files === 0 ? "drawn_by_category" : "no_field";
+}
+
+/** One line under Needs attention for the layers of one file that kept the same unknown values. */
+export type KeptGroup = { path: string; layers: (string | null)[]; kept: string[] };
+
+/**
+ * Renderers that kept a class the table does not know, grouped by file and by what they kept:
+ * Shinjuku's 58 unit layers all keep `vegetation`, which is one thing to read, not 58.
+ */
+export function keptGroups(report: Pick<ColorThemeReport, "symbology">): KeptGroup[] {
+  const groups = new Map<string, KeptGroup>();
+  for (const file of report.symbology) {
+    for (const renderer of file.renderers) {
+      if (renderer.outcome === "left_alone" || renderer.kept.length === 0) continue;
+      const key = JSON.stringify([file.path, renderer.kept]);
+      const group = groups.get(key) ?? { path: file.path, layers: [], kept: renderer.kept };
+      group.layers.push(renderer.layer);
+      groups.set(key, group);
+    }
+  }
+  return [...groups.values()];
+}
+
+/** One polygon shapefile and the style files beside it: those a download adds and those it already had. */
+export type StyledLayer = { layer: string; field: string; classes: string[]; added: ColorThemeStyleFile[]; kept: ColorThemeStyleFile[] };
+
+/** The report's style files by the layer they style, in upload order. */
+export function styledLayers(report: Pick<ColorThemeReport, "style_files">): StyledLayer[] {
+  const layers = new Map<string, StyledLayer>();
+  for (const file of report.style_files) {
+    const entry = layers.get(file.layer) ?? { layer: file.layer, field: file.field, classes: file.classes, added: [], kept: [] };
+    entry[file.outcome].push(file);
+    layers.set(file.layer, entry);
+  }
+  return [...layers.values()];
+}
+
+/** How many files asking for style files adds to the download. */
+export function styleFilesAdded(report: Pick<ColorThemeReport, "style_files">): number {
+  return report.style_files.filter((file) => file.outcome === "added").length;
+}
+
+/**
  * Why Download cannot run, in the operator's language; null when it can,
- * which is when rows or renderers would be rewritten.
+ * which is when rows or renderers would be rewritten, or style files are
+ * asked for and there are some to add.
  * Each reason is a whole sentence: it is read under the bar's "Nothing to
  * change", under the Deliver stage, and alone as the button's hint.
  */
 export function downloadBlockedReason(
   inspection: ColorThemeInspection,
-  t: (english: string, japanese: string) => string
+  t: (english: string, japanese: string) => string,
+  styleFiles = false
 ): string | null {
   const { field, layers, skipped, totals } = inspection.theme;
   const symbology = symbologyTally(inspection.theme);
   if (totals.recolor > 0 || symbology.rewritten > 0) return null;
+  if (styleFiles && styleFilesAdded(inspection.theme) > 0) return null;
   const editable = layers.length + symbology.alreadyNew;
   if (editable === 0 && skipped.length + symbology.leftAlone + symbology.unreadableFiles === 0) {
     return t(`No layer has a ${field} field.`, `${field} フィールドのあるレイヤーがありません。`);

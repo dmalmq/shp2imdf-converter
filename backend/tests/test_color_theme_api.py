@@ -16,6 +16,7 @@ from backend.tests.color_theme_fixtures import (
     project_members,
     read_zip,
     space_row,
+    square_shapefile,
     station_members,
 )
 
@@ -45,6 +46,16 @@ def test_the_table_is_served_before_any_upload(test_client) -> None:
     assert toilets["scope"] == {"en": "Toilets coded 濃鼠", "ja": "トイレ（濃鼠）"}
     assert body["totals"]["rows"] == 0
     assert body["symbology"] == []
+    assert body["style_files"] == []
+    assert (body["field"], body["category_field"]) == ("color2", "category")
+    assert [(line["area"], line["value"], line["hex"], len(line["categories"])) for line in body["category_areas"]] == [
+        ("free_area", "改札外通路", "#FFFFFF", 3),
+        ("paid_area", "在来線改札内", "#F2F7FB", 3),
+        ("facilities", "施設", "#DDEBEC", 11),
+        ("restricted", "進入制限エリア", "#F2F2F2", 9),
+        ("stairs_escalators", "階段・エスカレーター", "#FFFFFF", 3),
+    ]
+    assert body["category_areas"][4]["categories"] == ["stairs", "escalator", "opentobelow"]
 
 
 def test_inspect_reports_each_rule_for_a_dropped_folder(test_client) -> None:
@@ -61,6 +72,8 @@ def test_inspect_reports_each_rule_for_a_dropped_folder(test_client) -> None:
         "files": len(files),
         "geodatabases": 0,
         "lock_files_dropped": 0,
+        "tables": 3,
+        "category_only_tables": 0,
     }
     rows = {(rule["old"], tuple(rule["categories"] or ())): rule["rows"] for rule in body["theme"]["rules"]}
     assert rows[("濃鼠", ())] == 1
@@ -84,6 +97,7 @@ def test_inspect_reports_each_renderer_of_a_dropped_project(test_client) -> None
     assert (line["path"], line["kind"], line["unreadable"]) == ("DemoSta.aprx", "aprx", False)
     assert line["renderers"][1] == {
         "layer": "DemoSta_1_Space",
+        "field": "color2",
         "outcome": "rewritten",
         "reason": None,
         "classes_before": 15,
@@ -150,3 +164,52 @@ def test_a_broken_zip_is_refused(test_client) -> None:
     response = test_client.post("/api/color-theme/inspect", files=[("files", ("東京.zip", b"not a zip", "application/zip"))])
 
     assert response.status_code == 400
+
+
+def _polygon_layer() -> list[tuple[str, bytes]]:
+    shp, shx = square_shapefile(1)
+    space = make_dbf(SPACE_FIELDS, [space_row("黄", "B999")])
+    return [("st/1_Space.shp", shp), ("st/1_Space.shx", shx), ("st/1_Space.dbf", space), ("st/1_Space.cpg", b"UTF-8")]
+
+
+def test_inspect_lists_the_style_files_a_download_can_carry(test_client) -> None:
+    files, data = _folder(_polygon_layer())
+
+    response = test_client.post("/api/color-theme/inspect", files=files, data=data)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["theme"]["style_files"] == [
+        {
+            "path": f"st/1_Space.{kind}",
+            "kind": kind,
+            "layer": "st/1_Space.shp",
+            "field": "color2",
+            "classes": ["free_area", "paid_area", "paid_area_shinkansen", "facilities", "restricted", "stairs_escalators"],
+            "outcome": "added",
+        }
+        for kind in ("qml", "lyrx")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("flag", "added"),
+    [({"style_files": "true"}, ["st/1_Space.qml", "st/1_Space.lyrx"]), ({"style_files": "false"}, []), ({}, [])],
+    ids=["asked for", "declined", "not mentioned"],
+)
+def test_convert_adds_style_files_only_when_asked(test_client, flag: dict, added: list[str]) -> None:
+    members = _polygon_layer()
+    files, data = _folder(members)
+
+    response = test_client.post("/api/color-theme/convert", files=files, data={**data, **flag})
+
+    assert response.status_code == 200, response.text
+    assert list(read_zip(response.content)) == [name for name, _ in members] + added
+
+
+def test_a_style_files_flag_that_is_neither_true_nor_false_is_refused(test_client) -> None:
+    files, data = _folder(_polygon_layer())
+
+    response = test_client.post("/api/color-theme/convert", files=files, data={**data, "style_files": "yes"})
+
+    assert response.status_code == 400
+    assert "style_files" in response.json()["detail"]

@@ -10,8 +10,10 @@ page never decides how a Japanese layer name crosses the pipe. Any failure
 exits 1 with the error as the last line of stderr.
 
 ``read <gdb> <field> <category field>`` opens read-only and prints
-``{"gdal": version, "layers": [{"name", "field_type", "width", "rows": [[fid, value, category], ...]}]}``
-for every layer that has the field; a NULL cell is null.
+``{"gdal": version, "tables": n, "category_only": n, "layers": [{"name", "field_type", "width", "rows": [[fid, value, category], ...]}]}``
+with a ``layers`` entry for every layer that has the field; a NULL cell is null.
+``tables`` counts every layer, and ``category_only`` those that have the
+category field without the field.
 
 ``apply <gdb> <field>`` reads ``{"edits": {layer: {fid: text}}}`` on stdin, sets
 the field on exactly those rows and prints ``{"updated": n}``. GDAL rewrites
@@ -46,13 +48,15 @@ def _cell(feature: ogr.Feature, index: int) -> str | None:
 def read(path: str, field: str, category_field: str) -> dict:
     dataset = _open(path, update=False)
     layers = []
+    category_only = 0
     for number in range(dataset.GetLayerCount()):
         layer = dataset.GetLayer(number)
         definition = layer.GetLayerDefn()
         index = definition.GetFieldIndex(field)
-        if index < 0:
-            continue
         category = definition.GetFieldIndex(category_field)
+        if index < 0:
+            category_only += category >= 0
+            continue
         target = definition.GetFieldDefn(index)
         layers.append(
             {
@@ -62,7 +66,12 @@ def read(path: str, field: str, category_field: str) -> dict:
                 "rows": [[feature.GetFID(), _cell(feature, index), _cell(feature, category)] for feature in layer],
             }
         )
-    return {"gdal": gdal.__version__, "layers": layers}
+    return {
+        "gdal": gdal.__version__,
+        "tables": dataset.GetLayerCount(),
+        "category_only": category_only,
+        "layers": layers,
+    }
 
 
 def _clockwise(ring: ogr.Geometry) -> bool:
