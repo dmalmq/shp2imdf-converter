@@ -272,6 +272,7 @@ async def lifespan(app: FastAPI):
     finally:
         stop_event.set()
         await cleanup_task
+        await asyncio.to_thread(app.state.tile_jobs.close)
 
 
 app = FastAPI(title="SHP to IMDF Converter API", lifespan=lifespan)

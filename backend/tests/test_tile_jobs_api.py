@@ -6,7 +6,9 @@ here; everything around it has: refusals, the queue, status, the download.
 
 from __future__ import annotations
 
+import ctypes
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -14,8 +16,10 @@ from types import SimpleNamespace
 import zipfile
 from io import BytesIO
 
+from fastapi.testclient import TestClient
 import pytest
 
+from backend.main import app
 from backend.src.arcgis_pro import ArcpyAvailable, ArcpyChecking, ArcpyUnavailable
 from backend.src.color_theme import load_color_theme
 from backend.src.recolor import convert
@@ -262,3 +266,35 @@ def test_a_project_with_two_maps_is_refused_before_a_job(test_client, jobs) -> N
     assert response.json()["code"] == "VECTOR_TILES_NEED_ONE_MAP"
     assert "has 2: 1F, B1" in response.json()["detail"]
     assert list(jobs.root.iterdir()) == []
+
+
+def _running(pid: int) -> bool:
+    if sys.platform != "win32":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+    kernel32 = ctypes.windll.kernel32
+    synchronize, query = 0x00100000, 0x1000
+    handle = kernel32.OpenProcess(synchronize | query, False, pid)
+    if not handle:
+        return False
+    try:
+        wait_timeout = 0x102
+        return kernel32.WaitForSingleObject(handle, 0) == wait_timeout
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def test_stopping_the_server_kills_the_running_build(server_env, tmp_path) -> None:
+    pid_file = tmp_path / "worker.pid"
+    with TestClient(app) as client:
+        client.app.state.arcpy = SimpleNamespace(status=ArcpyAvailable(product="ArcInfo", python=Path(sys.executable)))
+        client.app.state.tile_jobs = TileJobs(tmp_path / "j", ttl_seconds=3600, script=FAKE)
+        job_id = _post(client, _upload({"hang": True, "pid": str(pid_file)}), vector_tiles="true").json()["job_id"]
+        _wait(client, job_id, lambda status: status["state"] == "running" and status["step"] == 1)
+        pid = int(pid_file.read_text(encoding="utf-8"))
+        assert _running(pid)
+
+    assert not _running(pid)

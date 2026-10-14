@@ -43,6 +43,7 @@ STEPS = 5
 TILES_FOLDER = "vector_tiles"
 _LOG_NAME = "build_log.txt"
 _LAYERS_NAME = "layers.json"
+_STOPPED = "The server stopped before this build could start."
 
 
 class Queued(BaseModel):
@@ -103,6 +104,8 @@ class TileJobs:
         self._line: deque[tuple[str, Path]] = deque()
         self._changed = threading.Condition()
         self._runner: threading.Thread | None = None
+        self._process: subprocess.Popen[bytes] | None = None
+        self._closed = False
         # Whatever is here belonged to a server that is gone; its ids can never be asked for again.
         shutil.rmtree(root, ignore_errors=True)
         root.mkdir(parents=True, exist_ok=True)
@@ -159,6 +162,23 @@ class TileJobs:
         if expired:
             logger.info("Removed %d finished vector tile builds", len(expired))
 
+    def close(self) -> None:
+        """Kill the running worker and start no other, for server shutdown.
+
+        The next server empties ``root`` at startup; a worker left running,
+        as a ``--reload`` would leave it, would go on writing into the folder
+        that server is deleting.
+        """
+        with self._changed:
+            self._closed = True
+            process = self._process
+        if process is not None:
+            process.kill()
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                logger.warning("The vector tile worker (pid %d) did not exit after it was killed", process.pid)
+
     def _set(self, job: _Job, state: Running | Done | Failed) -> None:
         with self._changed:
             job.state = state
@@ -205,13 +225,18 @@ class _Build:
         layers = self.job.directory / _LAYERS_NAME
         command = [str(self.python), "-I", str(self.jobs.script), str(tree / self.job.project), str(tree), str(out), str(layers)]
         self.log.append(f"Project: {self.job.project}")
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        with self.jobs._changed:
+            # Under the lock, so ``close`` either sees this process or stops it from starting.
+            if self.jobs._closed:
+                return Failed(reason=_STOPPED)
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            self.jobs._process = process
         stderr: list[str] = []
         reader = threading.Thread(target=lambda: stderr.extend(_lines(process.stderr)), daemon=True)
         reader.start()
@@ -222,6 +247,8 @@ class _Build:
                 self._take(line)
             returncode = process.wait()
         finally:
+            with self.jobs._changed:
+                self.jobs._process = None
             timed_out = not timer.is_alive() and process.returncode != 0
             timer.cancel()
             reader.join()
