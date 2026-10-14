@@ -11,16 +11,18 @@ from backend.src.tile_layers import (
     NO_EXCLUSIONS,
     LayersUnreadable,
     MapLayers,
-    NotOneMap,
+    NoMapLayers,
+    ProjectMaps,
     SelectionError,
     TileExclusions,
     default_selection,
     load_tile_exclusions,
     read_project_layers,
+    tile_plan,
     visibility_plan,
     walk,
 )
-from backend.tests.color_theme_fixtures import make_project, tile_project, tile_uri
+from backend.tests.color_theme_fixtures import TILE_MAP, make_project, tile_map_uri, tile_project, tile_uri
 
 pytestmark = [pytest.mark.colortheme, pytest.mark.vectortiles]
 
@@ -33,10 +35,16 @@ def exclusions() -> TileExclusions:
     return load_tile_exclusions(PATTERNS)
 
 
+def _maps(*maps: tuple[str, list]) -> ProjectMaps:
+    project = read_project_layers(tile_project(maps=maps), NO_EXCLUSIONS, max_bytes=LIMIT)
+    assert isinstance(project, ProjectMaps)
+    return project
+
+
 def _map(exclusions: TileExclusions = NO_EXCLUSIONS) -> MapLayers:
-    layers = read_project_layers(tile_project(), exclusions, max_bytes=LIMIT)
-    assert isinstance(layers, MapLayers)
-    return layers
+    project = read_project_layers(tile_project(), exclusions, max_bytes=LIMIT)
+    assert isinstance(project, ProjectMaps)
+    return project.chosen(None)
 
 
 def _rows(layers: MapLayers) -> list[tuple[str, bool, bool, str | None, bool]]:
@@ -48,7 +56,7 @@ def _rows(layers: MapLayers) -> list[tuple[str, bool, bool, str | None, bool]]:
 def test_the_tree_is_the_maps_groups_and_layers_in_drawing_order_as_saved(exclusions) -> None:
     layers = _map(exclusions)
 
-    assert layers.map == "Stenavi"
+    assert (layers.id, layers.name) == (tile_map_uri(0), "Stenavi")
     assert _rows(layers) == [
         ("ordinal_1", True, True, None, True),
         ("ordinal_1\\Facility_Merge_1", False, True, "Facility_Merge_*", False),
@@ -125,9 +133,70 @@ def test_a_broken_pattern_file_is_refused_at_load(tmp_path, doc, message) -> Non
         load_tile_exclusions(_patterns(tmp_path, doc))
 
 
-@pytest.mark.parametrize("maps", [(), ("1F", "B1")])
-def test_a_project_without_exactly_one_map_says_so(maps) -> None:
-    assert read_project_layers(tile_project(maps=maps), NO_EXCLUSIONS, max_bytes=LIMIT) == NotOneMap(maps=maps)
+PLATFORMS = [("ホーム", True, [("Platform_1", True, None), ("Platform_2", True, None)])]
+EXITS = [("Exit_A", True, None), ("Exit_B", False, None)]
+
+
+def test_every_map_is_listed_and_the_only_one_with_layers_is_the_default() -> None:
+    project = _maps(("マップ", []), ("マップ レイヤー", TILE_MAP))
+
+    assert [(m.id, m.name, len(m.layers)) for m in project.maps] == [
+        (tile_map_uri(0), "マップ", 0),
+        (tile_map_uri(1), "マップ レイヤー", len(TILE_MAP)),
+    ]
+    assert (project.default_map, project.default_reason) == (tile_map_uri(1), "only_with_layers")
+    assert project.chosen(None).name == "マップ レイヤー"
+
+
+@pytest.mark.parametrize(
+    "maps, default, reason",
+    [
+        ((("ホーム", PLATFORMS), ("マップ レイヤー", TILE_MAP)), 1, "most_layers"),
+        ((("マップ レイヤー", TILE_MAP), ("ホーム", PLATFORMS)), 0, "most_layers"),
+        ((("ホーム", PLATFORMS), ("出口", EXITS)), 0, "first_of_most"),
+    ],
+)
+def test_with_several_maps_with_layers_the_default_has_the_most_and_comes_first_on_a_tie(maps, default, reason) -> None:
+    project = _maps(*maps)
+
+    assert (project.default_map, project.default_reason) == (tile_map_uri(default), reason)
+
+
+@pytest.mark.parametrize("maps", [(), (("マップ", []), ("空", [("group", True, [])]))])
+def test_a_project_whose_maps_have_no_layers_says_so(maps) -> None:
+    assert read_project_layers(tile_project(maps=maps), NO_EXCLUSIONS, max_bytes=LIMIT) == NoMapLayers(
+        maps=tuple(name for name, _ in maps)
+    )
+
+
+def test_the_plan_names_the_chosen_map_and_its_layers() -> None:
+    project = _maps(("マップ レイヤー", TILE_MAP), ("ホーム", PLATFORMS))
+
+    plan = tile_plan(project, tile_map_uri(1), None)
+
+    assert (plan.map_uri, plan.map_name) == (tile_map_uri(1), "ホーム")
+    assert [(line.name, line.visible) for line in plan.layers] == [
+        ("ホーム", True),
+        ("ホーム\\Platform_1", True),
+        ("ホーム\\Platform_2", True),
+    ]
+
+
+@pytest.mark.parametrize(
+    "map_id, selected, kind, message",
+    [
+        ("CIMPATH=gone/map.json", None, "unknown_map", "no map CIMPATH=gone/map.json; its maps are マップ"),
+        (tile_map_uri(0), None, "empty_map", "'マップ' has no layers"),
+        (tile_map_uri(2), {tile_uri("背景")}, "layers", "not in the map 'ホーム'"),
+    ],
+)
+def test_a_map_that_cannot_be_tiled_or_layers_from_another_map_are_refused(map_id, selected, kind, message) -> None:
+    project = _maps(("マップ", []), ("マップ レイヤー", TILE_MAP), ("ホーム", PLATFORMS))
+
+    with pytest.raises(SelectionError, match=message) as refused:
+        tile_plan(project, map_id, selected)
+
+    assert refused.value.kind == kind
 
 
 @pytest.mark.parametrize(
@@ -177,7 +246,7 @@ def test_the_plan_draws_exactly_the_chosen_layers_and_the_groups_above_them(excl
 @pytest.mark.parametrize(
     "selected, message",
     [
-        ({tile_uri("背景"), "CIMPATH=stenavi/gone.json"}, "not in the project's map: CIMPATH=stenavi/gone.json"),
+        ({tile_uri("背景"), "CIMPATH=stenavi/gone.json"}, "not in the map 'Stenavi': CIMPATH=stenavi/gone.json"),
         ({tile_uri("ordinal_1")}, r"Choose layers, not groups: ordinal_1"),
         (set(), "at least one layer"),
     ],

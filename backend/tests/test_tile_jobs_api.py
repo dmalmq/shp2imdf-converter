@@ -24,7 +24,7 @@ from backend.src.arcgis_pro import ArcpyAvailable, ArcpyChecking, ArcpyUnavailab
 from backend.src.color_theme import load_color_theme
 from backend.src.recolor import convert
 from backend.src.tile_jobs import TileJobs
-from backend.tests.color_theme_fixtures import make_zip, station_members, tile_project, tile_uri
+from backend.tests.color_theme_fixtures import TILE_MAP, make_zip, station_members, tile_map_uri, tile_project, tile_uri
 
 pytestmark = [pytest.mark.colortheme, pytest.mark.vectortiles]
 
@@ -33,7 +33,9 @@ CONFIG = Path(__file__).resolve().parents[1] / "config" / "color_theme.json"
 PROJECT = "東京/ArcProPrj/東京.aprx"
 
 
-def _upload(plan: dict, *, projects: tuple[str, ...] = (PROJECT,), maps: tuple[str, ...] = ("Stenavi",)) -> bytes:
+def _upload(
+    plan: dict, *, projects: tuple[str, ...] = (PROJECT,), maps: tuple[tuple[str, list], ...] = (("Stenavi", TILE_MAP),)
+) -> bytes:
     members = station_members() + [(path, tile_project(plan, maps=maps)) for path in projects]
     return make_zip(members)
 
@@ -259,12 +261,72 @@ def test_a_choice_without_a_build_is_refused(test_client, jobs) -> None:
     assert "only sent with vector_tiles=true" in response.json()["detail"]
 
 
-def test_a_project_with_two_maps_is_refused_before_a_job(test_client, jobs) -> None:
-    response = _post(test_client, _upload({}, maps=("1F", "B1")), vector_tiles="true")
+PLATFORMS = [("ホーム", True, [("Platform_1", True, None), ("Platform_2", False, None)])]
+SHINJUKU = (("マップ", []), ("マップ レイヤー", TILE_MAP), ("ホーム", PLATFORMS))
+
+
+def test_without_a_map_the_build_tiles_the_default_map(test_client, jobs) -> None:
+    response = _post(test_client, _upload({}, maps=SHINJUKU), vector_tiles="true")
+
+    assert response.status_code == 202, response.text
+    log = _log(test_client, response.json()["job_id"])
+    assert f"Map: マップ レイヤー ({tile_map_uri(1)})\r\n" in log
+    assert "Tiled: ordinal_1\\JRSta_1F\\JRSta_1_Space, 背景\r\n" in log
+
+
+def test_the_chosen_map_and_its_layers_are_what_the_worker_is_told_to_tile(test_client, jobs) -> None:
+    chosen = json.dumps([tile_uri("Platform_2")])
+
+    response = _post(test_client, _upload({}, maps=SHINJUKU), vector_tiles="true", tile_map=tile_map_uri(2), tile_layers=chosen)
+
+    assert response.status_code == 202, response.text
+    log = _log(test_client, response.json()["job_id"])
+    assert f"Map: ホーム ({tile_map_uri(2)})\r\nTiled: ホーム\\Platform_2\r\n" in log
+
+
+def test_a_chosen_map_without_layers_tiles_that_maps_defaults(test_client, jobs) -> None:
+    response = _post(test_client, _upload({}, maps=SHINJUKU), vector_tiles="true", tile_map=tile_map_uri(2))
+
+    assert response.status_code == 202, response.text
+    assert "Tiled: ホーム\\Platform_1\r\n" in _log(test_client, response.json()["job_id"])
+
+
+@pytest.mark.parametrize(
+    "fields, code, detail",
+    [
+        ({"tile_map": "CIMPATH=gone/map.json"}, "VECTOR_TILES_UNKNOWN_MAP", "no map CIMPATH=gone/map.json"),
+        ({"tile_map": tile_map_uri(0)}, "VECTOR_TILES_EMPTY_MAP", "'マップ' has no layers"),
+        (
+            {"tile_map": tile_map_uri(2), "tile_layers": json.dumps([tile_uri("背景")])},
+            "VECTOR_TILES_BAD_LAYERS",
+            f"not in the map 'ホーム': {tile_uri('背景')}",
+        ),
+        ({"tile_layers": json.dumps([tile_uri("Platform_1")])}, "VECTOR_TILES_BAD_LAYERS", "not in the map 'マップ レイヤー'"),
+        ({"tile_map": ""}, "BAD_REQUEST", "tile_map must be a map id"),
+    ],
+)
+def test_a_map_that_cannot_be_tiled_or_another_maps_layers_are_refused_before_a_job(test_client, jobs, fields, code, detail) -> None:
+    response = _post(test_client, _upload({}, maps=SHINJUKU), vector_tiles="true", **fields)
 
     assert response.status_code == 400
-    assert response.json()["code"] == "VECTOR_TILES_NEED_ONE_MAP"
-    assert "has 2: 1F, B1" in response.json()["detail"]
+    assert response.json()["code"] == code
+    assert detail in response.json()["detail"]
+    assert list(jobs.root.iterdir()) == []
+
+
+def test_a_map_choice_without_a_build_is_refused(test_client, jobs) -> None:
+    response = _post(test_client, _upload({}, maps=SHINJUKU), tile_map=tile_map_uri(1))
+
+    assert response.status_code == 400
+    assert "tile_map is only sent with vector_tiles=true" in response.json()["detail"]
+
+
+def test_a_project_whose_maps_have_no_layers_is_refused_before_a_job(test_client, jobs) -> None:
+    response = _post(test_client, _upload({}, maps=(("マップ", []), ("1F", []))), vector_tiles="true")
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "VECTOR_TILES_NO_MAP_LAYERS"
+    assert "Its maps: マップ, 1F." in response.json()["detail"]
     assert list(jobs.root.iterdir()) == []
 
 

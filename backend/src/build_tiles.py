@@ -9,10 +9,12 @@ are tiled, and which those are is the operator's choice on the page.
 ``python -I build_tiles.py <project.aprx> <upload root> <out dir> <layers.json>``.
 It imports nothing from ``backend``. ``<upload root>`` is the folder the project
 was unpacked into with the rest of the upload; data sources broken by the move
-are looked up there. ``<layers.json>`` is ``{"layers": [{"uri", "name",
-"group", "visible"}, ...]}``: every layer and group of the map with the
-visibility to tile it with. It is set in memory after the data sources are
-repaired and saved, and never saved itself.
+are looked up there. ``<layers.json>`` is ``{"map_uri", "map_name",
+"layers": [{"uri", "name", "group", "visible"}, ...]}``: the map chosen on
+the page, and every layer and group of it with the visibility to tile it
+with. The map and its layers' uRIs are one choice, so they travel in one
+file. The visibility is set in memory after the data sources are repaired
+and saved, and never saved itself.
 
 Every stdout line it writes itself is one ASCII JSON object, so the console
 code page never decides how a Japanese name crosses the pipe:
@@ -88,12 +90,20 @@ def step(number: int, label: str) -> None:
     emit("step", step=number, of=STEPS, label=label)
 
 
-def only_map(aprx):
+def chosen_map(aprx, uri: str, name: str):
+    """The map chosen on the page: the one whose CIM uRI is ``uri``, else the one map called ``name``."""
     maps = aprx.listMaps()
-    if len(maps) != 1:
-        names = ", ".join(repr(m.name) for m in maps) or "none"
-        raise BuildFailed(f"The project must have exactly one map; it has {len(maps)}: {names}")
-    return maps[0]
+    by_uri = [m for m in maps if (_uri(m) or "").casefold() == uri.casefold()]
+    if len(by_uri) == 1:
+        return by_uri[0]
+    by_name = [m for m in maps if m.name == name]
+    if not by_uri and len(by_name) == 1:
+        warn(f"No map has the uRI {uri}; tiling the one called {name!r}")
+        return by_name[0]
+    names = ", ".join(f"{m.name!r} ({_uri(m)})" for m in maps) or "none"
+    raise BuildFailed(
+        f"The map chosen on the page, {name!r} ({uri}), is not one arcpy can tell apart; the project has {len(maps)}: {names}"
+    )
 
 
 def find_folder(root: Path, name: str) -> list[Path]:
@@ -230,9 +240,9 @@ def _tool_messages() -> None:
         log(text)
 
 
-def build(aprx_path: Path, root: Path, out_dir: Path, plan: list[dict]) -> tuple[Path, list[str]]:
+def build(aprx_path: Path, root: Path, out_dir: Path, plan: dict) -> tuple[Path, list[str]]:
     aprx = arcpy.mp.ArcGISProject(str(aprx_path))
-    m = only_map(aprx)
+    m = chosen_map(aprx, plan["map_uri"], plan["map_name"])
     name = aprx_path.stem
     vtpk = out_dir / f"{name}.vtpk"
     extract_dir = out_dir / "tiles"
@@ -241,7 +251,7 @@ def build(aprx_path: Path, root: Path, out_dir: Path, plan: list[dict]) -> tuple
 
     log(f"Map: {m.name} -> {out_dir}")
     repair_sources(aprx, m, root)
-    apply_layers(m, plan)
+    apply_layers(m, plan["layers"])
 
     # The project's default geodatabase may be a path on the machine it was saved on.
     index_gdb = out_dir / "index.gdb"
@@ -305,7 +315,7 @@ def main(argv: list[str]) -> None:
         fail("usage: build_tiles.py <project.aprx> <upload root> <out dir> <layers.json>")
     aprx_path, root, out_dir, layers = (Path(arg) for arg in argv)
     try:
-        plan = json.loads(layers.read_text(encoding="utf-8"))["layers"]
+        plan = json.loads(layers.read_text(encoding="utf-8"))
         vtiles, problems = build(aprx_path, root, out_dir, plan)
     except BuildFailed as exc:
         fail(str(exc))

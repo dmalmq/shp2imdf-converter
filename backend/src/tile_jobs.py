@@ -16,7 +16,7 @@ Finished jobs are deleted ``ttl_seconds`` after they finish.
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from io import BytesIO
@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 
 from backend.src.errors import ApiError
 from backend.src.recolor import Archive
-from backend.src.tile_layers import LayerVisibility
+from backend.src.tile_layers import TilePlan
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +114,10 @@ class TileJobs:
         shutil.rmtree(root, ignore_errors=True)
         root.mkdir(parents=True, exist_ok=True)
 
-    def submit(self, archive: Archive, project: str, python: Path, layers: Sequence[LayerVisibility]) -> str:
+    def submit(self, archive: Archive, project: str, python: Path, plan: TilePlan) -> str:
         """Unpack ``archive`` into a new job folder and put the job in line. Returns its id.
 
-        ``layers`` is the visibility the worker sets on every layer and group of the map before tiling.
+        ``plan`` names the map to tile and the visibility the worker sets on its every layer and group before tiling.
         """
         job_id = secrets.token_hex(4)
         directory = self.root.resolve() / job_id
@@ -133,9 +133,7 @@ class TileJobs:
         directory.mkdir()
         converted = directory / "converted.zip"
         converted.write_bytes(archive.data)
-        (directory / _LAYERS_NAME).write_text(
-            json.dumps({"layers": [asdict(line) for line in layers]}, ensure_ascii=False), encoding="utf-8"
-        )
+        (directory / _LAYERS_NAME).write_text(json.dumps(asdict(plan), ensure_ascii=False), encoding="utf-8")
         with zipfile.ZipFile(converted) as unpacked:
             unpacked.extractall(directory / "tree")
         job = _Job(id=job_id, directory=directory, filename=archive.filename, project=project)

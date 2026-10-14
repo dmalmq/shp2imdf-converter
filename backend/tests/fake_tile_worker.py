@@ -5,7 +5,7 @@ What it does is read from the project's ``fake_plan.json`` member, when it has o
 ``expects`` lists paths that must sit under the upload root, ``gate`` names a
 file to wait for after step 1, ``fail`` is a reason to fail with there,
 ``hang`` never finishes, ``pid`` names a file to write its process id to, and
-``problems`` are passed through in the result. It logs the layers it was told
+``problems`` are passed through in the result. It logs the map and the layers it was told
 to tile and warns about empty groups as the real worker does.
 """
 
@@ -36,7 +36,9 @@ print("arcpy prose that is not JSON", flush=True)
 for expected in plan.get("expects", []):
     if not (root / expected).is_file():
         fail(f"missing {expected}")
-visibility = json.loads(layers.read_text(encoding="utf-8"))["layers"]
+told = json.loads(layers.read_text(encoding="utf-8"))
+emit("message", text=f"Map: {told['map_name']} ({told['map_uri']})")
+visibility = told["layers"]
 emit("message", text="Tiled: " + ", ".join(line["name"] for line in visibility if line["visible"] and not line["group"]))
 empty = [line["name"] for line in visibility if line["group"] and not line["visible"]]
 if empty:

@@ -1,11 +1,16 @@
-"""Which layers of a project's map a vector tile build tiles: the map's layer tree, read without arcpy, and the choice.
+"""Which map of a project and which of its layers a vector tile build tiles: the layer trees, read without arcpy, and the choice.
 
 An ``.aprx`` is a zip of CIM JSON. ``GISProject.json`` lists the project's
 maps as items whose ``catalogPath`` is ``CIMPATH=<member>``; a map member
 lists its layers as ``uRI``s, top of the drawing order first, and a group's
 member lists its own the same way. A ``uRI`` is what arcpy's
-``layer.getDefinition("V3").uRI`` returns, so it is how the worker finds a
-layer again.
+``getDefinition("V3").uRI`` returns for a map or a layer, so it is how the
+worker finds them again.
+
+A project often has more than one map: importing an ``.mxd`` adds a map
+beside the empty one the project template made. The default is the map with
+the most layers, the first in project order on a tie; a map without a layer
+cannot be chosen.
 
 The default choice is what the project would draw as saved (a layer and
 every group above it switched on), less every layer whose own name, or a
@@ -79,18 +84,53 @@ class LayerNode:
 
 @dataclass(frozen=True, slots=True)
 class MapLayers:
-    map: str
+    id: str
+    """The ``CIMPATH=`` reference ``GISProject.json`` gives the map, which is also its ``uRI``."""
+    name: str
     layers: tuple[LayerNode, ...]
     """Top of the drawing order first, as Pro's Contents pane lists them."""
-    state: Literal["map"] = "map"
+
+
+def layer_count(the_map: MapLayers) -> int:
+    """Layers, not groups: a map whose groups hold nothing has nothing to tile."""
+    return sum(1 for node, _ in walk(the_map.layers) if not node.group)
+
+
+DefaultReason = Literal["only_with_layers", "most_layers", "first_of_most"]
+
+
+class SelectionError(ValueError):
+    def __init__(self, message: str, kind: Literal["unknown_map", "empty_map", "layers"]) -> None:
+        super().__init__(message)
+        self.kind = kind
 
 
 @dataclass(frozen=True, slots=True)
-class NotOneMap:
-    """A build tiles the project's one map, so it refuses a project with none or several."""
+class ProjectMaps:
+    maps: tuple[MapLayers, ...]
+    """Every map, in project order; those without a layer are listed but cannot be chosen."""
+    default_map: str
+    default_reason: DefaultReason
+    state: Literal["maps"] = "maps"
+
+    def chosen(self, map_id: str | None) -> MapLayers:
+        """The map ``map_id`` names, or with none, the default."""
+        wanted = self.default_map if map_id is None else map_id
+        the_map = next((m for m in self.maps if m.id == wanted), None)
+        if the_map is None:
+            names = ", ".join(f"{m.name} ({m.id})" for m in self.maps)
+            raise SelectionError(f"The project has no map {wanted}; its maps are {names}.", "unknown_map")
+        if layer_count(the_map) == 0:
+            raise SelectionError(f"The map {the_map.name!r} has no layers to tile.", "empty_map")
+        return the_map
+
+
+@dataclass(frozen=True, slots=True)
+class NoMapLayers:
+    """No map in the project has a layer, so there is nothing to tile."""
 
     maps: tuple[str, ...]
-    state: Literal["not_one_map"] = "not_one_map"
+    state: Literal["no_layers"] = "no_layers"
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,11 +139,11 @@ class LayersUnreadable:
     state: Literal["unreadable"] = "unreadable"
 
 
-ProjectLayers = MapLayers | NotOneMap | LayersUnreadable
+ProjectLayers = ProjectMaps | NoMapLayers | LayersUnreadable
 
 
 def read_project_layers(project: bytes, exclusions: TileExclusions, *, max_bytes: int) -> ProjectLayers:
-    """The layer tree of the project's one map. Reads only ``GISProject.json`` and the members the map reaches."""
+    """The layer tree of each of the project's maps. Reads only ``GISProject.json`` and the members the maps reach."""
     try:
         with zipfile.ZipFile(BytesIO(project)) as archive:
             if sum(info.file_size for info in archive.infolist()) > max_bytes:
@@ -140,11 +180,25 @@ class _Reader:
 
     def project(self) -> ProjectLayers:
         items = self.document("GISProject.json").get("projectItems")
-        maps = [item for item in items or [] if isinstance(item, dict) and item.get("itemType") == "Map"]
-        if len(maps) != 1:
-            return NotOneMap(maps=tuple(str(item.get("name", "")) for item in maps))
-        the_map = self.document(_member(maps[0].get("catalogPath")))
-        return MapLayers(map=str(the_map.get("name", "")), layers=self.layers(the_map, inherited=None, drawn=True))
+        map_items = [item for item in items or [] if isinstance(item, dict) and item.get("itemType") == "Map"]
+        maps = tuple(self.map(item.get("catalogPath")) for item in map_items)
+        counts = [layer_count(m) for m in maps]
+        most = max(counts, default=0)
+        if most == 0:
+            return NoMapLayers(maps=tuple(m.name for m in maps))
+        reason: DefaultReason = (
+            "only_with_layers"
+            if sum(1 for count in counts if count > 0) == 1
+            else "most_layers"
+            if counts.count(most) == 1
+            else "first_of_most"
+        )
+        return ProjectMaps(maps=maps, default_map=maps[counts.index(most)].id, default_reason=reason)
+
+    def map(self, uri: Any) -> MapLayers:
+        doc = self.document(_member(uri))
+        self.opened = set()
+        return MapLayers(id=uri, name=str(doc.get("name", "")), layers=self.layers(doc, inherited=None, drawn=True))
 
     def layers(self, parent: dict[str, Any], *, inherited: str | None, drawn: bool) -> tuple[LayerNode, ...]:
         uris = parent.get("layers")
@@ -184,8 +238,8 @@ def walk(nodes: tuple[LayerNode, ...], path: tuple[str, ...] = ()) -> Iterator[t
         yield from walk(node.children, (*path, node.name))
 
 
-def default_selection(layers: MapLayers) -> frozenset[str]:
-    return frozenset(node.uri for node, _ in walk(layers.layers) if not node.group and node.tiled_by_default)
+def default_selection(the_map: MapLayers) -> frozenset[str]:
+    return frozenset(node.uri for node, _ in walk(the_map.layers) if not node.group and node.tiled_by_default)
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,25 +253,38 @@ class LayerVisibility:
     visible: bool
 
 
-class SelectionError(ValueError):
-    pass
+@dataclass(frozen=True, slots=True)
+class TilePlan:
+    """What the worker is told: the map to tile and the visibility to tile it with."""
+
+    map_uri: str
+    map_name: str
+    """For the log, and to find the map by when arcpy gives no ``uRI``."""
+    layers: tuple[LayerVisibility, ...]
 
 
-def visibility_plan(layers: MapLayers, selected: Collection[str]) -> tuple[LayerVisibility, ...]:
+def tile_plan(maps: ProjectMaps, map_id: str | None, selected: Collection[str] | None) -> TilePlan:
+    """The chosen map, or the default, with the ``selected`` layers drawn, or that map's defaults."""
+    the_map = maps.chosen(map_id)
+    layers = visibility_plan(the_map, default_selection(the_map) if selected is None else selected)
+    return TilePlan(map_uri=the_map.id, map_name=the_map.name, layers=layers)
+
+
+def visibility_plan(the_map: MapLayers, selected: Collection[str]) -> tuple[LayerVisibility, ...]:
     """The visibility of every layer and group so that exactly the ``selected`` layers are drawn.
 
     A group is switched on when any layer in it is selected and off otherwise,
     whatever the project saved.
     """
-    nodes = {node.uri: (node, long_name) for node, long_name in walk(layers.layers)}
+    nodes = {node.uri: (node, long_name) for node, long_name in walk(the_map.layers)}
     unknown = sorted(uri for uri in selected if uri not in nodes)
     if unknown:
-        raise SelectionError(f"These layers are not in the project's map: {', '.join(unknown)}")
+        raise SelectionError(f"These layers are not in the map {the_map.name!r}: {', '.join(unknown)}", "layers")
     groups = sorted(nodes[uri][1] for uri in selected if nodes[uri][0].group)
     if groups:
-        raise SelectionError(f"Choose layers, not groups: {', '.join(groups)}")
+        raise SelectionError(f"Choose layers, not groups: {', '.join(groups)}", "layers")
     if not selected:
-        raise SelectionError("Choose at least one layer to tile.")
+        raise SelectionError("Choose at least one layer to tile.", "layers")
     chosen = set(selected)
 
     def drawn(node: LayerNode) -> bool:
@@ -225,5 +292,5 @@ def visibility_plan(layers: MapLayers, selected: Collection[str]) -> tuple[Layer
 
     return tuple(
         LayerVisibility(uri=node.uri, name=long_name, group=node.group, visible=drawn(node))
-        for node, long_name in walk(layers.layers)
+        for node, long_name in walk(the_map.layers)
     )

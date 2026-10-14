@@ -450,10 +450,16 @@ def tile_uri(name: str) -> str:
     return f"CIMPATH=stenavi/{name.encode('utf-8').hex()}.json"
 
 
-def tile_project(plan: dict | None = None, *, maps: Sequence[str] = ("Stenavi",)) -> bytes:
+def tile_map_uri(number: int) -> str:
+    """The uRI ``tile_project`` gives its map ``number``, counting from 0."""
+    return f"CIMPATH=map{number}/map.json"
+
+
+def tile_project(plan: dict | None = None, *, maps: Sequence[tuple[str, list]] = (("Stenavi", TILE_MAP),)) -> bytes:
     """An ``.aprx`` as Pro saves one: ``GISProject.json`` naming its maps, one member per map, group and layer.
 
-    The first map holds ``TILE_MAP``. ``plan``, when given, is a ``fake_plan.json`` member that
+    ``maps`` are (name, tree) in project order, each tree shaped as ``TILE_MAP``; layer names must
+    not repeat across maps. ``plan``, when given, is a ``fake_plan.json`` member that
     ``fake_tile_worker.py`` acts on.
     """
     members: list[tuple[str, bytes, int]] = []
@@ -467,9 +473,9 @@ def tile_project(plan: dict | None = None, *, maps: Sequence[str] = ("Stenavi",)
         return uri
 
     items = [{"type": "CIMProjectItem", "name": "Default.gdb", "itemType": "GDB", "catalogPath": ".\\Default.gdb"}]
-    for number, name in enumerate(maps):
-        uri = f"CIMPATH=map{number}/map.json"
-        layers = [add(*layer) for layer in TILE_MAP] if number == 0 else []
+    for number, (name, tree) in enumerate(maps):
+        uri = tile_map_uri(number)
+        layers = [add(*layer) for layer in tree]
         the_map = {"type": "CIMMap", "name": name, "uRI": uri, "layers": layers}
         members.append((uri.removeprefix("CIMPATH="), _compact(the_map), zipfile.ZIP_DEFLATED))
         items.append({"type": "CIMProjectItem", "name": name, "itemType": "Map", "catalogPath": uri})
@@ -480,7 +486,9 @@ def tile_project(plan: dict | None = None, *, maps: Sequence[str] = ("Stenavi",)
 
 
 def demo_tile_station() -> bytes:
-    """``demo_station`` with one project holding ``TILE_MAP``, for capture.mjs to open the layer list on."""
+    """``demo_station`` with one project for capture.mjs to open the layer list on: the template's empty map,
+    then ``TILE_MAP`` as Insert > Import Map of an ``.mxd`` leaves it."""
     with zipfile.ZipFile(BytesIO(demo_station())) as station:
         members: list[tuple[str, bytes | None]] = [(info.filename, station.read(info)) for info in station.infolist()]
-    return make_zip([*members, ("DemoSta_6677.shp/DemoSta.aprx", tile_project())])
+    project = tile_project(maps=(("マップ", []), ("マップ レイヤー", TILE_MAP)))
+    return make_zip([*members, ("DemoSta_6677.shp/DemoSta.aprx", project)])

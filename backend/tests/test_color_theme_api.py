@@ -10,6 +10,8 @@ import pytest
 
 from backend.tests.color_theme_fixtures import (
     SPACE_FIELDS,
+    TILE_MAP,
+    tile_map_uri,
     make_dbf,
     make_project,
     make_zip,
@@ -113,15 +115,24 @@ def test_inspect_reports_each_renderer_of_a_dropped_project(test_client) -> None
     assert line["renderers"][2]["reason"] == "expression"
 
 
-def test_inspect_lists_the_one_projects_layers_with_the_shipped_patterns_unticked(test_client) -> None:
-    files, data = _folder([*station_members()[1:], ("東京/東京.aprx", tile_project())])
+def test_inspect_lists_the_one_projects_maps_and_layers_with_the_shipped_patterns_unticked(test_client) -> None:
+    project = tile_project(maps=(("マップ", []), ("マップ レイヤー", TILE_MAP)))
+    files, data = _folder([*station_members()[1:], ("東京/東京.aprx", project)])
 
     response = test_client.post("/api/color-theme/inspect", files=files, data=data)
 
     assert response.status_code == 200, response.text
-    layers = response.json()["tile_layers"]
-    assert (layers["state"], layers["map"]) == ("map", "Stenavi")
-    ordinal = layers["layers"][0]
+    tile_layers = response.json()["tile_layers"]
+    assert {key: tile_layers[key] for key in ("state", "default_map", "default_reason")} == {
+        "state": "maps",
+        "default_map": tile_map_uri(1),
+        "default_reason": "only_with_layers",
+    }
+    assert [(m["id"], m["name"], len(m["layers"])) for m in tile_layers["maps"]] == [
+        (tile_map_uri(0), "マップ", 0),
+        (tile_map_uri(1), "マップ レイヤー", len(TILE_MAP)),
+    ]
+    ordinal = tile_layers["maps"][1]["layers"][0]
     assert {key: ordinal[key] for key in ("uri", "name", "group", "visible", "excluded_by", "tiled_by_default")} == {
         "uri": tile_uri("ordinal_1"),
         "name": "ordinal_1",

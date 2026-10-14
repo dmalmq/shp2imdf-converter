@@ -18,6 +18,7 @@ import pytest
 
 from backend.src.recolor import Archive
 from backend.src.tile_jobs import Failed, TileJobs
+from backend.src.tile_layers import TilePlan
 from backend.tests.color_theme_fixtures import make_zip
 
 pytestmark = [pytest.mark.colortheme, pytest.mark.vectortiles]
@@ -166,11 +167,48 @@ def test_a_layer_left_broken_fails_the_build_by_name(worker, tmp_path, capsys) -
     assert warnings == ["Floors\\1F: 0 folders named 'nowhere.gdb' in the upload", "Floors\\2F: 2 folders named 'shp' in the upload"]
 
 
-def test_a_project_needs_exactly_one_map(worker) -> None:
-    project = SimpleNamespace(listMaps=lambda: [SimpleNamespace(name="1F"), SimpleNamespace(name="B1")])
+class _Map:
+    def __init__(self, name: str, uri: str | None, layers: list[_Layer] | None = None) -> None:
+        self.name = name
+        self.uri = uri
+        self.layers = layers or []
+        self.metadata = SimpleNamespace(title="t", tags="t", summary="s", description="d", credits="c", accessConstraints="a")
 
-    with pytest.raises(worker.BuildFailed, match="exactly one map; it has 2: '1F', 'B1'"):
-        worker.only_map(project)
+    def listLayers(self) -> list[_Layer]:  # noqa: N802
+        return self.layers
+
+    def getDefinition(self, version: str) -> SimpleNamespace:  # noqa: N802
+        if self.uri is None:
+            raise RuntimeError("no CIM here")
+        return SimpleNamespace(uRI=self.uri)
+
+
+def _maps(*maps: _Map) -> SimpleNamespace:
+    return SimpleNamespace(listMaps=lambda: list(maps))
+
+
+def test_the_map_is_found_by_its_uri_whatever_the_others_are_called(worker) -> None:
+    station = _Map("マップ", "CIMPATH=map1/map.json")
+    project = _maps(_Map("マップ", "CIMPATH=map/map.json"), station)
+
+    assert worker.chosen_map(project, "CIMPATH=Map1/Map.json", "マップ") is station
+
+
+def test_without_a_uri_the_map_is_found_by_its_name_with_a_warning(worker, capsys) -> None:
+    station = _Map("マップ レイヤー", None)
+
+    assert worker.chosen_map(_maps(_Map("マップ", None), station), "CIMPATH=map1/map.json", "マップ レイヤー") is station
+    assert _lines(capsys.readouterr().out) == [
+        {"event": "warning", "text": "No map has the uRI CIMPATH=map1/map.json; tiling the one called 'マップ レイヤー'"}
+    ]
+
+
+@pytest.mark.parametrize("names", [("マップ", "2F"), ("1F", "1F")])
+def test_a_map_neither_uri_nor_name_tells_apart_fails_naming_the_maps(worker, names) -> None:
+    project = _maps(*(_Map(name, None) for name in names))
+
+    with pytest.raises(worker.BuildFailed, match=r"'1F' \(CIMPATH=map1/map.json\), is not one arcpy can tell apart; the project has 2: '"):
+        worker.chosen_map(project, "CIMPATH=map1/map.json", "1F")
 
 
 def _station(tmp_path: Path) -> tuple[list[_Layer], list[dict]]:
@@ -220,6 +258,7 @@ def _tools(seen: dict) -> SimpleNamespace:
     """arcpy.management as far as a build goes; the package records which layers it would have drawn."""
 
     def package(in_map, **_):
+        seen["map"] = in_map
         seen["tiled"] = [layer.longName for layer in in_map.listLayers() if layer.visible]
 
     def extract(in_package, output_folder, **_):
@@ -231,18 +270,20 @@ def _tools(seen: dict) -> SimpleNamespace:
     )
 
 
-def test_a_build_tiles_the_choice_without_saving_it_into_the_project(worker, tmp_path) -> None:
+def test_a_build_tiles_the_chosen_map_and_layers_without_saving_the_choice(worker, tmp_path) -> None:
     layers, plan = _station(tmp_path)
     project = _Project(layers, tmp_path)
-    metadata = SimpleNamespace(title="t", tags="t", summary="s", description="d", credits="c", accessConstraints="a")
-    the_map = SimpleNamespace(name="Map", listLayers=lambda: layers, metadata=metadata)
-    project.listMaps = lambda: [the_map]
+    template = _Map("マップ", "CIMPATH=map/map.json", [_Layer("Template", None, broken=False)])
+    station = _Map("マップ レイヤー", "CIMPATH=map1/map.json", layers)
+    project.listMaps = lambda: [template, station]
     seen: dict = {}
     worker.arcpy.mp.ArcGISProject = lambda path: project
     worker.arcpy.management = _tools(seen)
 
-    vtiles, problems = worker.build(tmp_path / "Sta.aprx", tmp_path, tmp_path / "out", plan)
+    told = {"map_uri": "CIMPATH=map1/map.json", "map_name": "マップ レイヤー", "layers": plan}
+    vtiles, problems = worker.build(tmp_path / "Sta.aprx", tmp_path, tmp_path / "out", told)
 
+    assert seen["map"] is station
     assert seen["tiled"] == ["Floors", "Floors\\1F", "Floors\\B1"]
     as_uploaded = {layer.longName: layer.longName != "Floors\\B1" for layer in layers}
     assert project.saves == [as_uploaded]
@@ -290,7 +331,8 @@ def test_a_japanese_failure_reaches_the_build_log_intact_under_a_cp932_console(t
     launcher.write_text(_JAPANESE_CONSOLE.format(stub=str(stub), worker=str(WORKER)), encoding="utf-8")
     jobs = TileJobs(tmp_path / "j", ttl_seconds=3600, script=launcher)
 
-    job_id = jobs.submit(Archive(filename="p.zip", data=make_zip([("p.aprx", b"x")])), "p.aprx", Path(sys.executable), ())
+    plan = TilePlan(map_uri="CIMPATH=map/map.json", map_name="マップ", layers=())
+    job_id = jobs.submit(Archive(filename="p.zip", data=make_zip([("p.aprx", b"x")])), "p.aprx", Path(sys.executable), plan)
 
     deadline = time.monotonic() + 30
     while not isinstance(status := jobs.status(job_id), Failed):

@@ -31,13 +31,12 @@ from backend.src.recolor import Archive, Inspection, convert, inspect, is_projec
 from backend.src.tile_jobs import JobStatus, TileJobs
 from backend.src.tile_layers import (
     LayersUnreadable,
-    LayerVisibility,
-    NotOneMap,
+    NoMapLayers,
     SelectionError,
     TileExclusions,
-    default_selection,
+    TilePlan,
     read_project_layers,
-    visibility_plan,
+    tile_plan,
 )
 
 router = APIRouter(prefix="/api/color-theme", tags=["color-theme"])
@@ -67,8 +66,10 @@ class _Station:
     """The ``style_files`` part: ``true`` to add style files to the download. Left out, none are added."""
     vector_tiles: bool
     """The ``vector_tiles`` part: ``true`` to build vector tiles from the upload's one project, as a job."""
+    tile_map: str | None
+    """The ``tile_map`` part: the id of the map to tile. Left out, the project's default map."""
     tile_layers: frozenset[str] | None
-    """The ``tile_layers`` part: a JSON list of the uRIs of every layer to tile. Left out, the project's defaults."""
+    """The ``tile_layers`` part: a JSON list of the uRIs of every layer to tile. Left out, the map's defaults."""
 
 
 _FLAGS = {"true": True, "false": False}
@@ -85,13 +86,18 @@ async def _station(request: Request) -> _Station:
         for name, flag in flags.items():
             if flag not in _FLAGS:
                 raise ValueError(f"{name} must be 'true' or 'false'.")
+        tile_map = form.get("tile_map")
+        if tile_map is not None and (not isinstance(tile_map, str) or not tile_map):
+            raise ValueError("tile_map must be a map id.")
         tile_layers = _tile_layers(form.get("tile_layers"))
-        if tile_layers is not None and not _FLAGS[flags["vector_tiles"]]:
-            raise ValueError("tile_layers is only sent with vector_tiles=true.")
+        for name, part in (("tile_map", tile_map), ("tile_layers", tile_layers)):
+            if part is not None and not _FLAGS[flags["vector_tiles"]]:
+                raise ValueError(f"{name} is only sent with vector_tiles=true.")
         return _Station(
             blobs=await read_uploads(request, files, names=paths or None),
             style_files=_FLAGS[flags["style_files"]],
             vector_tiles=_FLAGS[flags["vector_tiles"]],
+            tile_map=tile_map,
             tile_layers=tile_layers,
         )
 
@@ -161,10 +167,10 @@ async def convert_color_theme(request: Request) -> Response:
     if not station.vector_tiles:
         return attachment_response(archive.data, archive.filename)
     project, data = _one_project(archive)
-    layers = await run_in_threadpool(
-        _layer_plan, data, station.tile_layers, _exclusions(request), max_bytes=max_upload_bytes(request)
+    tiles = await run_in_threadpool(
+        _tile_plan, data, station.tile_map, station.tile_layers, _exclusions(request), max_bytes=max_upload_bytes(request)
     )
-    job_id = await run_in_threadpool(_tile_jobs(request).submit, archive, project, arcpy.python, layers)
+    job_id = await run_in_threadpool(_tile_jobs(request).submit, archive, project, arcpy.python, tiles)
     return JSONResponse(status_code=202, content={"job_id": job_id})
 
 
@@ -180,24 +186,29 @@ def _one_project(archive: Archive) -> tuple[str, bytes]:
         return projects[0], converted.read(projects[0])
 
 
-def _layer_plan(
-    project: bytes, chosen: frozenset[str] | None, exclusions: TileExclusions, *, max_bytes: int
-) -> tuple[LayerVisibility, ...]:
-    """The visibility to tile with: the operator's choice, or with none sent, the project's defaults."""
-    layers = read_project_layers(project, exclusions, max_bytes=max_bytes)
-    if isinstance(layers, NotOneMap):
-        names = ", ".join(layers.maps) or "none"
+_SELECTION_CODES = {
+    "unknown_map": "VECTOR_TILES_UNKNOWN_MAP",
+    "empty_map": "VECTOR_TILES_EMPTY_MAP",
+    "layers": "VECTOR_TILES_BAD_LAYERS",
+}
+
+
+def _tile_plan(
+    project: bytes, map_id: str | None, chosen: frozenset[str] | None, exclusions: TileExclusions, *, max_bytes: int
+) -> TilePlan:
+    """The map and visibility to tile with: the operator's choice, or with none sent, the project's defaults."""
+    maps = read_project_layers(project, exclusions, max_bytes=max_bytes)
+    if isinstance(maps, NoMapLayers):
+        names = ", ".join(maps.maps) or "none"
         raise ApiError(
-            f"Vector tiles are built from a project with exactly one map; this one has {len(layers.maps)}: {names}.",
-            "VECTOR_TILES_NEED_ONE_MAP",
-            400,
+            f"No map in the project has a layer to tile. Its maps: {names}.", "VECTOR_TILES_NO_MAP_LAYERS", 400
         )
-    if isinstance(layers, LayersUnreadable):
-        raise ApiError(f"The project's layers could not be read: {layers.detail}", "VECTOR_TILES_PROJECT_UNREADABLE", 400)
+    if isinstance(maps, LayersUnreadable):
+        raise ApiError(f"The project's layers could not be read: {maps.detail}", "VECTOR_TILES_PROJECT_UNREADABLE", 400)
     try:
-        return visibility_plan(layers, default_selection(layers) if chosen is None else chosen)
+        return tile_plan(maps, map_id, chosen)
     except SelectionError as exc:
-        raise ApiError(str(exc), "VECTOR_TILES_BAD_LAYERS", 400) from exc
+        raise ApiError(str(exc), _SELECTION_CODES[exc.kind], 400) from exc
 
 
 def _job_not_found() -> NotFoundError:
