@@ -678,6 +678,16 @@ test("in Japanese the option and its count read in the page's idiom", async () =
 
 const tilesOption = () => screen.getByRole("checkbox", { name: /Build vector tiles for Stenavi/ });
 const tilesRegion = () => screen.getByRole("region", { name: "Vector tiles" });
+const layersDialog = () => screen.getByRole("dialog", { name: "Layers to tile" });
+const layerBox = (name: string) => within(layersDialog()).getByRole("checkbox", { name });
+
+/** Tick the option, which opens the layer list, and keep what it starts with. */
+async function tickTilesKeepingDefaults() {
+  await waitFor(() => expect(tilesOption()).toBeEnabled());
+  fireEvent.click(tilesOption());
+  fireEvent.click(within(layersDialog()).getByRole("button", { name: "Use these layers" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+}
 
 test("vector tiles are off and greyed out, with the reason, when the server's ArcGIS Pro is not licensed", async () => {
   vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
@@ -690,7 +700,7 @@ test("vector tiles are off and greyed out, with the reason, when the server's Ar
   );
   expect(tilesOption()).toBeDisabled();
   expect(tilesOption()).not.toBeChecked();
-  expect(tilesRegion()).toHaveTextContent("tick the floor and background groups and save the project before you upload it");
+  expect(tilesRegion()).toHaveTextContent("Only the layers ticked in the layer list are tiled");
 });
 
 test("vector tiles are greyed out for an upload with no project or with two", async () => {
@@ -734,13 +744,12 @@ test("ticked, Download queues a build, shows its place in line and its steps, an
     .mockResolvedValueOnce({
       state: "done",
       filename: "shinjuku_new-colors.zip",
-      warnings: ["These top-level groups are switched off and will NOT be tiled: 背景"],
+      warnings: ["These groups have no layer chosen and are switched off: ordinal_-1, WiFi"],
       problems: ["missing zoom levels [21]"]
     });
   renderPage();
   pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
-  await waitFor(() => expect(tilesOption()).toBeEnabled());
-  fireEvent.click(tilesOption());
+  await tickTilesKeepingDefaults();
   const bar = screen.getByRole("region", { name: "Next step" });
   expect(bar).toHaveTextContent("Vector tiles are built");
 
@@ -749,7 +758,10 @@ test("ticked, Download queues a build, shows its place in line and its steps, an
   const status = await within(tilesRegion()).findByRole("status");
   await waitFor(() => expect(status).toHaveTextContent("Waiting for another build to finish · number 1 in line"));
   expect(vi.mocked(startTileBuild).mock.calls[0][0]).toBe(vi.mocked(inspectColorTheme).mock.calls[0][0]);
-  expect(vi.mocked(startTileBuild).mock.calls[0][1]).toMatchObject({ styleFiles: true });
+  expect(vi.mocked(startTileBuild).mock.calls[0][1]).toMatchObject({
+    styleFiles: true,
+    layers: ["CIMPATH=stenavi/JRSta_1_Space.json", "CIMPATH=stenavi/背景.json"]
+  });
   expect(convertColorTheme).not.toHaveBeenCalled();
   expect(vi.mocked(fetchTileJob).mock.calls[0][0]).toBe("a1b2c3");
   expect(within(bar).getByRole("button", { name: /Building tiles…/ })).toBeDisabled();
@@ -763,7 +775,7 @@ test("ticked, Download queues a build, shows its place in line and its steps, an
   expect(bar).toHaveTextContent("Downloaded shinjuku_new-colors.zip");
   expect(within(tilesRegion()).queryByRole("status")).toBeNull();
   expect(tilesRegion()).toHaveTextContent("missing zoom levels [21]");
-  expect(tilesRegion()).toHaveTextContent("will NOT be tiled: 背景");
+  expect(tilesRegion()).toHaveTextContent("no layer chosen and are switched off: ordinal_-1, WiFi");
   expect(fetchTileJob).toHaveBeenCalledTimes(3);
 });
 
@@ -774,8 +786,7 @@ test("a failed build shows the worker's reason and leaves the check to try again
   vi.mocked(fetchTileJob).mockResolvedValue({ state: "failed", reason: "2 layers have no data in the upload: 1F, 2F" });
   renderPage();
   pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
-  await waitFor(() => expect(tilesOption()).toBeEnabled());
-  fireEvent.click(tilesOption());
+  await tickTilesKeepingDefaults();
   const bar = screen.getByRole("region", { name: "Next step" });
 
   fireEvent.click(within(bar).getByRole("button", { name: "Download" }));
@@ -792,8 +803,7 @@ test("a build the server no longer knows says so", async () => {
   vi.mocked(fetchTileJob).mockRejectedValue(new ApiClientError(404, "TILE_JOB_NOT_FOUND", "not on the server"));
   renderPage();
   pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
-  await waitFor(() => expect(tilesOption()).toBeEnabled());
-  fireEvent.click(tilesOption());
+  await tickTilesKeepingDefaults();
   const bar = screen.getByRole("region", { name: "Next step" });
 
   fireEvent.click(within(bar).getByRole("button", { name: "Download" }));
@@ -813,9 +823,163 @@ test("in Japanese the option, its note and the build's progress read in Japanese
   const option = await screen.findByRole("checkbox", { name: /Stenavi 用のベクタータイルを作成/ });
   await waitFor(() => expect(option).toBeEnabled());
   const region = screen.getByRole("region", { name: "ベクタータイル" });
-  expect(region).toHaveTextContent("フロアと背景のグループにチェックを入れ");
+  expect(region).toHaveTextContent("レイヤー一覧でチェックしたレイヤーだけがタイルになります");
   fireEvent.click(option);
+  const dialog = screen.getByRole("dialog", { name: "タイルにするレイヤー" });
+  expect(dialog).toHaveTextContent("グループ 4 件、レイヤー 9 件 · タイル化 2 件 · パターンで除外 6 件");
+  expect(dialog).toHaveTextContent("除外 · Facility_Merge_*");
+  expect(dialog).toHaveTextContent("プロジェクトで非表示");
+  expect(within(dialog).getByRole("button", { name: "既定に戻す" })).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "このレイヤーを使う" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(region).toHaveTextContent("グループ 4 件、レイヤー 9 件 · タイル化 2 件 · パターンで除外 6 件");
+  expect(within(region).getByRole("button", { name: "レイヤーを選ぶ…" })).toBeInTheDocument();
   fireEvent.click(within(screen.getByRole("region", { name: "次のステップ" })).getByRole("button", { name: "ダウンロード" }));
 
   expect(await within(region).findByRole("status")).toHaveTextContent("ほかの作成の完了を待っています · 2 番目");
+});
+
+test("ticking vector tiles opens the layer list: saved visibility less the patterns, explained row by row", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(tilesOption()).toBeEnabled());
+
+  fireEvent.click(tilesOption());
+
+  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 2 to tile · 6 excluded by pattern");
+  expect(layersDialog()).toHaveTextContent("Ticked layers of the map “Stenavi” go into the vector tiles");
+  expect(layerBox("ordinal_1")).toHaveAttribute("aria-checked", "mixed");
+  expect(layerBox("Facility_Merge_1")).not.toBeChecked();
+  expect(layerBox("ordinal_-1")).not.toBeChecked();
+  expect(layerBox("WiFi")).not.toBeChecked();
+  expect(layerBox("背景")).toBeChecked();
+  const row = (name: string) => layerBox(name).closest("div") as HTMLElement;
+  expect(row("Facility_Merge_1")).toHaveTextContent("excluded · Facility_Merge_*");
+  expect(row("WiFi")).toHaveTextContent("excluded · wifi");
+  expect(row("ordinal_-1")).toHaveTextContent("hidden in project");
+  expect(row("背景")).not.toHaveTextContent("excluded");
+  expect(within(layersDialog()).queryByRole("checkbox", { name: "JRSta_1_Space" })).toBeNull();
+
+  fireEvent.click(within(layersDialog()).getByRole("button", { name: "Expand JRSta_1F" }));
+
+  expect(layerBox("JRSta_1F")).toHaveAttribute("aria-checked", "mixed");
+  expect(layerBox("JRSta_1_Space")).toBeChecked();
+  expect(within(row("JRSta_1_level")).getByText("excluded · *_level")).toBeInTheDocument();
+  expect(row("JRSta_1_level")).toHaveTextContent("hidden in project");
+});
+
+test("a group's tick sets every layer in it, a partly ticked group shows a dash, and the summary follows", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(tilesOption()).toBeEnabled());
+  fireEvent.click(tilesOption());
+
+  fireEvent.click(layerBox("ordinal_1"));
+  fireEvent.click(within(layersDialog()).getByRole("button", { name: "Expand JRSta_1F" }));
+
+  expect(layerBox("ordinal_1")).toBeChecked();
+  expect(layerBox("JRSta_1F")).toBeChecked();
+  expect(layerBox("JRSta_1_level")).toBeChecked();
+  expect(layersDialog()).toHaveTextContent("· 6 to tile ·");
+
+  fireEvent.click(layerBox("JRSta_1_opening"));
+
+  expect(layerBox("JRSta_1F")).toHaveAttribute("aria-checked", "mixed");
+  expect(layerBox("ordinal_1")).toHaveAttribute("aria-checked", "mixed");
+  expect(layersDialog()).toHaveTextContent("· 5 to tile ·");
+
+  fireEvent.click(layerBox("ordinal_1"));
+
+  expect(layerBox("ordinal_1")).toBeChecked();
+  fireEvent.click(layerBox("ordinal_1"));
+  expect(layerBox("ordinal_1")).not.toBeChecked();
+  expect(layerBox("JRSta_1_Space")).not.toBeChecked();
+  expect(layersDialog()).toHaveTextContent("· 1 to tile ·");
+});
+
+test("reset puts the defaults back, and with nothing ticked the list cannot be used", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(tilesOption()).toBeEnabled());
+  fireEvent.click(tilesOption());
+
+  fireEvent.click(layerBox("ordinal_1"));
+  fireEvent.click(layerBox("背景"));
+  fireEvent.click(layerBox("ordinal_1"));
+  expect(layersDialog()).toHaveTextContent("· 0 to tile ·");
+  expect(within(layersDialog()).getByRole("button", { name: "Use these layers" })).toBeDisabled();
+
+  fireEvent.click(within(layersDialog()).getByRole("button", { name: "Reset to defaults" }));
+
+  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 2 to tile · 6 excluded by pattern");
+  expect(layerBox("ordinal_1")).toHaveAttribute("aria-checked", "mixed");
+  expect(layerBox("背景")).toBeChecked();
+  expect(within(layersDialog()).getByRole("button", { name: "Use these layers" })).toBeEnabled();
+});
+
+test("the chosen layers are sent in drawing order, Cancel keeps the previous choice, and a new drop starts over", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  vi.mocked(startTileBuild).mockResolvedValue({ job_id: "a1b2c3" });
+  vi.mocked(fetchTileJob).mockResolvedValue({ state: "queued", position: 1 });
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(tilesOption()).toBeEnabled());
+  fireEvent.click(tilesOption());
+  fireEvent.click(layerBox("ordinal_-1"));
+  fireEvent.click(layerBox("背景"));
+  fireEvent.click(within(layersDialog()).getByRole("button", { name: "Use these layers" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(tilesRegion()).toHaveTextContent("· 2 to tile ·");
+
+  fireEvent.click(within(tilesRegion()).getByRole("button", { name: "Choose layers…" }));
+  expect(layerBox("ordinal_-1")).toBeChecked();
+  fireEvent.click(layerBox("ordinal_-1"));
+  fireEvent.click(within(layersDialog()).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(tilesRegion()).toHaveTextContent("· 2 to tile ·");
+
+  fireEvent.click(within(screen.getByRole("region", { name: "Next step" })).getByRole("button", { name: "Download" }));
+
+  await waitFor(() => expect(startTileBuild).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(startTileBuild).mock.calls[0][1].layers).toEqual([
+    "CIMPATH=stenavi/JRSta_1_Space.json",
+    "CIMPATH=stenavi/JRSta_B1_Space.json"
+  ]);
+
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(within(tilesRegion()).getByRole("button", { name: "Choose layers…" })).toBeEnabled());
+  fireEvent.click(within(tilesRegion()).getByRole("button", { name: "Choose layers…" }));
+  expect(layerBox("ordinal_-1")).not.toBeChecked();
+  expect(layerBox("背景")).toBeChecked();
+});
+
+test("a project with two maps, or whose layers cannot be read, cannot be tiled and says why", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue({
+    ...shinjukuProjectInspection(),
+    tile_layers: { state: "not_one_map", maps: ["1F", "B1"] }
+  });
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+
+  await waitFor(() =>
+    expect(tilesRegion()).toHaveTextContent("The project has 2 maps (1F, B1). Tiles are built from a project with exactly one map.")
+  );
+  expect(tilesOption()).toBeDisabled();
+
+  vi.mocked(inspectColorTheme).mockResolvedValue({
+    ...shinjukuProjectInspection(),
+    tile_layers: { state: "unreadable", detail: "The project has no member GISProject.json" }
+  });
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(tilesRegion()).toHaveTextContent("The project’s layers could not be read: The project has no member GISProject.json"));
+  expect(tilesOption()).toBeDisabled();
 });

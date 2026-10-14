@@ -741,7 +741,30 @@ export type ColorThemeInspection = {
     projects: number;
   };
   theme: ColorThemeReport;
+  /** The layers a vector tile build chooses from; null unless the upload has exactly one project. */
+  tile_layers: TileLayers | null;
 };
+
+/** A group or layer of the project's map, as the project was saved. */
+export type TileLayerNode = {
+  /** The CIM `uRI`: how the build finds the layer again. */
+  uri: string;
+  name: string;
+  group: boolean;
+  /** Its own visibility as saved. */
+  visible: boolean;
+  /** The exclusion pattern its own name matched. */
+  excluded_by: string | null;
+  /** A layer: drawn as saved and matched by no pattern, its own or a group's above it. A group: any layer in it is. */
+  tiled_by_default: boolean;
+  children: TileLayerNode[];
+};
+
+export type TileLayers =
+  /** `layers` top of the drawing order first. */
+  | { state: "map"; map: string; layers: TileLayerNode[] }
+  | { state: "not_one_map"; maps: string[] }
+  | { state: "unreadable"; detail: string };
 
 /** A dropped or picked file and its path inside what was dropped or picked. */
 export type DatasetFile = { file: File; path: string };
@@ -784,14 +807,18 @@ export type TileJobStatus =
   | { state: "done"; filename: string; warnings: string[]; problems: string[] }
   | { state: "failed"; reason: string };
 
-/** Converts as `convertColorTheme` does, then queues a vector tile build from the upload's one project. */
+/**
+ * Converts as `convertColorTheme` does, then queues a vector tile build from the upload's one project.
+ * `layers` is the uRI of every layer to tile, exactly as the page showed them ticked.
+ */
 export function startTileBuild(
   files: DatasetFile[],
-  { styleFiles, ...options }: SendFormOptions & { styleFiles: boolean }
+  { styleFiles, layers, ...options }: SendFormOptions & { styleFiles: boolean; layers: string[] }
 ): Promise<{ job_id: string }> {
   const form = datasetForm(files);
   form.append("style_files", String(styleFiles));
   form.append("vector_tiles", "true");
+  form.append("tile_layers", JSON.stringify(layers));
   return sendForm<{ job_id: string }>("/api/color-theme/convert", form, options);
 }
 

@@ -305,6 +305,19 @@ export function vectorTilesBlockedReason(
       `このアップロードには ArcGIS Pro プロジェクト（.aprx）が ${projects} 個あります。タイルは 1 つのプロジェクトから作成するため、プロジェクトが 1 つだけの駅をドロップしてください。`
     );
   }
+  const layers = inspection.tile_layers;
+  if (layers?.state === "not_one_map") {
+    const names = layers.maps.join(", ");
+    return layers.maps.length === 0
+      ? t("The project has no map to tile.", "プロジェクトにタイルにするマップがありません。")
+      : t(
+          `The project has ${layers.maps.length} maps (${names}). Tiles are built from a project with exactly one map.`,
+          `プロジェクトにマップが ${layers.maps.length} 個あります（${layers.maps.join("、")}）。タイルはマップが 1 つだけのプロジェクトから作成します。`
+        );
+  }
+  if (layers?.state === "unreadable") {
+    return t(`The project’s layers could not be read: ${layers.detail}`, `プロジェクトのレイヤーを読み込めませんでした: ${layers.detail}`);
+  }
   return null;
 }
 

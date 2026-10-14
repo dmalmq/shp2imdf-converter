@@ -23,7 +23,8 @@ import { NextBar } from "../components/bringIn/NextBar";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
 import { usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
-import { Button, Checkbox, Metric } from "../components/ui";
+import { TileLayersDialog, tileLayerSummary } from "../components/colorTheme/TileLayersDialog";
+import { Button, Checkbox, DisabledHint, Metric } from "../components/ui";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import {
@@ -46,6 +47,7 @@ import {
   type DatasetUpload
 } from "../lib/colorTheme";
 import { saveBlob, saveUrl } from "../lib/download";
+import { choiceInOrder, defaultTileChoice, tileLayerCounts, type TileChoice, type TileLayerCounts } from "../lib/tileLayers";
 import { cn } from "@/lib/utils";
 
 type T = (english: string, japanese: string) => string;
@@ -98,6 +100,9 @@ export function ColorThemePage() {
   // Off by default: a build takes minutes and holds the server's one ArcGIS Pro licence.
   const [vectorTiles, setVectorTiles] = useState(false);
   const [tilesAvailability, setTilesAvailability] = useState<VectorTilesAvailability | null>(null);
+  // Tied to the inspection it was made for: a new drop starts again from that project's defaults.
+  const [tileChoice, setTileChoice] = useState<{ inspection: ColorThemeInspection; choice: TileChoice } | null>(null);
+  const [choosingLayers, setChoosingLayers] = useState(false);
   const inflight = useRef<AbortController | null>(null);
   const anchor = useRef<HTMLDivElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
@@ -231,9 +236,10 @@ export function ColorThemePage() {
     const signal = begin();
     dispatch({ type: "convertStarted" });
     try {
-      if (tiles) {
+      if (tiles && tileMap) {
         const { job_id } = await startTileBuild(upload.files, {
           styleFiles,
+          layers: choiceInOrder(tileMap.layers, tileLayersChosen ?? new Set()),
           signal,
           onProgress: (percent) => dispatch({ type: "progress", upload, percent })
         });
@@ -281,7 +287,14 @@ export function ColorThemePage() {
 
   const checked = state.phase === "checked" || state.phase === "converting" || state.phase === "building" ? state : null;
   const inspection = checked?.inspection ?? null;
-  const tilesBlocked = inspection ? vectorTilesBlockedReason(tilesAvailability, inspection, t) : null;
+  const tileMap = inspection?.tile_layers?.state === "map" ? inspection.tile_layers : null;
+  const tileLayersChosen =
+    tileMap === null
+      ? null
+      : tileChoice?.inspection === inspection
+        ? tileChoice.choice
+        : defaultTileChoice(tileMap.layers);
+  const tilesBlocked =inspection ? vectorTilesBlockedReason(tilesAvailability, inspection, t) : null;
   const wantTiles = vectorTiles && tilesBlocked === null;
   const blocked = inspection ? downloadBlockedReason(inspection, t, styleFiles, wantTiles) : null;
   const busy = state.phase === "converting" || state.phase === "building";
@@ -390,7 +403,12 @@ export function ColorThemePage() {
           {inspection ? (
             <VectorTiles
               wanted={vectorTiles}
-              onWanted={setVectorTiles}
+              onWanted={(wanted) => {
+                setVectorTiles(wanted);
+                if (wanted && tileMap) setChoosingLayers(true);
+              }}
+              counts={tileMap && tileLayersChosen ? tileLayerCounts(tileMap.layers, tileLayersChosen) : null}
+              onChooseLayers={() => setChoosingLayers(true)}
               blocked={tilesBlocked}
               detail={tilesAvailability?.state === "unavailable" ? tilesAvailability.detail : null}
               building={building}
@@ -425,6 +443,20 @@ export function ColorThemePage() {
               </span>
             )
           }
+        />
+      ) : null}
+
+      {inspection && tileMap && tileLayersChosen ? (
+        <TileLayersDialog
+          open={choosingLayers}
+          onOpenChange={setChoosingLayers}
+          map={tileMap.map}
+          layers={tileMap.layers}
+          choice={tileLayersChosen}
+          onChoose={(choice) => {
+            setTileChoice({ inspection, choice });
+            setChoosingLayers(false);
+          }}
         />
       ) : null}
     </div>
@@ -1317,6 +1349,8 @@ function StyleFiles({
 function VectorTiles({
   wanted,
   onWanted,
+  counts,
+  onChooseLayers,
   blocked,
   detail,
   building,
@@ -1324,6 +1358,9 @@ function VectorTiles({
 }: {
   wanted: boolean;
   onWanted: (wanted: boolean) => void;
+  /** The layer choice so far; null when the project's layers could not be listed. */
+  counts: TileLayerCounts | null;
+  onChooseLayers: () => void;
   /** Why tiles cannot be built for this upload; null when they can. */
   blocked: string | null;
   /** What the server's probe saw, for whoever has to fix it. */
@@ -1361,11 +1398,24 @@ function VectorTiles({
             ) : null}
           </span>
         </label>
+        {wanted && blocked === null && counts ? (
+          <div className="flex items-center gap-3 border-t border-border px-4 py-2.5">
+            <span className="min-w-0 flex-1 text-[12.5px] leading-[1.45] text-foreground">{tileLayerSummary(counts, t)}</span>
+            <DisabledHint
+              className="w-auto"
+              hint={building ? t("The layers cannot change while a build runs.", "作成中はレイヤーを変更できません。") : null}
+            >
+              <Button variant="outline" size="sm" disabled={building !== null} onClick={onChooseLayers}>
+                {t("Choose layers…", "レイヤーを選ぶ…")}
+              </Button>
+            </DisabledHint>
+          </div>
+        ) : null}
         <p className="flex items-start gap-2.5 border-t border-border px-4 py-2.5 text-[12.5px] leading-[1.45] text-muted-foreground">
           <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warning-foreground" />
           {t(
-            "Only visible layers are tiled. In ArcGIS Pro, tick the floor and background groups and save the project before you upload it.",
-            "表示中のレイヤーだけがタイルになります。ArcGIS Pro でフロアと背景のグループにチェックを入れ、プロジェクトを保存してからアップロードしてください。"
+            "Only the layers ticked in the layer list are tiled. It starts from the project as saved, with helper layers such as *_opening and Facility_Merge_* unticked, and nothing you change there is kept for the next build.",
+            "レイヤー一覧でチェックしたレイヤーだけがタイルになります。一覧は保存されたプロジェクトの表示状態から始まり、*_opening や Facility_Merge_* などの補助レイヤーはチェックが外れています。一覧での変更は次の作成には引き継がれません。"
           )}
         </p>
         {building ? (
