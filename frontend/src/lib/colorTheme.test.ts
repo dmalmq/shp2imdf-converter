@@ -123,12 +123,12 @@ describe("colorThemeReducer", () => {
     expect(run([{ type: "converted", upload: tokyo, filename: "t.zip", notes: ["missing zoom levels [21]"] }], running)).toMatchObject({
       phase: "checked",
       delivered: "t.zip",
-      notes: ["missing zoom levels [21]"]
+      built: { jobId: "a", notes: ["missing zoom levels [21]"] }
     });
     expect(run([{ type: "convertFailed", upload: tokyo, message: "no map" }], running)).toMatchObject({
       phase: "checked",
       error: "no map",
-      notes: []
+      built: null
     });
     expect(run([{ type: "reset" }], running)).toBe(initialColorThemeState);
   });
