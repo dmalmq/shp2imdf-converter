@@ -3,14 +3,16 @@
 Steps 3-4 of "Vector tiles from ArcGIS Pro for Stenavi": index (5000 vertices)
 -> metadata -> .vtpk (1:9,028 -> 1:141, Indexed) -> extract (Exploded,
 ready-to-serve) -> root.json maxzoom 21 -> 16 -> checks. Only visible layers
-are tiled, so the project must have its floor and background groups ticked and
-saved before it is uploaded.
+are tiled, and which those are is the operator's choice on the page.
 
 ``tile_jobs.py`` runs it in a Python with a licensed ``arcpy`` as
-``python -I build_tiles.py <project.aprx> <upload root> <out dir>``. It imports
-nothing from ``backend``. ``<upload root>`` is the folder the project was
-unpacked into with the rest of the upload; data sources broken by the move are
-looked up there.
+``python -I build_tiles.py <project.aprx> <upload root> <out dir> <layers.json>``.
+It imports nothing from ``backend``. ``<upload root>`` is the folder the project
+was unpacked into with the rest of the upload; data sources broken by the move
+are looked up there. ``<layers.json>`` is ``{"layers": [{"uri", "name",
+"group", "visible"}, ...]}``: every layer and group of the map with the
+visibility to tile it with. It is set in memory after the data sources are
+repaired and saved, and never saved itself.
 
 Every stdout line it writes itself is one ASCII JSON object, so the console
 code page never decides how a Japanese name crosses the pipe:
@@ -139,10 +141,33 @@ def repair_sources(aprx, m, root: Path) -> None:
         aprx.save()
 
 
-def warn_hidden_groups(m) -> None:
-    hidden = [lyr.name for lyr in m.listLayers() if lyr.isGroupLayer and "\\" not in lyr.longName and not lyr.visible]
-    if hidden:
-        warn("These top-level groups are switched off and will NOT be tiled: " + ", ".join(hidden))
+def _uri(layer) -> str | None:
+    try:
+        return layer.getDefinition("V3").uRI
+    except Exception:
+        return None
+
+
+def apply_layers(m, plan: list[dict]) -> None:
+    """Switch each layer and group on or off as ``plan`` says. Only in memory: nothing saves the project after this."""
+    by_uri = {uri: layer for layer in m.listLayers() if (uri := _uri(layer)) is not None}
+    missing = [line["name"] for line in plan if line["uri"] not in by_uri]
+    if missing:
+        raise BuildFailed(f"{len(missing)} layers chosen on the page are not in the map arcpy opened: {', '.join(missing)}")
+    switched: dict[bool, list[str]] = {True: [], False: []}
+    for line in plan:
+        layer = by_uri[line["uri"]]
+        if layer.visible != line["visible"]:
+            switched[line["visible"]].append(line["name"])
+        layer.visible = line["visible"]
+    log(f"Layers to tile: {sum(1 for line in plan if line['visible'] and not line['group'])}")
+    if switched[True]:
+        log("Switched on for tiling: " + ", ".join(switched[True]))
+    if switched[False]:
+        log("Switched off for tiling: " + ", ".join(switched[False]))
+    empty = [line["name"] for line in plan if line["group"] and not line["visible"]]
+    if empty:
+        warn("These groups have no layer chosen and are switched off: " + ", ".join(empty))
 
 
 def ensure_metadata(m, title: str):
@@ -199,7 +224,7 @@ def _tool_messages() -> None:
         log(text)
 
 
-def build(aprx_path: Path, root: Path, out_dir: Path) -> tuple[Path, list[str]]:
+def build(aprx_path: Path, root: Path, out_dir: Path, plan: list[dict]) -> tuple[Path, list[str]]:
     aprx = arcpy.mp.ArcGISProject(str(aprx_path))
     m = only_map(aprx)
     name = aprx_path.stem
@@ -210,7 +235,7 @@ def build(aprx_path: Path, root: Path, out_dir: Path) -> tuple[Path, list[str]]:
 
     log(f"Map: {m.name} -> {out_dir}")
     repair_sources(aprx, m, root)
-    warn_hidden_groups(m)
+    apply_layers(m, plan)
 
     # The project's default geodatabase may be a path on the machine it was saved on.
     index_gdb = out_dir / "index.gdb"
@@ -270,11 +295,12 @@ def one_line(exc: BaseException) -> str:
 
 
 def main(argv: list[str]) -> None:
-    if len(argv) != 3:
-        fail("usage: build_tiles.py <project.aprx> <upload root> <out dir>")
-    aprx_path, root, out_dir = (Path(arg) for arg in argv)
+    if len(argv) != 4:
+        fail("usage: build_tiles.py <project.aprx> <upload root> <out dir> <layers.json>")
+    aprx_path, root, out_dir, layers = (Path(arg) for arg in argv)
     try:
-        vtiles, problems = build(aprx_path, root, out_dir)
+        plan = json.loads(layers.read_text(encoding="utf-8"))["layers"]
+        vtiles, problems = build(aprx_path, root, out_dir, plan)
     except BuildFailed as exc:
         fail(str(exc))
     except Exception as exc:

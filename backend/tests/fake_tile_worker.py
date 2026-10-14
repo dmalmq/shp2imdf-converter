@@ -1,16 +1,20 @@
 """Stands in for ``build_tiles.py`` in tests: the same JSON lines and a small ``.vtiles`` tree, without arcpy.
 
-Run as ``python -I fake_tile_worker.py <project> <upload root> <out dir>``.
-What it does is read from the project file, which is JSON here, not a zip:
+Run as ``python -I fake_tile_worker.py <project> <upload root> <out dir> <layers.json>``.
+What it does is read from the project's ``fake_plan.json`` member, when it has one:
 ``expects`` lists paths that must sit under the upload root, ``gate`` names a
 file to wait for after step 1, ``fail`` is a reason to fail with there,
-``hang`` never finishes, and ``problems`` are passed through in the result.
+``hang`` never finishes, ``pid`` names a file to write its process id to, and
+``problems`` are passed through in the result. It logs the layers it was told
+to tile and warns about empty groups as the real worker does.
 """
 
 import json
+import os
 from pathlib import Path
 import sys
 import time
+import zipfile
 
 
 def emit(event, **fields):
@@ -23,12 +27,20 @@ def fail(reason):
     sys.exit(1)
 
 
-project, root, out = (Path(arg) for arg in sys.argv[1:4])
-plan = json.loads(project.read_text(encoding="utf-8"))
+project, root, out, layers = (Path(arg) for arg in sys.argv[1:5])
+with zipfile.ZipFile(project) as aprx:
+    plan = json.loads(aprx.read("fake_plan.json")) if "fake_plan.json" in aprx.namelist() else {}
+if plan.get("pid"):
+    Path(plan["pid"]).write_text(str(os.getpid()), encoding="utf-8")
 print("arcpy prose that is not JSON", flush=True)
 for expected in plan.get("expects", []):
     if not (root / expected).is_file():
         fail(f"missing {expected}")
+visibility = json.loads(layers.read_text(encoding="utf-8"))["layers"]
+emit("message", text="Tiled: " + ", ".join(line["name"] for line in visibility if line["visible"] and not line["group"]))
+empty = [line["name"] for line in visibility if line["group"] and not line["visible"]]
+if empty:
+    emit("warning", text="These groups have no layer chosen and are switched off: " + ", ".join(empty))
 emit("step", step=1, of=5, label="Create Vector Tile Index (5000 vertices)")
 if plan.get("gate"):
     deadline = time.monotonic() + 60
@@ -39,7 +51,6 @@ if plan.get("hang"):
 if plan.get("fail"):
     print("Traceback: something arcpy said", file=sys.stderr, flush=True)
     fail(plan["fail"])
-emit("warning", text="These top-level groups are switched off and will NOT be tiled: 背景")
 for step, label in enumerate(("Map metadata", "Create Vector Tile Package", "Extract Package", "root.json"), start=2):
     emit("step", step=step, of=5, label=label)
 vtiles = out / "tiles" / "p12" / f"{project.stem}.vtiles"

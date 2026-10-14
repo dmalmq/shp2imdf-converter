@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from io import BytesIO
+import json
 from pathlib import Path
 import zipfile
 
@@ -28,7 +29,16 @@ from backend.src.color_theme import ColorTheme, ThemeReport, plan
 from backend.src.errors import ApiError, NotFoundError
 from backend.src.recolor import Archive, Inspection, convert, inspect, is_project
 from backend.src.tile_jobs import JobStatus, TileJobs
-from backend.src.tile_layers import TileExclusions
+from backend.src.tile_layers import (
+    LayersUnreadable,
+    LayerVisibility,
+    NotOneMap,
+    SelectionError,
+    TileExclusions,
+    default_selection,
+    read_project_layers,
+    visibility_plan,
+)
 
 router = APIRouter(prefix="/api/color-theme", tags=["color-theme"])
 
@@ -57,6 +67,8 @@ class _Station:
     """The ``style_files`` part: ``true`` to add style files to the download. Left out, none are added."""
     vector_tiles: bool
     """The ``vector_tiles`` part: ``true`` to build vector tiles from the upload's one project, as a job."""
+    tile_layers: frozenset[str] | None
+    """The ``tile_layers`` part: a JSON list of the uRIs of every layer to tile. Left out, the project's defaults."""
 
 
 _FLAGS = {"true": True, "false": False}
@@ -73,11 +85,27 @@ async def _station(request: Request) -> _Station:
         for name, flag in flags.items():
             if flag not in _FLAGS:
                 raise ValueError(f"{name} must be 'true' or 'false'.")
+        tile_layers = _tile_layers(form.get("tile_layers"))
+        if tile_layers is not None and not _FLAGS[flags["vector_tiles"]]:
+            raise ValueError("tile_layers is only sent with vector_tiles=true.")
         return _Station(
             blobs=await read_uploads(request, files, names=paths or None),
             style_files=_FLAGS[flags["style_files"]],
             vector_tiles=_FLAGS[flags["vector_tiles"]],
+            tile_layers=tile_layers,
         )
+
+
+def _tile_layers(part: object) -> frozenset[str] | None:
+    if part is None:
+        return None
+    try:
+        uris = json.loads(part) if isinstance(part, str) else None
+    except ValueError:
+        uris = None
+    if not isinstance(uris, list) or not all(isinstance(uri, str) for uri in uris):
+        raise ValueError("tile_layers must be a JSON list of layer uRIs.")
+    return frozenset(uris)
 
 
 @router.get("", response_model=ThemeReport)
@@ -132,21 +160,44 @@ async def convert_color_theme(request: Request) -> Response:
     )
     if not station.vector_tiles:
         return attachment_response(archive.data, archive.filename)
-    project = _one_project(archive)
-    job_id = await run_in_threadpool(_tile_jobs(request).submit, archive, project, arcpy.python)
+    project, data = _one_project(archive)
+    layers = await run_in_threadpool(
+        _layer_plan, data, station.tile_layers, _exclusions(request), max_bytes=max_upload_bytes(request)
+    )
+    job_id = await run_in_threadpool(_tile_jobs(request).submit, archive, project, arcpy.python, layers)
     return JSONResponse(status_code=202, content={"job_id": job_id})
 
 
-def _one_project(archive: Archive) -> str:
+def _one_project(archive: Archive) -> tuple[str, bytes]:
     with zipfile.ZipFile(BytesIO(archive.data)) as converted:
         projects = [name for name in converted.namelist() if not name.endswith("/") and is_project(name)]
-    if len(projects) != 1:
+        if len(projects) != 1:
+            raise ApiError(
+                f"Vector tiles are built from one ArcGIS Pro project (.aprx); this upload has {len(projects)}.",
+                "VECTOR_TILES_NEED_ONE_PROJECT",
+                400,
+            )
+        return projects[0], converted.read(projects[0])
+
+
+def _layer_plan(
+    project: bytes, chosen: frozenset[str] | None, exclusions: TileExclusions, *, max_bytes: int
+) -> tuple[LayerVisibility, ...]:
+    """The visibility to tile with: the operator's choice, or with none sent, the project's defaults."""
+    layers = read_project_layers(project, exclusions, max_bytes=max_bytes)
+    if isinstance(layers, NotOneMap):
+        names = ", ".join(layers.maps) or "none"
         raise ApiError(
-            f"Vector tiles are built from one ArcGIS Pro project (.aprx); this upload has {len(projects)}.",
-            "VECTOR_TILES_NEED_ONE_PROJECT",
+            f"Vector tiles are built from a project with exactly one map; this one has {len(layers.maps)}: {names}.",
+            "VECTOR_TILES_NEED_ONE_MAP",
             400,
         )
-    return projects[0]
+    if isinstance(layers, LayersUnreadable):
+        raise ApiError(f"The project's layers could not be read: {layers.detail}", "VECTOR_TILES_PROJECT_UNREADABLE", 400)
+    try:
+        return visibility_plan(layers, default_selection(layers) if chosen is None else chosen)
+    except SelectionError as exc:
+        raise ApiError(str(exc), "VECTOR_TILES_BAD_LAYERS", 400) from exc
 
 
 def _job_not_found() -> NotFoundError:

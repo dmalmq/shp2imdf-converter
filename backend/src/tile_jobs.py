@@ -16,8 +16,8 @@ Finished jobs are deleted ``ttl_seconds`` after they finish.
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterator
-from dataclasses import dataclass, field
+from collections.abc import Iterator, Sequence
+from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 import json
 import logging
@@ -33,6 +33,7 @@ import zipfile
 from pydantic import BaseModel, Field
 
 from backend.src.recolor import Archive
+from backend.src.tile_layers import LayerVisibility
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ TIMEOUT_SECONDS = 2 * 60 * 60
 STEPS = 5
 TILES_FOLDER = "vector_tiles"
 _LOG_NAME = "build_log.txt"
+_LAYERS_NAME = "layers.json"
 
 
 class Queued(BaseModel):
@@ -105,13 +107,19 @@ class TileJobs:
         shutil.rmtree(root, ignore_errors=True)
         root.mkdir(parents=True, exist_ok=True)
 
-    def submit(self, archive: Archive, project: str, python: Path) -> str:
-        """Unpack ``archive`` into a new job folder and put the job in line. Returns its id."""
+    def submit(self, archive: Archive, project: str, python: Path, layers: Sequence[LayerVisibility]) -> str:
+        """Unpack ``archive`` into a new job folder and put the job in line. Returns its id.
+
+        ``layers`` is the visibility the worker sets on every layer and group of the map before tiling.
+        """
         job_id = secrets.token_hex(6)
         directory = self.root / job_id
         directory.mkdir()
         converted = directory / "converted.zip"
         converted.write_bytes(archive.data)
+        (directory / _LAYERS_NAME).write_text(
+            json.dumps({"layers": [asdict(line) for line in layers]}, ensure_ascii=False), encoding="utf-8"
+        )
         with zipfile.ZipFile(converted) as unpacked:
             unpacked.extractall(directory / "tree")
         job = _Job(id=job_id, directory=directory, filename=archive.filename, project=project)
@@ -175,6 +183,7 @@ class TileJobs:
             for scratch in ("tree", "out"):
                 shutil.rmtree(job.directory / scratch, ignore_errors=True)
             (job.directory / "converted.zip").unlink(missing_ok=True)
+            (job.directory / _LAYERS_NAME).unlink(missing_ok=True)
             self._set(job, outcome)
 
 
@@ -193,7 +202,8 @@ class _Build:
     def run(self) -> Done | Failed:
         tree = self.job.directory / "tree"
         out = self.job.directory / "out"
-        command = [str(self.python), "-I", str(self.jobs.script), str(tree / self.job.project), str(tree), str(out)]
+        layers = self.job.directory / _LAYERS_NAME
+        command = [str(self.python), "-I", str(self.jobs.script), str(tree / self.job.project), str(tree), str(out), str(layers)]
         self.log.append(f"Project: {self.job.project}")
         process = subprocess.Popen(
             command,

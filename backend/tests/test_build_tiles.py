@@ -91,10 +91,15 @@ def test_a_boolean_maxzoom_is_not_sixteen(worker, tmp_path) -> None:
 class _Layer:
     def __init__(self, name: str, database: str | None, broken: bool, group: bool = False, visible: bool = True) -> None:
         self.name = self.longName = name
+        self.uri = f"CIMPATH=map/{name.replace(chr(92), '_')}.json"
         self.isGroupLayer = group
         self.isBroken = broken
         self.visible = visible
         self.connectionProperties = None if database is None else {"connection_info": {"database": database}}
+
+    def getDefinition(self, version: str) -> SimpleNamespace:  # noqa: N802
+        assert version == "V3"
+        return SimpleNamespace(uRI=self.uri)
 
 
 class _Project:
@@ -102,7 +107,8 @@ class _Project:
         self.layers = layers
         self.root = root
         self.updates: list[tuple[str, str]] = []
-        self.saved = False
+        self.saves: list[dict[str, bool]] = []
+        """The visibility of every layer each time the project was saved."""
 
     def updateConnectionProperties(self, old: str, new: str) -> None:
         self.updates.append((old, new))
@@ -113,7 +119,7 @@ class _Project:
                 layer.isBroken = not Path(new).is_dir()
 
     def save(self) -> None:
-        self.saved = True
+        self.saves.append({layer.longName: layer.visible for layer in self.layers})
 
 
 def _map(layers: list[_Layer]):
@@ -135,7 +141,7 @@ def test_a_moved_geodatabase_is_found_by_name_under_the_upload(worker, tmp_path)
 
     assert project.updates == [(r"D:\area\ArcProPrj\data.gdb", str(gdb))]
     assert not any(layer.isBroken for layer in layers)
-    assert project.saved
+    assert len(project.saves) == 1
 
 
 def test_a_layer_left_broken_fails_the_build_by_name(worker, tmp_path, capsys) -> None:
@@ -162,18 +168,80 @@ def test_a_project_needs_exactly_one_map(worker) -> None:
         worker.only_map(project)
 
 
-def test_hidden_top_level_groups_are_warned_about(worker, capsys) -> None:
+def _station(tmp_path: Path) -> tuple[list[_Layer], list[dict]]:
+    """A floor group with a moved data source, a hidden layer to switch on and a background to switch off."""
+    (tmp_path / "Sta" / "data.gdb").mkdir(parents=True)
     layers = [
-        _Layer("Background", None, broken=False, group=True, visible=False),
         _Layer("Floors", None, broken=False, group=True),
-        _Layer("Floors\\Hidden", None, broken=False, group=True, visible=False),
+        _Layer("Floors\\1F", r"D:\old\data.gdb", broken=True),
+        _Layer("Floors\\B1", r"D:\old\data.gdb", broken=True, visible=False),
+        _Layer("Points", None, broken=False, group=True),
+        _Layer("Points\\merge_tap", None, broken=False),
+        _Layer("Background", None, broken=False),
     ]
+    chosen = ("Floors", "Floors\\1F", "Floors\\B1")
+    plan = [
+        {"uri": layer.uri, "name": layer.longName, "group": layer.isGroupLayer, "visible": layer.longName in chosen}
+        for layer in layers
+    ]
+    return layers, plan
 
-    worker.warn_hidden_groups(_map(layers))
 
+def test_the_chosen_visibility_is_set_and_logged_with_empty_groups_warned(worker, tmp_path, capsys) -> None:
+    layers, plan = _station(tmp_path)
+
+    worker.apply_layers(_map(layers), plan)
+
+    assert {layer.longName: layer.visible for layer in layers} == {line["name"]: line["visible"] for line in plan}
     assert _lines(capsys.readouterr().out) == [
-        {"event": "warning", "text": "These top-level groups are switched off and will NOT be tiled: Background"}
+        {"event": "message", "text": "Layers to tile: 2"},
+        {"event": "message", "text": "Switched on for tiling: Floors\\B1"},
+        {"event": "message", "text": "Switched off for tiling: Points, Points\\merge_tap, Background"},
+        {"event": "warning", "text": "These groups have no layer chosen and are switched off: Points"},
     ]
+
+
+def test_a_chosen_layer_arcpy_does_not_find_fails_the_build_by_name(worker, tmp_path) -> None:
+    layers, plan = _station(tmp_path)
+    plan += [{"uri": "CIMPATH=map/gone.json", "name": "Floors\\2F", "group": False, "visible": True}]
+
+    with pytest.raises(worker.BuildFailed, match=r"^1 layers chosen on the page are not in the map arcpy opened: Floors\\2F$"):
+        worker.apply_layers(_map(layers), plan)
+
+    assert [layer.visible for layer in layers] == [True, True, False, True, True, True]
+
+
+def _tools(seen: dict) -> SimpleNamespace:
+    """arcpy.management as far as a build goes; the package records which layers it would have drawn."""
+
+    def package(in_map, **_):
+        seen["tiled"] = [layer.longName for layer in in_map.listLayers() if layer.visible]
+
+    def extract(in_package, output_folder, **_):
+        vtiles = _vtiles(Path(output_folder), maxzoom=16, bom=False)
+        seen["vtiles"] = vtiles
+
+    return SimpleNamespace(
+        CreateFileGDB=lambda *_: None, CreateVectorTileIndex=lambda **_: None, CreateVectorTilePackage=package, ExtractPackage=extract
+    )
+
+
+def test_a_build_tiles_the_choice_without_saving_it_into_the_project(worker, tmp_path) -> None:
+    layers, plan = _station(tmp_path)
+    project = _Project(layers, tmp_path)
+    metadata = SimpleNamespace(title="t", tags="t", summary="s", description="d", credits="c", accessConstraints="a")
+    the_map = SimpleNamespace(name="Map", listLayers=lambda: layers, metadata=metadata)
+    project.listMaps = lambda: [the_map]
+    seen: dict = {}
+    worker.arcpy.mp.ArcGISProject = lambda path: project
+    worker.arcpy.management = _tools(seen)
+
+    vtiles, problems = worker.build(tmp_path / "Sta.aprx", tmp_path, tmp_path / "out", plan)
+
+    assert seen["tiled"] == ["Floors", "Floors\\1F", "Floors\\B1"]
+    as_uploaded = {layer.longName: layer.longName != "Floors\\B1" for layer in layers}
+    assert project.saves == [as_uploaded]
+    assert (vtiles, problems) == (seen["vtiles"], [])
 
 
 def test_an_arcpy_error_exits_1_with_its_error_line(worker, tmp_path, capsys) -> None:
@@ -181,9 +249,10 @@ def test_an_arcpy_error_exits_1_with_its_error_line(worker, tmp_path, capsys) ->
         raise RuntimeError("ERROR 000732: Input Map: Dataset does not exist\nFailed to execute (CreateVectorTileIndex).")
 
     worker.arcpy.mp.ArcGISProject = refuse
+    (tmp_path / "layers.json").write_text('{"layers": []}', encoding="utf-8")
 
     with pytest.raises(SystemExit) as exited:
-        worker.main([str(tmp_path / "p.aprx"), str(tmp_path), str(tmp_path / "out")])
+        worker.main([str(tmp_path / "p.aprx"), str(tmp_path), str(tmp_path / "out"), str(tmp_path / "layers.json")])
 
     captured = capsys.readouterr()
     assert exited.value.code == 1
