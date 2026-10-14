@@ -143,7 +143,10 @@ def is_remote(path: str) -> bool:
     drive = PureWindowsPath(path).drive
     if drive.startswith("\\\\"):
         return True
-    return bool(drive) and ctypes.windll.kernel32.GetDriveTypeW(drive + "\\") == _DRIVE_REMOTE
+    # arcpy runs only on Windows; elsewhere (CI) a drive letter cannot name a network drive.
+    if not drive or sys.platform != "win32":
+        return False
+    return ctypes.windll.kernel32.GetDriveTypeW(drive + "\\") == _DRIVE_REMOTE
 
 
 def _database(connection: str) -> str | None:
