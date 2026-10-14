@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from io import BytesIO
 import json
 import logging
@@ -59,7 +59,7 @@ class Queued(BaseModel):
 class Running(BaseModel):
     state: Literal["running"] = "running"
     step: int
-    """0 while the project opens and its data sources are checked, then 1 to ``of``."""
+    """0 while the project opens and its data sources are copied from the network and checked, then 1 to ``of``."""
     of: int
     label: str
 
@@ -229,13 +229,15 @@ class _Build:
         self.warnings: list[str] = []
         self.result: dict | None = None
         self.reason: str | None = None
+        self.steps: list[tuple[str, float]] = [("0 Opening the project and copying network data", time.monotonic())]
+        """Each step's name and when it started, for the time table that ends the log."""
 
     def run(self) -> Done | Failed:
         tree = self.job.directory / "tree"
         out = self.job.directory / "out"
         layers = self.job.directory / _LAYERS_NAME
         command = [str(self.python), "-I", str(self.jobs.script), str(tree / self.job.project), str(tree), str(out), str(layers)]
-        self.log.append(f"Project: {self.job.project}")
+        self._note(f"Project: {self.job.project}")
         with self.jobs._changed:
             # Under the lock, so ``close`` either sees this process or stops it from starting.
             if self.jobs._closed:
@@ -264,6 +266,7 @@ class _Build:
             timer.cancel()
             reader.join()
         self.log += [f"stderr: {line}" for line in stderr]
+        self._time_table()
         outcome = self._outcome(returncode, stderr, timed_out, out)
         if isinstance(outcome, Failed):
             self.log.append(f"FAILED: {outcome.reason}")
@@ -271,6 +274,17 @@ class _Build:
         if isinstance(outcome, Done):
             self._write_download(Path(self.result["vtiles"]))
         return outcome
+
+    def _note(self, line: str) -> None:
+        """A log line stamped with the time it arrived, since the worker's own lines carry none."""
+        self.log.append(f"{datetime.now():%H:%M:%S} {line}")
+
+    def _time_table(self) -> None:
+        ended = time.monotonic()
+        self.log.append("Time taken (h:mm:ss):")
+        for (name, started), (_, next_started) in zip(self.steps, [*self.steps[1:], ("", ended)], strict=True):
+            self.log.append(f"  {_duration(next_started - started)}  {name}")
+        self.log.append(f"  {_duration(ended - self.steps[0][1])}  Total")
 
     def _log_file(self) -> Path:
         return self.job.directory / _LOG_NAME
@@ -281,24 +295,25 @@ class _Build:
         except ValueError:
             event = None
         if not isinstance(event, dict):
-            self.log.append(line)
+            self._note(line)
             return
         kind = event.get("event")
         if kind == "step":
             running = Running(step=event["step"], of=event["of"], label=event["label"])
             self.jobs._set(self.job, running)
-            self.log.append(f"[{running.step}/{running.of}] {running.label}")
+            self.steps.append((f"{running.step} {running.label}", time.monotonic()))
+            self._note(f"[{running.step}/{running.of}] {running.label}")
         elif kind == "warning":
             self.warnings.append(event["text"])
-            self.log.append(f"WARNING: {event['text']}")
+            self._note(f"WARNING: {event['text']}")
         elif kind == "message":
-            self.log.append(event["text"])
+            self._note(event["text"])
         elif kind == "result":
             self.result = event
         elif kind == "failed":
             self.reason = event["reason"]
         else:
-            self.log.append(line)
+            self._note(line)
 
     def _outcome(self, returncode: int, stderr: list[str], timed_out: bool, out: Path) -> Done | Failed:
         if timed_out:
@@ -340,6 +355,10 @@ def _deepest_path(directory: Path, archive: Archive, project: str) -> str:
     vtiles = f"{PurePosixPath(project).stem}.vtiles"
     tile = directory / "out" / "tiles" / vtiles / "tile" / "21" / "1234567" / "1234567.pbf"
     return max([str(tile), *(str(directory / "tree" / name.rstrip("/")) for name in names)], key=len)
+
+
+def _duration(seconds: float) -> str:
+    return str(timedelta(seconds=round(seconds)))
 
 
 def _lines(stream: IO[bytes]) -> Iterator[str]:

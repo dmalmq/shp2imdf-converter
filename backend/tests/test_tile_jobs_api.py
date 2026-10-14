@@ -9,6 +9,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import time
@@ -164,7 +165,17 @@ def test_builds_run_one_at_a_time_and_download_the_conversion_plus_tiles(test_cl
     )
     assert added[f"{tiles}tile/21/0/0.pbf"] == bytes([21]) * 3
     log = added["vector_tiles/build_log.txt"].decode("utf-8")
-    assert "[1/5] Create Vector Tile Index (5000 vertices)" in log
+    assert re.search(r"^\d\d:\d\d:\d\d \[1/5\] Create Vector Tile Index \(5000 vertices\)\r$", log, re.M)
+    table = log[log.index("Time taken (h:mm:ss):") :].splitlines()
+    assert [re.sub(r"^  \d+:\d\d:\d\d  ", "", line) for line in table[1:]] == [
+        "0 Opening the project and copying network data",
+        "1 Create Vector Tile Index (5000 vertices)",
+        "2 Map metadata",
+        "3 Create Vector Tile Package",
+        "4 Extract Package",
+        "5 root.json",
+        "Total",
+    ]
     assert "WARNING: These groups have no layer chosen and are switched off: ordinal_-1, WiFi" in log
     assert "arcpy prose that is not JSON" in log
 
@@ -281,7 +292,7 @@ def test_the_chosen_map_and_its_layers_are_what_the_worker_is_told_to_tile(test_
 
     assert response.status_code == 202, response.text
     log = _log(test_client, response.json()["job_id"])
-    assert f"Map: ホーム ({tile_map_uri(2)})\r\nTiled: ホーム\\Platform_2\r\n" in log
+    assert re.search(rf"Map: ホーム \({re.escape(tile_map_uri(2))}\)\r\n\d\d:\d\d:\d\d Tiled: ホーム\\Platform_2\r\n", log)
 
 
 def test_a_chosen_map_without_layers_tiles_that_maps_defaults(test_client, jobs) -> None:
