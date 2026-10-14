@@ -223,6 +223,14 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   `vector_tiles/build_log.txt`. The worker speaks one ASCII JSON object per stdout line;
   parse those, never its prose. Before tiling it repoints data sources broken by the move at
   the same-named folder under the unpacked upload and fails naming any layer still broken.
+  Before that, each file geodatabase the map reads from a network drive (UNC, or a drive
+  `GetDriveTypeW` calls remote, as `Q:` is) is copied without its `*.lock` files to
+  `out/data` and the layers pointed at the copy by editing their CIM data connection:
+  Shinjuku's 943 layers on `Q:` took 5½ minutes just for `isBroken` and the build 26 min,
+  against 55 s and 14½ min local. `aprx.updateConnectionProperties` is no substitute; it
+  silently left 519 of 611 layers on the share. Shapefile folders on a share are not copied.
+  The server stamps each build log line with the time it arrived and ends the log with a
+  table of how long each step took.
   The worker reconfigures its own stdout and stderr to UTF-8: a pipe gets the console code page
   (cp932 on a Japanese Windows) and `-I` ignores `PYTHONIOENCODING`, so stderr once reached
   `build_log.txt` as mojibake.
