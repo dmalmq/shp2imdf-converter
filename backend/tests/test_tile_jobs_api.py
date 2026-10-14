@@ -268,6 +268,32 @@ def test_a_project_with_two_maps_is_refused_before_a_job(test_client, jobs) -> N
     assert list(jobs.root.iterdir()) == []
 
 
+def test_a_build_whose_paths_would_pass_max_path_is_refused_before_a_job(test_client, jobs) -> None:
+    folder = "東京/" + "長い駅の名前" * 30
+    payload = make_zip([*station_members(), (f"{folder}/Space.dbf", b"x"), (PROJECT, tile_project({}))])
+    deepest = jobs.root.resolve() / "12345678" / "tree" / folder / "Space.dbf"
+
+    response = _post(test_client, payload, vector_tiles="true")
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "VECTOR_TILES_PATH_TOO_LONG"
+    assert f"a path of {len(str(deepest))} characters" in response.json()["detail"]
+    assert "Space.dbf" in response.json()["detail"]
+    assert list(jobs.root.iterdir()) == []
+
+
+def test_the_deepest_tile_counts_toward_max_path(test_client, jobs) -> None:
+    room = 250 - len(str(jobs.root.resolve() / "12345678" / "out" / "tiles" / ".vtiles/tile/21/1234567/1234567.pbf"))
+    fits, too_long = (f"東京/{'p' * length}.aprx" for length in (room, room + 1))
+
+    accepted = _post(test_client, _upload({}, projects=(fits,)), vector_tiles="true")
+    refused = _post(test_client, _upload({}, projects=(too_long,)), vector_tiles="true")
+
+    assert accepted.status_code == 202, accepted.text
+    assert refused.status_code == 400
+    assert "1234567.pbf" in refused.json()["detail"]
+
+
 def _running(pid: int) -> bool:
     if sys.platform != "win32":
         try:

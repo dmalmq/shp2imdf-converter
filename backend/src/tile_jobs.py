@@ -19,9 +19,10 @@ from collections import deque
 from collections.abc import Iterator, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
+from io import BytesIO
 import json
 import logging
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import secrets
 import shutil
 import subprocess
@@ -32,6 +33,7 @@ import zipfile
 
 from pydantic import BaseModel, Field
 
+from backend.src.errors import ApiError
 from backend.src.recolor import Archive
 from backend.src.tile_layers import LayerVisibility
 
@@ -44,6 +46,8 @@ TILES_FOLDER = "vector_tiles"
 _LOG_NAME = "build_log.txt"
 _LAYERS_NAME = "layers.json"
 _STOPPED = "The server stopped before this build could start."
+MAX_PATH_CHARS = 250
+"""arcpy does not use Windows long paths, so every path a build writes must stay under MAX_PATH (260), with room."""
 
 
 class Queued(BaseModel):
@@ -115,8 +119,17 @@ class TileJobs:
 
         ``layers`` is the visibility the worker sets on every layer and group of the map before tiling.
         """
-        job_id = secrets.token_hex(6)
-        directory = self.root / job_id
+        job_id = secrets.token_hex(4)
+        directory = self.root.resolve() / job_id
+        deepest = _deepest_path(directory, archive, project)
+        if len(deepest) > MAX_PATH_CHARS:
+            raise ApiError(
+                f"This build would write a path of {len(deepest)} characters, and ArcGIS Pro cannot use paths over "
+                f"{MAX_PATH_CHARS}: {deepest}. Shorten the station's folder or file names, or set TILE_JOBS_DIR "
+                "to a folder nearer the root of the drive.",
+                "VECTOR_TILES_PATH_TOO_LONG",
+                400,
+            )
         directory.mkdir()
         converted = directory / "converted.zip"
         converted.write_bytes(archive.data)
@@ -317,6 +330,18 @@ class _Build:
                     name = f"{prefix}{vtiles.name}/{file.relative_to(vtiles).as_posix()}"
                     download.write(file, name, compress_type=zipfile.ZIP_DEFLATED)
             download.write(self._log_file(), f"{prefix}{_LOG_NAME}", compress_type=zipfile.ZIP_DEFLATED)
+
+
+def _deepest_path(directory: Path, archive: Archive, project: str) -> str:
+    """The longest path a build in ``directory`` writes: a file of the unpacked upload, or a tile at the deepest level.
+
+    The tile is sized for zoom 21, where a column or row number runs to seven digits.
+    """
+    with zipfile.ZipFile(BytesIO(archive.data)) as converted:
+        names = converted.namelist()
+    vtiles = f"{PurePosixPath(project).stem}.vtiles"
+    tile = directory / "out" / "tiles" / vtiles / "tile" / "21" / "1234567" / "1234567.pbf"
+    return max([str(tile), *(str(directory / "tree" / name.rstrip("/")) for name in names)], key=len)
 
 
 def _lines(stream: IO[bytes]) -> Iterator[str]:
