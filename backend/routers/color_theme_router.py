@@ -28,6 +28,7 @@ from backend.src.color_theme import ColorTheme, ThemeReport, plan
 from backend.src.errors import ApiError, NotFoundError
 from backend.src.recolor import Archive, Inspection, convert, inspect, is_project
 from backend.src.tile_jobs import JobStatus, TileJobs
+from backend.src.tile_layers import TileExclusions
 
 router = APIRouter(prefix="/api/color-theme", tags=["color-theme"])
 
@@ -38,6 +39,10 @@ _FORM_PARTS = 20_000
 
 def _theme(request: Request) -> ColorTheme:
     return request.app.state.color_theme
+
+
+def _exclusions(request: Request) -> TileExclusions:
+    return request.app.state.tile_exclusions
 
 
 def _gdal_python(request: Request) -> Path | None:
@@ -85,7 +90,12 @@ def color_theme(request: Request) -> ThemeReport:
 async def inspect_color_theme(request: Request) -> Inspection:
     station = await _station(request)
     return await run_in_threadpool(
-        inspect, _theme(request), station.blobs, max_bytes=max_upload_bytes(request), gdal_python=_gdal_python(request)
+        inspect,
+        _theme(request),
+        station.blobs,
+        max_bytes=max_upload_bytes(request),
+        gdal_python=_gdal_python(request),
+        exclusions=_exclusions(request),
     )
 
 

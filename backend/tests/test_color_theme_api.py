@@ -18,6 +18,8 @@ from backend.tests.color_theme_fixtures import (
     space_row,
     square_shapefile,
     station_members,
+    tile_project,
+    tile_uri,
 )
 
 pytestmark = pytest.mark.colortheme
@@ -86,6 +88,7 @@ def test_inspect_reports_each_rule_for_a_dropped_folder(test_client) -> None:
         "JRTokyoSta_6677.shp/1/Space.dbf",
     ]
     assert body["theme"]["layers"][0]["encoding"] == {"codec": "utf-8", "source": "cpg"}
+    assert body["tile_layers"] is None
 
 
 def test_inspect_reports_each_renderer_of_a_dropped_project(test_client) -> None:
@@ -108,6 +111,32 @@ def test_inspect_reports_each_renderer_of_a_dropped_project(test_client) -> None
         "kept": ["赤"],
     }
     assert line["renderers"][2]["reason"] == "expression"
+
+
+def test_inspect_lists_the_one_projects_layers_with_the_shipped_patterns_unticked(test_client) -> None:
+    files, data = _folder([*station_members()[1:], ("東京/東京.aprx", tile_project())])
+
+    response = test_client.post("/api/color-theme/inspect", files=files, data=data)
+
+    assert response.status_code == 200, response.text
+    layers = response.json()["tile_layers"]
+    assert (layers["state"], layers["map"]) == ("map", "Stenavi")
+    ordinal = layers["layers"][0]
+    assert {key: ordinal[key] for key in ("uri", "name", "group", "visible", "excluded_by", "tiled_by_default")} == {
+        "uri": tile_uri("ordinal_1"),
+        "name": "ordinal_1",
+        "group": True,
+        "visible": True,
+        "excluded_by": None,
+        "tiled_by_default": True,
+    }
+    floor = ordinal["children"][2]
+    assert [(child["name"], child["excluded_by"], child["tiled_by_default"]) for child in floor["children"]] == [
+        ("JRSta_1_Space", None, True),
+        ("JRSta_1_opening", "*_opening", False),
+        ("JRSta_1_level", "*_level", False),
+    ]
+    assert floor["children"][0]["children"] == []
 
 
 def test_convert_downloads_the_station_under_its_japanese_name(test_client) -> None:

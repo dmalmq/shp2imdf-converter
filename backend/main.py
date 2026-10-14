@@ -50,6 +50,7 @@ from backend.src.schemas import ErrorResponse
 from backend.src.session import SessionManager, build_session_backend
 from backend.src.session_lock import SessionLockMiddleware
 from backend.src.tile_jobs import TileJobs
+from backend.src.tile_layers import load_tile_exclusions
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +245,7 @@ async def lifespan(app: FastAPI):
     app.state.unit_categories_path = Path(__file__).parent / "config" / "unit_categories.json"
     app.state.company_mappings_path = Path(__file__).parent / "config" / "company_mappings.json"
     app.state.color_theme = load_color_theme(Path(__file__).parent / "config" / "color_theme.json")
+    app.state.tile_exclusions = load_tile_exclusions(Path(__file__).parent / "config" / "vector_tile_exclusions.json")
     app.state.gdal_python = find_gdal_python()
     app.state.arcpy = ArcpyProbe(find_arcpy_python())
     app.state.arcpy.start()

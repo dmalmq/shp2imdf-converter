@@ -424,3 +424,56 @@ def demo_category_station() -> bytes:
             (f"{stem}.cpg", b"UTF-8"),
         ]
     return make_zip(members)
+
+
+# (name, visible, children); children None for a layer. Top of the drawing order first.
+TILE_MAP: list[tuple[str, bool, Any]] = [
+    (
+        "ordinal_1",
+        True,
+        [
+            ("Facility_Merge_1", True, None),
+            ("POINT_FACILITY_1", True, None),
+            ("JRSta_1F", True, [("JRSta_1_Space", True, None), ("JRSta_1_opening", True, None), ("JRSta_1_level", False, None)]),
+        ],
+    ),
+    ("ordinal_-1", False, [("JRSta_B1_Space", True, None)]),
+    ("WiFi", True, [("wifi_ap", True, None)]),
+    ("編集用ネットワーク", True, None),
+    ("背景", True, None),
+]
+"""A station map: pattern names (one in capitals, one in Japanese, a group), a hidden layer and a hidden group."""
+
+
+def tile_uri(name: str) -> str:
+    """The uRI ``tile_project`` gives the layer or group called ``name``."""
+    return f"CIMPATH=stenavi/{name.encode('utf-8').hex()}.json"
+
+
+def tile_project(plan: dict | None = None, *, maps: Sequence[str] = ("Stenavi",)) -> bytes:
+    """An ``.aprx`` as Pro saves one: ``GISProject.json`` naming its maps, one member per map, group and layer.
+
+    The first map holds ``TILE_MAP``. ``plan``, when given, is a ``fake_plan.json`` member that
+    ``fake_tile_worker.py`` acts on.
+    """
+    members: list[tuple[str, bytes, int]] = []
+
+    def add(name: str, visible: bool, children: Any) -> str:
+        uri = tile_uri(name)
+        doc: dict[str, Any] = {"type": "CIMFeatureLayer", "name": name, "uRI": uri, "visibility": visible}
+        if children is not None:
+            doc = {**doc, "type": "CIMGroupLayer", "layers": [add(*child) for child in children]}
+        members.append((uri.removeprefix("CIMPATH="), _compact(doc), zipfile.ZIP_DEFLATED))
+        return uri
+
+    items = [{"type": "CIMProjectItem", "name": "Default.gdb", "itemType": "GDB", "catalogPath": ".\\Default.gdb"}]
+    for number, name in enumerate(maps):
+        uri = f"CIMPATH=map{number}/map.json"
+        layers = [add(*layer) for layer in TILE_MAP] if number == 0 else []
+        the_map = {"type": "CIMMap", "name": name, "uRI": uri, "layers": layers}
+        members.append((uri.removeprefix("CIMPATH="), _compact(the_map), zipfile.ZIP_DEFLATED))
+        items.append({"type": "CIMProjectItem", "name": name, "itemType": "Map", "catalogPath": uri})
+    members.append(("GISProject.json", _compact({"type": "CIMGISProject", "projectItems": items}), zipfile.ZIP_DEFLATED))
+    if plan is not None:
+        members.append(("fake_plan.json", _compact(plan), zipfile.ZIP_DEFLATED))
+    return make_project(members)
