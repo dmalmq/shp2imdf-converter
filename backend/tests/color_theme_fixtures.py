@@ -424,3 +424,71 @@ def demo_category_station() -> bytes:
             (f"{stem}.cpg", b"UTF-8"),
         ]
     return make_zip(members)
+
+
+# (name, visible, children); children None for a layer. Top of the drawing order first.
+TILE_MAP: list[tuple[str, bool, Any]] = [
+    (
+        "ordinal_1",
+        True,
+        [
+            ("Facility_Merge_1", True, None),
+            ("POINT_FACILITY_1", True, None),
+            ("JRSta_1F", True, [("JRSta_1_Space", True, None), ("JRSta_1_opening", True, None), ("JRSta_1_level", False, None)]),
+        ],
+    ),
+    ("ordinal_-1", False, [("JRSta_B1_Space", True, None)]),
+    ("WiFi", True, [("wifi_ap", True, None)]),
+    ("編集用ネットワーク", True, None),
+    ("背景", True, None),
+]
+"""A station map: pattern names (one in capitals, one in Japanese, a group), a hidden layer and a hidden group."""
+
+
+def tile_uri(name: str) -> str:
+    """The uRI ``tile_project`` gives the layer or group called ``name``."""
+    return f"CIMPATH=stenavi/{name.encode('utf-8').hex()}.json"
+
+
+def tile_map_uri(number: int) -> str:
+    """The uRI ``tile_project`` gives its map ``number``, counting from 0."""
+    return f"CIMPATH=map{number}/map.json"
+
+
+def tile_project(plan: dict | None = None, *, maps: Sequence[tuple[str, list]] = (("Stenavi", TILE_MAP),)) -> bytes:
+    """An ``.aprx`` as Pro saves one: ``GISProject.json`` naming its maps, one member per map, group and layer.
+
+    ``maps`` are (name, tree) in project order, each tree shaped as ``TILE_MAP``; layer names must
+    not repeat across maps. ``plan``, when given, is a ``fake_plan.json`` member that
+    ``fake_tile_worker.py`` acts on.
+    """
+    members: list[tuple[str, bytes, int]] = []
+
+    def add(name: str, visible: bool, children: Any) -> str:
+        uri = tile_uri(name)
+        doc: dict[str, Any] = {"type": "CIMFeatureLayer", "name": name, "uRI": uri, "visibility": visible}
+        if children is not None:
+            doc = {**doc, "type": "CIMGroupLayer", "layers": [add(*child) for child in children]}
+        members.append((uri.removeprefix("CIMPATH="), _compact(doc), zipfile.ZIP_DEFLATED))
+        return uri
+
+    items = [{"type": "CIMProjectItem", "name": "Default.gdb", "itemType": "GDB", "catalogPath": ".\\Default.gdb"}]
+    for number, (name, tree) in enumerate(maps):
+        uri = tile_map_uri(number)
+        layers = [add(*layer) for layer in tree]
+        the_map = {"type": "CIMMap", "name": name, "uRI": uri, "layers": layers}
+        members.append((uri.removeprefix("CIMPATH="), _compact(the_map), zipfile.ZIP_DEFLATED))
+        items.append({"type": "CIMProjectItem", "name": name, "itemType": "Map", "catalogPath": uri})
+    members.append(("GISProject.json", _compact({"type": "CIMGISProject", "projectItems": items}), zipfile.ZIP_DEFLATED))
+    if plan is not None:
+        members.append(("fake_plan.json", _compact(plan), zipfile.ZIP_DEFLATED))
+    return make_project(members)
+
+
+def demo_tile_station() -> bytes:
+    """``demo_station`` with one project for capture.mjs to open the layer list on: the template's empty map,
+    then ``TILE_MAP`` as Insert > Import Map of an ``.mxd`` leaves it."""
+    with zipfile.ZipFile(BytesIO(demo_station())) as station:
+        members: list[tuple[str, bytes | None]] = [(info.filename, station.read(info)) for info in station.infolist()]
+    project = tile_project(maps=(("マップ", []), ("マップ レイヤー", TILE_MAP)))
+    return make_zip([*members, ("DemoSta_6677.shp/DemoSta.aprx", project)])

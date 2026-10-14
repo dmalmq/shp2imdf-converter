@@ -61,6 +61,7 @@ pytest -m phase3     # wizard mapping (mapper, config, generation setup)
 pytest -m phase5     # validation and export (converter, validator, autofix)
 pytest -m georef     # Illustrator georeferencing (transform, zones, placement)
 pytest -m colortheme # station colour theme (tables, DBF patch, upload tree, geodatabases, symbology)
+pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy probe, job queue, download)
 ```
 
 `phase0` generates test fixtures; `phase1`–`phase6` run foundation → polish.
@@ -207,3 +208,54 @@ pytest -m colortheme # station colour theme (tables, DBF patch, upload tree, geo
   `.lyrx` is only proven to parse (`test_cim_esri_parser.py`). ArcGIS Pro resolving
   `DATABASE=.` + `<stem>.shp` and drawing it is unverified, because `arcpy` needs a licence
   this machine does not have; do not claim more in the page copy until someone opens one.
+  "Build vector tiles" (`vector_tiles=true`, off by default) runs `backend/src/build_tiles.py`
+  in a Python whose `arcpy` is **licensed for the account that runs uvicorn**: `ARCPY_PYTHON`,
+  else Pro's `arcgispro-py3` (`arcgis_pro.py` holds the one Program Files lookup; `gdb.py`
+  shares it). Unlicensed, `import arcpy` raises "The Product License has not been initialized."
+  Startup probes `arcpy.ProductInfo()` in a background thread and `GET
+  /api/color-theme/vector-tiles` reports `checking` / `available` / `unavailable` with a reason
+  code the page translates. Convert then answers 202 with a job id instead of the zip; refusals
+  are 409 (no licence) and 400 (not exactly one `.aprx`). `tile_jobs.py` runs one build at a
+  time on one thread: queued(position) → running(step of 5) → done | failed(reason), held in
+  memory, folders under `TILE_JOBS_DIR` (emptied at startup, so a restart loses jobs and the
+  page reports 404), pruned `TILE_JOB_TTL_HOURS` after finishing, 2 h timeout. The download is
+  the converted archive's entries unchanged plus `vector_tiles/<name>.vtiles/...` and
+  `vector_tiles/build_log.txt`. The worker speaks one ASCII JSON object per stdout line;
+  parse those, never its prose. Before tiling it repoints data sources broken by the move at
+  the same-named folder under the unpacked upload and fails naming any layer still broken.
+  The worker reconfigures its own stdout and stderr to UTF-8: a pipe gets the console code page
+  (cp932 on a Japanese Windows) and `-I` ignores `PYTHONIOENCODING`, so stderr once reached
+  `build_log.txt` as mojibake.
+  Which map and which layers are tiled is chosen on the page. A station project usually has two
+  maps: Insert → Import Map of the `.mxd` adds `マップ レイヤー` beside the template's empty `マップ`.
+  Inspection lists every map with its id (the `CIMPATH=` catalog path, which is also the map's
+  uRI) and layer tree; the default is the only map with layers, else the one with the most, the
+  first on a tie, and the page says which. A map without a layer is listed, greyed out; only a
+  project where no map has one is refused up front. Convert takes `tile_map` (left out, the
+  default), and the worker gets it in `layers.json` beside the layers, since the layer uRIs only
+  mean anything inside that map. It finds the map by `getDefinition("V3").uRI`, else by a unique
+  name with a log warning, else fails naming every map. Inspection reads each map's layer tree
+  from the `.aprx`'s CIM JSON without arcpy (`tile_layers.py`: `GISProject.json` items of type
+  `Map`, then `layers` uRIs down through the groups) and marks the default: drawn as saved, less
+  any layer whose name, or a group's above it, matches a glob in
+  `backend/config/vector_tile_exclusions.json` (case-insensitive, validated at startup; the
+  first match is the one the page names). Convert takes `tile_layers`, the uRI of **every**
+  layer to tile rather than a delta, so the build matches what the page showed even if the
+  pattern file changed in between; left out, that map's defaults. An unknown map, a map without
+  layers, layers of another map, group uRIs and an empty choice are 400s before a job exists. The
+  worker gets every layer's and group's visibility in `layers.json` and sets it **in memory
+  after** the repair's `aprx.save()`; nothing saves it, and nothing keeps a choice anywhere
+  (no localStorage, no server state): every build starts from the uploaded project and the
+  pattern file. A group left with nothing chosen is a log warning. Shutdown kills a running
+  worker (`TileJobs.close` in the lifespan), since the next server empties `TILE_JOBS_DIR`.
+  arcpy has no long-path support, so a job whose deepest path (the unpacked upload, or a z21
+  tile under `out/tiles/<name>.vtiles`) passes 250 characters is refused up front.
+  **The real arcpy path has run once**, on Shinjuku on a licensed machine, and stopped at the
+  old one-map rule; nothing past opening the project has been seen. This machine is
+  unlicensed, so the tests drive `fake_tile_worker.py` and a stub `arcpy`. Matching the map by
+  uRI is unverified too. The tool calls, the scratch `index.gdb` in the
+  output folder (the project's default geodatabase is a path on the machine it was saved on),
+  whether the GP tools see `updateConnectionProperties`, metadata and `layer.visible` changes
+  made in memory, and the real depth of the extracted `.vtiles` tree are unverified until
+  someone runs a build on a licensed machine. The capture script reaches the layer list by
+  telling only the browser that tiles are available (`page.route`); the server still refuses.

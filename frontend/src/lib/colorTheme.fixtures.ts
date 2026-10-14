@@ -6,8 +6,85 @@ import type {
   ColorThemeReport,
   ColorThemeRule,
   ColorThemeStyleFile,
-  ColorThemeSymbologyFile
+  ColorThemeSymbologyFile,
+  TileLayerNode,
+  TileLayers
 } from "../api/client";
+
+function tileNode(
+  name: string,
+  { visible = true, excluded = null, tiled = false, children }: { visible?: boolean; excluded?: string | null; tiled?: boolean; children?: TileLayerNode[] } = {}
+): TileLayerNode {
+  return {
+    uri: `CIMPATH=stenavi/${name}.json`,
+    name,
+    group: children !== undefined,
+    visible,
+    excluded_by: excluded,
+    tiled_by_default: tiled,
+    children: children ?? []
+  };
+}
+
+/**
+ * `TILE_MAP` in `backend/tests/color_theme_fixtures.py` as the server lists it with the shipped patterns:
+ * 4 groups, 9 layers, 2 tiled by default, 6 excluded by a pattern (wifi_ap through its group).
+ */
+export function stationTileLayers(): TileLayers {
+  return {
+    state: "maps",
+    maps: [{ id: "CIMPATH=map0/map.json", name: "Stenavi", layers: stationTileTree() }],
+    default_map: "CIMPATH=map0/map.json",
+    default_reason: "only_with_layers"
+  };
+}
+
+/** As a station project imported from an .mxd: the template's empty map, the imported one, and a smaller one. */
+export function shinjukuTileMaps(): TileLayers {
+  return {
+    state: "maps",
+    maps: [
+      { id: "CIMPATH=map/map.json", name: "マップ", layers: [] },
+      { id: "CIMPATH=map1/map.json", name: "マップ レイヤー", layers: stationTileTree() },
+      {
+        id: "CIMPATH=map2/map.json",
+        name: "ホーム",
+        layers: [
+          tileNode("ホーム", {
+            tiled: true,
+            children: [tileNode("Platform_1", { tiled: true }), tileNode("Platform_2", { visible: false })]
+          })
+        ]
+      }
+    ],
+    default_map: "CIMPATH=map1/map.json",
+    default_reason: "most_layers"
+  };
+}
+
+function stationTileTree(): TileLayerNode[] {
+  return [
+    tileNode("ordinal_1", {
+      tiled: true,
+      children: [
+        tileNode("Facility_Merge_1", { excluded: "Facility_Merge_*" }),
+        tileNode("POINT_FACILITY_1", { excluded: "point_facility_*" }),
+        tileNode("JRSta_1F", {
+          tiled: true,
+          children: [
+            tileNode("JRSta_1_Space", { tiled: true }),
+            tileNode("JRSta_1_opening", { excluded: "*_opening" }),
+            tileNode("JRSta_1_level", { visible: false, excluded: "*_level" })
+          ]
+        })
+      ]
+    }),
+    tileNode("ordinal_-1", { visible: false, children: [tileNode("JRSta_B1_Space")] }),
+    tileNode("WiFi", { excluded: "wifi", children: [tileNode("wifi_ap")] }),
+    tileNode("編集用ネットワーク", { excluded: "編集用ネットワーク" }),
+    tileNode("背景", { tiled: true })
+  ];
+}
 
 const AREAS = {
   free_area: { name: { en: "Free area outside the gates", ja: "改札外通路" }, spec: "Mono 000", hex: "#FFFFFF" },
@@ -155,8 +232,10 @@ export function tokyoInspection(): ColorThemeInspection {
       geodatabases: 0,
       lock_files_dropped: 0,
       tables: 20,
-      category_only_tables: 0
+      category_only_tables: 0,
+      projects: 0
     },
+    tile_layers: null,
     theme: {
       ...colorThemeReport(),
       rules: colorThemeRules(TOKYO_ROWS),
@@ -213,8 +292,10 @@ export function tokyoGeodatabaseInspection(): ColorThemeInspection {
       geodatabases: 1,
       lock_files_dropped: 0,
       tables: 127,
-      category_only_tables: 0
+      category_only_tables: 0,
+      projects: 0
     },
+    tile_layers: null,
     theme: {
       ...colorThemeReport(),
       rules: colorThemeRules(TOKYO_GDB_ROWS),
@@ -238,6 +319,7 @@ export function rerunInspection(): ColorThemeInspection {
   const tokyo = tokyoInspection();
   return {
     dataset: tokyo.dataset,
+    tile_layers: null,
     theme: {
       ...tokyo.theme,
       rules: colorThemeRules(),
@@ -284,8 +366,10 @@ export function shinjukuProjectInspection(): ColorThemeInspection {
       geodatabases: 0,
       lock_files_dropped: 0,
       tables: 0,
-      category_only_tables: 0
+      category_only_tables: 0,
+      projects: 1
     },
+    tile_layers: stationTileLayers(),
     theme: { ...colorThemeReport(), symbology: [{ path: "shinjuku.aprx", kind: "aprx", unreadable: false, renderers }] }
   };
 }
@@ -300,8 +384,10 @@ export function shinjukuGeodatabaseInspection(): ColorThemeInspection {
       geodatabases: 1,
       lock_files_dropped: 0,
       tables: 529,
-      category_only_tables: 449
+      category_only_tables: 449,
+      projects: 0
     },
+    tile_layers: null,
     theme: colorThemeReport()
   };
 }
@@ -335,8 +421,10 @@ export function layerFilesInspection(): ColorThemeInspection {
       geodatabases: 0,
       lock_files_dropped: 0,
       tables: 0,
-      category_only_tables: 0
+      category_only_tables: 0,
+      projects: 2
     },
+    tile_layers: null,
     theme: { ...colorThemeReport(), symbology }
   };
 }
@@ -346,6 +434,7 @@ export function layerFilesRerunInspection(): ColorThemeInspection {
   const first = layerFilesInspection();
   return {
     ...first,
+    tile_layers: null,
     theme: {
       ...first.theme,
       symbology: first.theme.symbology.map((file) => ({
@@ -384,8 +473,10 @@ export function shinjukuShapefileInspection(): ColorThemeInspection {
       geodatabases: 0,
       lock_files_dropped: 0,
       tables: 16,
-      category_only_tables: 10
+      category_only_tables: 10,
+      projects: 0
     },
+    tile_layers: null,
     theme: {
       ...colorThemeReport(),
       style_files: ["1", "2"].flatMap((floor) => styleFilesFor(`JRShinjukuSta_${floor}_unit.shp`, "category"))

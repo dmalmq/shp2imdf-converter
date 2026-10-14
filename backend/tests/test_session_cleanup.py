@@ -30,11 +30,12 @@ class _Flaky:
 @pytest.mark.phase6
 def test_cleanup_loop_survives_a_failing_prune(monkeypatch) -> None:
     monkeypatch.setattr(main, "_CLEANUP_INTERVAL_SECONDS", 0.01, raising=False)
-    sessions, conversions = _Flaky(), _Flaky()
+    sessions, conversions, tiles = _Flaky(), _Flaky(), _Flaky()
     app = SimpleNamespace(
         state=SimpleNamespace(
             session_manager=SimpleNamespace(prune_expired=sessions),
             illustrator_store=SimpleNamespace(prune=conversions),
+            tile_jobs=SimpleNamespace(prune=tiles),
         )
     )
 
@@ -48,6 +49,7 @@ def test_cleanup_loop_survives_a_failing_prune(monkeypatch) -> None:
     asyncio.run(run())
     assert sessions.calls >= 3
     assert conversions.calls >= 3
+    assert tiles.calls >= 3
 
 
 def _age(path: Path, hours: float) -> None:

@@ -307,7 +307,7 @@ async function captureIllustratorFlow(page, shoot, artwork) {
 // coloured by category. Last is a station with category and no color2: nothing
 // to rewrite, the summary saying where its colours live, and a download that
 // holds only what the style files option adds.
-async function captureColorThemeFlow(page, shoot, zip, gdbZip, layersZip, categoryZip) {
+async function captureColorThemeFlow(page, shoot, zip, gdbZip, layersZip, categoryZip, tilesZip) {
   await gotoHub(page);
   await page.getByRole("button", { name: /Recolour a station/ }).scrollIntoViewIfNeeded();
   await shoot("color-theme-hub");
@@ -350,6 +350,42 @@ async function captureColorThemeFlow(page, shoot, zip, gdbZip, layersZip, catego
   await download;
   await page.getByText(`Downloaded ${path.basename(categoryZip, ".zip")}_new-colors.zip`).waitFor({ timeout: 30000 });
   await shoot("color-theme-category-delivered");
+  if (tilesZip) await captureTileLayers(page, shoot, tilesZip);
+}
+
+// The vector tile option is greyed out without a licensed arcpy, which this
+// machine lacks. Only the browser is told tiles are available, so the layer
+// list can be opened and shot; nothing is downloaded, and the server would
+// still refuse a build with 409.
+async function captureTileLayers(page, shoot, zip) {
+  await page.route("**/api/color-theme/vector-tiles", (route) =>
+    route.fulfill({ json: { state: "available", product: "capture.mjs stand-in" } })
+  );
+  await page.reload();
+  await page.locator('[data-testid="color-theme-zip-input"]').setInputFiles(zip);
+  await page.getByRole("heading", { name: `Recolour ${path.basename(zip, ".zip")}`, level: 1 }).waitFor({ timeout: 60000 });
+  const tiles = page.getByRole("region", { name: "Vector tiles" });
+  const option = tiles.getByRole("checkbox", { name: /Build vector tiles for Stenavi/ });
+  await option.scrollIntoViewIfNeeded();
+  for (let tries = 0; !(await option.isEnabled()); tries += 1) {
+    if (tries > 75) throw new Error("the vector tile option stayed disabled");
+    await page.waitForTimeout(200);
+  }
+  await option.click();
+  const dialog = page.getByRole("dialog");
+  await dialog.waitFor({ timeout: 15000 });
+  await dialog.getByRole("button", { name: "Expand JRSta_1F" }).click();
+  await shoot("color-theme-tile-layers", { wait: 600 });
+  await dialog.getByRole("combobox", { name: "Map to tile" }).click();
+  await page.getByRole("listbox").waitFor({ timeout: 10000 });
+  await shoot("color-theme-tile-maps", { wait: 600 });
+  await page.keyboard.press("Escape");
+  await page.getByRole("listbox").waitFor({ state: "detached", timeout: 10000 });
+  await dialog.getByRole("checkbox", { name: "ordinal_-1" }).click();
+  await dialog.getByRole("button", { name: "Use these layers" }).click();
+  await dialog.waitFor({ state: "detached", timeout: 15000 });
+  await tiles.scrollIntoViewIfNeeded();
+  await shoot("color-theme-tile-option");
 }
 
 async function checkAndDownloadStation(page, shoot, zip, prefix, reveal = null) {
@@ -415,6 +451,7 @@ async function capture(options) {
   const geodatabase = writeGeodatabaseFixture(options.out);
   const layerFiles = writeFixture(options.out, "DemoSta_layers.zip", "backend.tests.color_theme_fixtures", "demo_layer_files");
   const categoryStation = writeFixture(options.out, "DemoUnits_6677.zip", "backend.tests.color_theme_fixtures", "demo_category_station");
+  const tileStation = writeFixture(options.out, "DemoTiles_6677.zip", "backend.tests.color_theme_fixtures", "demo_tile_station");
   const manifest = [];
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: true });
@@ -424,7 +461,7 @@ async function capture(options) {
     for (const flow of [
       (page, shoot) => captureShapefileFlow(page, shoot),
       (page, shoot) => captureIllustratorFlow(page, shoot, artwork),
-      (page, shoot) => captureColorThemeFlow(page, shoot, station, geodatabase, layerFiles, categoryStation)
+      (page, shoot) => captureColorThemeFlow(page, shoot, station, geodatabase, layerFiles, categoryStation, tileStation)
     ]) {
       const context = await browser.newContext({ viewport: VIEWPORT });
       await context.addInitScript(() => {

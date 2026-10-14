@@ -66,6 +66,7 @@ from backend.src.dbf_table import DbfField, DbfLayoutError, DbfTable, resolve_co
 from backend.src.gdb import GdbRead, apply_edits, read_layers
 from backend.src.importer import zip_member_name
 from backend.src.qgis_style import layer_style_xml
+from backend.src.tile_layers import NO_EXCLUSIONS, ProjectLayers, TileExclusions, read_project_layers
 
 DOWNLOAD_SUFFIX = "_new-colors"
 """The archive is ``<station><suffix>.zip``."""
@@ -87,12 +88,16 @@ class DatasetInfo:
     category_only_tables: int
     """Of those, the ones with the category field and without the theme's field: a station drawn by category,
     whose colours live in its layer file or project and not in its data."""
+    projects: int
+    """ArcGIS Pro projects (``.aprx``) outside a geodatabase. Vector tiles are built from exactly one."""
 
 
 @dataclass(frozen=True, slots=True)
 class Inspection:
     dataset: DatasetInfo
     theme: ThemeReport
+    tile_layers: ProjectLayers | None
+    """The layer tree a vector tile build would choose from; None unless the upload has exactly one project."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,15 +107,23 @@ class Archive:
 
 
 def inspect(
-    theme: ColorTheme, blobs: Sequence[tuple[str, bytes]], *, max_bytes: int, gdal_python: Path | None = None
+    theme: ColorTheme,
+    blobs: Sequence[tuple[str, bytes]],
+    *,
+    max_bytes: int,
+    gdal_python: Path | None = None,
+    exclusions: TileExclusions = NO_EXCLUSIONS,
 ) -> Inspection:
     """What converting this upload would change. Writes nothing but a temporary copy of its geodatabases.
 
     ``gdal_python`` runs ``gdb_worker.py``; without one each geodatabase is ``gdb_unavailable``.
+    ``exclusions`` untick layers in the project's layer tree.
     """
     with _workspace() as workspace:
         survey = _survey(theme, blobs, max_bytes=max_bytes, gdal_python=gdal_python, workspace=Path(workspace))
-    return Inspection(dataset=survey.dataset, theme=survey.plan.report)
+    projects = [entry.data for entry in survey.tree.entries if entry.data is not None and is_project(entry.path)]
+    tile_layers = read_project_layers(projects[0], exclusions, max_bytes=max_bytes) if len(projects) == 1 else None
+    return Inspection(dataset=survey.dataset, theme=survey.plan.report, tile_layers=tile_layers)
 
 
 def convert(
@@ -417,6 +430,7 @@ def _survey(
         lock_files_dropped=len(uploaded.entries) - len(tree.entries),
         tables=read_tables,
         category_only_tables=category_only,
+        projects=sum(1 for entry in tree.entries if entry.data is not None and is_project(entry.path)),
     )
     return _Survey(
         tree=tree,
@@ -602,6 +616,11 @@ def _patch(table: _Table, edits: Mapping[int, str]) -> bytes:
 
 _BOM = b"\xef\xbb\xbf"
 _SYMBOLOGY_SUFFIXES: dict[str, SymbologyKind] = {".lyrx": "lyrx", ".aprx": "aprx"}
+
+
+def is_project(path: str) -> bool:
+    """An ArcGIS Pro project outside a geodatabase: the only kind a vector tile build can open."""
+    return _symbology_kind(path) == "aprx" and _gdb_root(TreePath(path)) is None
 
 
 def _symbology_kind(path: str) -> SymbologyKind | None:

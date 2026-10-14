@@ -62,11 +62,19 @@ def sample_company_mappings() -> dict:
 
 
 @pytest.fixture()
-def test_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
+def test_client(server_env: None) -> TestClient:
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.fixture()
+def server_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Where a server started in a test keeps its data, for a test that starts and stops its own."""
     monkeypatch.setenv("SESSION_DATA_DIR", str(tmp_path / "sessions"))
     monkeypatch.setenv("SESSION_UPLOADS_DIR", str(tmp_path / "session_uploads"))
     monkeypatch.setenv("TEMP_DATA_DIR", str(tmp_path / "tmp"))
     monkeypatch.setenv("ILLUSTRATOR_DATA_DIR", str(tmp_path / "illustrator"))
     monkeypatch.setenv("PLACEMENTS_DB", str(tmp_path / "placements.db"))
-    with TestClient(app) as client:
-        yield client
+    monkeypatch.setenv("TILE_JOBS_DIR", str(tmp_path / "tiles"))
+    # Not a file, so no test starts ArcGIS Pro's Python to ask about a licence.
+    monkeypatch.setenv("ARCPY_PYTHON", str(tmp_path / "no-arcpy.exe"))

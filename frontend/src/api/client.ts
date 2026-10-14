@@ -737,9 +737,46 @@ export type ColorThemeInspection = {
     tables: number;
     /** Of those, the ones with `category_field` and without `field`. */
     category_only_tables: number;
+    /** ArcGIS Pro projects (`.aprx`) outside a geodatabase; vector tiles are built from exactly one. */
+    projects: number;
   };
   theme: ColorThemeReport;
+  /** The layers a vector tile build chooses from; null unless the upload has exactly one project. */
+  tile_layers: TileLayers | null;
 };
+
+/** A group or layer of the project's map, as the project was saved. */
+export type TileLayerNode = {
+  /** The CIM `uRI`: how the build finds the layer again. */
+  uri: string;
+  name: string;
+  group: boolean;
+  /** Its own visibility as saved. */
+  visible: boolean;
+  /** The exclusion pattern its own name matched. */
+  excluded_by: string | null;
+  /** A layer: drawn as saved and matched by no pattern, its own or a group's above it. A group: any layer in it is. */
+  tiled_by_default: boolean;
+  children: TileLayerNode[];
+};
+
+/** One of the project's maps. A map without layers is listed but cannot be chosen. */
+export type TileMap = {
+  /** The map's CIM `uRI` (`CIMPATH=map/map.json`): how the build finds it again. */
+  id: string;
+  name: string;
+  /** Top of the drawing order first. */
+  layers: TileLayerNode[];
+};
+
+/** Why the server picked `default_map`: the only map with layers, the one with the most, or the first of those tied for most. */
+export type TileMapDefaultReason = "only_with_layers" | "most_layers" | "first_of_most";
+
+export type TileLayers =
+  /** `maps` in project order. */
+  | { state: "maps"; maps: TileMap[]; default_map: string; default_reason: TileMapDefaultReason }
+  | { state: "no_layers"; maps: string[] }
+  | { state: "unreadable"; detail: string };
 
 /** A dropped or picked file and its path inside what was dropped or picked. */
 export type DatasetFile = { file: File; path: string };
@@ -761,6 +798,51 @@ export function convertColorTheme(
   const form = datasetForm(files);
   form.append("style_files", String(styleFiles));
   return sendForm("/api/color-theme/convert", form, { ...options, download: "new-colors.zip" });
+}
+
+/** Whether this server can build vector tiles: its ArcGIS Pro's arcpy must be licensed. "checking" just after startup. */
+export type VectorTilesAvailability =
+  | { state: "checking" }
+  | { state: "available"; product: string }
+  | { state: "unavailable"; reason: "no_python" | "not_licensed" | "failed"; detail: string };
+
+export async function fetchVectorTilesAvailability(): Promise<VectorTilesAvailability> {
+  return handleJson<VectorTilesAvailability>(await fetch("/api/color-theme/vector-tiles"));
+}
+
+/** One vector tile build. Builds run one at a time; `position` 1 is the next to start. */
+export type TileJobStatus =
+  | { state: "queued"; position: number }
+  /** `step` is 0 while the project opens, then 1 to `of`. */
+  | { state: "running"; step: number; of: number; label: string }
+  /** `problems` are what the checks found wrong with the tiles, which are in the download all the same. */
+  | { state: "done"; filename: string; warnings: string[]; problems: string[] }
+  | { state: "failed"; reason: string };
+
+/**
+ * Converts as `convertColorTheme` does, then queues a vector tile build from the upload's one project.
+ * `map` is the id of the map to tile and `layers` the uRI of every layer of it to tile, exactly as the page showed them ticked.
+ */
+export function startTileBuild(
+  files: DatasetFile[],
+  { styleFiles, map, layers, ...options }: SendFormOptions & { styleFiles: boolean; map: string; layers: string[] }
+): Promise<{ job_id: string }> {
+  const form = datasetForm(files);
+  form.append("style_files", String(styleFiles));
+  form.append("vector_tiles", "true");
+  form.append("tile_map", map);
+  form.append("tile_layers", JSON.stringify(layers));
+  return sendForm<{ job_id: string }>("/api/color-theme/convert", form, options);
+}
+
+/** 404 once the server has restarted or the finished build has expired. */
+export async function fetchTileJob(jobId: string, signal?: AbortSignal): Promise<TileJobStatus> {
+  return handleJson<TileJobStatus>(await fetch(`/api/color-theme/jobs/${encodeURIComponent(jobId)}`, { signal }));
+}
+
+/** Followed by the browser itself, so a zip of thousands of tiles streams to disk instead of into memory. */
+export function tileJobDownloadUrl(jobId: string): string {
+  return `/api/color-theme/jobs/${encodeURIComponent(jobId)}/download`;
 }
 
 /** Multipart names carry no folders, so each file's path travels beside it, pairwise. */

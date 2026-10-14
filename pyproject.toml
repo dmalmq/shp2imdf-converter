@@ -9,6 +9,7 @@ markers = [
     "phase5: Validation and export (converter, validator, autofix)",
     "phase6: Polish and edge cases",
     "georef: Illustrator georeferencing (transform, zones, placement)",
-    "colortheme: Station colour theme converter (table, DBF patch, upload tree)"
+    "colortheme: Station colour theme converter (table, DBF patch, upload tree)",
+    "vectortiles: Colour tool vector tile builds (worker protocol, job queue, download)"
 ]
 
