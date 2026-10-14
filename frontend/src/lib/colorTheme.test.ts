@@ -10,6 +10,8 @@ import {
   keptGroups,
   styledLayers,
   styleFilesAdded,
+  tilePercent,
+  vectorTilesBlockedReason,
   type ColorThemeEvent,
   type ColorThemeState,
   type DatasetUpload
@@ -101,6 +103,60 @@ describe("colorThemeReducer", () => {
       { type: "convertFailed", upload: tokyo, message: "Upload exceeds 200 MB" }
     ]);
     expect(failed).toMatchObject({ phase: "checked", upload: tokyo, error: "Upload exceeds 200 MB", delivered: null });
+  });
+
+  test("a vector tile build follows the conversion, takes only its own job's progress, and ends delivered or failed", () => {
+    const building = run([
+      { type: "dropped", upload: tokyo },
+      { type: "inspected", upload: tokyo, inspection: tokyoInspection() },
+      { type: "convertStarted" },
+      { type: "buildQueued", upload: tokyo, jobId: "a" }
+    ]);
+    expect(building).toMatchObject({ phase: "building", jobId: "a", job: null });
+    expect(colorThemeStage(building)).toBe("deliver");
+
+    const running = run([{ type: "buildProgress", upload: tokyo, jobId: "a", job: { state: "running", step: 3, of: 5, label: "x" } }], building);
+    expect(running).toMatchObject({ phase: "building", job: { state: "running", step: 3 } });
+    expect(run([{ type: "buildProgress", upload: tokyo, jobId: "old", job: { state: "queued", position: 4 } }], running)).toBe(running);
+    expect(run([{ type: "buildProgress", upload: shinjuku, jobId: "a", job: { state: "queued", position: 4 } }], running)).toBe(running);
+
+    expect(run([{ type: "converted", upload: tokyo, filename: "t.zip", notes: ["missing zoom levels [21]"] }], running)).toMatchObject({
+      phase: "checked",
+      delivered: "t.zip",
+      notes: ["missing zoom levels [21]"]
+    });
+    expect(run([{ type: "convertFailed", upload: tokyo, message: "no map" }], running)).toMatchObject({
+      phase: "checked",
+      error: "no map",
+      notes: []
+    });
+    expect(run([{ type: "reset" }], running)).toBe(initialColorThemeState);
+  });
+});
+
+describe("vectorTilesBlockedReason", () => {
+  const one = shinjukuProjectInspection();
+  test("needs a licensed server and exactly one project", () => {
+    expect(vectorTilesBlockedReason({ state: "available", product: "ArcInfo" }, one, english)).toBeNull();
+    expect(vectorTilesBlockedReason(null, one, english)).toMatch(/^Checking whether/);
+    expect(vectorTilesBlockedReason({ state: "checking" }, one, english)).toMatch(/^Checking whether/);
+    expect(vectorTilesBlockedReason({ state: "unavailable", reason: "no_python", detail: "" }, one, english)).toMatch(/not installed/);
+    expect(vectorTilesBlockedReason({ state: "unavailable", reason: "failed", detail: "" }, one, japanese)).toMatch(/Python を起動できない/);
+    const available = { state: "available", product: "ArcView" } as const;
+    expect(vectorTilesBlockedReason(available, tokyoInspection(), english)).toMatch(/no ArcGIS Pro project/);
+    expect(vectorTilesBlockedReason(available, layerFilesInspection(), english)).toMatch(/has 2 ArcGIS Pro projects/);
+  });
+
+  test("tiles alone are something to download, even when no colour changes", () => {
+    expect(downloadBlockedReason(rerunInspection(), english, false, false)).toBe("Every value is already new.");
+    expect(downloadBlockedReason(rerunInspection(), english, false, true)).toBeNull();
+  });
+
+  test("the bar fills with finished steps", () => {
+    expect(tilePercent(null)).toBe(0);
+    expect(tilePercent({ state: "queued", position: 1 })).toBe(0);
+    expect(tilePercent({ state: "running", step: 0, of: 5, label: "" })).toBe(0);
+    expect(tilePercent({ state: "running", step: 3, of: 5, label: "" })).toBe(40);
   });
 });
 

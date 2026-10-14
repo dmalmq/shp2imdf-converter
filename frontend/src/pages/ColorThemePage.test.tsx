@@ -5,9 +5,14 @@ import { MemoryRouter } from "react-router-dom";
 import {
   convertColorTheme,
   fetchColorTheme,
+  fetchTileJob,
+  fetchVectorTilesAvailability,
   inspectColorTheme,
-  type ColorThemeInspection
+  startTileBuild,
+  type ColorThemeInspection,
+  type VectorTilesAvailability
 } from "../api/client";
+import { ApiClientError } from "../api/errors";
 import { ToastProvider } from "../components/shared/ToastProvider";
 import { AppShell } from "../components/shell/AppShell";
 import {
@@ -32,8 +37,19 @@ import { ColorThemePage } from "./ColorThemePage";
 vi.mock("../api/client", () => ({
   convertColorTheme: vi.fn(),
   fetchColorTheme: vi.fn(),
-  inspectColorTheme: vi.fn()
+  fetchTileJob: vi.fn(),
+  fetchVectorTilesAvailability: vi.fn(),
+  inspectColorTheme: vi.fn(),
+  startTileBuild: vi.fn(),
+  tileJobDownloadUrl: (jobId: string) => `/api/color-theme/jobs/${jobId}/download`
 }));
+
+const NOT_LICENSED: VectorTilesAvailability = {
+  state: "unavailable",
+  reason: "not_licensed",
+  detail: "import arcpy failed: RuntimeError: The Product License has not been initialized."
+};
+const LICENSED: VectorTilesAvailability = { state: "available", product: "ArcInfo" };
 
 function renderPage() {
   return render(
@@ -64,15 +80,19 @@ const ruleRow = (text: string) =>
     .find((row) => within(row).queryByRole("rowheader")?.textContent === text);
 
 let saved: string[] = [];
+let followed: string[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
   useAppStore.setState({ uiLanguage: "en" });
   vi.mocked(fetchColorTheme).mockResolvedValue(colorThemeReport());
   vi.mocked(inspectColorTheme).mockResolvedValue(tokyoInspection());
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(NOT_LICENSED);
   saved = [];
+  followed = [];
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
     saved.push(this.download);
+    followed.push(this.getAttribute("href") ?? "");
   });
   URL.createObjectURL = vi.fn(() => "blob:new-colors");
   URL.revokeObjectURL = vi.fn();
@@ -654,4 +674,148 @@ test("in Japanese the option and its count read in the page's idiom", async () =
   expect(await screen.findByRole("checkbox", { name: /QGIS と ArcGIS Pro 用のスタイルファイルを追加/ })).toBeChecked();
   expect(screen.getByRole("region", { name: "次のステップ" })).toHaveTextContent("スタイルファイル 20 個を追加します");
   expect(screen.getByRole("region", { name: "スタイルファイル" })).toHaveTextContent("ArcGIS Pro で .lyrx が正しく描かれるかは未確認");
+});
+
+const tilesOption = () => screen.getByRole("checkbox", { name: /Build vector tiles for Stenavi/ });
+const tilesRegion = () => screen.getByRole("region", { name: "Vector tiles" });
+
+test("vector tiles are off and greyed out, with the reason, when the server's ArcGIS Pro is not licensed", async () => {
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+
+  await screen.findByRole("heading", { level: 1, name: "Recolour shinjuku" });
+  await waitFor(() =>
+    expect(tilesRegion()).toHaveTextContent("ArcGIS Pro is not licensed for the account that runs this server")
+  );
+  expect(tilesOption()).toBeDisabled();
+  expect(tilesOption()).not.toBeChecked();
+  expect(tilesRegion()).toHaveTextContent("tick the floor and background groups and save the project before you upload it");
+});
+
+test("vector tiles are greyed out for an upload with no project or with two", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  renderPage();
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_6677" });
+  await waitFor(() => expect(tilesRegion()).toHaveTextContent("There is no ArcGIS Pro project (.aprx) in this upload"));
+  expect(tilesOption()).toBeDisabled();
+
+  vi.mocked(inspectColorTheme).mockResolvedValue(layerFilesInspection());
+  pickFolder([inFolder("DemoSta.aprx", "DemoSta_layers"), inFolder("DemoSta_units.aprx", "DemoSta_layers")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour DemoSta_layers" });
+  expect(tilesRegion()).toHaveTextContent("This upload has 2 ArcGIS Pro projects (.aprx)");
+  expect(tilesOption()).toBeDisabled();
+});
+
+test("left unticked, Download converts exactly as before and starts no build", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  vi.mocked(convertColorTheme).mockResolvedValue({ blob: new Blob(["zip"]), filename: "shinjuku_new-colors.zip" });
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(tilesOption()).toBeEnabled());
+  expect(tilesOption()).not.toBeChecked();
+
+  fireEvent.click(within(screen.getByRole("region", { name: "Next step" })).getByRole("button", { name: "Download" }));
+
+  await waitFor(() => expect(saved).toEqual(["shinjuku_new-colors.zip"]));
+  expect(startTileBuild).not.toHaveBeenCalled();
+  expect(fetchTileJob).not.toHaveBeenCalled();
+});
+
+test("ticked, Download queues a build, shows its place in line and its steps, and downloads the zip when done", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  vi.mocked(startTileBuild).mockResolvedValue({ job_id: "a1b2c3" });
+  vi.mocked(fetchTileJob)
+    .mockResolvedValueOnce({ state: "queued", position: 1 })
+    .mockResolvedValueOnce({ state: "running", step: 2, of: 5, label: "Map metadata" })
+    .mockResolvedValueOnce({
+      state: "done",
+      filename: "shinjuku_new-colors.zip",
+      warnings: ["These top-level groups are switched off and will NOT be tiled: 背景"],
+      problems: ["missing zoom levels [21]"]
+    });
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(tilesOption()).toBeEnabled());
+  fireEvent.click(tilesOption());
+  const bar = screen.getByRole("region", { name: "Next step" });
+  expect(bar).toHaveTextContent("Vector tiles are built");
+
+  fireEvent.click(within(bar).getByRole("button", { name: "Download" }));
+
+  const status = await within(tilesRegion()).findByRole("status");
+  await waitFor(() => expect(status).toHaveTextContent("Waiting for another build to finish · number 1 in line"));
+  expect(vi.mocked(startTileBuild).mock.calls[0][0]).toBe(vi.mocked(inspectColorTheme).mock.calls[0][0]);
+  expect(vi.mocked(startTileBuild).mock.calls[0][1]).toMatchObject({ styleFiles: true });
+  expect(convertColorTheme).not.toHaveBeenCalled();
+  expect(vi.mocked(fetchTileJob).mock.calls[0][0]).toBe("a1b2c3");
+  expect(within(bar).getByRole("button", { name: /Building tiles…/ })).toBeDisabled();
+  expect(tilesOption()).toBeDisabled();
+
+  await waitFor(() => expect(status).toHaveTextContent("Step 2 of 5 · Map metadata"), { timeout: 2500 });
+  expect(bar).toHaveTextContent("Building vector tiles");
+
+  await waitFor(() => expect(saved).toEqual(["shinjuku_new-colors.zip"]), { timeout: 2500 });
+  expect(followed).toEqual(["/api/color-theme/jobs/a1b2c3/download"]);
+  expect(bar).toHaveTextContent("Downloaded shinjuku_new-colors.zip");
+  expect(within(tilesRegion()).queryByRole("status")).toBeNull();
+  expect(tilesRegion()).toHaveTextContent("missing zoom levels [21]");
+  expect(tilesRegion()).toHaveTextContent("will NOT be tiled: 背景");
+  expect(fetchTileJob).toHaveBeenCalledTimes(3);
+});
+
+test("a failed build shows the worker's reason and leaves the check to try again", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  vi.mocked(startTileBuild).mockResolvedValue({ job_id: "a1b2c3" });
+  vi.mocked(fetchTileJob).mockResolvedValue({ state: "failed", reason: "2 layers have no data in the upload: 1F, 2F" });
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(tilesOption()).toBeEnabled());
+  fireEvent.click(tilesOption());
+  const bar = screen.getByRole("region", { name: "Next step" });
+
+  fireEvent.click(within(bar).getByRole("button", { name: "Download" }));
+
+  await waitFor(() => expect(bar).toHaveTextContent("Vector tiles failed: 2 layers have no data in the upload: 1F, 2F"));
+  expect(within(bar).getByRole("button", { name: "Download" })).toBeEnabled();
+  expect(saved).toEqual([]);
+});
+
+test("a build the server no longer knows says so", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  vi.mocked(startTileBuild).mockResolvedValue({ job_id: "gone" });
+  vi.mocked(fetchTileJob).mockRejectedValue(new ApiClientError(404, "TILE_JOB_NOT_FOUND", "not on the server"));
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(tilesOption()).toBeEnabled());
+  fireEvent.click(tilesOption());
+  const bar = screen.getByRole("region", { name: "Next step" });
+
+  fireEvent.click(within(bar).getByRole("button", { name: "Download" }));
+
+  await waitFor(() => expect(bar).toHaveTextContent("The server no longer has this vector tile build"));
+});
+
+test("in Japanese the option, its note and the build's progress read in Japanese", async () => {
+  useAppStore.setState({ uiLanguage: "ja" });
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  vi.mocked(startTileBuild).mockResolvedValue({ job_id: "a1b2c3" });
+  vi.mocked(fetchTileJob).mockResolvedValue({ state: "queued", position: 2 });
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+
+  const option = await screen.findByRole("checkbox", { name: /Stenavi 用のベクタータイルを作成/ });
+  await waitFor(() => expect(option).toBeEnabled());
+  const region = screen.getByRole("region", { name: "ベクタータイル" });
+  expect(region).toHaveTextContent("フロアと背景のグループにチェックを入れ");
+  fireEvent.click(option);
+  fireEvent.click(within(screen.getByRole("region", { name: "次のステップ" })).getByRole("button", { name: "ダウンロード" }));
+
+  expect(await within(region).findByRole("status")).toHaveTextContent("ほかの作成の完了を待っています · 2 番目");
 });

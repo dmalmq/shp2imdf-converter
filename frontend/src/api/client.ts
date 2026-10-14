@@ -737,6 +737,8 @@ export type ColorThemeInspection = {
     tables: number;
     /** Of those, the ones with `category_field` and without `field`. */
     category_only_tables: number;
+    /** ArcGIS Pro projects (`.aprx`) outside a geodatabase; vector tiles are built from exactly one. */
+    projects: number;
   };
   theme: ColorThemeReport;
 };
@@ -761,6 +763,46 @@ export function convertColorTheme(
   const form = datasetForm(files);
   form.append("style_files", String(styleFiles));
   return sendForm("/api/color-theme/convert", form, { ...options, download: "new-colors.zip" });
+}
+
+/** Whether this server can build vector tiles: its ArcGIS Pro's arcpy must be licensed. "checking" just after startup. */
+export type VectorTilesAvailability =
+  | { state: "checking" }
+  | { state: "available"; product: string }
+  | { state: "unavailable"; reason: "no_python" | "not_licensed" | "failed"; detail: string };
+
+export async function fetchVectorTilesAvailability(): Promise<VectorTilesAvailability> {
+  return handleJson<VectorTilesAvailability>(await fetch("/api/color-theme/vector-tiles"));
+}
+
+/** One vector tile build. Builds run one at a time; `position` 1 is the next to start. */
+export type TileJobStatus =
+  | { state: "queued"; position: number }
+  /** `step` is 0 while the project opens, then 1 to `of`. */
+  | { state: "running"; step: number; of: number; label: string }
+  /** `problems` are what the checks found wrong with the tiles, which are in the download all the same. */
+  | { state: "done"; filename: string; warnings: string[]; problems: string[] }
+  | { state: "failed"; reason: string };
+
+/** Converts as `convertColorTheme` does, then queues a vector tile build from the upload's one project. */
+export function startTileBuild(
+  files: DatasetFile[],
+  { styleFiles, ...options }: SendFormOptions & { styleFiles: boolean }
+): Promise<{ job_id: string }> {
+  const form = datasetForm(files);
+  form.append("style_files", String(styleFiles));
+  form.append("vector_tiles", "true");
+  return sendForm<{ job_id: string }>("/api/color-theme/convert", form, options);
+}
+
+/** 404 once the server has restarted or the finished build has expired. */
+export async function fetchTileJob(jobId: string, signal?: AbortSignal): Promise<TileJobStatus> {
+  return handleJson<TileJobStatus>(await fetch(`/api/color-theme/jobs/${encodeURIComponent(jobId)}`, { signal }));
+}
+
+/** Followed by the browser itself, so a zip of thousands of tiles streams to disk instead of into memory. */
+export function tileJobDownloadUrl(jobId: string): string {
+  return `/api/color-theme/jobs/${encodeURIComponent(jobId)}/download`;
 }
 
 /** Multipart names carry no folders, so each file's path travels beside it, pairwise. */

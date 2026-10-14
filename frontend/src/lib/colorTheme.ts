@@ -6,7 +6,9 @@ import type {
   ColorThemeReport,
   ColorThemeRule,
   ColorThemeStyleFile,
-  DatasetFile
+  DatasetFile,
+  TileJobStatus,
+  VectorTilesAvailability
 } from "../api/client";
 import type { ColorThemeStageId } from "../components/shell/stages";
 
@@ -27,8 +29,12 @@ export type ColorThemeState =
       error: string | null;
       /** File name of the last download. */
       delivered: string | null;
+      /** What the last vector tile build warned about and its checks found, for the operator to read. */
+      notes: string[];
     }
-  | { phase: "converting"; upload: DatasetUpload; inspection: ColorThemeInspection; progress: number };
+  | { phase: "converting"; upload: DatasetUpload; inspection: ColorThemeInspection; progress: number }
+  /** Converted, with a vector tile build in line or running; `job` is null until its first status. */
+  | { phase: "building"; upload: DatasetUpload; inspection: ColorThemeInspection; jobId: string; job: TileJobStatus | null };
 
 /**
  * An answer names the upload it was for, so one that arrives after a reset or
@@ -40,7 +46,9 @@ export type ColorThemeEvent =
   | { type: "inspected"; upload: DatasetUpload; inspection: ColorThemeInspection }
   | { type: "inspectFailed"; upload: DatasetUpload; message: string }
   | { type: "convertStarted" }
-  | { type: "converted"; upload: DatasetUpload; filename: string }
+  | { type: "buildQueued"; upload: DatasetUpload; jobId: string }
+  | { type: "buildProgress"; upload: DatasetUpload; jobId: string; job: TileJobStatus }
+  | { type: "converted"; upload: DatasetUpload; filename: string; notes?: string[] }
   | { type: "convertFailed"; upload: DatasetUpload; message: string }
   | { type: "reset" };
 
@@ -63,23 +71,38 @@ export function colorThemeReducer(state: ColorThemeState, event: ColorThemeEvent
       return state.phase === "inspecting" || state.phase === "converting" ? { ...state, progress: event.percent } : state;
     case "inspected":
       return state.phase === "inspecting"
-        ? { phase: "checked", upload: state.upload, inspection: event.inspection, error: null, delivered: null }
+        ? { phase: "checked", upload: state.upload, inspection: event.inspection, error: null, delivered: null, notes: [] }
         : state;
     case "inspectFailed":
       return state.phase === "inspecting" ? { phase: "empty", error: event.message } : state;
-    case "converted":
+    case "buildQueued":
       return state.phase === "converting"
-        ? { phase: "checked", upload: state.upload, inspection: state.inspection, error: null, delivered: event.filename }
+        ? { phase: "building", upload: state.upload, inspection: state.inspection, jobId: event.jobId, job: null }
+        : state;
+    case "buildProgress":
+      return state.phase === "building" && state.jobId === event.jobId ? { ...state, job: event.job } : state;
+    case "converted":
+      return state.phase === "converting" || state.phase === "building"
+        ? {
+            phase: "checked",
+            upload: state.upload,
+            inspection: state.inspection,
+            error: null,
+            delivered: event.filename,
+            notes: event.notes ?? []
+          }
         : state;
     case "convertFailed":
-      return state.phase === "converting"
-        ? { phase: "checked", upload: state.upload, inspection: state.inspection, error: event.message, delivered: null }
+      return state.phase === "converting" || state.phase === "building"
+        ? { phase: "checked", upload: state.upload, inspection: state.inspection, error: event.message, delivered: null, notes: [] }
         : state;
   }
 }
 
 export function colorThemeStage(state: ColorThemeState): ColorThemeStageId {
-  if (state.phase === "converting" || (state.phase === "checked" && state.delivered)) return "deliver";
+  if (state.phase === "converting" || state.phase === "building" || (state.phase === "checked" && state.delivered)) {
+    return "deliver";
+  }
   return state.phase === "checked" ? "check" : "bring-in";
 }
 
@@ -203,11 +226,13 @@ export function styleFilesAdded(report: Pick<ColorThemeReport, "style_files">): 
 export function downloadBlockedReason(
   inspection: ColorThemeInspection,
   t: (english: string, japanese: string) => string,
-  styleFiles = false
+  styleFiles = false,
+  /** Tiles are wanted and can be built: something to download even when no colour changes. */
+  vectorTiles = false
 ): string | null {
   const { field, layers, skipped, totals } = inspection.theme;
   const symbology = symbologyTally(inspection.theme);
-  if (totals.recolor > 0 || symbology.rewritten > 0) return null;
+  if (totals.recolor > 0 || symbology.rewritten > 0 || vectorTiles) return null;
   if (styleFiles && styleFilesAdded(inspection.theme) > 0) return null;
   const editable = layers.length + symbology.alreadyNew;
   if (editable === 0 && skipped.length + symbology.leftAlone + symbology.unreadableFiles === 0) {
@@ -234,4 +259,78 @@ export function categoryRange(rule: Pick<ColorThemeRule, "categories">): string 
   if (!rule.categories || rule.categories.length === 0) return null;
   const sorted = [...rule.categories].sort();
   return sorted.length === 1 ? sorted[0] : `${sorted[0]}–${sorted[sorted.length - 1]}`;
+}
+
+/**
+ * Why vector tiles cannot be built for this upload, in the operator's language; null when they can.
+ * The server needs a licensed arcpy and the upload exactly one project.
+ */
+export function vectorTilesBlockedReason(
+  availability: VectorTilesAvailability | null,
+  inspection: ColorThemeInspection,
+  t: (english: string, japanese: string) => string
+): string | null {
+  if (availability === null || availability.state === "checking") {
+    return t("Checking whether this server can build vector tiles…", "このサーバーでベクタータイルを作成できるか確認しています…");
+  }
+  if (availability.state === "unavailable") {
+    switch (availability.reason) {
+      case "no_python":
+        return t(
+          "ArcGIS Pro is not installed on this server, so it cannot build vector tiles.",
+          "このサーバーには ArcGIS Pro がインストールされていないため、ベクタータイルを作成できません。"
+        );
+      case "not_licensed":
+        return t(
+          "ArcGIS Pro is not licensed for the account that runs this server, so it cannot build vector tiles.",
+          "このサーバーを動かしているアカウントに ArcGIS Pro のライセンスがないため、ベクタータイルを作成できません。"
+        );
+      case "failed":
+        return t(
+          "This server could not start ArcGIS Pro’s Python, so it cannot build vector tiles.",
+          "このサーバーで ArcGIS Pro の Python を起動できないため、ベクタータイルを作成できません。"
+        );
+    }
+  }
+  const { projects } = inspection.dataset;
+  if (projects === 0) {
+    return t(
+      "There is no ArcGIS Pro project (.aprx) in this upload to build tiles from.",
+      "このアップロードにはタイルの元になる ArcGIS Pro プロジェクト（.aprx）がありません。"
+    );
+  }
+  if (projects > 1) {
+    return t(
+      `This upload has ${projects} ArcGIS Pro projects (.aprx). Tiles are built from one, so drop a station with exactly one.`,
+      `このアップロードには ArcGIS Pro プロジェクト（.aprx）が ${projects} 個あります。タイルは 1 つのプロジェクトから作成するため、プロジェクトが 1 つだけの駅をドロップしてください。`
+    );
+  }
+  return null;
+}
+
+/** Where a vector tile build has got to, in the operator's language. */
+export function tileProgress(job: TileJobStatus | null, t: (english: string, japanese: string) => string): string {
+  if (job === null) return t("Converted. Starting the vector tile build…", "変換しました。ベクタータイルの作成を開始しています…");
+  switch (job.state) {
+    case "queued":
+      return t(
+        `Waiting for another build to finish · number ${job.position} in line`,
+        `ほかの作成の完了を待っています · ${job.position} 番目`
+      );
+    case "running":
+      return job.step === 0
+        ? t("Opening the project…", "プロジェクトを開いています…")
+        : t(`Step ${job.step} of ${job.of} · ${job.label}`, `ステップ ${job.step}/${job.of} · ${job.label}`);
+    case "done":
+      return t("Vector tiles built.", "ベクタータイルを作成しました。");
+    case "failed":
+      return job.reason;
+  }
+}
+
+/** Steps finished, as a percent, for the bar on the button. */
+export function tilePercent(job: TileJobStatus | null): number {
+  if (job === null || job.state === "queued") return 0;
+  if (job.state === "running") return Math.round((Math.max(job.step - 1, 0) / job.of) * 100);
+  return 100;
 }

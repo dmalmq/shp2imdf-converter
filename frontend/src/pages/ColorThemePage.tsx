@@ -5,14 +5,20 @@ import { useDropzone } from "react-dropzone";
 import {
   convertColorTheme,
   fetchColorTheme,
+  fetchTileJob,
+  fetchVectorTilesAvailability,
   inspectColorTheme,
+  startTileBuild,
+  tileJobDownloadUrl,
   type ColorThemeInspection,
   type ColorThemeLayer,
   type ColorThemeRenderer,
   type ColorThemeReport,
-  type ColorThemeStyleFile
+  type ColorThemeStyleFile,
+  type TileJobStatus,
+  type VectorTilesAvailability
 } from "../api/client";
-import { toErrorMessage } from "../api/errors";
+import { ApiClientError, toErrorMessage } from "../api/errors";
 import { NextBar } from "../components/bringIn/NextBar";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
@@ -33,13 +39,21 @@ import {
   styledLayers,
   styleFilesAdded,
   symbologyTally,
+  tilePercent,
+  tileProgress,
+  vectorTilesBlockedReason,
   type ColorThemeState,
   type DatasetUpload
 } from "../lib/colorTheme";
-import { saveBlob } from "../lib/download";
+import { saveBlob, saveUrl } from "../lib/download";
 import { cn } from "@/lib/utils";
 
 type T = (english: string, japanese: string) => string;
+
+/** How often a running vector tile build is asked where it has got to. */
+export const TILE_POLL_MS = 1000;
+/** How often to ask again while the server is still finding out whether arcpy is licensed. */
+const AVAILABILITY_RETRY_MS = 3000;
 
 type Mapping = { state: "loading" } | { state: "failed"; message: string } | { state: "loaded"; report: ColorThemeReport };
 
@@ -81,6 +95,9 @@ export function ColorThemePage() {
   const [mapping, setMapping] = useState<Mapping>({ state: "loading" });
   // Kept across stations: an operator who turns style files off means it for the next drop too.
   const [styleFiles, setStyleFiles] = useState(true);
+  // Off by default: a build takes minutes and holds the server's one ArcGIS Pro licence.
+  const [vectorTiles, setVectorTiles] = useState(false);
+  const [tilesAvailability, setTilesAvailability] = useState<VectorTilesAvailability | null>(null);
   const inflight = useRef<AbortController | null>(null);
   const anchor = useRef<HTMLDivElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
@@ -97,7 +114,85 @@ export function ColorThemePage() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const ask = () =>
+      fetchVectorTilesAvailability().then(
+        (availability) => {
+          if (!active) return;
+          setTilesAvailability(availability);
+          if (availability.state === "checking") retry = setTimeout(ask, AVAILABILITY_RETRY_MS);
+        },
+        (caught: unknown) =>
+          active && setTilesAvailability({ state: "unavailable", reason: "failed", detail: toErrorMessage(caught, "") })
+      );
+    void ask();
+    return () => {
+      active = false;
+      clearTimeout(retry);
+    };
+  }, []);
+
   useEffect(() => () => inflight.current?.abort(), []);
+
+  const building = state.phase === "building" ? state : null;
+  const buildingJob = building?.jobId ?? null;
+  const buildingUpload = building?.upload ?? null;
+  useEffect(() => {
+    if (buildingJob === null || buildingUpload === null) return;
+    const request = new AbortController();
+    let next: ReturnType<typeof setTimeout> | undefined;
+    const upload = buildingUpload;
+    const poll = async () => {
+      let job: TileJobStatus;
+      try {
+        job = await fetchTileJob(buildingJob, request.signal);
+      } catch (caught) {
+        if (request.signal.aborted) return;
+        const message =
+          caught instanceof ApiClientError && caught.status === 404
+            ? t(
+                "The server no longer has this vector tile build: it was restarted, or the build expired. Download again to start a new one.",
+                "サーバーにこのベクタータイルの作成がありません。サーバーが再起動したか、期限が切れました。もう一度ダウンロードして作成し直してください。"
+              )
+            : handleApiError(caught, t("Could not follow the vector tile build", "ベクタータイルの作成状況を取得できませんでした"), {
+                title: t("Download failed", "ダウンロード失敗")
+              });
+        dispatch({ type: "convertFailed", upload, message });
+        return;
+      }
+      if (request.signal.aborted) return;
+      switch (job.state) {
+        case "done":
+          saveUrl(tileJobDownloadUrl(buildingJob), job.filename);
+          dispatch({ type: "converted", upload, filename: job.filename, notes: [...job.problems, ...job.warnings] });
+          pushToast({
+            title: t(`Created ${job.filename} with vector tiles`, `ベクタータイル付きの ${job.filename} を作成しました`),
+            description: t("It is in your browser’s downloads.", "ブラウザのダウンロードに保存されます。"),
+            variant: "success"
+          });
+          return;
+        case "failed":
+          dispatch({
+            type: "convertFailed",
+            upload,
+            message: t(`Vector tiles failed: ${job.reason}`, `ベクタータイルの作成に失敗しました: ${job.reason}`)
+          });
+          return;
+        default:
+          dispatch({ type: "buildProgress", upload, jobId: buildingJob, job });
+          next = setTimeout(() => void poll(), TILE_POLL_MS);
+      }
+    };
+    void poll();
+    return () => {
+      request.abort();
+      clearTimeout(next);
+    };
+    // Follows one build; the language or the toast handler changing must not restart it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildingJob, buildingUpload]);
 
   // React has no prop for it; the folder picker is what keeps the folder layout on a click-browse.
   useEffect(() => {
@@ -129,11 +224,22 @@ export function ColorThemePage() {
   };
 
   const download = async () => {
-    if (state.phase !== "checked" || downloadBlockedReason(state.inspection, t, styleFiles)) return;
+    if (state.phase !== "checked") return;
+    const tiles = vectorTiles && vectorTilesBlockedReason(tilesAvailability, state.inspection, t) === null;
+    if (downloadBlockedReason(state.inspection, t, styleFiles, tiles)) return;
     const { upload } = state;
     const signal = begin();
     dispatch({ type: "convertStarted" });
     try {
+      if (tiles) {
+        const { job_id } = await startTileBuild(upload.files, {
+          styleFiles,
+          signal,
+          onProgress: (percent) => dispatch({ type: "progress", upload, percent })
+        });
+        dispatch({ type: "buildQueued", upload, jobId: job_id });
+        return;
+      }
       const { blob, filename } = await convertColorTheme(upload.files, {
         styleFiles,
         signal,
@@ -173,9 +279,12 @@ export function ColorThemePage() {
     event.target.value = "";
   };
 
-  const checked = state.phase === "checked" || state.phase === "converting" ? state : null;
+  const checked = state.phase === "checked" || state.phase === "converting" || state.phase === "building" ? state : null;
   const inspection = checked?.inspection ?? null;
-  const blocked = inspection ? downloadBlockedReason(inspection, t, styleFiles) : null;
+  const tilesBlocked = inspection ? vectorTilesBlockedReason(tilesAvailability, inspection, t) : null;
+  const wantTiles = vectorTiles && tilesBlocked === null;
+  const blocked = inspection ? downloadBlockedReason(inspection, t, styleFiles, wantTiles) : null;
+  const busy = state.phase === "converting" || state.phase === "building";
   const lockFiles = checked ? checked.upload.lockFilesLeftOut + checked.inspection.dataset.lock_files_dropped : 0;
 
   usePageShell({
@@ -191,7 +300,7 @@ export function ColorThemePage() {
           label: t("Download", "ダウンロード"),
           run: () => void download(),
           disabledReason: blocked,
-          busy: state.phase === "converting",
+          busy,
           anchor
         }
       : null
@@ -278,6 +387,16 @@ export function ColorThemePage() {
           {inspection && inspection.theme.style_files.length > 0 ? (
             <StyleFiles report={inspection.theme} wanted={styleFiles} onWanted={setStyleFiles} />
           ) : null}
+          {inspection ? (
+            <VectorTiles
+              wanted={vectorTiles}
+              onWanted={setVectorTiles}
+              blocked={tilesBlocked}
+              detail={tilesAvailability?.state === "unavailable" ? tilesAvailability.detail : null}
+              building={building}
+              notes={state.phase === "checked" ? state.notes : []}
+            />
+          ) : null}
         </main>
 
         <aside className="flex w-[360px] shrink-0 flex-col gap-4">
@@ -294,9 +413,9 @@ export function ColorThemePage() {
       {inspection ? (
         <NextBar
           ref={anchor}
-          step={nextStep(state, inspection, blocked, styleFiles, t)}
-          progress={state.phase === "converting" ? state.progress : null}
-          busyLabel={{ en: "Preparing…", ja: "準備中…" }}
+          step={nextStep(state, inspection, blocked, styleFiles, wantTiles, t)}
+          progress={state.phase === "converting" ? state.progress : building ? tilePercent(building.job) : null}
+          busyLabel={building ? { en: "Building tiles…", ja: "タイル作成中…" } : { en: "Preparing…", ja: "準備中…" }}
           onGo={() => void download()}
           secondary={
             // Once delivered, the title names the file.
@@ -312,7 +431,14 @@ export function ColorThemePage() {
   );
 }
 
-function nextStep(state: ColorThemeState, inspection: ColorThemeInspection, blocked: string | null, styleFiles: boolean, t: T) {
+function nextStep(
+  state: ColorThemeState,
+  inspection: ColorThemeInspection,
+  blocked: string | null,
+  styleFiles: boolean,
+  vectorTiles: boolean,
+  t: T
+) {
   const { totals, layers } = inspection.theme;
   const changed = layers.filter((layer) => layer.counts.recolor > 0).length;
   const { rewritten } = symbologyTally(inspection.theme);
@@ -331,19 +457,23 @@ function nextStep(state: ColorThemeState, inspection: ColorThemeInspection, bloc
       : null,
     added > 0
       ? t(`${plural(added, "style file is", "style files are")} added`, `スタイルファイル ${formatCount(added)} 個を追加します`)
-      : null
+      : null,
+    vectorTiles ? t("Vector tiles are built", "ベクタータイルを作成します") : null
   ].filter((part): part is string => part !== null);
+  const building = state.phase === "building" ? state : null;
   const title = blocked
     ? t("Nothing to change", "変更はありません")
-    : delivered
-      ? t(`Downloaded ${delivered}`, `${delivered} をダウンロードしました`)
-      : changes.join(" · ");
+    : building
+      ? t("Building vector tiles", "ベクタータイルを作成中")
+      : delivered
+        ? t(`Downloaded ${delivered}`, `${delivered} をダウンロードしました`)
+        : changes.join(" · ");
   // GDAL rewrites a geodatabase's changed rows whole (Shape_Area recomputed), so only shapefiles get the stronger promise.
   const unchanged =
     inspection.dataset.geodatabases > 0
       ? t("Everything but the changed rows comes back as it was.", "変更する行以外はそのまま戻ります。")
       : t("Everything else comes back exactly as it was.", "ほかはすべてそのまま戻ります。");
-  const detail = blocked ?? error ?? unchanged;
+  const detail = blocked ?? (building ? tileProgress(building.job, t) : null) ?? error ?? unchanged;
   const action = delivered ? t("Download again", "もう一度ダウンロード") : t("Download", "ダウンロード");
   // The strings are already in the operator's language.
   const same = (text: string) => ({ en: text, ja: text });
@@ -1178,6 +1308,87 @@ function StyleFiles({
             </tbody>
           </table>
         </details>
+      </div>
+    </section>
+  );
+}
+
+/** The option to add Stenavi vector tiles, why it is off when it is, and the build as it runs. */
+function VectorTiles({
+  wanted,
+  onWanted,
+  blocked,
+  detail,
+  building,
+  notes
+}: {
+  wanted: boolean;
+  onWanted: (wanted: boolean) => void;
+  /** Why tiles cannot be built for this upload; null when they can. */
+  blocked: string | null;
+  /** What the server's probe saw, for whoever has to fix it. */
+  detail: string | null;
+  building: { job: TileJobStatus | null } | null;
+  /** The last build's problems and warnings. */
+  notes: string[];
+}) {
+  const { t } = useUiLanguage();
+  return (
+    <section aria-labelledby="color-theme-vector-tiles" className="flex flex-col gap-2.5">
+      <MicroLabel id="color-theme-vector-tiles">{t("Vector tiles", "ベクタータイル")}</MicroLabel>
+      <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+        <label className={cn("flex items-start gap-3 px-4 py-3", blocked ? "cursor-not-allowed" : "cursor-pointer")}>
+          <Checkbox
+            className="mt-0.5"
+            checked={wanted && blocked === null}
+            disabled={blocked !== null || building !== null}
+            onCheckedChange={(next) => onWanted(next === true)}
+          />
+          <span className="flex min-w-0 flex-col gap-1">
+            <span className="text-[13px] font-medium text-foreground">
+              {t("Build vector tiles for Stenavi", "Stenavi 用のベクタータイルを作成")}
+            </span>
+            <span className="text-[12.5px] leading-[1.45] text-muted-foreground">
+              {t(
+                "After converting, ArcGIS Pro on this server tiles the project’s map and the .vtiles folder is added to the download under vector_tiles. A build takes several minutes, and one runs at a time.",
+                "変換後、このサーバーの ArcGIS Pro がプロジェクトのマップからタイルを作成し、.vtiles フォルダをダウンロードの vector_tiles に追加します。作成には数分かかり、一度に 1 件ずつ実行します。"
+              )}
+            </span>
+            {blocked ? (
+              <span className="text-[12.5px] leading-[1.45] text-warning-foreground" title={detail ?? undefined}>
+                {blocked}
+              </span>
+            ) : null}
+          </span>
+        </label>
+        <p className="flex items-start gap-2.5 border-t border-border px-4 py-2.5 text-[12.5px] leading-[1.45] text-muted-foreground">
+          <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warning-foreground" />
+          {t(
+            "Only visible layers are tiled. In ArcGIS Pro, tick the floor and background groups and save the project before you upload it.",
+            "表示中のレイヤーだけがタイルになります。ArcGIS Pro でフロアと背景のグループにチェックを入れ、プロジェクトを保存してからアップロードしてください。"
+          )}
+        </p>
+        {building ? (
+          <div role="status" className="flex flex-col gap-2 border-t border-border px-4 py-3">
+            <p className="text-[13px] font-medium text-foreground">{tileProgress(building.job, t)}</p>
+            <span aria-hidden="true" className="h-1 w-full overflow-hidden rounded-full bg-muted">
+              <span className="block h-full bg-primary transition-all duration-300" style={{ width: `${tilePercent(building.job)}%` }} />
+            </span>
+          </div>
+        ) : null}
+        {notes.length > 0 ? (
+          <div className="flex flex-col gap-1.5 border-t border-border px-4 py-3">
+            <span className="text-[12.5px] font-medium text-foreground">{t("From the last build", "前回の作成から")}</span>
+            <ul className="flex flex-col gap-1">
+              {notes.map((note) => (
+                <li key={note} className="flex gap-2 text-[12.5px] leading-[1.45] text-warning-foreground">
+                  <AlertTriangle aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {note}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
     </section>
   );

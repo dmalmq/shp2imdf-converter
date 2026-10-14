@@ -155,7 +155,8 @@ export function tokyoInspection(): ColorThemeInspection {
       geodatabases: 0,
       lock_files_dropped: 0,
       tables: 20,
-      category_only_tables: 0
+      category_only_tables: 0,
+      projects: 0
     },
     theme: {
       ...colorThemeReport(),
@@ -213,7 +214,8 @@ export function tokyoGeodatabaseInspection(): ColorThemeInspection {
       geodatabases: 1,
       lock_files_dropped: 0,
       tables: 127,
-      category_only_tables: 0
+      category_only_tables: 0,
+      projects: 0
     },
     theme: {
       ...colorThemeReport(),
@@ -284,7 +286,8 @@ export function shinjukuProjectInspection(): ColorThemeInspection {
       geodatabases: 0,
       lock_files_dropped: 0,
       tables: 0,
-      category_only_tables: 0
+      category_only_tables: 0,
+      projects: 1
     },
     theme: { ...colorThemeReport(), symbology: [{ path: "shinjuku.aprx", kind: "aprx", unreadable: false, renderers }] }
   };
@@ -300,7 +303,8 @@ export function shinjukuGeodatabaseInspection(): ColorThemeInspection {
       geodatabases: 1,
       lock_files_dropped: 0,
       tables: 529,
-      category_only_tables: 449
+      category_only_tables: 449,
+      projects: 0
     },
     theme: colorThemeReport()
   };
@@ -335,7 +339,8 @@ export function layerFilesInspection(): ColorThemeInspection {
       geodatabases: 0,
       lock_files_dropped: 0,
       tables: 0,
-      category_only_tables: 0
+      category_only_tables: 0,
+      projects: 2
     },
     theme: { ...colorThemeReport(), symbology }
   };
@@ -384,7 +389,8 @@ export function shinjukuShapefileInspection(): ColorThemeInspection {
       geodatabases: 0,
       lock_files_dropped: 0,
       tables: 16,
-      category_only_tables: 10
+      category_only_tables: 10,
+      projects: 0
     },
     theme: {
       ...colorThemeReport(),
