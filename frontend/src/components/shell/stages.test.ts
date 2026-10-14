@@ -230,6 +230,8 @@ test("each route belongs to one flow; every other route is shapefiles", () => {
   expect(flowForPath("/illustrator")).toBe("artwork");
   expect(flowForPath("/a/0123456789abcdef0123456789abcdef")).toBe("artwork");
   expect(flowForPath("/color-theme")).toBe("color-theme");
+  expect(flowForPath("/color-theme/tiles/ab12")).toBe("color-theme");
+  expect(flowForPath("/color-themes")).toBe("shapefiles");
   expect(flowForPath("/")).toBe("shapefiles");
   expect(flowForPath("/p/s1/check")).toBe("shapefiles");
 });

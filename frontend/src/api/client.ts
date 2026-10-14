@@ -845,6 +845,25 @@ export function tileJobDownloadUrl(jobId: string): string {
   return `/api/color-theme/jobs/${encodeURIComponent(jobId)}/download`;
 }
 
+/** The finished build's `.vtiles` folder: its name and the tiles stored at each level. */
+export type TileJobIndex = {
+  name: string;
+  levels: Array<{ z: number; count: number; rows: [number, number]; columns: [number, number] }>;
+};
+
+export async function fetchTileJobIndex(jobId: string, signal?: AbortSignal): Promise<TileJobIndex> {
+  return handleJson<TileJobIndex>(await fetch(`/api/color-theme/jobs/${encodeURIComponent(jobId)}/tiles`, { signal }));
+}
+
+/** One file of the finished build's `.vtiles` folder; null when it is not there, as most tiles of a sparse cache are not. */
+export async function fetchTileJobFile(jobId: string, path: string, signal?: AbortSignal): Promise<ArrayBuffer | null> {
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  const response = await fetch(`/api/color-theme/jobs/${encodeURIComponent(jobId)}/tiles/${encoded}`, { signal });
+  if (response.status === 404 && !(await response.clone().text())) return null;
+  if (!response.ok) throw buildApiClientError(response.status, (await response.text()) || "");
+  return response.arrayBuffer();
+}
+
 /** Multipart names carry no folders, so each file's path travels beside it, pairwise. */
 function datasetForm(files: DatasetFile[]): FormData {
   const form = new FormData();

@@ -9,6 +9,7 @@ import { ArtworkRoute } from "./pages/ArtworkRoute";
 import { ColorThemePage } from "./pages/ColorThemePage";
 import { HubPage } from "./pages/HubPage";
 import { LegacyStageRedirect, ProjectLayout, ProjectStage } from "./pages/ProjectRoutes";
+import { TileViewerPage } from "./pages/TileViewerPage";
 import { UploadPage } from "./pages/UploadPage";
 
 export default function App() {
@@ -28,6 +29,7 @@ export default function App() {
             <Route path="/illustrator" element={<ArtworkRoute />} />
             <Route path="/a/:conversionId" element={<ArtworkRoute />} />
             <Route path={COLOR_THEME_PATH} element={<ColorThemePage />} />
+            <Route path={`${COLOR_THEME_PATH}/tiles/:jobId?`} element={<TileViewerPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </AppShell>
