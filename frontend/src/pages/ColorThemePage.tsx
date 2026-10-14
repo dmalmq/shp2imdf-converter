@@ -490,7 +490,7 @@ function nextStep(
     added > 0
       ? t(`${plural(added, "style file is", "style files are")} added`, `スタイルファイル ${formatCount(added)} 個を追加します`)
       : null,
-    vectorTiles ? t("Vector tiles are built", "ベクタータイルを作成します") : null
+    vectorTiles ? t("Vector tiles will be built", "ベクタータイルを作成します") : null
   ].filter((part): part is string => part !== null);
   const building = state.phase === "building" ? state : null;
   const title = blocked

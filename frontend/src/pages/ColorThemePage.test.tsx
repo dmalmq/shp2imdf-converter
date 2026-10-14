@@ -751,7 +751,7 @@ test("ticked, Download queues a build, shows its place in line and its steps, an
   pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
   await tickTilesKeepingDefaults();
   const bar = screen.getByRole("region", { name: "Next step" });
-  expect(bar).toHaveTextContent("Vector tiles are built");
+  expect(bar).toHaveTextContent("Vector tiles will be built");
 
   fireEvent.click(within(bar).getByRole("button", { name: "Download" }));
 
