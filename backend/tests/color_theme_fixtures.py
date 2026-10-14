@@ -477,3 +477,10 @@ def tile_project(plan: dict | None = None, *, maps: Sequence[str] = ("Stenavi",)
     if plan is not None:
         members.append(("fake_plan.json", _compact(plan), zipfile.ZIP_DEFLATED))
     return make_project(members)
+
+
+def demo_tile_station() -> bytes:
+    """``demo_station`` with one project holding ``TILE_MAP``, for capture.mjs to open the layer list on."""
+    with zipfile.ZipFile(BytesIO(demo_station())) as station:
+        members: list[tuple[str, bytes | None]] = [(info.filename, station.read(info)) for info in station.infolist()]
+    return make_zip([*members, ("DemoSta_6677.shp/DemoSta.aprx", tile_project())])
