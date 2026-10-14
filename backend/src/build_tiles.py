@@ -23,6 +23,7 @@ code page never decides how a Japanese name crosses the pipe:
 - ``{"event": "failed", "reason": ...}`` last, exit 1, with the reason also the last line of stderr.
 
 Anything else on stdout (arcpy's own output) is not JSON and goes to the log as it is.
+stdout and stderr are UTF-8 whatever the console code page, which is how the server reads them.
 """
 
 from __future__ import annotations
@@ -31,6 +32,11 @@ import json
 import os
 from pathlib import Path, PureWindowsPath
 import sys
+
+if __name__ == "__main__":
+    # A pipe gets the console code page (cp932 on a Japanese Windows), and -I ignores PYTHONIOENCODING.
+    for _stream in (sys.stdout, sys.stderr):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 
 def emit(event: str, **fields: object) -> None:

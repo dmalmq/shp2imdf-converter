@@ -11,9 +11,14 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import time
 from types import ModuleType, SimpleNamespace
 
 import pytest
+
+from backend.src.recolor import Archive
+from backend.src.tile_jobs import Failed, TileJobs
+from backend.tests.color_theme_fixtures import make_zip
 
 pytestmark = [pytest.mark.colortheme, pytest.mark.vectortiles]
 
@@ -258,3 +263,39 @@ def test_an_arcpy_error_exits_1_with_its_error_line(worker, tmp_path, capsys) ->
     assert exited.value.code == 1
     assert _lines(captured.out)[-1] == {"event": "failed", "reason": "ERROR 000732: Input Map: Dataset does not exist"}
     assert captured.err.strip().splitlines()[-1] == "ERROR 000732: Input Map: Dataset does not exist"
+
+
+_JAPANESE_CONSOLE = """
+import io, runpy, sys
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="cp932", line_buffering=True)
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="cp932", line_buffering=True)
+sys.path.insert(0, {stub!r})
+sys.argv = [{worker!r}, *sys.argv[1:]]
+runpy.run_path({worker!r}, run_name="__main__")
+"""
+
+_REFUSING_ARCPY = """
+class mp:
+    @staticmethod
+    def ArcGISProject(path):
+        raise RuntimeError("マップ レイヤー を開けません")
+"""
+
+
+def test_a_japanese_failure_reaches_the_build_log_intact_under_a_cp932_console(tmp_path) -> None:
+    stub = tmp_path / "stub"
+    stub.mkdir()
+    (stub / "arcpy.py").write_text(_REFUSING_ARCPY, encoding="utf-8")
+    launcher = tmp_path / "launcher.py"
+    launcher.write_text(_JAPANESE_CONSOLE.format(stub=str(stub), worker=str(WORKER)), encoding="utf-8")
+    jobs = TileJobs(tmp_path / "j", ttl_seconds=3600, script=launcher)
+
+    job_id = jobs.submit(Archive(filename="p.zip", data=make_zip([("p.aprx", b"x")])), "p.aprx", Path(sys.executable), ())
+
+    deadline = time.monotonic() + 30
+    while not isinstance(status := jobs.status(job_id), Failed):
+        assert time.monotonic() < deadline, status
+        time.sleep(0.02)
+    assert status.reason == "マップ レイヤー を開けません"
+    log = (jobs.root / job_id / "build_log.txt").read_text(encoding="utf-8")
+    assert "stderr: マップ レイヤー を開けません\n" in log
