@@ -376,6 +376,11 @@ async function captureTileLayers(page, shoot, zip) {
   await dialog.waitFor({ timeout: 15000 });
   await dialog.getByRole("button", { name: "Expand JRSta_1F" }).click();
   await shoot("color-theme-tile-layers", { wait: 600 });
+  await dialog.getByRole("combobox", { name: "Map to tile" }).click();
+  await page.getByRole("listbox").waitFor({ timeout: 10000 });
+  await shoot("color-theme-tile-maps", { wait: 600 });
+  await page.keyboard.press("Escape");
+  await page.getByRole("listbox").waitFor({ state: "detached", timeout: 10000 });
   await dialog.getByRole("checkbox", { name: "ordinal_-1" }).click();
   await dialog.getByRole("button", { name: "Use these layers" }).click();
   await dialog.waitFor({ state: "detached", timeout: 15000 });
