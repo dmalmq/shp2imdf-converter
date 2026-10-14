@@ -24,6 +24,7 @@ import {
   rerunInspection,
   shinjukuGeodatabaseInspection,
   shinjukuProjectInspection,
+  shinjukuTileMaps,
   shinjukuShapefileInspection,
   styleFilesFor,
   TOKYO_GDB,
@@ -961,18 +962,121 @@ test("the chosen layers are sent in drawing order, Cancel keeps the previous cho
   expect(layerBox("背景")).toBeChecked();
 });
 
-test("a project with two maps, or whose layers cannot be read, cannot be tiled and says why", async () => {
+test("with one map there is no map to choose, and the build is sent that map", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  vi.mocked(startTileBuild).mockResolvedValue({ job_id: "a1b2c3" });
+  vi.mocked(fetchTileJob).mockResolvedValue({ state: "queued", position: 1 });
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(tilesOption()).toBeEnabled());
+  fireEvent.click(tilesOption());
+
+  expect(within(layersDialog()).queryByRole("combobox")).toBeNull();
+  fireEvent.click(within(layersDialog()).getByRole("button", { name: "Use these layers" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  fireEvent.click(within(screen.getByRole("region", { name: "Next step" })).getByRole("button", { name: "Download" }));
+
+  await waitFor(() => expect(startTileBuild).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(startTileBuild).mock.calls[0][1].map).toBe("CIMPATH=map0/map.json");
+});
+
+const mapPicker = () => within(layersDialog()).getByRole("combobox", { name: "Map to tile" });
+
+test("with several maps the default is chosen and explained, an empty map cannot be picked, and the build is sent the map", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue({ ...shinjukuProjectInspection(), tile_layers: shinjukuTileMaps() });
+  vi.mocked(startTileBuild).mockResolvedValue({ job_id: "a1b2c3" });
+  vi.mocked(fetchTileJob).mockResolvedValue({ state: "queued", position: 1 });
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(tilesOption()).toBeEnabled());
+  fireEvent.click(tilesOption());
+
+  expect(mapPicker()).toHaveTextContent("マップ レイヤー · 9 layers");
+  expect(layersDialog()).toHaveTextContent("“マップ レイヤー” is the default: it has the most layers.");
+  expect(layersDialog()).toHaveTextContent("Ticked layers of the chosen map go into the vector tiles");
+  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 2 to tile");
+  fireEvent.click(mapPicker());
+  expect(await screen.findByRole("option", { name: "マップ · no layers" })).toHaveAttribute("aria-disabled", "true");
+
+  fireEvent.click(screen.getByRole("option", { name: "ホーム · 2 layers" }));
+
+  expect(mapPicker()).toHaveTextContent("ホーム · 2 layers");
+  expect(layersDialog()).toHaveTextContent("1 group, 2 layers · 1 to tile · 0 excluded by pattern");
+  expect(layerBox("ホーム")).toHaveAttribute("aria-checked", "mixed");
+  expect(layerBox("Platform_1")).toBeChecked();
+  expect(layerBox("Platform_2")).not.toBeChecked();
+  fireEvent.click(layerBox("Platform_2"));
+  fireEvent.click(within(layersDialog()).getByRole("button", { name: "Use these layers" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(tilesRegion()).toHaveTextContent("1 group, 2 layers · 2 to tile");
+  fireEvent.click(within(screen.getByRole("region", { name: "Next step" })).getByRole("button", { name: "Download" }));
+
+  await waitFor(() => expect(startTileBuild).toHaveBeenCalledTimes(1));
+  const sent = vi.mocked(startTileBuild).mock.calls[0][1];
+  expect([sent.map, sent.layers]).toEqual([
+    "CIMPATH=map2/map.json",
+    ["CIMPATH=stenavi/Platform_1.json", "CIMPATH=stenavi/Platform_2.json"]
+  ]);
+});
+
+test("switching maps starts the new map from its defaults, and reset goes back to the default map", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue({ ...shinjukuProjectInspection(), tile_layers: shinjukuTileMaps() });
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(tilesOption()).toBeEnabled());
+  fireEvent.click(tilesOption());
+  fireEvent.click(layerBox("背景"));
+  expect(layersDialog()).toHaveTextContent("· 1 to tile ·");
+
+  fireEvent.click(mapPicker());
+  fireEvent.click(await screen.findByRole("option", { name: "ホーム · 2 layers" }));
+  fireEvent.click(layerBox("Platform_1"));
+  expect(layersDialog()).toHaveTextContent("· 0 to tile ·");
+  fireEvent.click(mapPicker());
+  fireEvent.click(await screen.findByRole("option", { name: "マップ レイヤー · 9 layers" }));
+
+  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 2 to tile");
+  expect(layerBox("背景")).toBeChecked();
+
+  fireEvent.click(mapPicker());
+  fireEvent.click(await screen.findByRole("option", { name: "ホーム · 2 layers" }));
+  fireEvent.click(within(layersDialog()).getByRole("button", { name: "Reset to defaults" }));
+
+  expect(mapPicker()).toHaveTextContent("マップ レイヤー · 9 layers");
+  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 2 to tile");
+});
+
+test("the map list speaks Japanese", async () => {
+  useAppStore.setState({ uiLanguage: "ja" });
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue({ ...shinjukuProjectInspection(), tile_layers: shinjukuTileMaps() });
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  const option = await screen.findByRole("checkbox", { name: /Stenavi 用のベクタータイルを作成/ });
+  await waitFor(() => expect(option).toBeEnabled());
+  fireEvent.click(option);
+
+  const dialog = screen.getByRole("dialog", { name: "タイルにするレイヤー" });
+  const picker = within(dialog).getByRole("combobox", { name: "タイルにするマップ" });
+  expect(picker).toHaveTextContent("マップ レイヤー · レイヤー 9 件");
+  expect(dialog).toHaveTextContent("既定は「マップ レイヤー」です。レイヤーがいちばん多いマップです。");
+  fireEvent.click(picker);
+  expect(await screen.findByRole("option", { name: "マップ · レイヤーなし" })).toHaveAttribute("aria-disabled", "true");
+});
+
+test("a project whose maps have no layers, or whose layers cannot be read, cannot be tiled and says why", async () => {
   vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
   vi.mocked(inspectColorTheme).mockResolvedValue({
     ...shinjukuProjectInspection(),
-    tile_layers: { state: "not_one_map", maps: ["1F", "B1"] }
+    tile_layers: { state: "no_layers", maps: ["マップ", "1F"] }
   });
   renderPage();
   pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
 
-  await waitFor(() =>
-    expect(tilesRegion()).toHaveTextContent("The project has 2 maps (1F, B1). Tiles are built from a project with exactly one map.")
-  );
+  await waitFor(() => expect(tilesRegion()).toHaveTextContent("No map in the project has a layer to tile (マップ, 1F)."));
   expect(tilesOption()).toBeDisabled();
 
   vi.mocked(inspectColorTheme).mockResolvedValue({

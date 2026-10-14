@@ -32,30 +32,58 @@ function tileNode(
  */
 export function stationTileLayers(): TileLayers {
   return {
-    state: "map",
-    map: "Stenavi",
-    layers: [
-      tileNode("ordinal_1", {
-        tiled: true,
-        children: [
-          tileNode("Facility_Merge_1", { excluded: "Facility_Merge_*" }),
-          tileNode("POINT_FACILITY_1", { excluded: "point_facility_*" }),
-          tileNode("JRSta_1F", {
+    state: "maps",
+    maps: [{ id: "CIMPATH=map0/map.json", name: "Stenavi", layers: stationTileTree() }],
+    default_map: "CIMPATH=map0/map.json",
+    default_reason: "only_with_layers"
+  };
+}
+
+/** As a station project imported from an .mxd: the template's empty map, the imported one, and a smaller one. */
+export function shinjukuTileMaps(): TileLayers {
+  return {
+    state: "maps",
+    maps: [
+      { id: "CIMPATH=map/map.json", name: "マップ", layers: [] },
+      { id: "CIMPATH=map1/map.json", name: "マップ レイヤー", layers: stationTileTree() },
+      {
+        id: "CIMPATH=map2/map.json",
+        name: "ホーム",
+        layers: [
+          tileNode("ホーム", {
             tiled: true,
-            children: [
-              tileNode("JRSta_1_Space", { tiled: true }),
-              tileNode("JRSta_1_opening", { excluded: "*_opening" }),
-              tileNode("JRSta_1_level", { visible: false, excluded: "*_level" })
-            ]
+            children: [tileNode("Platform_1", { tiled: true }), tileNode("Platform_2", { visible: false })]
           })
         ]
-      }),
-      tileNode("ordinal_-1", { visible: false, children: [tileNode("JRSta_B1_Space")] }),
-      tileNode("WiFi", { excluded: "wifi", children: [tileNode("wifi_ap")] }),
-      tileNode("編集用ネットワーク", { excluded: "編集用ネットワーク" }),
-      tileNode("背景", { tiled: true })
-    ]
+      }
+    ],
+    default_map: "CIMPATH=map1/map.json",
+    default_reason: "most_layers"
   };
+}
+
+function stationTileTree(): TileLayerNode[] {
+  return [
+    tileNode("ordinal_1", {
+      tiled: true,
+      children: [
+        tileNode("Facility_Merge_1", { excluded: "Facility_Merge_*" }),
+        tileNode("POINT_FACILITY_1", { excluded: "point_facility_*" }),
+        tileNode("JRSta_1F", {
+          tiled: true,
+          children: [
+            tileNode("JRSta_1_Space", { tiled: true }),
+            tileNode("JRSta_1_opening", { excluded: "*_opening" }),
+            tileNode("JRSta_1_level", { visible: false, excluded: "*_level" })
+          ]
+        })
+      ]
+    }),
+    tileNode("ordinal_-1", { visible: false, children: [tileNode("JRSta_B1_Space")] }),
+    tileNode("WiFi", { excluded: "wifi", children: [tileNode("wifi_ap")] }),
+    tileNode("編集用ネットワーク", { excluded: "編集用ネットワーク" }),
+    tileNode("背景", { tiled: true })
+  ];
 }
 
 const AREAS = {

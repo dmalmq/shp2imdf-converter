@@ -1,7 +1,29 @@
-import type { TileLayerNode } from "../api/client";
+import type { TileLayerNode, TileLayers, TileMap } from "../api/client";
 
 /** The uRIs of the layers to tile. Groups are never in it: a group's tick is read off the layers inside it. */
 export type TileChoice = ReadonlySet<string>;
+
+export type TileMaps = Extract<TileLayers, { state: "maps" }>;
+
+/** The map to tile, by id, and the layers of it to tile. */
+export type TileSelection = { map: string; layers: TileChoice };
+
+/** The server only lists a map it can tile from, so a lookup by an id it gave always finds one. */
+export function tileMap(maps: TileMaps, id: string): TileMap {
+  const found = maps.maps.find((candidate) => candidate.id === id);
+  if (!found) throw new Error(`No map ${id} in the project`);
+  return found;
+}
+
+/** A map whose groups hold no layer has nothing to tile and cannot be chosen. */
+export function mapLayerCount(map: TileMap): number {
+  return [...layersIn(map.layers)].length;
+}
+
+/** What the server would tile with nothing sent but, optionally, the map: that map's own defaults. */
+export function defaultTileSelection(maps: TileMaps, id: string = maps.default_map): TileSelection {
+  return { map: id, layers: defaultTileChoice(tileMap(maps, id).layers) };
+}
 
 export type TickState = boolean | "indeterminate";
 

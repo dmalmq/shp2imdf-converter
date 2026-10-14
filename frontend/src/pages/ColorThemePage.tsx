@@ -47,7 +47,14 @@ import {
   type DatasetUpload
 } from "../lib/colorTheme";
 import { saveBlob, saveUrl } from "../lib/download";
-import { choiceInOrder, defaultTileChoice, tileLayerCounts, type TileChoice, type TileLayerCounts } from "../lib/tileLayers";
+import {
+  choiceInOrder,
+  defaultTileSelection,
+  tileLayerCounts,
+  tileMap,
+  type TileLayerCounts,
+  type TileSelection
+} from "../lib/tileLayers";
 import { cn } from "@/lib/utils";
 
 type T = (english: string, japanese: string) => string;
@@ -101,7 +108,7 @@ export function ColorThemePage() {
   const [vectorTiles, setVectorTiles] = useState(false);
   const [tilesAvailability, setTilesAvailability] = useState<VectorTilesAvailability | null>(null);
   // Tied to the inspection it was made for: a new drop starts again from that project's defaults.
-  const [tileChoice, setTileChoice] = useState<{ inspection: ColorThemeInspection; choice: TileChoice } | null>(null);
+  const [tileChoice, setTileChoice] = useState<{ inspection: ColorThemeInspection; selection: TileSelection } | null>(null);
   const [choosingLayers, setChoosingLayers] = useState(false);
   const inflight = useRef<AbortController | null>(null);
   const anchor = useRef<HTMLDivElement>(null);
@@ -236,10 +243,11 @@ export function ColorThemePage() {
     const signal = begin();
     dispatch({ type: "convertStarted" });
     try {
-      if (tiles && tileMap) {
+      if (tiles && tileSelection && tileLayers) {
         const { job_id } = await startTileBuild(upload.files, {
           styleFiles,
-          layers: choiceInOrder(tileMap.layers, tileLayersChosen ?? new Set()),
+          map: tileSelection.map,
+          layers: choiceInOrder(tileLayers, tileSelection.layers),
           signal,
           onProgress: (percent) => dispatch({ type: "progress", upload, percent })
         });
@@ -287,13 +295,14 @@ export function ColorThemePage() {
 
   const checked = state.phase === "checked" || state.phase === "converting" || state.phase === "building" ? state : null;
   const inspection = checked?.inspection ?? null;
-  const tileMap = inspection?.tile_layers?.state === "map" ? inspection.tile_layers : null;
-  const tileLayersChosen =
-    tileMap === null
+  const tileMaps = inspection?.tile_layers?.state === "maps" ? inspection.tile_layers : null;
+  const tileSelection =
+    tileMaps === null
       ? null
       : tileChoice?.inspection === inspection
-        ? tileChoice.choice
-        : defaultTileChoice(tileMap.layers);
+        ? tileChoice.selection
+        : defaultTileSelection(tileMaps);
+  const tileLayers = tileMaps && tileSelection ? tileMap(tileMaps, tileSelection.map).layers : null;
   const tilesBlocked =inspection ? vectorTilesBlockedReason(tilesAvailability, inspection, t) : null;
   const wantTiles = vectorTiles && tilesBlocked === null;
   const blocked = inspection ? downloadBlockedReason(inspection, t, styleFiles, wantTiles) : null;
@@ -405,9 +414,9 @@ export function ColorThemePage() {
               wanted={vectorTiles}
               onWanted={(wanted) => {
                 setVectorTiles(wanted);
-                if (wanted && tileMap) setChoosingLayers(true);
+                if (wanted && tileMaps) setChoosingLayers(true);
               }}
-              counts={tileMap && tileLayersChosen ? tileLayerCounts(tileMap.layers, tileLayersChosen) : null}
+              counts={tileLayers && tileSelection ? tileLayerCounts(tileLayers, tileSelection.layers) : null}
               onChooseLayers={() => setChoosingLayers(true)}
               blocked={tilesBlocked}
               detail={tilesAvailability?.state === "unavailable" ? tilesAvailability.detail : null}
@@ -446,15 +455,14 @@ export function ColorThemePage() {
         />
       ) : null}
 
-      {inspection && tileMap && tileLayersChosen ? (
+      {inspection && tileMaps && tileSelection ? (
         <TileLayersDialog
           open={choosingLayers}
           onOpenChange={setChoosingLayers}
-          map={tileMap.map}
-          layers={tileMap.layers}
-          choice={tileLayersChosen}
-          onChoose={(choice) => {
-            setTileChoice({ inspection, choice });
+          maps={tileMaps}
+          selection={tileSelection}
+          onChoose={(selection) => {
+            setTileChoice({ inspection, selection });
             setChoosingLayers(false);
           }}
         />

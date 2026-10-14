@@ -4,12 +4,16 @@ import { useState } from "react";
 import type { TileLayerNode } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
-  defaultTileChoice,
+  defaultTileSelection,
+  mapLayerCount,
   setTicked,
   tickState,
   tileLayerCounts,
+  tileMap,
   type TileChoice,
-  type TileLayerCounts
+  type TileLayerCounts,
+  type TileMaps,
+  type TileSelection
 } from "../../lib/tileLayers";
 import {
   Button,
@@ -20,7 +24,12 @@ import {
   DialogFooter,
   DialogTitle,
   DisabledHint,
-  ScrollArea
+  ScrollArea,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
 } from "../ui";
 import { cn } from "@/lib/utils";
 
@@ -36,76 +45,94 @@ export function tileLayerSummary({ groups, layers, chosen, excluded }: TileLayer
   );
 }
 
-/** The map's layer tree with a tick per layer and a three-state tick per group. Changes apply on "Use these layers". */
+/**
+ * A map's layer tree with a tick per layer and a three-state tick per group, and above it, when the project has
+ * more than one map, the map to tile. Changes apply on "Use these layers".
+ */
 export function TileLayersDialog({
   open,
   onOpenChange,
-  map,
-  layers,
-  choice,
+  maps,
+  selection,
   onChoose
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  map: string;
-  layers: TileLayerNode[];
-  choice: TileChoice;
-  onChoose: (choice: TileChoice) => void;
+  maps: TileMaps;
+  selection: TileSelection;
+  onChoose: (selection: TileSelection) => void;
 }) {
   const { t } = useUiLanguage();
+  const only = maps.maps.length === 1 ? maps.maps[0].name : null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] max-w-[680px] flex-col gap-0 p-0">
         <div className="flex flex-col gap-1.5 border-b border-border px-6 pb-4 pt-6">
           <DialogTitle>{t("Layers to tile", "タイルにするレイヤー")}</DialogTitle>
           <DialogDescription>
-            {t(
-              `Ticked layers of the map “${map}” go into the vector tiles. The list starts from the project as saved, with the layers the exclusion patterns name unticked. Nothing here is kept: the next build starts from the project again.`,
-              `マップ「${map}」のうちチェックしたレイヤーがベクタータイルになります。保存されたプロジェクトの表示状態から始まり、除外パターンに当たるレイヤーはチェックが外れています。ここでの変更は保存されず、次の作成はまたプロジェクトから始まります。`
-            )}
+            {only !== null
+              ? t(
+                  `Ticked layers of the map “${only}” go into the vector tiles. The list starts from the project as saved, with the layers the exclusion patterns name unticked. Nothing here is kept: the next build starts from the project again.`,
+                  `マップ「${only}」のうちチェックしたレイヤーがベクタータイルになります。保存されたプロジェクトの表示状態から始まり、除外パターンに当たるレイヤーはチェックが外れています。ここでの変更は保存されず、次の作成はまたプロジェクトから始まります。`
+                )
+              : t(
+                  `Ticked layers of the chosen map go into the vector tiles. The list starts from the project as saved, with the layers the exclusion patterns name unticked. Nothing here is kept: the next build starts from the project again.`,
+                  `選んだマップのうちチェックしたレイヤーがベクタータイルになります。保存されたプロジェクトの表示状態から始まり、除外パターンに当たるレイヤーはチェックが外れています。ここでの変更は保存されず、次の作成はまたプロジェクトから始まります。`
+                )}
           </DialogDescription>
         </div>
-        {open ? <Chooser layers={layers} initial={choice} onChoose={onChoose} onCancel={() => onOpenChange(false)} /> : null}
+        {open ? <Chooser maps={maps} initial={selection} onChoose={onChoose} onCancel={() => onOpenChange(false)} /> : null}
       </DialogContent>
     </Dialog>
   );
 }
 
+const topGroups = (layers: readonly TileLayerNode[]): ReadonlySet<string> =>
+  new Set(layers.filter((node) => node.group).map((node) => node.uri));
+
 function Chooser({
-  layers,
+  maps,
   initial,
   onChoose,
   onCancel
 }: {
-  layers: TileLayerNode[];
-  initial: TileChoice;
-  onChoose: (choice: TileChoice) => void;
+  maps: TileMaps;
+  initial: TileSelection;
+  onChoose: (selection: TileSelection) => void;
   onCancel: () => void;
 }) {
   const { t } = useUiLanguage();
   const [draft, setDraft] = useState(initial);
-  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set(layers.filter((node) => node.group).map((node) => node.uri)));
-  const counts = tileLayerCounts(layers, draft);
+  const layers = tileMap(maps, draft.map).layers;
+  const [open, setOpen] = useState(() => topGroups(layers));
+  const counts = tileLayerCounts(layers, draft.layers);
   const toggle = (uri: string) =>
     setOpen((current) => {
       const next = new Set(current);
       if (!next.delete(uri)) next.add(uri);
       return next;
     });
+  const reset = (selection: TileSelection) => {
+    setDraft(selection);
+    setOpen(topGroups(tileMap(maps, selection.map).layers));
+  };
+  const setLayers = (update: (choice: TileChoice) => TileChoice) =>
+    setDraft((current) => ({ ...current, layers: update(current.layers) }));
   return (
     <>
+      {maps.maps.length > 1 ? <MapPicker maps={maps} value={draft.map} onChange={(id) => reset(defaultTileSelection(maps, id))} /> : null}
       <p aria-live="polite" className="border-b border-border px-6 py-2.5 text-[12.5px] font-medium text-foreground">
         {tileLayerSummary(counts, t)}
       </p>
       <ScrollArea className="min-h-0 flex-1">
         <ul aria-label={t("Layers", "レイヤー")} className="flex flex-col py-1.5">
           {layers.map((node) => (
-            <Row key={node.uri} node={node} depth={0} draft={draft} setDraft={setDraft} open={open} toggle={toggle} />
+            <Row key={node.uri} node={node} depth={0} draft={draft.layers} setDraft={setLayers} open={open} toggle={toggle} />
           ))}
         </ul>
       </ScrollArea>
       <DialogFooter className="justify-between border-t border-border px-6 py-4">
-        <Button variant="ghost" onClick={() => setDraft(defaultTileChoice(layers))}>
+        <Button variant="ghost" onClick={() => reset(defaultTileSelection(maps))}>
           {t("Reset to defaults", "既定に戻す")}
         </Button>
         <div className="flex items-center gap-2">
@@ -120,6 +147,54 @@ function Chooser({
         </div>
       </DialogFooter>
     </>
+  );
+}
+
+function defaultReason(maps: TileMaps, t: T): string {
+  const name = tileMap(maps, maps.default_map).name;
+  switch (maps.default_reason) {
+    case "only_with_layers":
+      return t(`“${name}” is the default: it is the only map with layers.`, `既定は「${name}」です。レイヤーがあるのはこのマップだけです。`);
+    case "most_layers":
+      return t(`“${name}” is the default: it has the most layers.`, `既定は「${name}」です。レイヤーがいちばん多いマップです。`);
+    case "first_of_most":
+      return t(
+        `“${name}” is the default: it comes first of the maps with the most layers.`,
+        `既定は「${name}」です。レイヤー数がいちばん多いマップのうち、最初のマップです。`
+      );
+  }
+}
+
+/** Switching maps starts that map from its own defaults: a choice of layers belongs to one map. */
+function MapPicker({ maps, value, onChange }: { maps: TileMaps; value: string; onChange: (id: string) => void }) {
+  const { t } = useUiLanguage();
+  return (
+    <div className="flex flex-col gap-1.5 border-b border-border px-6 py-3">
+      <div className="flex items-center gap-3">
+        <span className="shrink-0 text-[12.5px] font-medium text-foreground">{t("Map", "マップ")}</span>
+        <Select value={value} onValueChange={onChange}>
+          <SelectTrigger aria-label={t("Map to tile", "タイルにするマップ")} className="h-8 max-w-[380px] bg-card text-[13px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {maps.maps.map((map) => {
+              const count = mapLayerCount(map);
+              return (
+                <SelectItem key={map.id} value={map.id} disabled={count === 0}>
+                  {count === 0
+                    ? t(`${map.name} · no layers`, `${map.name} · レイヤーなし`)
+                    : t(
+                        `${map.name} · ${formatCount(count)} ${count === 1 ? "layer" : "layers"}`,
+                        `${map.name} · レイヤー ${formatCount(count)} 件`
+                      )}
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
+      </div>
+      <p className="text-[12px] text-muted-foreground">{defaultReason(maps, t)}</p>
+    </div>
   );
 }
 

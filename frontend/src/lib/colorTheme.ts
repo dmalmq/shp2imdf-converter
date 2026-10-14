@@ -306,13 +306,12 @@ export function vectorTilesBlockedReason(
     );
   }
   const layers = inspection.tile_layers;
-  if (layers?.state === "not_one_map") {
-    const names = layers.maps.join(", ");
+  if (layers?.state === "no_layers") {
     return layers.maps.length === 0
       ? t("The project has no map to tile.", "プロジェクトにタイルにするマップがありません。")
       : t(
-          `The project has ${layers.maps.length} maps (${names}). Tiles are built from a project with exactly one map.`,
-          `プロジェクトにマップが ${layers.maps.length} 個あります（${layers.maps.join("、")}）。タイルはマップが 1 つだけのプロジェクトから作成します。`
+          `No map in the project has a layer to tile (${layers.maps.join(", ")}).`,
+          `プロジェクトのどのマップにもタイルにするレイヤーがありません（${layers.maps.join("、")}）。`
         );
   }
   if (layers?.state === "unreadable") {

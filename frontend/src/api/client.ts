@@ -760,10 +760,22 @@ export type TileLayerNode = {
   children: TileLayerNode[];
 };
 
+/** One of the project's maps. A map without layers is listed but cannot be chosen. */
+export type TileMap = {
+  /** The map's CIM `uRI` (`CIMPATH=map/map.json`): how the build finds it again. */
+  id: string;
+  name: string;
+  /** Top of the drawing order first. */
+  layers: TileLayerNode[];
+};
+
+/** Why the server picked `default_map`: the only map with layers, the one with the most, or the first of those tied for most. */
+export type TileMapDefaultReason = "only_with_layers" | "most_layers" | "first_of_most";
+
 export type TileLayers =
-  /** `layers` top of the drawing order first. */
-  | { state: "map"; map: string; layers: TileLayerNode[] }
-  | { state: "not_one_map"; maps: string[] }
+  /** `maps` in project order. */
+  | { state: "maps"; maps: TileMap[]; default_map: string; default_reason: TileMapDefaultReason }
+  | { state: "no_layers"; maps: string[] }
   | { state: "unreadable"; detail: string };
 
 /** A dropped or picked file and its path inside what was dropped or picked. */
@@ -809,15 +821,16 @@ export type TileJobStatus =
 
 /**
  * Converts as `convertColorTheme` does, then queues a vector tile build from the upload's one project.
- * `layers` is the uRI of every layer to tile, exactly as the page showed them ticked.
+ * `map` is the id of the map to tile and `layers` the uRI of every layer of it to tile, exactly as the page showed them ticked.
  */
 export function startTileBuild(
   files: DatasetFile[],
-  { styleFiles, layers, ...options }: SendFormOptions & { styleFiles: boolean; layers: string[] }
+  { styleFiles, map, layers, ...options }: SendFormOptions & { styleFiles: boolean; map: string; layers: string[] }
 ): Promise<{ job_id: string }> {
   const form = datasetForm(files);
   form.append("style_files", String(styleFiles));
   form.append("vector_tiles", "true");
+  form.append("tile_map", map);
   form.append("tile_layers", JSON.stringify(layers));
   return sendForm<{ job_id: string }>("/api/color-theme/convert", form, options);
 }
