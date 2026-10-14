@@ -68,5 +68,8 @@ def test_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
     monkeypatch.setenv("TEMP_DATA_DIR", str(tmp_path / "tmp"))
     monkeypatch.setenv("ILLUSTRATOR_DATA_DIR", str(tmp_path / "illustrator"))
     monkeypatch.setenv("PLACEMENTS_DB", str(tmp_path / "placements.db"))
+    monkeypatch.setenv("TILE_JOBS_DIR", str(tmp_path / "tiles"))
+    # Not a file, so no test starts ArcGIS Pro's Python to ask about a licence.
+    monkeypatch.setenv("ARCPY_PYTHON", str(tmp_path / "no-arcpy.exe"))
     with TestClient(app) as client:
         yield client

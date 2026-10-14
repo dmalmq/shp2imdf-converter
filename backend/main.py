@@ -27,6 +27,7 @@ from backend.routers.import_router import router as import_router
 from backend.routers.projects_router import router as projects_router
 from backend.routers.reference_router import router as reference_router
 from backend.routers.wizard_router import router as wizard_router
+from backend.src.arcgis_pro import ArcpyProbe, find_arcpy_python
 from backend.src.color_theme import load_color_theme
 from backend.src.gdb import find_gdal_python
 from backend.src.errors import ApiError
@@ -48,6 +49,7 @@ from backend.src.reference_overlay import ReferenceOverlayStore
 from backend.src.schemas import ErrorResponse
 from backend.src.session import SessionManager, build_session_backend
 from backend.src.session_lock import SessionLockMiddleware
+from backend.src.tile_jobs import TileJobs
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +110,7 @@ async def _session_cleanup_loop(app: FastAPI, stop: asyncio.Event) -> None:
             break
         except TimeoutError:
             pass
-        for prune in (app.state.session_manager.prune_expired, app.state.illustrator_store.prune):
+        for prune in (app.state.session_manager.prune_expired, app.state.illustrator_store.prune, app.state.tile_jobs.prune):
             try:
                 await asyncio.to_thread(prune)
             except Exception:
@@ -243,6 +245,12 @@ async def lifespan(app: FastAPI):
     app.state.company_mappings_path = Path(__file__).parent / "config" / "company_mappings.json"
     app.state.color_theme = load_color_theme(Path(__file__).parent / "config" / "color_theme.json")
     app.state.gdal_python = find_gdal_python()
+    app.state.arcpy = ArcpyProbe(find_arcpy_python())
+    app.state.arcpy.start()
+    app.state.tile_jobs = TileJobs(
+        Path(os.getenv("TILE_JOBS_DIR", "./data/tile_jobs")),
+        ttl_seconds=float(os.getenv("TILE_JOB_TTL_HOURS", "24")) * 3600,
+    )
     app.state.placement_store = PlacementStore(
         Path(os.getenv("PLACEMENTS_DB", "./data/placements.db"))
     )

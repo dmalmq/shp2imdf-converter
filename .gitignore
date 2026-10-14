@@ -21,6 +21,7 @@ data/session_uploads/
 data/sessions/
 data/tmp/
 data/illustrator/
+data/tile_jobs/
 backend/data/session_uploads/
 backend/data/sessions/
 data/placements.db
