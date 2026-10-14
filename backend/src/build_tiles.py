@@ -9,7 +9,10 @@ are tiled, and which those are is the operator's choice on the page.
 ``python -I build_tiles.py <project.aprx> <upload root> <out dir> <layers.json>``.
 It imports nothing from ``backend``. ``<upload root>`` is the folder the project
 was unpacked into with the rest of the upload; data sources broken by the move
-are looked up there. ``<layers.json>`` is ``{"map_uri", "map_name",
+are looked up there. A file geodatabase the map reads from a network drive is
+first copied to ``<out dir>/data`` and the map pointed at the copy: checking
+and tiling 943 layers on a mapped share took 26 minutes against 14 on a local
+copy. ``<layers.json>`` is ``{"map_uri", "map_name",
 "layers": [{"uri", "name", "group", "visible"}, ...]}``: the map chosen on
 the page, and every layer and group of it with the visibility to tile it
 with. The map and its layers' uRIs are one choice, so they travel in one
@@ -30,10 +33,14 @@ stdout and stderr are UTF-8 whatever the console code page, which is how the ser
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
+import ctypes
 import json
 import os
 from pathlib import Path, PureWindowsPath
+import shutil
 import sys
+import time
 
 if __name__ == "__main__":
     # A pipe gets the console code page (cp932 on a Japanese Windows), and -I ignores PYTHONIOENCODING.
@@ -125,6 +132,118 @@ def _workspace(layer) -> str | None:
         return None
     info = (properties or {}).get("connection_info") or {}
     return info.get("database")
+
+
+_DRIVE_REMOTE = 4
+_MAX_PATH_CHARS = 250
+
+
+def is_remote(path: str) -> bool:
+    """A UNC path, or one on a mapped network drive."""
+    drive = PureWindowsPath(path).drive
+    if drive.startswith("\\\\"):
+        return True
+    # arcpy runs only on Windows; elsewhere (CI) a drive letter cannot name a network drive.
+    if not drive or sys.platform != "win32":
+        return False
+    return ctypes.windll.kernel32.GetDriveTypeW(drive + "\\") == _DRIVE_REMOTE
+
+
+def _database(connection: str) -> str | None:
+    for part in connection.split(";"):
+        key, _, value = part.partition("=")
+        if key.strip().upper() == "DATABASE":
+            return value
+    return None
+
+
+def _with_database(connection: str, database: str) -> str:
+    parts = connection.split(";")
+    for index, part in enumerate(parts):
+        key, _, _ = part.partition("=")
+        if key.strip().upper() == "DATABASE":
+            parts[index] = f"{key}={database}"
+    return ";".join(parts)
+
+
+def _connections(cim) -> Iterator:
+    """Every object under a layer's data connection that names a workspace, both sides of a join included."""
+    pending = [getattr(cim, name, None) for name in ("featureTable", "dataConnection")]
+    while pending:
+        node = pending.pop()
+        if node is None or isinstance(node, (str, bytes, int, float, bool)):
+            continue
+        if isinstance(node, (list, tuple)):
+            pending.extend(node)
+            continue
+        if isinstance(getattr(node, "workspaceConnectionString", None), str):
+            yield node
+        pending.extend(vars(node).values() if hasattr(node, "__dict__") else ())
+
+
+def _copy_gdb(source: Path, data_dir: Path) -> Path | None:
+    """``source`` copied under ``data_dir`` without its lock files; None, with a warning, when it cannot be."""
+    target = data_dir / source.name
+    n = 1
+    while target.exists():
+        n += 1
+        target = data_dir / str(n) / source.name
+    longest = max((len(str(target / Path(parent).relative_to(source) / f)) for parent, _, files in os.walk(source) for f in files), default=0)
+    if longest > _MAX_PATH_CHARS:
+        warn(f"{source} is read from the network: its copy would need a path of {longest} characters")
+        return None
+    started = time.monotonic()
+    try:
+        shutil.copytree(source, target, ignore=shutil.ignore_patterns("*.lock"))
+    except OSError as exc:
+        shutil.rmtree(target, ignore_errors=True)
+        warn(f"{source} is read from the network: copying it failed: {exc}")
+        return None
+    size = sum(f.stat().st_size for f in target.rglob("*") if f.is_file())
+    log(f"Copied {source} -> {target} ({size / 1e6:.1f} MB in {time.monotonic() - started:.0f} s)")
+    return target
+
+
+def localise(m, data_dir: Path, remote: Callable[[str], bool] = is_remote) -> bool:
+    """Copy each file geodatabase ``m`` reads from a network drive into ``data_dir`` and point its layers at the copy.
+
+    ``aprx.updateConnectionProperties`` was seen to leave 519 of a map's 611
+    layers on the share, so each layer's CIM is edited instead. Returns whether
+    any layer changed, for the caller to save.
+    """
+    found: list[tuple[object, object, list]] = []
+    sources: dict[str, Path] = {}
+    for layer in m.listLayers():
+        if layer.isGroupLayer:
+            continue
+        try:
+            cim = layer.getDefinition("V3")
+        except Exception:
+            continue
+        remote_connections = []
+        for connection in _connections(cim):
+            database = _database(connection.workspaceConnectionString)
+            if database and database.rstrip("\\/").casefold().endswith(".gdb") and remote(database):
+                remote_connections.append(connection)
+                sources.setdefault(database.casefold(), Path(database))
+        if remote_connections:
+            found.append((layer, cim, remote_connections))
+    if not sources:
+        return False
+    copies = {key: copy for key, source in sources.items() if source.is_dir() and (copy := _copy_gdb(source, data_dir))}
+    changed = 0
+    for layer, cim, connections in found:
+        moved = False
+        for connection in connections:
+            copy = copies.get(_database(connection.workspaceConnectionString).casefold())
+            if copy is not None:
+                connection.workspaceConnectionString = _with_database(connection.workspaceConnectionString, str(copy))
+                moved = True
+        if moved:
+            layer.setDefinition(cim)
+            changed += 1
+    log(f"Layers pointed at a local copy: {changed}")
+    return changed > 0
 
 
 def _broken(m) -> list:
@@ -250,6 +369,8 @@ def build(aprx_path: Path, root: Path, out_dir: Path, plan: dict) -> tuple[Path,
     arcpy.env.overwriteOutput = True
 
     log(f"Map: {m.name} -> {out_dir}")
+    if localise(m, out_dir / "data"):
+        aprx.save()
     repair_sources(aprx, m, root)
     apply_layers(m, plan["layers"])
 
