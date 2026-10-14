@@ -167,6 +167,83 @@ def test_a_layer_left_broken_fails_the_build_by_name(worker, tmp_path, capsys) -
     assert warnings == ["Floors\\1F: 0 folders named 'nowhere.gdb' in the upload", "Floors\\2F: 2 folders named 'shp' in the upload"]
 
 
+class _CimLayer:
+    """A layer whose CIM names its workspace the way Pro's does, its join's other table included."""
+
+    def __init__(self, name: str, *databases: str) -> None:
+        self.longName = name
+        self.isGroupLayer = False
+        tables = [SimpleNamespace(workspaceConnectionString=f"AUTHENTICATION_MODE=OSA;DATABASE={db}", dataset=name) for db in databases]
+        connection = tables[0] if len(tables) == 1 else SimpleNamespace(sourceTable=tables[0], destinationTable=tables[1])
+        self.cim = SimpleNamespace(uRI=f"CIMPATH=map/{name}.json", featureTable=SimpleNamespace(dataConnection=connection))
+        self.saved = None
+
+    def getDefinition(self, version: str) -> SimpleNamespace:  # noqa: N802
+        return self.cim
+
+    def setDefinition(self, cim) -> None:  # noqa: N802
+        self.saved = cim
+
+    def databases(self) -> list[str]:
+        cim = self.saved or self.cim
+        connection = cim.featureTable.dataConnection
+        tables = [connection] if hasattr(connection, "workspaceConnectionString") else [connection.sourceTable, connection.destinationTable]
+        return [table.workspaceConnectionString for table in tables]
+
+
+def test_a_geodatabase_on_the_network_is_copied_once_and_its_layers_pointed_at_the_copy(worker, tmp_path, capsys) -> None:
+    share = tmp_path / "share"
+    station = share / "JRShinjukuSta.gdb"
+    points = share / "points.gdb"
+    for gdb in (station, points):
+        gdb.mkdir(parents=True)
+        (gdb / "a00000001.gdbtable").write_bytes(gdb.name.encode())
+    (station / "a00000001.sr.lock").write_bytes(b"")
+    local = tmp_path / "local.gdb"
+    local.mkdir()
+    layers = [
+        _CimLayer("1F", str(station)),
+        _CimLayer("2F", str(station).upper()),
+        _CimLayer("joined", str(local), str(points)),
+        _CimLayer("base", str(local)),
+        _CimLayer("gone", str(share / "gone.gdb")),
+    ]
+    data = tmp_path / "out" / "data"
+
+    changed = worker.localise(_map(layers), data, remote=lambda path: path.casefold().startswith(str(share).casefold()))
+
+    assert changed
+    assert sorted(p.relative_to(data).as_posix() for p in data.rglob("*")) == [
+        "JRShinjukuSta.gdb", "JRShinjukuSta.gdb/a00000001.gdbtable", "points.gdb", "points.gdb/a00000001.gdbtable"
+    ]
+    osa = "AUTHENTICATION_MODE=OSA;DATABASE="
+    assert [layer.databases() for layer in layers] == [
+        [osa + str(data / "JRShinjukuSta.gdb")],
+        [osa + str(data / "JRShinjukuSta.gdb")],
+        [osa + str(local), osa + str(data / "points.gdb")],
+        [osa + str(local)],
+        [osa + str(share / "gone.gdb")],
+    ]
+    assert [layer.saved is not None for layer in layers] == [True, True, True, False, False]
+    assert _lines(capsys.readouterr().out)[-1] == {"event": "message", "text": "Layers pointed at a local copy: 3"}
+
+
+def test_a_map_with_nothing_on_the_network_copies_nothing(worker, tmp_path) -> None:
+    local = tmp_path / "local.gdb"
+    local.mkdir()
+    layers = [_CimLayer("base", str(local)), _Layer("Floors", None, broken=False, group=True)]
+
+    assert not worker.localise(_map(layers), tmp_path / "data", remote=lambda path: False)
+    assert not (tmp_path / "data").exists()
+
+
+@pytest.mark.parametrize(
+    "path, remote", [(r"\\server\share\a.gdb", True), (r"C:\data\a.gdb", False), (r".\data\a.gdb", False)]
+)
+def test_unc_paths_are_remote_and_local_or_relative_ones_are_not(worker, path, remote) -> None:
+    assert worker.is_remote(path) is remote
+
+
 class _Map:
     def __init__(self, name: str, uri: str | None, layers: list[_Layer] | None = None) -> None:
         self.name = name
