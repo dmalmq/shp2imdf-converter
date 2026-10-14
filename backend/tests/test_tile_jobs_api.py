@@ -200,10 +200,18 @@ def test_an_unknown_or_expired_job_is_not_found(test_client, tmp_path) -> None:
     state.tile_jobs = jobs = TileJobs(tmp_path / "j", ttl_seconds=0, script=FAKE)
     job_id = _post(test_client, _upload({}), vector_tiles="true").json()["job_id"]
     _wait(test_client, job_id, _finished)
+    # The viewer holds the download open; pruning must still delete it.
+    assert test_client.get(f"/api/color-theme/jobs/{job_id}/tiles").status_code == 200
 
     jobs.prune()
 
-    for path in (f"/api/color-theme/jobs/{job_id}", f"/api/color-theme/jobs/{job_id}/download", "/api/color-theme/jobs/nope"):
+    for path in (
+        f"/api/color-theme/jobs/{job_id}",
+        f"/api/color-theme/jobs/{job_id}/download",
+        f"/api/color-theme/jobs/{job_id}/tiles",
+        f"/api/color-theme/jobs/{job_id}/tiles/tile/15/0/0.pbf",
+        "/api/color-theme/jobs/nope",
+    ):
         response = test_client.get(path)
         assert response.status_code == 404
         assert response.json()["code"] == "TILE_JOB_NOT_FOUND"
@@ -386,3 +394,49 @@ def test_stopping_the_server_kills_the_running_build(server_env, tmp_path) -> No
         assert _running(pid)
 
     assert not _running(pid)
+
+
+def test_the_viewer_reads_a_finished_build_file_by_file(test_client, jobs) -> None:
+    job_id = _post(test_client, _upload({}), vector_tiles="true").json()["job_id"]
+    _wait(test_client, job_id, _finished)
+    files = f"/api/color-theme/jobs/{job_id}/tiles"
+
+    index = test_client.get(files)
+    tile = test_client.get(f"{files}/tile/21/0/0.pbf")
+    style = test_client.get(f"{files}/resources/styles/root.json")
+
+    assert index.json() == {
+        "name": "東京",
+        "levels": [{"z": z, "count": 1, "rows": [0, 0], "columns": [0, 0]} for z in range(15, 22)],
+    }
+    assert (tile.status_code, tile.content, tile.headers["content-type"]) == (200, bytes([21]) * 3, "application/x-protobuf")
+    assert "immutable" in tile.headers["cache-control"]
+    assert style.json() == {"sources": {"esri": {"maxzoom": 16}}}
+    assert style.headers["content-type"] == "application/json"
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["tile/14/0/0.pbf", "../build_log.txt", "..%2Fbuild_log.txt", "tile", "resources/styles"],
+)
+def test_the_viewer_finds_nothing_outside_the_vtiles_files(test_client, jobs, path) -> None:
+    job_id = _post(test_client, _upload({}), vector_tiles="true").json()["job_id"]
+    _wait(test_client, job_id, _finished)
+
+    response = test_client.get(f"/api/color-theme/jobs/{job_id}/tiles/{path}")
+
+    assert response.status_code == 404
+    assert "Project:" not in response.text
+
+
+def test_the_viewer_waits_for_the_build_to_finish(test_client, jobs, tmp_path) -> None:
+    gate = tmp_path / "gate"
+    job_id = _post(test_client, _upload({"gate": str(gate)}), vector_tiles="true").json()["job_id"]
+    _wait(test_client, job_id, lambda status: status["state"] == "running")
+
+    for path in (f"/api/color-theme/jobs/{job_id}/tiles", f"/api/color-theme/jobs/{job_id}/tiles/tile/15/0/0.pbf"):
+        response = test_client.get(path)
+        assert response.status_code == 409
+        assert response.json()["code"] == "TILE_JOB_NOT_DONE"
+    gate.touch()
+    _wait(test_client, job_id, _finished)

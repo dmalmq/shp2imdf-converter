@@ -7,7 +7,8 @@ so SessionLockMiddleware never sees these requests.
 
 The one exception is a vector tile build (``vector_tiles=true``): it outlasts
 the request, so convert answers 202 with a job id, the page polls the job and
-downloads it when done, and ``TileJobs`` prunes finished jobs.
+downloads it when done, and ``TileJobs`` prunes finished jobs. Until then the
+tile viewer reads the build's ``.vtiles`` folder file by file out of that download.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from backend.src.arcgis_pro import ArcpyAvailable, ArcpyChecking, ArcpyProbe, Ar
 from backend.src.color_theme import ColorTheme, ThemeReport, plan
 from backend.src.errors import ApiError, NotFoundError
 from backend.src.recolor import Archive, Inspection, convert, inspect, is_project
+from backend.src.tile_archive import TileArchive, TileIndex
 from backend.src.tile_jobs import JobStatus, TileJobs
 from backend.src.tile_layers import (
     LayersUnreadable,
@@ -236,3 +238,39 @@ def tile_job_download(job_id: str, request: Request) -> FileResponse:
     if path is None:
         raise ApiError("This vector tile build has not finished.", "TILE_JOB_NOT_DONE", 409)
     return FileResponse(path, media_type="application/zip", filename=status.filename)
+
+
+def _finished_tiles(job_id: str, request: Request) -> TileArchive:
+    jobs = _tile_jobs(request)
+    if jobs.status(job_id) is None:
+        raise _job_not_found()
+    tiles = jobs.tiles(job_id)
+    if tiles is None:
+        raise ApiError("This vector tile build has not finished.", "TILE_JOB_NOT_DONE", 409)
+    return tiles
+
+
+@router.get("/jobs/{job_id}/tiles", response_model=TileIndex)
+def tile_job_index(job_id: str, request: Request) -> TileIndex:
+    """The ``.vtiles`` folder's name and the tiles it holds at each level, for the viewer to frame the map."""
+    return _finished_tiles(job_id, request).index()
+
+
+_MEDIA_TYPES = {
+    ".pbf": "application/x-protobuf",
+    ".json": "application/json",
+    ".png": "image/png",
+    ".xml": "application/xml",
+}
+# A job's files never change, and its id is never reused.
+_TILE_CACHE = "private, max-age=86400, immutable"
+
+
+@router.get("/jobs/{job_id}/tiles/{path:path}")
+def tile_job_file(job_id: str, path: str, request: Request) -> Response:
+    """One file of the ``.vtiles`` folder. A missing tile is a bare 404: a cache stores no empty tiles, so it is routine."""
+    data = _finished_tiles(job_id, request).read(path)
+    if data is None:
+        return Response(status_code=404)
+    media_type = _MEDIA_TYPES.get(Path(path).suffix.lower(), "application/octet-stream")
+    return Response(data, media_type=media_type, headers={"Cache-Control": _TILE_CACHE})
