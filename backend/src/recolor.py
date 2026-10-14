@@ -87,6 +87,8 @@ class DatasetInfo:
     category_only_tables: int
     """Of those, the ones with the category field and without the theme's field: a station drawn by category,
     whose colours live in its layer file or project and not in its data."""
+    projects: int
+    """ArcGIS Pro projects (``.aprx``) outside a geodatabase. Vector tiles are built from exactly one."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -417,6 +419,7 @@ def _survey(
         lock_files_dropped=len(uploaded.entries) - len(tree.entries),
         tables=read_tables,
         category_only_tables=category_only,
+        projects=sum(1 for entry in tree.entries if entry.data is not None and is_project(entry.path)),
     )
     return _Survey(
         tree=tree,
@@ -602,6 +605,11 @@ def _patch(table: _Table, edits: Mapping[int, str]) -> bytes:
 
 _BOM = b"\xef\xbb\xbf"
 _SYMBOLOGY_SUFFIXES: dict[str, SymbologyKind] = {".lyrx": "lyrx", ".aprx": "aprx"}
+
+
+def is_project(path: str) -> bool:
+    """An ArcGIS Pro project outside a geodatabase: the only kind a vector tile build can open."""
+    return _symbology_kind(path) == "aprx" and _gdb_root(TreePath(path)) is None
 
 
 def _symbology_kind(path: str) -> SymbologyKind | None:

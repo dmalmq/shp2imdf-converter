@@ -18,6 +18,7 @@ from pathlib import Path
 import subprocess
 import sys
 
+from backend.src.arcgis_pro import pro_python
 from backend.src.color_theme import ColorTheme, Encoding, LayerInput, Row, SkippedLayer
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,6 @@ WORKER = Path(__file__).with_name("gdb_worker.py")
 # Measured on Tokyo (64 classes, 5,996 rewrites): read 1.9 s, apply 16 s.
 _TIMEOUT_SECONDS = 120
 _ENCODING = Encoding(codec="utf-8", source="gdb")
-_ARCGIS_PRO_PYTHON = Path("ArcGIS/Pro/bin/Python/envs/arcgispro-py3/python.exe")
 
 
 def find_gdal_python() -> Path | None:
@@ -39,8 +39,7 @@ def find_gdal_python() -> Path | None:
         return None
     if importlib.util.find_spec("osgeo") is not None:
         return Path(sys.executable)
-    arcgis = Path(os.getenv("ProgramFiles", r"C:\Program Files")) / _ARCGIS_PRO_PYTHON
-    return arcgis if arcgis.is_file() else None
+    return pro_python()
 
 
 def _run(python: Path, args: list[str], stdin: bytes = b"") -> bytes:

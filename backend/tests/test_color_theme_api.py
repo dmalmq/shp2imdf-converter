@@ -74,6 +74,7 @@ def test_inspect_reports_each_rule_for_a_dropped_folder(test_client) -> None:
         "lock_files_dropped": 0,
         "tables": 3,
         "category_only_tables": 0,
+        "projects": 0,
     }
     rows = {(rule["old"], tuple(rule["categories"] or ())): rule["rows"] for rule in body["theme"]["rules"]}
     assert rows[("濃鼠", ())] == 1
@@ -93,6 +94,7 @@ def test_inspect_reports_each_renderer_of_a_dropped_project(test_client) -> None
     response = test_client.post("/api/color-theme/inspect", files=files, data=data)
 
     assert response.status_code == 200, response.text
+    assert response.json()["dataset"]["projects"] == 1
     (line,) = response.json()["theme"]["symbology"]
     assert (line["path"], line["kind"], line["unreadable"]) == ("DemoSta.aprx", "aprx", False)
     assert line["renderers"][1] == {
