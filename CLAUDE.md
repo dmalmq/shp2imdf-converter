@@ -222,7 +222,9 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   the converted archive's entries unchanged plus `vector_tiles/<name>.vtiles/...` and
   `vector_tiles/build_log.txt`. The worker speaks one ASCII JSON object per stdout line;
   parse those, never its prose. Before tiling it repoints data sources broken by the move at
-  the same-named folder under the unpacked upload and fails naming any layer still broken.
+  the same-named folder under the unpacked upload and fails naming any layer still broken
+  that was chosen on the page; a broken layer the operator left out is only logged (Tokyo's
+  `2F\背景_グレー_2F` points at a geodatabase that is in neither the upload nor the share).
   Before that, each file geodatabase the map reads from a network drive (UNC, or a drive
   `GetDriveTypeW` calls remote, as `Q:` is) is copied without its `*.lock` files to
   `out/data` and the layers pointed at the copy by editing their CIM data connection:

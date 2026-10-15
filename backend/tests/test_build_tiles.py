@@ -143,7 +143,7 @@ def test_a_moved_geodatabase_is_found_by_name_under_the_upload(worker, tmp_path)
     ]
     project = _Project(layers, tmp_path)
 
-    worker.repair_sources(project, _map(layers), tmp_path)
+    worker.repair_sources(project, _map(layers), tmp_path, {layer.uri for layer in layers})
 
     assert project.updates == [(r"D:\area\ArcProPrj\data.gdb", str(gdb))]
     assert not any(layer.isBroken for layer in layers)
@@ -160,11 +160,36 @@ def test_a_layer_left_broken_fails_the_build_by_name(worker, tmp_path, capsys) -
     ]
 
     with pytest.raises(worker.BuildFailed) as failed:
-        worker.repair_sources(_Project(layers, tmp_path), _map(layers), tmp_path)
+        worker.repair_sources(_Project(layers, tmp_path), _map(layers), tmp_path, {layer.uri for layer in layers})
 
     assert str(failed.value) == "2 layers have no data in the upload and would be left out of the tiles: Floors\\1F, Floors\\2F"
     warnings = [line["text"] for line in _lines(capsys.readouterr().out) if line["event"] == "warning"]
     assert warnings == ["Floors\\1F: 0 folders named 'nowhere.gdb' in the upload", "Floors\\2F: 2 folders named 'shp' in the upload"]
+
+
+def test_a_broken_layer_left_out_on_the_page_does_not_fail_the_build(worker, tmp_path, capsys) -> None:
+    layers = [
+        _Layer("2F\\背景_グレー_2F", r"D:\gone\JRTokyoSta_3857.gdb", broken=True),
+        _Layer("2F\\Space", None, broken=False),
+    ]
+    project = _Project(layers, tmp_path)
+
+    worker.repair_sources(project, _map(layers), tmp_path, {layers[1].uri})
+
+    warnings = [line["text"] for line in _lines(capsys.readouterr().out) if line["event"] == "warning"]
+    assert warnings[-1] == "Broken but not chosen for tiling, so left out: 2F\\背景_グレー_2F"
+
+
+def test_only_chosen_broken_layers_are_named_in_the_failure(worker, tmp_path) -> None:
+    layers = [
+        _Layer("1F\\chosen", r"D:\gone\a.gdb", broken=True),
+        _Layer("1F\\left_out", r"D:\gone\a.gdb", broken=True),
+    ]
+
+    with pytest.raises(worker.BuildFailed) as failed:
+        worker.repair_sources(_Project(layers, tmp_path), _map(layers), tmp_path, {layers[0].uri})
+
+    assert str(failed.value) == "1 layers have no data in the upload and would be left out of the tiles: 1F\\chosen"
 
 
 class _CimLayer:
