@@ -258,12 +258,15 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   worker (`TileJobs.close` in the lifespan), since the next server empties `TILE_JOBS_DIR`.
   arcpy has no long-path support, so a job whose deepest path (the unpacked upload, or a z21
   tile under `out/tiles/<name>.vtiles`) passes 250 characters is refused up front.
-  **The real arcpy path has run once**, on Shinjuku on a licensed machine, and stopped at the
-  old one-map rule; nothing past opening the project has been seen. This machine is
-  unlicensed, so the tests drive `fake_tile_worker.py` and a stub `arcpy`. Matching the map by
-  uRI is unverified too. The tool calls, the scratch `index.gdb` in the
-  output folder (the project's default geodatabase is a path on the machine it was saved on),
-  whether the GP tools see `updateConnectionProperties`, metadata and `layer.visible` changes
-  made in memory, and the real depth of the extracted `.vtiles` tree are unverified until
-  someone runs a build on a licensed machine. The capture script reaches the layer list by
+  **Real builds have run** on Shinjuku on a licensed machine (#102: 15:39 with network data
+  copied locally, 722 layers repointed, none broken), so the tool calls, the scratch
+  `index.gdb`, map matching and the `.vtiles` layout have been seen working. The stored levels
+  stop at z16 (z15 9 tiles, z16 18), most likely because Indexed tiling stops where each
+  tile's data fits the vertex limit (inferred, not from Esri's docs); clients overzoom z16. The
+  check therefore flags only a deepest stored level below that maxzoom; it once expected
+  z15-z21 and flagged every good build. Whether the GP tools honour `layer.visible` set in
+  memory has not been compared against a build with the layers saved hidden. This machine's
+  Claude sessions cannot use the licence even where the operator's own terminal can, so the
+  tests drive `fake_tile_worker.py` and a stub `arcpy`, and real builds go through a server
+  the operator starts. The capture script reaches the layer list by
   telling only the browser that tiles are available (`page.route`); the server still refuses.

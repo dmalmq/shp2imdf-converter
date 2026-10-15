@@ -80,7 +80,6 @@ STEPS = 5
 # Exact values so the tool snaps to the tiling scheme's levels rather than rounding.
 MIN_SCALE = 9027.977411  # 1:9,028, z15 in 512px numbering
 MAX_SCALE = 141.062147  # 1:141,   z21 in 512px numbering
-EXPECTED_LEVELS = set(range(15, 22))
 VERTICES = 5000
 MAXZOOM = 16
 
@@ -347,9 +346,10 @@ def check(vtiles: Path, maxzoom: int) -> list[str]:
     else:
         counts = {z: sum(1 for _ in (tile_dir / str(z)).rglob("*.pbf")) for z in sorted(levels)}
         log("  tiles per level: " + ", ".join(f"z{z}={n}" for z, n in counts.items()))
-        missing = EXPECTED_LEVELS - levels
-        if missing:
-            problems.append(f"missing zoom levels {sorted(missing)}")
+        # Real builds store nothing past z16 (Shinjuku: z1-z16); clients overzoom it. Only a gap below maxzoom is a fault.
+        deepest = max(levels)
+        if deepest < maxzoom:
+            problems.append(f"the deepest stored level is z{deepest}, below the style's maxzoom {maxzoom}")
     return problems
 
 

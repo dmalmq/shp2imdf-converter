@@ -75,8 +75,8 @@ def test_maxzoom_is_set_on_every_source_and_written_without_a_bom(worker, tmp_pa
     assert worker.check(vtiles, 16) == []
 
 
-def test_checks_name_a_bom_a_wrong_maxzoom_and_missing_levels(worker, tmp_path) -> None:
-    vtiles = _vtiles(tmp_path, levels=range(15, 21), maxzoom=21)
+def test_checks_name_a_bom_a_wrong_maxzoom_and_levels_short_of_maxzoom(worker, tmp_path) -> None:
+    vtiles = _vtiles(tmp_path, levels=range(13, 16), maxzoom=21)
 
     problems = worker.check(vtiles, 16)
 
@@ -84,8 +84,14 @@ def test_checks_name_a_bom_a_wrong_maxzoom_and_missing_levels(worker, tmp_path) 
         "root.json starts with a BOM",
         "source 'esri' maxzoom is 21, expected 16",
         "source 'b' maxzoom is 21, expected 16",
-        "missing zoom levels [21]",
+        "the deepest stored level is z15, below the style's maxzoom 16",
     ]
+
+
+def test_levels_ending_at_maxzoom_are_not_a_problem(worker, tmp_path) -> None:
+    vtiles = _vtiles(tmp_path, levels=range(1, 17), maxzoom=16, bom=False)
+
+    assert worker.check(vtiles, 16) == []
 
 
 def test_a_boolean_maxzoom_is_not_sixteen(worker, tmp_path) -> None:
