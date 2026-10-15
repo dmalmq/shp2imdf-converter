@@ -258,6 +258,12 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   (no localStorage, no server state): every build starts from the uploaded project and the
   pattern file. A group left with nothing chosen is a log warning. Shutdown kills a running
   worker (`TileJobs.close` in the lifespan), since the next server empties `TILE_JOBS_DIR`.
+  The page does not follow a build itself: `TileBuildProvider` (`TileBuildMonitor.tsx`), mounted
+  above the routes in `App.tsx`, polls the job and shows `TileBuildNotice` on every route until
+  the operator dismisses it. Builds end minutes after Download, often with the operator elsewhere,
+  and a toast that expired or a page that unmounted once made a failure silent. It keeps the job
+  id and outcome in `sessionStorage`, so a reload resumes polling; that is the build's status, not
+  a layer choice. A finished build is downloaded once, never again on reload.
   arcpy has no long-path support, so a job whose deepest path (the unpacked upload, or a z21
   tile under `out/tiles/<name>.vtiles`) passes 250 characters is refused up front.
   **Real builds have run** on Shinjuku on a licensed machine (#102: 15:39 with network data

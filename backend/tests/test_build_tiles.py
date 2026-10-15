@@ -188,7 +188,10 @@ def test_a_layer_left_broken_fails_the_build_by_name(worker, tmp_path, capsys) -
     with pytest.raises(worker.BuildFailed) as failed:
         worker.repair_sources(_Project(layers, tmp_path), _map(layers), tmp_path, {layer.uri for layer in layers})
 
-    assert str(failed.value) == "2 layers have no data in the upload and would be left out of the tiles: Floors\\1F, Floors\\2F"
+    assert str(failed.value) == (
+        "2 selected layers cannot read their data and would be left out of the tiles: Floors\\1F, Floors\\2F. "
+        "Fix their data sources in the ArcGIS project or deselect the affected layers under Vector tiles, then try again."
+    )
     warnings = [line["text"] for line in _lines(capsys.readouterr().out) if line["event"] == "warning"]
     assert warnings == ["Floors\\1F: 0 folders named 'nowhere.gdb' in the upload", "Floors\\2F: 2 folders named 'shp' in the upload"]
 
@@ -215,7 +218,10 @@ def test_only_chosen_broken_layers_are_named_in_the_failure(worker, tmp_path) ->
     with pytest.raises(worker.BuildFailed) as failed:
         worker.repair_sources(_Project(layers, tmp_path), _map(layers), tmp_path, {layers[0].uri})
 
-    assert str(failed.value) == "1 layers have no data in the upload and would be left out of the tiles: 1F\\chosen"
+    assert str(failed.value) == (
+        "1 selected layer cannot read its data and would be left out of the tiles: 1F\\chosen. "
+        "Fix its data source in the ArcGIS project or deselect the affected layer under Vector tiles, then try again."
+    )
 
 
 class _CimLayer:
