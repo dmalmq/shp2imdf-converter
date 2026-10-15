@@ -346,12 +346,12 @@ def check(vtiles: Path, maxzoom: int) -> list[str]:
     else:
         counts = {z: sum(1 for _ in (tile_dir / str(z)).rglob("*.pbf")) for z in sorted(levels)}
         log("  tiles per level: " + ", ".join(f"z{z}={n}" for z, n in counts.items()))
-        # Real builds store nothing past z16 (Shinjuku: z1-z16); clients overzoom it. Only a gap below maxzoom is a fault.
+        # Real builds store nothing past z16 (Shinjuku: z1-z16) and clients overzoom it, so the one level that must hold tiles is maxzoom.
         stored = [z for z, n in counts.items() if n]
         if not stored:
             problems.append(f"no tiles in {tile_dir}")
-        elif max(stored) < maxzoom:
-            problems.append(f"the deepest stored level is z{max(stored)}, below the style's maxzoom {maxzoom}")
+        elif not counts.get(maxzoom):
+            problems.append(f"no tiles at the style's maxzoom z{maxzoom}; stored levels end at z{max(stored)}")
     return problems
 
 

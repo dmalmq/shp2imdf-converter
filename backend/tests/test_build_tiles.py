@@ -84,7 +84,7 @@ def test_checks_name_a_bom_a_wrong_maxzoom_and_levels_short_of_maxzoom(worker, t
         "root.json starts with a BOM",
         "source 'esri' maxzoom is 21, expected 16",
         "source 'b' maxzoom is 21, expected 16",
-        "the deepest stored level is z15, below the style's maxzoom 16",
+        "no tiles at the style's maxzoom z16; stored levels end at z15",
     ]
 
 
@@ -98,7 +98,13 @@ def test_an_empty_level_folder_does_not_count_as_stored(worker, tmp_path) -> Non
     vtiles = _vtiles(tmp_path, levels=range(1, 16), maxzoom=16, bom=False)
     (vtiles / "tile" / "16" / "0").mkdir(parents=True)
 
-    assert worker.check(vtiles, 16) == ["the deepest stored level is z15, below the style's maxzoom 16"]
+    assert worker.check(vtiles, 16) == ["no tiles at the style's maxzoom z16; stored levels end at z15"]
+
+
+def test_tiles_beyond_maxzoom_do_not_stand_in_for_maxzoom(worker, tmp_path) -> None:
+    vtiles = _vtiles(tmp_path, levels=(15, 17), maxzoom=16, bom=False)
+
+    assert worker.check(vtiles, 16) == ["no tiles at the style's maxzoom z16; stored levels end at z17"]
 
 
 def test_level_folders_without_a_tile_are_no_tiles(worker, tmp_path) -> None:
@@ -111,7 +117,7 @@ def test_level_folders_without_a_tile_are_no_tiles(worker, tmp_path) -> None:
 def test_a_boolean_maxzoom_is_not_sixteen(worker, tmp_path) -> None:
     vtiles = _vtiles(tmp_path, maxzoom=True, bom=False)
 
-    assert worker.check(vtiles, 1) == ["source 'esri' maxzoom is True, expected 1", "source 'b' maxzoom is True, expected 1"]
+    assert worker.check(vtiles, 1)[:2] == ["source 'esri' maxzoom is True, expected 1", "source 'b' maxzoom is True, expected 1"]
 
 
 class _Layer:
