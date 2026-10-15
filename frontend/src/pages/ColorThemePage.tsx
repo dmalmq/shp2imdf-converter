@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, ChevronRight, FileArchive, FolderOpen } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight, ExternalLink, FileArchive, FolderOpen, Map as MapIcon } from "lucide-react";
 import { useEffect, useReducer, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { useDropzone } from "react-dropzone";
 
@@ -24,6 +24,7 @@ import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
 import { usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
 import { TileLayersDialog, tileLayerSummary } from "../components/colorTheme/TileLayersDialog";
+import { tileViewerPath } from "../components/shell/stages";
 import { Button, Checkbox, DisabledHint, Metric } from "../components/ui";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
@@ -377,6 +378,15 @@ export function ColorThemePage() {
                 "駅のシェープファイルのフォルダ、ファイルジオデータベース（.gdb フォルダ）、ArcGIS Pro のレイヤーファイル（.lyrx）やプロジェクト（.aprx）、またはそれらの zip をドロップしてください。color2 の値を表のとおり新しいエリア名に書き換え、color2 で色分けしたレイヤーを新しい色で描き直します。color2 のない駅はレイヤーファイルやプロジェクトで category により色分けされており、そのレイヤーをエリアごとに描き直します。"
               )}
             </p>
+            <a
+              href={tileViewerPath()}
+              target="_blank"
+              rel="noreferrer"
+              className="flex w-fit items-center gap-1.5 rounded-sm text-[13px] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <MapIcon aria-hidden="true" className="h-3.5 w-3.5" />
+              {t("View a .vtiles folder already made", "作成済みの .vtiles フォルダを表示")}
+            </a>
           </div>
 
           {inspection ? (
@@ -421,7 +431,7 @@ export function ColorThemePage() {
               blocked={tilesBlocked}
               detail={tilesAvailability?.state === "unavailable" ? tilesAvailability.detail : null}
               building={building}
-              notes={state.phase === "checked" ? state.notes : []}
+              built={state.phase === "checked" ? state.built : null}
             />
           ) : null}
         </main>
@@ -1362,7 +1372,7 @@ function VectorTiles({
   blocked,
   detail,
   building,
-  notes
+  built
 }: {
   wanted: boolean;
   onWanted: (wanted: boolean) => void;
@@ -1374,8 +1384,8 @@ function VectorTiles({
   /** What the server's probe saw, for whoever has to fix it. */
   detail: string | null;
   building: { job: TileJobStatus | null } | null;
-  /** The last build's problems and warnings. */
-  notes: string[];
+  /** The last build, to view, and its problems and warnings. */
+  built: { jobId: string; notes: string[] } | null;
 }) {
   const { t } = useUiLanguage();
   return (
@@ -1434,11 +1444,29 @@ function VectorTiles({
             </span>
           </div>
         ) : null}
-        {notes.length > 0 ? (
+        {built ? (
+          <div className="flex items-center gap-3 border-t border-border px-4 py-2.5">
+            <span className="min-w-0 flex-1 text-[12.5px] leading-[1.45] text-foreground">
+              {t(
+                "The tiles from the last build can be viewed until the server restarts or lets the build go.",
+                "前回作成したタイルは、サーバーが再起動するか作成結果が削除されるまで表示できます。"
+              )}
+            </span>
+            {/* A new tab, so this page keeps the station it has. */}
+            <Button variant="outline" size="sm" asChild>
+              <a href={tileViewerPath(built.jobId)} target="_blank" rel="noreferrer">
+                <MapIcon aria-hidden="true" />
+                {t("View tiles", "タイルを表示")}
+                <ExternalLink aria-hidden="true" />
+              </a>
+            </Button>
+          </div>
+        ) : null}
+        {built && built.notes.length > 0 ? (
           <div className="flex flex-col gap-1.5 border-t border-border px-4 py-3">
             <span className="text-[12.5px] font-medium text-foreground">{t("From the last build", "前回の作成から")}</span>
             <ul className="flex flex-col gap-1">
-              {notes.map((note) => (
+              {built.notes.map((note) => (
                 <li key={note} className="flex gap-2 text-[12.5px] leading-[1.45] text-warning-foreground">
                   <AlertTriangle aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   {note}

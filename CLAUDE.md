@@ -270,3 +270,16 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   tests drive `fake_tile_worker.py` and a stub `arcpy`, and real builds go through a server
   the operator starts. The capture script reaches the layer list by
   telling only the browser that tiles are available (`page.route`); the server still refuses.
+  The tile viewer (`/color-theme/tiles/:jobId`, opened in a new tab by "View tiles" once a build
+  is done) reads the build's `.vtiles` folder file by file out of its `download.zip`
+  (`tile_archive.py`: `GET /jobs/{id}/tiles` for the folder's name and each level's row and
+  column range, `/jobs/{id}/tiles/{path}` for one file). Nothing is unpacked or kept, so the
+  link dies with the job; a path is looked up in the zip's own index, so none reaches outside
+  the folder. A missing tile is a bare 404 and draws as empty: Esri stores no empty tiles.
+  `TileJobs.prune` closes the open zip first, or Windows refuses to delete it. Without a job id
+  the page opens a `.vtiles` folder picked from disk, which is the path for tiles made by hand
+  in Pro and for builds lost to a restart. Both go through one MapLibre protocol, `vtiles://`
+  (`lib/vtiles.ts`), and tiles are laid out `tile/<z>/<row>/<column>.pbf`, row first. The style's
+  zoom range wins over the service `root.json`'s, which wins over the levels on disk; Pro wrote
+  Shinjuku's style with the source capped at z16 and the service at z15–z21, which is what the
+  panel's "enlarged ×n" is for. `SHINJUKU_VTILES` points a test at a real extracted folder.

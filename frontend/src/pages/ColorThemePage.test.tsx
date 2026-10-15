@@ -778,6 +778,9 @@ test("ticked, Download queues a build, shows its place in line and its steps, an
   expect(tilesRegion()).toHaveTextContent("missing zoom levels [21]");
   expect(tilesRegion()).toHaveTextContent("no layer chosen and are switched off: ordinal_-1, WiFi");
   expect(fetchTileJob).toHaveBeenCalledTimes(3);
+  const view = within(tilesRegion()).getByRole("link", { name: "View tiles" });
+  expect(view).toHaveAttribute("href", "/color-theme/tiles/a1b2c3");
+  expect(view).toHaveAttribute("target", "_blank");
 });
 
 test("a failed build shows the worker's reason and leaves the check to try again", async () => {
@@ -795,6 +798,15 @@ test("a failed build shows the worker's reason and leaves the check to try again
   await waitFor(() => expect(bar).toHaveTextContent("Vector tiles failed: 2 layers have no data in the upload: 1F, 2F"));
   expect(within(bar).getByRole("button", { name: "Download" })).toBeEnabled();
   expect(saved).toEqual([]);
+  expect(within(tilesRegion()).queryByRole("link", { name: "View tiles" })).toBeNull();
+});
+
+test("a .vtiles folder made elsewhere can be viewed before anything is dropped", async () => {
+  renderPage();
+
+  const link = await screen.findByRole("link", { name: "View a .vtiles folder already made" });
+
+  expect(link).toHaveAttribute("href", "/color-theme/tiles");
 });
 
 test("a build the server no longer knows says so", async () => {

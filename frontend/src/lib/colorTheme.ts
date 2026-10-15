@@ -29,8 +29,11 @@ export type ColorThemeState =
       error: string | null;
       /** File name of the last download. */
       delivered: string | null;
-      /** What the last vector tile build warned about and its checks found, for the operator to read. */
-      notes: string[];
+      /**
+       * The last vector tile build, whose tiles the viewer can show until the server lets it go,
+       * and what it warned about and its checks found, for the operator to read.
+       */
+      built: { jobId: string; notes: string[] } | null;
     }
   | { phase: "converting"; upload: DatasetUpload; inspection: ColorThemeInspection; progress: number }
   /** Converted, with a vector tile build in line or running; `job` is null until its first status. */
@@ -71,7 +74,7 @@ export function colorThemeReducer(state: ColorThemeState, event: ColorThemeEvent
       return state.phase === "inspecting" || state.phase === "converting" ? { ...state, progress: event.percent } : state;
     case "inspected":
       return state.phase === "inspecting"
-        ? { phase: "checked", upload: state.upload, inspection: event.inspection, error: null, delivered: null, notes: [] }
+        ? { phase: "checked", upload: state.upload, inspection: event.inspection, error: null, delivered: null, built: null }
         : state;
     case "inspectFailed":
       return state.phase === "inspecting" ? { phase: "empty", error: event.message } : state;
@@ -89,12 +92,12 @@ export function colorThemeReducer(state: ColorThemeState, event: ColorThemeEvent
             inspection: state.inspection,
             error: null,
             delivered: event.filename,
-            notes: event.notes ?? []
+            built: state.phase === "building" ? { jobId: state.jobId, notes: event.notes ?? [] } : null
           }
         : state;
     case "convertFailed":
       return state.phase === "converting" || state.phase === "building"
-        ? { phase: "checked", upload: state.upload, inspection: state.inspection, error: event.message, delivered: null, notes: [] }
+        ? { phase: "checked", upload: state.upload, inspection: state.inspection, error: event.message, delivered: null, built: null }
         : state;
   }
 }
