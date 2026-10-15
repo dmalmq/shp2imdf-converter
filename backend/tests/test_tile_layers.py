@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -65,8 +66,8 @@ def test_the_tree_is_the_maps_groups_and_layers_in_drawing_order_as_saved(exclus
         ("ordinal_1\\JRSta_1F\\JRSta_1_Space", False, True, None, True),
         ("ordinal_1\\JRSta_1F\\JRSta_1_opening", False, True, "*_opening", False),
         ("ordinal_1\\JRSta_1F\\JRSta_1_level", False, False, "*_level", False),
-        ("ordinal_-1", True, False, None, False),
-        ("ordinal_-1\\JRSta_B1_Space", False, True, None, False),
+        ("ordinal_-1", True, False, None, True),
+        ("ordinal_-1\\JRSta_B1_Space", False, True, None, True),
         ("WiFi", True, True, "wifi", False),
         ("WiFi\\wifi_ap", False, True, None, False),
         ("編集用ネットワーク", False, True, "編集用ネットワーク", False),
@@ -77,15 +78,25 @@ def test_the_tree_is_the_maps_groups_and_layers_in_drawing_order_as_saved(exclus
     ]
 
 
-def test_without_patterns_the_default_is_what_the_project_draws_as_saved() -> None:
+def test_without_patterns_the_default_is_every_layer_whatever_the_project_saved() -> None:
     assert default_selection(_map()) == {
         tile_uri(name)
-        for name in ("Facility_Merge_1", "POINT_FACILITY_1", "JRSta_1_Space", "JRSta_1_opening", "wifi_ap", "編集用ネットワーク", "背景")
+        for name in (
+            "Facility_Merge_1",
+            "POINT_FACILITY_1",
+            "JRSta_1_Space",
+            "JRSta_1_opening",
+            "JRSta_1_level",
+            "JRSta_B1_Space",
+            "wifi_ap",
+            "編集用ネットワーク",
+            "背景",
+        )
     }
 
 
 def test_patterns_take_their_layers_and_a_matching_groups_layers_out_of_the_default(exclusions) -> None:
-    assert default_selection(_map(exclusions)) == {tile_uri("JRSta_1_Space"), tile_uri("背景")}
+    assert default_selection(_map(exclusions)) == {tile_uri("JRSta_1_Space"), tile_uri("JRSta_B1_Space"), tile_uri("背景")}
 
 
 @pytest.mark.parametrize(
@@ -95,6 +106,7 @@ def test_patterns_take_their_layers_and_a_matching_groups_layers_out_of_the_defa
         ("Point_Facility_Network_B2", "point_facility_network_*"),
         ("point_facility_B1", "point_facility_*"),
         ("JRShinjukuSta_B1_LEVEL", "*_level"),
+        ("JRTokyoSta_B1_Floor", "*_floor"),
         ("Merge_Tap", "merge_tap"),
         ("SUBNADE_1_opening", "*_opening"),
         ("WIFI", "wifi"),
@@ -254,3 +266,65 @@ def test_the_plan_draws_exactly_the_chosen_layers_and_the_groups_above_them(excl
 def test_a_choice_naming_anything_but_the_maps_layers_is_refused(selected, message) -> None:
     with pytest.raises(SelectionError, match=message):
         visibility_plan(_map(), selected)
+
+
+def test_only_feature_layers_are_offered_so_a_visible_graphics_layer_is_never_tiled() -> None:
+    """Tokyo's map draws an empty Graphics Layer as saved; tiled, it failed the index with ERROR 001852."""
+    docs = {
+        "map/map.json": {"type": "CIMMap", "name": "マップ レイヤー11", "layers": ["CIMPATH=map/g.json", "CIMPATH=map/1f.json"]},
+        "map/g.json": {"type": "CIMGraphicsLayer", "name": "Graphics Layer", "uRI": "CIMPATH=map/g.json", "visibility": True},
+        "map/1f.json": {
+            "type": "CIMGroupLayer",
+            "name": "1F",
+            "uRI": "CIMPATH=map/1f.json",
+            "visibility": True,
+            "layers": ["CIMPATH=map/space.json", "CIMPATH=map/hillshade.json"],
+        },
+        "map/space.json": {"type": "CIMFeatureLayer", "name": "Space", "uRI": "CIMPATH=map/space.json", "visibility": True},
+        "map/hillshade.json": {"type": "CIMTiledServiceLayer", "name": "Hillshade", "uRI": "CIMPATH=map/hillshade.json", "visibility": True},
+        "GISProject.json": {
+            "type": "CIMGISProject",
+            "projectItems": [{"type": "CIMProjectItem", "name": "マップ レイヤー11", "itemType": "Map", "catalogPath": "CIMPATH=map/map.json"}],
+        },
+    }
+    project = make_project([(name, json.dumps(doc).encode(), zipfile.ZIP_DEFLATED) for name, doc in docs.items()])
+    maps = read_project_layers(project, NO_EXCLUSIONS, max_bytes=LIMIT)
+    assert isinstance(maps, ProjectMaps)
+
+    the_map = maps.chosen(None)
+    assert [long_name for _, long_name in walk(the_map.layers)] == ["1F", "1F\\Space"]
+    assert default_selection(the_map) == {"CIMPATH=map/space.json"}
+
+
+def _symbol(kind: str) -> dict:
+    return {"type": "CIMSymbolReference", "symbol": {"type": kind, "symbolLayers": [{"type": "CIMSolidFill"}]}}
+
+
+@pytest.mark.parametrize(
+    "renderer, points",
+    [
+        ({"type": "CIMSimpleRenderer", "symbol": _symbol("CIMPointSymbol")}, True),
+        ({"type": "CIMUniqueValueRenderer", "groups": [{"classes": [{"symbol": _symbol("CIMPointSymbol")}] * 2}]}, True),
+        ({"type": "CIMSimpleRenderer", "symbol": _symbol("CIMPolygonSymbol")}, False),
+        (
+            {"type": "CIMUniqueValueRenderer", "groups": [{"classes": [{"symbol": _symbol("CIMPointSymbol")}, {"symbol": _symbol("CIMLineSymbol")}]}]},
+            False,
+        ),
+        (None, False),
+    ],
+)
+def test_a_layer_drawing_only_points_starts_unticked(renderer, points) -> None:
+    docs = {
+        "map/map.json": {"type": "CIMMap", "name": "Stenavi", "layers": ["CIMPATH=map/a.json"]},
+        "map/a.json": {"type": "CIMFeatureLayer", "name": "toilets", "uRI": "CIMPATH=map/a.json", "visibility": True, "renderer": renderer},
+        "GISProject.json": {
+            "type": "CIMGISProject",
+            "projectItems": [{"type": "CIMProjectItem", "name": "Stenavi", "itemType": "Map", "catalogPath": "CIMPATH=map/map.json"}],
+        },
+    }
+    project = make_project([(name, json.dumps(doc).encode(), zipfile.ZIP_DEFLATED) for name, doc in docs.items()])
+    maps = read_project_layers(project, NO_EXCLUSIONS, max_bytes=LIMIT)
+    assert isinstance(maps, ProjectMaps)
+
+    (layer,) = maps.chosen(None).layers
+    assert (layer.draws_points, layer.tiled_by_default) == (points, not points)

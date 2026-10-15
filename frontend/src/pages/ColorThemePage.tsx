@@ -1415,8 +1415,8 @@ function VectorTiles({
         <p className="flex items-start gap-2.5 border-t border-border px-4 py-2.5 text-[12.5px] leading-[1.45] text-muted-foreground">
           <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-warning-foreground" />
           {t(
-            "Only the layers ticked in the layer list are tiled. It starts from the project as saved, with helper layers such as *_opening and Facility_Merge_* unticked, and nothing you change there is kept for the next build.",
-            "レイヤー一覧でチェックしたレイヤーだけがタイルになります。一覧は保存されたプロジェクトの表示状態から始まり、*_opening や Facility_Merge_* などの補助レイヤーはチェックが外れています。一覧での変更は次の作成には引き継がれません。"
+            "Only the layers ticked in the layer list are tiled. Every floor starts ticked, with helper layers such as *_opening and Facility_Merge_* and point layers unticked, and nothing you change there is kept for the next build.",
+            "レイヤー一覧でチェックしたレイヤーだけがタイルになります。すべての階にチェックが入った状態から始まり、*_opening や Facility_Merge_* などの補助レイヤーとポイントのレイヤーはチェックが外れています。一覧での変更は次の作成には引き継がれません。"
           )}
         </p>
         {building ? (

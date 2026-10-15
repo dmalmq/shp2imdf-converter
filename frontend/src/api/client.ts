@@ -755,7 +755,9 @@ export type TileLayerNode = {
   visible: boolean;
   /** The exclusion pattern its own name matched. */
   excluded_by: string | null;
-  /** A layer: drawn as saved and matched by no pattern, its own or a group's above it. A group: any layer in it is. */
+  /** A layer whose renderer draws only point symbols; false for a group. */
+  draws_points: boolean;
+  /** A layer: matched by no pattern, its own or a group's above it, and not drawing points. A group: any layer in it is. */
   tiled_by_default: boolean;
   children: TileLayerNode[];
 };

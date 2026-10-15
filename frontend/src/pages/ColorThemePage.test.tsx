@@ -875,7 +875,7 @@ test("ticked, Download queues a build, shows its place in line and its steps, an
   expect(vi.mocked(startTileBuild).mock.calls[0][0]).toBe(vi.mocked(inspectColorTheme).mock.calls[0][0]);
   expect(vi.mocked(startTileBuild).mock.calls[0][1]).toMatchObject({
     styleFiles: true,
-    layers: ["CIMPATH=stenavi/JRSta_1_Space.json", "CIMPATH=stenavi/背景.json"]
+    layers: ["CIMPATH=stenavi/JRSta_1_Space.json", "CIMPATH=stenavi/JRSta_B1_Space.json", "CIMPATH=stenavi/背景.json"]
   });
   expect(convertColorTheme).not.toHaveBeenCalled();
   expect(vi.mocked(fetchTileJob).mock.calls[0][0]).toBe("a1b2c3");
@@ -1054,20 +1054,20 @@ test("in Japanese the option, its note and the build's progress read in Japanese
   expect(region).toHaveTextContent("レイヤー一覧でチェックしたレイヤーだけがタイルになります");
   fireEvent.click(option);
   const dialog = screen.getByRole("dialog", { name: "タイルにするレイヤー" });
-  expect(dialog).toHaveTextContent("グループ 4 件、レイヤー 9 件 · タイル化 2 件 · パターンで除外 6 件");
+  expect(dialog).toHaveTextContent("グループ 4 件、レイヤー 9 件 · タイル化 3 件 · パターンで除外 6 件");
   expect(dialog).toHaveTextContent("除外 · Facility_Merge_*");
   expect(dialog).toHaveTextContent("プロジェクトで非表示");
   expect(within(dialog).getByRole("button", { name: "既定に戻す" })).toBeInTheDocument();
   fireEvent.click(within(dialog).getByRole("button", { name: "このレイヤーを使う" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  expect(region).toHaveTextContent("グループ 4 件、レイヤー 9 件 · タイル化 2 件 · パターンで除外 6 件");
+  expect(region).toHaveTextContent("グループ 4 件、レイヤー 9 件 · タイル化 3 件 · パターンで除外 6 件");
   expect(within(region).getByRole("button", { name: "レイヤーを選ぶ…" })).toBeInTheDocument();
   fireEvent.click(within(screen.getByRole("region", { name: "次のステップ" })).getByRole("button", { name: "ダウンロード" }));
 
   await waitFor(() => expect(within(region).getByRole("status")).toHaveTextContent("ほかの作成の完了を待っています · 2 番目"));
 });
 
-test("ticking vector tiles opens the layer list: saved visibility less the patterns, explained row by row", async () => {
+test("ticking vector tiles opens the layer list: every floor, hidden or not, less the patterns, explained row by row", async () => {
   vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
   vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
   renderPage();
@@ -1076,11 +1076,11 @@ test("ticking vector tiles opens the layer list: saved visibility less the patte
 
   fireEvent.click(tilesOption());
 
-  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 2 to tile · 6 excluded by pattern");
+  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 3 to tile · 6 excluded by pattern");
   expect(layersDialog()).toHaveTextContent("Ticked layers of the map “Stenavi” go into the vector tiles");
   expect(layerBox("ordinal_1")).toHaveAttribute("aria-checked", "mixed");
   expect(layerBox("Facility_Merge_1")).not.toBeChecked();
-  expect(layerBox("ordinal_-1")).not.toBeChecked();
+  expect(layerBox("ordinal_-1")).toBeChecked();
   expect(layerBox("WiFi")).not.toBeChecked();
   expect(layerBox("背景")).toBeChecked();
   const row = (name: string) => layerBox(name).closest("div") as HTMLElement;
@@ -1112,13 +1112,13 @@ test("a group's tick sets every layer in it, a partly ticked group shows a dash,
   expect(layerBox("ordinal_1")).toBeChecked();
   expect(layerBox("JRSta_1F")).toBeChecked();
   expect(layerBox("JRSta_1_level")).toBeChecked();
-  expect(layersDialog()).toHaveTextContent("· 6 to tile ·");
+  expect(layersDialog()).toHaveTextContent("· 7 to tile ·");
 
   fireEvent.click(layerBox("JRSta_1_opening"));
 
   expect(layerBox("JRSta_1F")).toHaveAttribute("aria-checked", "mixed");
   expect(layerBox("ordinal_1")).toHaveAttribute("aria-checked", "mixed");
-  expect(layersDialog()).toHaveTextContent("· 5 to tile ·");
+  expect(layersDialog()).toHaveTextContent("· 6 to tile ·");
 
   fireEvent.click(layerBox("ordinal_1"));
 
@@ -1126,7 +1126,43 @@ test("a group's tick sets every layer in it, a partly ticked group shows a dash,
   fireEvent.click(layerBox("ordinal_1"));
   expect(layerBox("ordinal_1")).not.toBeChecked();
   expect(layerBox("JRSta_1_Space")).not.toBeChecked();
-  expect(layersDialog()).toHaveTextContent("· 1 to tile ·");
+  expect(layersDialog()).toHaveTextContent("· 2 to tile ·");
+});
+
+test("a kind of layer is ticked or unticked on every floor at once, after a floor's tick took it in", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(tilesOption()).toBeEnabled());
+  fireEvent.click(tilesOption());
+  const kinds = within(layersDialog()).getByRole("list", { name: "Tick or untick a kind of layer on every floor at once." });
+  expect(within(kinds).getAllByRole("checkbox").map((box) => box.getAttribute("aria-label"))).toEqual([
+    "Facility_Merge_*",
+    "point_facility_*",
+    "*_opening",
+    "*_level",
+    "wifi",
+    "編集用ネットワーク"
+  ]);
+
+  fireEvent.click(layerBox("ordinal_1"));
+  expect(within(kinds).getByRole("checkbox", { name: "*_opening" })).toBeChecked();
+  expect(layersDialog()).toHaveTextContent("· 7 to tile ·");
+
+  fireEvent.click(within(kinds).getByRole("checkbox", { name: "*_opening" }));
+  fireEvent.click(within(kinds).getByRole("checkbox", { name: "*_level" }));
+
+  expect(layersDialog()).toHaveTextContent("· 5 to tile ·");
+  fireEvent.click(within(layersDialog()).getByRole("button", { name: "Expand JRSta_1F" }));
+  expect(layerBox("JRSta_1_opening")).not.toBeChecked();
+  expect(layerBox("JRSta_1_level")).not.toBeChecked();
+  expect(layerBox("JRSta_1_Space")).toBeChecked();
+  expect(layerBox("Facility_Merge_1")).toBeChecked();
+
+  fireEvent.click(within(kinds).getByRole("checkbox", { name: "wifi" }));
+  expect(layerBox("WiFi")).toBeChecked();
+  expect(within(kinds).getByRole("checkbox", { name: "wifi" }).closest("label")).toHaveTextContent("1/1");
 });
 
 test("reset puts the defaults back, and with nothing ticked the list cannot be used", async () => {
@@ -1140,12 +1176,13 @@ test("reset puts the defaults back, and with nothing ticked the list cannot be u
   fireEvent.click(layerBox("ordinal_1"));
   fireEvent.click(layerBox("背景"));
   fireEvent.click(layerBox("ordinal_1"));
+  fireEvent.click(layerBox("ordinal_-1"));
   expect(layersDialog()).toHaveTextContent("· 0 to tile ·");
   expect(within(layersDialog()).getByRole("button", { name: "Use these layers" })).toBeDisabled();
 
   fireEvent.click(within(layersDialog()).getByRole("button", { name: "Reset to defaults" }));
 
-  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 2 to tile · 6 excluded by pattern");
+  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 3 to tile · 6 excluded by pattern");
   expect(layerBox("ordinal_1")).toHaveAttribute("aria-checked", "mixed");
   expect(layerBox("背景")).toBeChecked();
   expect(within(layersDialog()).getByRole("button", { name: "Use these layers" })).toBeEnabled();
@@ -1161,7 +1198,6 @@ test("the chosen layers are sent in drawing order, Cancel keeps the previous cho
   pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
   await waitFor(() => expect(tilesOption()).toBeEnabled());
   fireEvent.click(tilesOption());
-  fireEvent.click(layerBox("ordinal_-1"));
   fireEvent.click(layerBox("背景"));
   fireEvent.click(within(layersDialog()).getByRole("button", { name: "Use these layers" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -1186,7 +1222,6 @@ test("the chosen layers are sent in drawing order, Cancel keeps the previous cho
   pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
   await waitFor(() => expect(within(tilesRegion()).getByRole("button", { name: "Choose layers…" })).toBeEnabled());
   fireEvent.click(within(tilesRegion()).getByRole("button", { name: "Choose layers…" }));
-  expect(layerBox("ordinal_-1")).not.toBeChecked();
   expect(layerBox("背景")).toBeChecked();
 });
 
@@ -1241,28 +1276,27 @@ test("with several maps the default is chosen and explained, an empty map cannot
   expect(mapPicker()).toHaveTextContent("マップ レイヤー · 9 layers");
   expect(layersDialog()).toHaveTextContent("“マップ レイヤー” is the default: it has the most layers.");
   expect(layersDialog()).toHaveTextContent("Ticked layers of the chosen map go into the vector tiles");
-  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 2 to tile");
+  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 3 to tile");
   fireEvent.click(mapPicker());
   expect(await screen.findByRole("option", { name: "マップ · no layers" })).toHaveAttribute("aria-disabled", "true");
 
   fireEvent.click(screen.getByRole("option", { name: "ホーム · 2 layers" }));
 
   expect(mapPicker()).toHaveTextContent("ホーム · 2 layers");
-  expect(layersDialog()).toHaveTextContent("1 group, 2 layers · 1 to tile · 0 excluded by pattern");
-  expect(layerBox("ホーム")).toHaveAttribute("aria-checked", "mixed");
-  expect(layerBox("Platform_1")).toBeChecked();
-  expect(layerBox("Platform_2")).not.toBeChecked();
+  expect(layersDialog()).toHaveTextContent("1 group, 2 layers · 2 to tile · 0 excluded by pattern");
+  expect(layerBox("ホーム")).toBeChecked();
+  expect(layerBox("Platform_2")).toBeChecked();
   fireEvent.click(layerBox("Platform_2"));
   fireEvent.click(within(layersDialog()).getByRole("button", { name: "Use these layers" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  expect(tilesRegion()).toHaveTextContent("1 group, 2 layers · 2 to tile");
+  expect(tilesRegion()).toHaveTextContent("1 group, 2 layers · 1 to tile");
   fireEvent.click(within(screen.getByRole("region", { name: "Next step" })).getByRole("button", { name: "Download" }));
 
   await waitFor(() => expect(startTileBuild).toHaveBeenCalledTimes(1));
   const sent = vi.mocked(startTileBuild).mock.calls[0][1];
   expect([sent.map, sent.layers]).toEqual([
     "CIMPATH=map2/map.json",
-    ["CIMPATH=stenavi/Platform_1.json", "CIMPATH=stenavi/Platform_2.json"]
+    ["CIMPATH=stenavi/Platform_1.json"]
   ]);
 });
 
@@ -1274,16 +1308,16 @@ test("switching maps starts the new map from its defaults, and reset goes back t
   await waitFor(() => expect(tilesOption()).toBeEnabled());
   fireEvent.click(tilesOption());
   fireEvent.click(layerBox("背景"));
-  expect(layersDialog()).toHaveTextContent("· 1 to tile ·");
+  expect(layersDialog()).toHaveTextContent("· 2 to tile ·");
 
   fireEvent.click(mapPicker());
   fireEvent.click(await screen.findByRole("option", { name: "ホーム · 2 layers" }));
   fireEvent.click(layerBox("Platform_1"));
-  expect(layersDialog()).toHaveTextContent("· 0 to tile ·");
+  expect(layersDialog()).toHaveTextContent("· 1 to tile ·");
   fireEvent.click(mapPicker());
   fireEvent.click(await screen.findByRole("option", { name: "マップ レイヤー · 9 layers" }));
 
-  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 2 to tile");
+  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 3 to tile");
   expect(layerBox("背景")).toBeChecked();
 
   fireEvent.click(mapPicker());
@@ -1291,7 +1325,7 @@ test("switching maps starts the new map from its defaults, and reset goes back t
   fireEvent.click(within(layersDialog()).getByRole("button", { name: "Reset to defaults" }));
 
   expect(mapPicker()).toHaveTextContent("マップ レイヤー · 9 layers");
-  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 2 to tile");
+  expect(layersDialog()).toHaveTextContent("4 groups, 9 layers · 3 to tile");
 });
 
 test("the map list speaks Japanese", async () => {

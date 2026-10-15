@@ -13,7 +13,13 @@ import type {
 
 function tileNode(
   name: string,
-  { visible = true, excluded = null, tiled = false, children }: { visible?: boolean; excluded?: string | null; tiled?: boolean; children?: TileLayerNode[] } = {}
+  {
+    visible = true,
+    excluded = null,
+    points = false,
+    tiled = false,
+    children
+  }: { visible?: boolean; excluded?: string | null; points?: boolean; tiled?: boolean; children?: TileLayerNode[] } = {}
 ): TileLayerNode {
   return {
     uri: `CIMPATH=stenavi/${name}.json`,
@@ -21,6 +27,7 @@ function tileNode(
     group: children !== undefined,
     visible,
     excluded_by: excluded,
+    draws_points: points,
     tiled_by_default: tiled,
     children: children ?? []
   };
@@ -28,7 +35,7 @@ function tileNode(
 
 /**
  * `TILE_MAP` in `backend/tests/color_theme_fixtures.py` as the server lists it with the shipped patterns:
- * 4 groups, 9 layers, 2 tiled by default, 6 excluded by a pattern (wifi_ap through its group).
+ * 4 groups, 9 layers, 3 tiled by default (every floor, hidden or not), 6 excluded by a pattern (wifi_ap through its group).
  */
 export function stationTileLayers(): TileLayers {
   return {
@@ -52,7 +59,7 @@ export function shinjukuTileMaps(): TileLayers {
         layers: [
           tileNode("ホーム", {
             tiled: true,
-            children: [tileNode("Platform_1", { tiled: true }), tileNode("Platform_2", { visible: false })]
+            children: [tileNode("Platform_1", { tiled: true }), tileNode("Platform_2", { visible: false, tiled: true })]
           })
         ]
       }
@@ -79,7 +86,7 @@ function stationTileTree(): TileLayerNode[] {
         })
       ]
     }),
-    tileNode("ordinal_-1", { visible: false, children: [tileNode("JRSta_B1_Space")] }),
+    tileNode("ordinal_-1", { visible: false, tiled: true, children: [tileNode("JRSta_B1_Space", { tiled: true })] }),
     tileNode("WiFi", { excluded: "wifi", children: [tileNode("wifi_ap")] }),
     tileNode("編集用ネットワーク", { excluded: "編集用ネットワーク" }),
     tileNode("背景", { tiled: true })

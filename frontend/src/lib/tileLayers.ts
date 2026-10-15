@@ -94,6 +94,48 @@ function excludedLayers(nodes: readonly TileLayerNode[], inherited = false): Set
   return out;
 }
 
+/**
+ * A kind of layer the defaults leave out, to tick or untick at once: those an exclusion pattern names,
+ * by their own name or a group's above them, and those that draw points. A layer can be of several kinds.
+ */
+export type TileLayerKind = { kind: "pattern"; pattern: string; layers: readonly string[] } | { kind: "points"; layers: readonly string[] };
+
+/** The kinds present in `nodes`: patterns in the order the tree first shows them, then points. */
+export function tileLayerKinds(nodes: readonly TileLayerNode[]): TileLayerKind[] {
+  const byPattern = new Map<string, string[]>();
+  const points: string[] = [];
+  const visit = (list: readonly TileLayerNode[], inherited: ReadonlySet<string>) => {
+    for (const node of list) {
+      const patterns = node.excluded_by === null ? inherited : new Set([...inherited, node.excluded_by]);
+      if (node.group) {
+        visit(node.children, patterns);
+        continue;
+      }
+      for (const pattern of patterns) byPattern.set(pattern, [...(byPattern.get(pattern) ?? []), node.uri]);
+      if (node.draws_points) points.push(node.uri);
+    }
+  };
+  visit(nodes, new Set());
+  const kinds: TileLayerKind[] = [...byPattern].map(([pattern, layers]) => ({ kind: "pattern", pattern, layers }));
+  return points.length > 0 ? [...kinds, { kind: "points", layers: points }] : kinds;
+}
+
+/** Ticked when all of its layers are, unticked when none are. */
+export function kindTickState(kind: TileLayerKind, choice: TileChoice): TickState {
+  const ticked = kind.layers.filter((uri) => choice.has(uri)).length;
+  if (ticked === 0) return false;
+  return ticked === kind.layers.length ? true : "indeterminate";
+}
+
+export function setKindTicked(choice: TileChoice, kind: TileLayerKind, ticked: boolean): TileChoice {
+  const next = new Set(choice);
+  for (const uri of kind.layers) {
+    if (ticked) next.add(uri);
+    else next.delete(uri);
+  }
+  return next;
+}
+
 /** The choice in the project's drawing order, as it is sent. */
 export function choiceInOrder(nodes: readonly TileLayerNode[], choice: TileChoice): string[] {
   return [...layersIn(nodes)].filter((layer) => choice.has(layer.uri)).map((layer) => layer.uri);

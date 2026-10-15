@@ -246,10 +246,15 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   mean anything inside that map. It finds the map by `getDefinition("V3").uRI`, else by a unique
   name with a log warning, else fails naming every map. Inspection reads each map's layer tree
   from the `.aprx`'s CIM JSON without arcpy (`tile_layers.py`: `GISProject.json` items of type
-  `Map`, then `layers` uRIs down through the groups) and marks the default: drawn as saved, less
-  any layer whose name, or a group's above it, matches a glob in
+  `Map`, then `layers` uRIs down through the groups) and marks the default: every feature layer,
+  whatever visibility the project saved (Tokyo and Shinjuku save lower floors hidden), less any
+  layer whose name, or a group's above it, matches a glob in
   `backend/config/vector_tile_exclusions.json` (case-insensitive, validated at startup; the
-  first match is the one the page names). Convert takes `tile_layers`, the uRI of **every**
+  first match is the one the page names), and less any layer whose renderer holds only
+  `CIMPointSymbol`s (the CIM names no geometry type; no symbols, or mixed ones, keep it in).
+  Ticking a floor group ticks everything in it, excluded layers too, so the layer list also
+  offers each pattern found in the map, and "Point layers", as one tick across every floor
+  (`tileLayerKinds` in `lib/tileLayers.ts`). Convert takes `tile_layers`, the uRI of **every**
   layer to tile rather than a delta, so the build matches what the page showed even if the
   pattern file changed in between; left out, that map's defaults. An unknown map, a map without
   layers, layers of another map, group uRIs and an empty choice are 400s before a job exists. The
@@ -258,6 +263,11 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   (no localStorage, no server state): every build starts from the uploaded project and the
   pattern file. A group left with nothing chosen is a log warning. Shutdown kills a running
   worker (`TileJobs.close` in the lifespan), since the next server empties `TILE_JOBS_DIR`.
+  Only `CIMFeatureLayer`s are listed: Tokyo's tiled map draws an empty Graphics Layer as saved,
+  which failed the index with ERROR 001852 (Shinjuku's is saved hidden and built). The worker
+  switches off every visible layer the plan does not name, so a basemap or graphics layer never
+  reaches the GP tools. Confirmed on 2026-10-15: Tokyo then built in 10:26 (z15 9 tiles, z16 24),
+  its log naming the Graphics Layer it switched off.
   The page does not follow a build itself: `TileBuildProvider` (`TileBuildMonitor.tsx`), mounted
   above the routes in `App.tsx`, polls the job and shows `TileBuildNotice` on every route until
   the operator dismisses it. Builds end minutes after Download, often with the operator elsewhere,

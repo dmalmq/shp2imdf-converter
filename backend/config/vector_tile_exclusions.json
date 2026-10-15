@@ -1,10 +1,11 @@
 {
-  "source": "Layers a station project carries for editing and network building, which must not be in Stenavi's vector tiles. Each pattern is a glob (* and ?) matched against a layer's or group's own name, ignoring case; a group that matches takes every layer in it out. The first pattern that matches is the one the page names, so list the narrower of two overlapping patterns first. They only untick layers in the list the operator sees before a build; the operator can tick them again.",
+  "source": "Layers a station project carries for editing and network building, which must not be in Stenavi's vector tiles. Each pattern is a glob (* and ?) matched against a layer's or group's own name, ignoring case; a group that matches takes every layer in it out. The first pattern that matches is the one the page names, so list the narrower of two overlapping patterns first. Layers that draw points are left out as well, without a pattern. Patterns and points only untick layers in the list the operator sees before a build; the operator can tick them again.",
   "exclude": [
     "Facility_Merge_*",
     "point_facility_network_*",
     "point_facility_*",
     "*_level",
+    "*_floor",
     "merge_tap",
     "*_opening",
     "wifi",
