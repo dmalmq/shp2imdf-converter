@@ -1,29 +1,51 @@
 import React from "react";
-import { render } from "@testing-library/react";
-import { beforeEach, expect, test, vi } from "vitest";
+import { act, render } from "@testing-library/react";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { Prepared, Problem, VtilesSource } from "../../lib/vtiles";
+import { CONTEXT_RESTORE_WAIT_MS } from "../../lib/mapHealth";
+import type { Prepared, Problem, TileStats, VtilesSource } from "../../lib/vtiles";
 import { TileMap } from "./TileMap";
 
 type Protocol = (request: { url: string; type: string }, abort: AbortController) => Promise<unknown>;
 
 const maplibre = vi.hoisted(() => {
-  const state = { protocol: null as Protocol | null, handlers: {} as Record<string, (event: unknown) => void> };
+  const state = {
+    protocol: null as Protocol | null,
+    handlers: {} as Record<string, (event: unknown) => void>,
+    maps: [] as Array<{ options: Record<string, unknown>; removed: boolean; zoom: number }>
+  };
   class FakeMap {
+    record: (typeof state.maps)[number];
+    constructor(options: Record<string, unknown>) {
+      this.record = { options, removed: false, zoom: typeof options.zoom === "number" ? options.zoom : 16 };
+      state.maps.push(this.record);
+    }
     on(name: string, handler: (event: unknown) => void) {
       state.handlers[name] = handler;
       return this;
     }
     getZoom() {
-      return 16;
+      return this.record.zoom;
+    }
+    getCenter() {
+      return { lng: 139.7, lat: 35.69 };
+    }
+    getBearing() {
+      return 0;
+    }
+    getPitch() {
+      return 0;
     }
     isStyleLoaded() {
       return false;
     }
+    remove() {
+      this.record.removed = true;
+    }
   }
   const map = new Proxy(FakeMap, {
-    construct: (target) =>
-      new Proxy(new target(), { get: (object, key) => (key in object ? Reflect.get(object, key) : () => undefined) })
+    construct: (target, args: [Record<string, unknown>]) =>
+      new Proxy(new target(...args), { get: (object, key) => (key in object ? Reflect.get(object, key) : () => undefined) })
   });
   return {
     state,
@@ -34,7 +56,9 @@ const maplibre = vi.hoisted(() => {
       addProtocol: (_name: string, handler: Protocol) => {
         state.protocol = handler;
       },
-      removeProtocol: () => undefined
+      removeProtocol: () => {
+        state.protocol = null;
+      }
     }
   };
 });
@@ -55,9 +79,14 @@ const source: VtilesSource = { index: { levels: [] } as unknown as VtilesSource[
 beforeEach(() => {
   maplibre.state.protocol = null;
   maplibre.state.handlers = {};
+  maplibre.state.maps = [];
 });
 
-function mount() {
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+function mount(onStats: (stats: TileStats) => void = () => undefined) {
   const problems: Problem[] = [];
   render(
     <TileMap
@@ -65,7 +94,7 @@ function mount() {
       prepared={prepared}
       on={{}}
       showTileBoundaries={false}
-      onStats={() => undefined}
+      onStats={onStats}
       onZoom={() => undefined}
       onPick={() => undefined}
       onProblem={(problem) => problems.push(problem)}
@@ -101,4 +130,23 @@ test("any other missing file still reaches the problems as a map error", async (
   await request("resources/sprites/sprite.json");
 
   expect(problems).toEqual([{ kind: "map-error", message: "resources/sprites/sprite.json is not in the folder" }]);
+});
+
+test("a lost WebGL context remounts one map on the same view, still reading tiles through the vtiles protocol", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+  const stats: TileStats[] = [];
+  mount((latest) => stats.push(latest));
+  await request("tile/16/1/2.pbf");
+  act(() => vi.advanceTimersByTime(16));
+  maplibre.state.maps[0].zoom = 18.5;
+
+  act(() => maplibre.state.handlers.webglcontextlost(undefined));
+  act(() => vi.advanceTimersByTime(CONTEXT_RESTORE_WAIT_MS));
+
+  expect(maplibre.state.maps.map((map) => map.removed)).toEqual([true, false]);
+  expect(maplibre.state.maps[1].options).toMatchObject({ center: { lng: 139.7, lat: 35.69 }, zoom: 18.5 });
+  expect(maplibre.state.protocol).not.toBeNull();
+  await request("tile/16/1/3.pbf");
+  act(() => vi.advanceTimersByTime(16));
+  expect(stats.at(-1)).toMatchObject({ missing: 2, firstMissing: "tile/16/1/2.pbf" });
 });

@@ -1,6 +1,7 @@
-import maplibregl, { type GeoJSONSource, type MapGeoJSONFeature } from "maplibre-gl";
-import { useEffect, useRef } from "react";
+import maplibregl, { type CameraOptions, type GeoJSONSource, type MapGeoJSONFeature } from "maplibre-gl";
+import { useEffect, useRef, useState } from "react";
 
+import { attachMapHealth } from "../../lib/mapHealth";
 import {
   VTILES_PROTOCOL,
   countTile,
@@ -60,6 +61,10 @@ export function TileMap({
   const mapRef = useRef<maplibregl.Map | null>(null);
   const callbacks = useRef({ onStats, onZoom, onPick, onProblem });
   callbacks.current = { onStats, onZoom, onPick, onProblem };
+  /** Bumped to remount the map after its WebGL context is lost; the protocol and its counts stay. */
+  const [generation, setGeneration] = useState(0);
+  /** Where the lost map was looking, for the one that replaces it. */
+  const camera = useRef<CameraOptions | null>(null);
 
   useEffect(() => {
     let stats = emptyTileStats;
@@ -104,18 +109,26 @@ export function TileMap({
       return { data: inflated.data };
     });
 
+    return () => {
+      cancelAnimationFrame(flush);
+      maplibregl.removeProtocol(VTILES_PROTOCOL);
+    };
+  }, [source]);
+
+  useEffect(() => {
+    const view = camera.current;
+    camera.current = null;
     const map = new maplibregl.Map({
       container: container.current!,
       style: prepared.style,
-      bounds: prepared.frame ?? undefined,
-      fitBoundsOptions: { padding: 40 },
+      ...(view ?? { bounds: prepared.frame ?? undefined, fitBoundsOptions: { padding: 40 } }),
       maxZoom: 23,
       validateStyle: false,
       attributionControl: false,
       localIdeographFontFamily: "'Yu Gothic UI', 'Meiryo', 'Hiragino Sans', 'Noto Sans JP', sans-serif"
     });
     mapRef.current = map;
-    if (map.getZoom() < prepared.primary.minzoom) map.jumpTo({ zoom: prepared.primary.minzoom + 0.5 });
+    if (!view && map.getZoom() < prepared.primary.minzoom) map.jumpTo({ zoom: prepared.primary.minzoom + 0.5 });
     map.addControl(new maplibregl.NavigationControl(), "top-right");
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-right");
 
@@ -152,13 +165,19 @@ export function TileMap({
       );
     });
 
+    const detach = attachMapHealth(map, {
+      remount: () => {
+        camera.current = { center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() };
+        setGeneration((value) => value + 1);
+      }
+    });
+
     return () => {
-      cancelAnimationFrame(flush);
+      detach();
       map.remove();
       mapRef.current = null;
-      maplibregl.removeProtocol(VTILES_PROTOCOL);
     };
-  }, [source, prepared]);
+  }, [prepared, generation]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -172,11 +191,11 @@ export function TileMap({
     };
     if (map.isStyleLoaded()) apply();
     else map.once("styledata", apply);
-  }, [on, prepared]);
+  }, [on, prepared, generation]);
 
   useEffect(() => {
     if (mapRef.current) mapRef.current.showTileBoundaries = showTileBoundaries;
-  }, [showTileBoundaries]);
+  }, [showTileBoundaries, generation]);
 
   return <div ref={container} className="absolute inset-0" data-testid="tile-viewer-map" />;
 }
