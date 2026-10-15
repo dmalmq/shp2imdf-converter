@@ -129,7 +129,7 @@ export function TileViewerPage() {
       return;
     }
     if (jobId) navigate(`${COLOR_THEME_PATH}/tiles`);
-    void start({ kind: "folder" }, Promise.resolve(folderSource(found.name, found.files)));
+    void start({ kind: "folder" }, Promise.resolve().then(() => folderSource(found.name, found.files)));
   };
 
   usePageShell({

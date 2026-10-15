@@ -12,6 +12,18 @@ import { TileViewerPage } from "./TileViewerPage";
 
 vi.mock("../api/client", () => ({ fetchTileJobIndex: vi.fn(), fetchTileJobFile: vi.fn() }));
 
+const indexing = vi.hoisted(() => ({ error: null as Error | null }));
+vi.mock("../lib/vtiles", async (actual) => {
+  const real = await actual<typeof import("../lib/vtiles")>();
+  return {
+    ...real,
+    tileLevels: (paths: Iterable<string>) => {
+      if (indexing.error) throw indexing.error;
+      return real.tileLevels(paths);
+    }
+  };
+});
+
 type MapProps = Parameters<typeof TileMap>[0];
 const drawn: { props: MapProps | null } = { props: null };
 // jsdom has no WebGL; the map stands in as the props it was given.
@@ -60,6 +72,7 @@ const shown = (name: string) => within(groupList()).getByRole("checkbox", { name
 beforeEach(() => {
   vi.clearAllMocks();
   drawn.props = null;
+  indexing.error = null;
   useAppStore.setState({ uiLanguage: "en" });
   vi.mocked(fetchTileJobIndex).mockResolvedValue(index);
   vi.mocked(fetchTileJobFile).mockImplementation(async (_job, path) => {
@@ -159,4 +172,17 @@ test("a folder without a style says which folder to open", async () => {
 
   expect(await screen.findByRole("heading", { name: "These tiles cannot be drawn" })).toBeInTheDocument();
   expect(screen.getByText(/Open the .vtiles folder itself/)).toBeInTheDocument();
+});
+
+test("a folder that fails while it is being indexed says so instead of staying on the picker", async () => {
+  indexing.error = new RangeError("Maximum call stack size exceeded");
+  renderAt("/color-theme/tiles");
+
+  fireEvent.change(screen.getByTestId("tile-viewer-folder-input"), {
+    target: { files: [inFolder("shinjuku_station.vtiles/resources/styles/root.json", style)] }
+  });
+
+  expect(await screen.findByRole("heading", { name: "The tiles could not be read" })).toBeInTheDocument();
+  expect(screen.getByText("Maximum call stack size exceeded")).toBeInTheDocument();
+  expect(drawn.props).toBeNull();
 });

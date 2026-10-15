@@ -30,24 +30,23 @@ const FLOOR_CODE = /^(?:[FBM]\d+|MB|RF|PH\d*)$/i;
 const SCALE_Z0 = 295828763.7957775;
 
 export function tileLevels(paths: Iterable<string>): TileLevel[] {
-  const found = new Map<number, Array<[number, number]>>();
+  const found = new Map<number, TileLevel>();
   for (const path of paths) {
     const parts = path.split("/");
     if (parts.length !== 4 || parts[0] !== "tile") continue;
     const [z, row, column] = [parts[1], parts[2], parts[3].split(".", 1)[0]];
     if (![z, row, column].every((part) => /^\d+$/.test(part))) continue;
-    const tiles = found.get(Number(z)) ?? [];
-    tiles.push([Number(row), Number(column)]);
-    found.set(Number(z), tiles);
+    const [r, c] = [Number(row), Number(column)];
+    const level = found.get(Number(z));
+    if (!level) {
+      found.set(Number(z), { z: Number(z), count: 1, rows: [r, r], columns: [c, c] });
+      continue;
+    }
+    level.count += 1;
+    level.rows = [Math.min(level.rows[0], r), Math.max(level.rows[1], r)];
+    level.columns = [Math.min(level.columns[0], c), Math.max(level.columns[1], c)];
   }
-  return [...found.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([z, tiles]) => ({
-      z,
-      count: tiles.length,
-      rows: [Math.min(...tiles.map(([row]) => row)), Math.max(...tiles.map(([row]) => row))],
-      columns: [Math.min(...tiles.map(([, column]) => column)), Math.max(...tiles.map(([, column]) => column))]
-    }));
+  return [...found.values()].sort((a, b) => a.z - b.z);
 }
 
 /**

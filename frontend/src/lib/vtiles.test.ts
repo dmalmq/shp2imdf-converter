@@ -165,6 +165,14 @@ describe("tile levels", () => {
     ]);
     expect(tileBounds([])).toBeNull();
   });
+
+  it("reads a level of 500,000 tiles, more than a call can take as arguments", () => {
+    function* paths() {
+      for (let i = 0; i < 500_000; i++) yield `tile/21/${1_000_000 + (i % 500)}/${1_800_000 + Math.floor(i / 500)}.pbf`;
+    }
+
+    expect(tileLevels(paths())).toEqual([{ z: 21, count: 500_000, rows: [1_000_000, 1_000_499], columns: [1_800_000, 1_800_999] }]);
+  });
 });
 
 describe("groups", () => {
