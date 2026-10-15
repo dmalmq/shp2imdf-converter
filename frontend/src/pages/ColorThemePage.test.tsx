@@ -884,6 +884,36 @@ test("a build whose checks found problems says so in its toast, not only in the 
   );
 });
 
+test("ticked but unbuildable, Download is disabled with the reason and sends nothing until the box is unticked", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  vi.mocked(convertColorTheme).mockResolvedValue({ blob: new Blob(["zip"]), filename: "JRTokyoSta_6677_new-colors.zip" });
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await tickTilesKeepingDefaults();
+
+  vi.mocked(inspectColorTheme).mockResolvedValue(tokyoInspection());
+  pickFolder([inFolder("JRTokyoSta_1_Space.dbf")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour JRTokyoSta_6677" });
+
+  const bar = screen.getByRole("region", { name: "Next step" });
+  const download = within(bar).getByRole("button", { name: "Download" });
+  expect(download).toBeDisabled();
+  expect(bar).toHaveTextContent("Vector tiles cannot be built");
+  expect(bar).toHaveTextContent("There is no ArcGIS Pro project (.aprx) in this upload to build tiles from.");
+  expect(tilesOption()).toBeChecked();
+  fireEvent.click(download);
+  expect(convertColorTheme).not.toHaveBeenCalled();
+  expect(startTileBuild).not.toHaveBeenCalled();
+
+  fireEvent.click(tilesOption());
+  expect(tilesOption()).not.toBeChecked();
+  expect(tilesOption()).toBeDisabled();
+  fireEvent.click(within(bar).getByRole("button", { name: "Download" }));
+  await waitFor(() => expect(saved).toEqual(["JRTokyoSta_6677_new-colors.zip"]));
+  expect(startTileBuild).not.toHaveBeenCalled();
+});
+
 test("in Japanese the option, its note and the build's progress read in Japanese", async () => {
   useAppStore.setState({ uiLanguage: "ja" });
   vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);

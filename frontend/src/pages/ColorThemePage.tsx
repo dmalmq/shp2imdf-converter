@@ -247,18 +247,15 @@ export function ColorThemePage() {
   };
 
   const download = async () => {
-    if (state.phase !== "checked") return;
-    const tiles = vectorTiles && vectorTilesBlockedReason(tilesAvailability, state.inspection, t) === null;
-    if (downloadBlockedReason(state.inspection, t, styleFiles, tiles)) return;
+    if (state.phase !== "checked" || blocked) return;
     const { upload } = state;
     const signal = begin();
     dispatch({ type: "convertStarted" });
     try {
-      if (tiles && tileSelection && tileLayers) {
+      if (tileRequest) {
         const { job_id } = await startTileBuild(upload.files, {
           styleFiles,
-          map: tileSelection.map,
-          layers: choiceInOrder(tileLayers, tileSelection.layers),
+          ...tileRequest,
           signal,
           onProgress: (percent) => dispatch({ type: "progress", upload, percent })
         });
@@ -314,9 +311,20 @@ export function ColorThemePage() {
         ? tileChoice.selection
         : defaultTileSelection(tileMaps);
   const tileLayers = tileMaps && tileSelection ? tileMap(tileMaps, tileSelection.map).layers : null;
-  const tilesBlocked =inspection ? vectorTilesBlockedReason(tilesAvailability, inspection, t) : null;
-  const wantTiles = vectorTiles && tilesBlocked === null;
-  const blocked = inspection ? downloadBlockedReason(inspection, t, styleFiles, wantTiles) : null;
+  const tileBuild =
+    tileSelection && tileLayers ? { map: tileSelection.map, layers: choiceInOrder(tileLayers, tileSelection.layers) } : null;
+  const tilesBlocked = inspection
+    ? (vectorTilesBlockedReason(tilesAvailability, inspection, t) ??
+      (tileBuild
+        ? null
+        : t("The project’s layers could not be listed, so there are none to tile.", "プロジェクトのレイヤーを一覧にできないため、タイルにするレイヤーがありません。")))
+    : null;
+  /** What Download sends for tiles: set exactly when they are ticked and can be built. */
+  const tileRequest = vectorTiles && tilesBlocked === null ? tileBuild : null;
+  const wantTiles = tileRequest !== null;
+  // Ticked but unbuildable stops Download: converting without the tiles asked for would hand back a zip that looks complete.
+  const tilesStopDownload = vectorTiles ? tilesBlocked : null;
+  const blocked = inspection ? (tilesStopDownload ?? downloadBlockedReason(inspection, t, styleFiles, wantTiles)) : null;
   const busy = state.phase === "converting" || state.phase === "building";
   const lockFiles = checked ? checked.upload.lockFilesLeftOut + checked.inspection.dataset.lock_files_dropped : 0;
 
@@ -451,7 +459,7 @@ export function ColorThemePage() {
       {inspection ? (
         <NextBar
           ref={anchor}
-          step={nextStep(state, inspection, blocked, styleFiles, wantTiles, t)}
+          step={nextStep(state, inspection, blocked, styleFiles, tilesStopDownload ? "blocked" : wantTiles ? "build" : "off", t)}
           progress={state.phase === "converting" ? state.progress : building ? tilePercent(building.job) : null}
           busyLabel={building ? { en: "Building tiles…", ja: "タイル作成中…" } : { en: "Preparing…", ja: "準備中…" }}
           onGo={() => void download()}
@@ -487,7 +495,8 @@ function nextStep(
   inspection: ColorThemeInspection,
   blocked: string | null,
   styleFiles: boolean,
-  vectorTiles: boolean,
+  /** "blocked": ticked, but they cannot be built, which is what stops Download. */
+  tiles: "build" | "blocked" | "off",
   t: T
 ) {
   const { totals, layers } = inspection.theme;
@@ -509,12 +518,15 @@ function nextStep(
     added > 0
       ? t(`${plural(added, "style file is", "style files are")} added`, `スタイルファイル ${formatCount(added)} 個を追加します`)
       : null,
-    vectorTiles ? t("Vector tiles will be built", "ベクタータイルを作成します") : null
+    tiles === "build" ? t("Vector tiles will be built", "ベクタータイルを作成します") : null
   ].filter((part): part is string => part !== null);
   const building = state.phase === "building" ? state : null;
-  const title = blocked
-    ? t("Nothing to change", "変更はありません")
-    : building
+  const title =
+    tiles === "blocked"
+      ? t("Vector tiles cannot be built", "ベクタータイルを作成できません")
+      : blocked
+        ? t("Nothing to change", "変更はありません")
+        : building
       ? t("Building vector tiles", "ベクタータイルを作成中")
       : delivered
         ? t(`Downloaded ${delivered}`, `${delivered} をダウンロードしました`)
@@ -1395,11 +1407,12 @@ function VectorTiles({
     <section aria-labelledby="color-theme-vector-tiles" className="flex flex-col gap-2.5">
       <MicroLabel id="color-theme-vector-tiles">{t("Vector tiles", "ベクタータイル")}</MicroLabel>
       <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
-        <label className={cn("flex items-start gap-3 px-4 py-3", blocked ? "cursor-not-allowed" : "cursor-pointer")}>
+        <label className={cn("flex items-start gap-3 px-4 py-3", blocked && !wanted ? "cursor-not-allowed" : "cursor-pointer")}>
           <Checkbox
             className="mt-0.5"
-            checked={wanted && blocked === null}
-            disabled={blocked !== null || building !== null}
+            checked={wanted}
+            // A ticked box stays enabled when blocked: unticking it is how Download goes ahead without tiles.
+            disabled={(blocked !== null && !wanted) || building !== null}
             onCheckedChange={(next) => onWanted(next === true)}
           />
           <span className="flex min-w-0 flex-col gap-1">
