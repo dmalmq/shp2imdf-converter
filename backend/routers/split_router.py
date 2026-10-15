@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 
-from backend.routers.common import get_session_or_raise, session_manager
+from backend.routers.common import get_session_or_raise, session_manager, session_uploads_dir
 from backend.src.schemas import SplitPreviewResponse, SplitProject, SplitRequest, SplitResponse
 from backend.src.split import preview_split, split_session
 
@@ -25,7 +25,9 @@ async def split(session_id: str, payload: SplitRequest, request: Request) -> Spl
 
 def _split(session_id: str, payload: SplitRequest, request: Request) -> SplitResponse:
     parent = get_session_or_raise(session_id, request)
-    children, unassigned_total = split_session(session_manager(request), parent, payload.shapes)
+    children, unassigned_total = split_session(
+        session_manager(request), parent, payload.shapes, session_uploads_dir(request)
+    )
     return SplitResponse(
         projects=[
             SplitProject(

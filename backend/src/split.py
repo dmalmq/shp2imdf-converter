@@ -8,8 +8,10 @@ has at most one owner; features outside every shape stay behind.
 from __future__ import annotations
 
 import copy
+import shutil
 from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from shapely import make_valid
@@ -110,8 +112,25 @@ def _source_collection(record: SessionRecord) -> dict[str, Any]:
     return record.source_feature_collection or record.feature_collection
 
 
+def _copy_source_files(parent: SessionRecord, stems: set[str], target: Path) -> Path | None:
+    """Copy the parent's uploaded files for these stems, byte for byte.
+
+    Each project owns its upload folder and deletes it when it goes, so a child
+    cannot borrow the parent's. Rows of other buildings stay in the copies; the
+    shapefile export leaves them out.
+    """
+    source = Path(parent.upload_artifact_dir) if parent.upload_artifact_dir else None
+    if source is None or not source.is_dir():
+        return None
+    target.mkdir(parents=True, exist_ok=True)
+    for entry in source.iterdir():
+        if entry.is_file() and entry.stem in stems:
+            shutil.copy2(entry, target / entry.name)
+    return target
+
+
 def split_session(
-    manager: SessionManager, parent: SessionRecord, shapes: list[SplitShape]
+    manager: SessionManager, parent: SessionRecord, shapes: list[SplitShape], uploads_root: Path
 ) -> tuple[list[SessionRecord], int]:
     """Create one new project per shape, and say how many features fell outside them all.
 
@@ -146,6 +165,8 @@ def split_session(
             learned_keywords=dict(parent.learned_keywords),
         )
         child.split_from = SplitOrigin(parent_session_id=parent.session_id, name=name)
+        copied = _copy_source_files(parent, set(counts), uploads_root / child.session_id)
+        child.upload_artifact_dir = str(copied) if copied else None
         manager.save_session(child)
         children.append(child)
     return children, len(assignment.unassigned)

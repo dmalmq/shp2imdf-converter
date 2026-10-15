@@ -103,7 +103,10 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   source features and the parent's confirmed files, named by `SessionRecord.split_from`; the
   parent is never written. Downstream (wizard, generator, validator) sees an ordinary
   project, which is the point: keep it that way rather than teaching the generator about
-  buildings. IMDF-schema imports are not offered the split.
+  buildings. IMDF-schema imports are not offered the split. A child gets its own byte copy
+  of the parent's uploaded files for its stems (each project deletes its upload folder when
+  it goes, so it cannot borrow the parent's); the copies still hold every building's rows,
+  and the round-trip shapefile export keeps only the source rows the child's features name.
 - Illustrator multi-floor placement: assignment is by box on the artwork preview, membership
   is `centroid ∈ box` plus an optional layer restriction, re-verified server-side at export
   (the preview filter is display-only). Linked floors share scale/rotation; dragging a floor

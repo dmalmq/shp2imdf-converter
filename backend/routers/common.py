@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import Request, UploadFile
@@ -24,6 +25,13 @@ def get_session_or_raise(session_id: str, request: Request) -> SessionRecord:
     if session is None:
         raise SessionNotFoundError()
     return session
+
+
+def session_uploads_dir(request: Request) -> Path:
+    path = getattr(request.app.state, "session_uploads_dir", Path("./data/session_uploads"))
+    directory = Path(path)
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 
 def max_upload_bytes(request: Request) -> int:

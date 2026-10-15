@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +11,8 @@ import geopandas as gpd
 import pytest
 from fastapi.testclient import TestClient
 from shapely.geometry import Point, Polygon, box, mapping
+
+from backend.src.session import SessionSummary
 
 pytestmark = pytest.mark.phase1
 
@@ -169,3 +173,30 @@ def test_split_refuses_a_building_with_nothing_inside(test_client: TestClient, t
     assert response.status_code == 400
     assert "Field" in response.json()["detail"]
     assert len(test_client.get("/api/projects").json()["projects"]) == 1
+
+
+def _exported_names(content: bytes, root: Path) -> set[str]:
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        archive.extractall(root)
+    return {name for path in root.rglob("*.shp") for name in gpd.read_file(path)["name"]}
+
+
+def test_a_split_project_exports_its_own_building_as_shapefiles(
+    test_client: TestClient, two_buildings: Path, tmp_path: Path
+) -> None:
+    session_id = _import(test_client, two_buildings)
+    projects = test_client.post(f"/api/session/{session_id}/split", json={"shapes": _shapes()}).json()["projects"]
+    east_id = projects[1]["session_id"]
+
+    response = test_client.post(f"/api/session/{east_id}/export/shapefiles", json={})
+
+    assert response.status_code == 200, response.text
+    assert _exported_names(response.content, tmp_path / "east") == {
+        f"Site_{floor}_{kind}-{row}" for floor in ("1F", "2F") for kind, row in (("Floor", 1), ("Space", 3), ("Space", 4))
+    }
+
+    manager = test_client.app.state.session_manager
+    parent = manager.get_session(session_id, touch=False)
+    manager._delete_session_record(SessionSummary(parent.session_id, parent.last_accessed, parent.upload_artifact_dir))
+    again = test_client.post(f"/api/session/{east_id}/export/shapefiles", json={})
+    assert again.status_code == 200, again.text
