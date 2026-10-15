@@ -29,6 +29,8 @@ const HIGHLIGHT_COLOUR = "#c2410c";
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 /** Most features a click lists; a station's stacked floors can put hundreds under one point. */
 const MAX_PICKED = 25;
+/** Marks a glyph range the folder lacks: reported once as `glyphs-missing`, so MapLibre's error for each range is dropped. */
+const MISSING_GLYPHS = "glyph range is not in the folder";
 
 /**
  * The map, drawn from `source` through the `vtiles` protocol. A file that is not there
@@ -84,9 +86,12 @@ export function TileMap({
       }
       if (data === null) {
         if (isTile) count(path, "missing");
-        else if (path.startsWith("resources/fonts/") && !glyphsReported) {
-          glyphsReported = true;
-          callbacks.current.onProblem({ kind: "glyphs-missing", path });
+        else if (path.startsWith("resources/fonts/")) {
+          if (!glyphsReported) {
+            glyphsReported = true;
+            callbacks.current.onProblem({ kind: "glyphs-missing", path });
+          }
+          throw new Error(`${MISSING_GLYPHS}: ${path}`);
         }
         if (request.type === "json" || request.type === "image" || !isTile) throw new Error(`${path} is not in the folder`);
         return { data: new ArrayBuffer(0) };
@@ -130,7 +135,7 @@ export function TileMap({
     map.on("move", () => callbacks.current.onZoom(map.getZoom()));
     map.on("error", (event) => {
       const error = event.error;
-      if (!error || error.name === "AbortError") return;
+      if (!error || error.name === "AbortError" || String(error.message).includes(MISSING_GLYPHS)) return;
       callbacks.current.onProblem({ kind: "map-error", message: error.message || String(error) });
     });
     map.on("click", (event) => {
