@@ -983,6 +983,23 @@ test("with one map there is no map to choose, and the build is sent that map", a
 
 const mapPicker = () => within(layersDialog()).getByRole("combobox", { name: "Map to tile" });
 
+test("another map's layer list opens scrolled to the top", async () => {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue({ ...shinjukuProjectInspection(), tile_layers: shinjukuTileMaps() });
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await waitFor(() => expect(tilesOption()).toBeEnabled());
+  fireEvent.click(tilesOption());
+  const scroller = () => within(layersDialog()).getByRole("list", { name: "Layers" }).parentElement!;
+  scroller().scrollTop = 400;
+
+  fireEvent.click(mapPicker());
+  fireEvent.click(await screen.findByRole("option", { name: "ホーム · 2 layers" }));
+
+  expect(mapPicker()).toHaveTextContent("ホーム · 2 layers");
+  expect(scroller().scrollTop).toBe(0);
+});
+
 test("with several maps the default is chosen and explained, an empty map cannot be picked, and the build is sent the map", async () => {
   vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
   vi.mocked(inspectColorTheme).mockResolvedValue({ ...shinjukuProjectInspection(), tile_layers: shinjukuTileMaps() });

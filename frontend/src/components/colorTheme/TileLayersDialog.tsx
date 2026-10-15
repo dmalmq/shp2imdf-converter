@@ -124,7 +124,7 @@ function Chooser({
         {tileLayerSummary(counts, t)}
       </p>
       {/* Native scrolling: the dialog only has a max-height, so Radix ScrollArea's h-full viewport grew to the whole list and was clipped. */}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div key={draft.map} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <ul aria-label={t("Layers", "レイヤー")} className="flex flex-col py-1.5">
           {layers.map((node) => (
             <Row key={node.uri} node={node} depth={0} draft={draft.layers} setDraft={setLayers} open={open} toggle={toggle} />
