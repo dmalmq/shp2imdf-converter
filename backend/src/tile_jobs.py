@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 
 from backend.src.errors import ApiError
 from backend.src.recolor import Archive
+from backend.src.tile_archive import TILES_FOLDER, TileArchive
 from backend.src.tile_layers import TilePlan
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,6 @@ logger = logging.getLogger(__name__)
 WORKER = Path(__file__).with_name("build_tiles.py")
 TIMEOUT_SECONDS = 2 * 60 * 60
 STEPS = 5
-TILES_FOLDER = "vector_tiles"
 _LOG_NAME = "build_log.txt"
 _LAYERS_NAME = "layers.json"
 _STOPPED = "The server stopped before this build could start."
@@ -94,6 +94,8 @@ class _Job:
     """The ``.aprx``'s path inside the converted archive."""
     state: _Waiting | Running | Done | Failed = field(default_factory=_Waiting)
     finished: float | None = None
+    tiles: TileArchive | None = None
+    """The download, opened for the viewer on its first request and closed before the folder is deleted."""
 
 
 class TileJobs:
@@ -161,6 +163,16 @@ class TileJobs:
             job = self._jobs.get(job_id)
             return job.directory / "download.zip" if job and isinstance(job.state, Done) else None
 
+    def tiles(self, job_id: str) -> TileArchive | None:
+        """The finished build's ``.vtiles`` folder, read from its download; None unless the job is done."""
+        with self._changed:
+            job = self._jobs.get(job_id)
+            if job is None or not isinstance(job.state, Done):
+                return None
+            if job.tiles is None:
+                job.tiles = TileArchive(job.directory / "download.zip")
+            return job.tiles
+
     def prune(self) -> None:
         """Delete jobs that finished more than ``ttl_seconds`` ago."""
         cutoff = time.time() - self.ttl_seconds
@@ -169,6 +181,9 @@ class TileJobs:
             for job in expired:
                 del self._jobs[job.id]
         for job in expired:
+            # Windows will not delete a file that is still open.
+            if job.tiles is not None:
+                job.tiles.close()
             shutil.rmtree(job.directory, ignore_errors=True)
         if expired:
             logger.info("Removed %d finished vector tile builds", len(expired))
@@ -183,6 +198,9 @@ class TileJobs:
         with self._changed:
             self._closed = True
             process = self._process
+            for job in self._jobs.values():
+                if job.tiles is not None:
+                    job.tiles.close()
         if process is not None:
             process.kill()
             try:

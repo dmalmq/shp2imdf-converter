@@ -49,9 +49,14 @@ export const FLOW_STAGES: Record<Flow, ReadonlyArray<{ id: StageId; label: Bilin
 /** The station colour-theme tool. */
 export const COLOR_THEME_PATH = "/color-theme";
 
+/** The tile viewer: a finished build's tiles, or with no build, a `.vtiles` folder picked from disk. */
+export function tileViewerPath(jobId?: string): string {
+  return jobId ? `${COLOR_THEME_PATH}/tiles/${encodeURIComponent(jobId)}` : `${COLOR_THEME_PATH}/tiles`;
+}
+
 export function flowForPath(pathname: string): Flow {
   if (pathname === "/illustrator" || pathname.startsWith("/a/")) return "artwork";
-  if (pathname === COLOR_THEME_PATH) return "color-theme";
+  if (pathname === COLOR_THEME_PATH || pathname.startsWith(`${COLOR_THEME_PATH}/`)) return "color-theme";
   return "shapefiles";
 }
 
