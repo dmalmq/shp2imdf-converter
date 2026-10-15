@@ -5,13 +5,17 @@ import type { TileLayerNode } from "../../api/client";
 import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
   defaultTileSelection,
+  kindTickState,
   mapLayerCount,
+  setKindTicked,
   setTicked,
   tickState,
   tileLayerCounts,
+  tileLayerKinds,
   tileMap,
   type TileChoice,
   type TileLayerCounts,
+  type TileLayerKind,
   type TileMaps,
   type TileSelection
 } from "../../lib/tileLayers";
@@ -71,12 +75,12 @@ export function TileLayersDialog({
           <DialogDescription>
             {only !== null
               ? t(
-                  `Ticked layers of the map “${only}” go into the vector tiles. The list starts from the project as saved, with the layers the exclusion patterns name unticked. Nothing here is kept: the next build starts from the project again.`,
-                  `マップ「${only}」のうちチェックしたレイヤーがベクタータイルになります。保存されたプロジェクトの表示状態から始まり、除外パターンに当たるレイヤーはチェックが外れています。ここでの変更は保存されず、次の作成はまたプロジェクトから始まります。`
+                  `Ticked layers of the map “${only}” go into the vector tiles. Every layer starts ticked, on every floor, except those an exclusion pattern names and layers that draw points. Nothing here is kept: the next build starts from the project again.`,
+                  `マップ「${only}」のうちチェックしたレイヤーがベクタータイルになります。すべての階のレイヤーにチェックが入った状態から始まり、除外パターンに当たるレイヤーとポイントのレイヤーはチェックが外れています。ここでの変更は保存されず、次の作成はまたプロジェクトから始まります。`
                 )
               : t(
-                  `Ticked layers of the chosen map go into the vector tiles. The list starts from the project as saved, with the layers the exclusion patterns name unticked. Nothing here is kept: the next build starts from the project again.`,
-                  `選んだマップのうちチェックしたレイヤーがベクタータイルになります。保存されたプロジェクトの表示状態から始まり、除外パターンに当たるレイヤーはチェックが外れています。ここでの変更は保存されず、次の作成はまたプロジェクトから始まります。`
+                  `Ticked layers of the chosen map go into the vector tiles. Every layer starts ticked, on every floor, except those an exclusion pattern names and layers that draw points. Nothing here is kept: the next build starts from the project again.`,
+                  `選んだマップのうちチェックしたレイヤーがベクタータイルになります。すべての階のレイヤーにチェックが入った状態から始まり、除外パターンに当たるレイヤーとポイントのレイヤーはチェックが外れています。ここでの変更は保存されず、次の作成はまたプロジェクトから始まります。`
                 )}
           </DialogDescription>
         </div>
@@ -123,6 +127,7 @@ function Chooser({
       <p aria-live="polite" className="border-b border-border px-6 py-2.5 text-[12.5px] font-medium text-foreground">
         {tileLayerSummary(counts, t)}
       </p>
+      <LayerKinds kinds={tileLayerKinds(layers)} draft={draft.layers} setDraft={setLayers} />
       {/* Native scrolling: the dialog only has a max-height, so Radix ScrollArea's h-full viewport grew to the whole list and was clipped. */}
       <div key={draft.map} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <ul aria-label={t("Layers", "レイヤー")} className="flex flex-col py-1.5">
@@ -147,6 +152,49 @@ function Chooser({
         </div>
       </DialogFooter>
     </>
+  );
+}
+
+/** Each kind of layer the defaults leave out, ticked or unticked everywhere at once: openings on every floor, say. */
+function LayerKinds({
+  kinds,
+  draft,
+  setDraft
+}: {
+  kinds: readonly TileLayerKind[];
+  draft: TileChoice;
+  setDraft: (update: (choice: TileChoice) => TileChoice) => void;
+}) {
+  const { t } = useUiLanguage();
+  if (kinds.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2 border-b border-border px-6 py-3">
+      <p id="tile-layer-kinds" className="text-[12px] text-muted-foreground">
+        {t("Tick or untick a kind of layer on every floor at once.", "種類ごとに、すべての階のレイヤーをまとめてチェック・解除します。")}
+      </p>
+      <ul aria-labelledby="tile-layer-kinds" className="flex flex-wrap gap-1.5">
+        {kinds.map((kind) => {
+          const ticked = kindTickState(kind, draft);
+          const chosen = kind.layers.filter((uri) => draft.has(uri)).length;
+          const label = kind.kind === "points" ? t("Point layers", "ポイントのレイヤー") : kind.pattern;
+          return (
+            <li key={kind.kind === "points" ? "points" : `pattern:${kind.pattern}`}>
+              <label className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 hover:bg-muted/60">
+                <Checkbox
+                  aria-label={label}
+                  checked={ticked}
+                  onCheckedChange={() => setDraft((choice) => setKindTicked(choice, kind, ticked !== true))}
+                />
+                <span className={cn("text-[12.5px] text-foreground", kind.kind === "pattern" && "font-mono")}>{label}</span>
+                <span className="text-[11px] tabular-nums text-muted-foreground">
+                  {formatCount(chosen)}/{formatCount(kind.layers.length)}
+                </span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -249,6 +297,11 @@ function Row({
           {node.excluded_by !== null ? (
             <span className="rounded-sm bg-warning-surface px-1.5 py-0.5 font-mono text-[11px] text-warning-foreground">
               {t(`excluded · ${node.excluded_by}`, `除外 · ${node.excluded_by}`)}
+            </span>
+          ) : null}
+          {node.draws_points ? (
+            <span className="rounded-sm bg-warning-surface px-1.5 py-0.5 text-[11px] text-warning-foreground">
+              {t("point layer", "ポイント")}
             </span>
           ) : null}
           {!node.visible ? (
