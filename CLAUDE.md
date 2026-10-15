@@ -121,9 +121,14 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   class in a `.gdb` of the same folder name, or the shapefile of that stem. Shinjuku's
   `JRShinjukuSta.gdb` has no feature datasets at all (266 feature classes at the root), so its
   buildings come from the project's groups or from the page's layer filter with "Tick all shown".
-  Only `.aprx` groups are read: the station folders on hand carry `.mxd` maps, a binary format
-  nothing here parses without arcpy, so the project-group path has only been tested on built
-  fixtures. Pro's Insert → Import Map turns an `.mxd` into an `.aprx` map.
+  Only `.aprx` groups are read; an `.mxd` is a binary format nothing here parses without arcpy
+  (Pro's Insert → Import Map turns one into an `.aprx` map). Checked on 2026-10-15 with a copy
+  of `Shinjuku Station 2 local.aprx` and the 2026-10-01 `JRShinjukuSta.gdb`: 197 groups, one
+  per building and floor under `ordinal_<n>` (`ordinal_-1 › JRShinjukuSta_B1` → its 5 layers),
+  and splitting by them into JR新宿駅, ルミネ1 and ヨドバシカメラ generated all three. Display
+  copies such as `地下背景 › 他地下階表示用ordinal_-1 › JRShinjukuSta_B1` hold a subset of the
+  same layers, so the same file sits in several groups; picking two of them for one building
+  is fine, for two buildings it is refused. Projects hold no whole-building group.
 - The standard import reads File Geodatabases: a zipped `*.gdb` folder, or a folder upload
   whose relative paths travel in `paths` parts as on the colour page. Each feature class is an
   `ImportedFile` with `source_format="gdb"`, its stem the class name (Japanese kept, since
