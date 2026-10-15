@@ -159,6 +159,20 @@ test("the build keeps polling after navigation and its failure remains visible o
   expect(screen.getByRole("alert", { name: "Download failed" })).toHaveTextContent("Layer missing after navigation");
 });
 
+test("coming back mid-build cannot start a second build over the one being followed", async () => {
+  vi.mocked(fetchTileJob).mockResolvedValue({ state: "running", step: 1, of: 5, label: "Create Vector Tile Index" });
+  await startVisibleTileBuild();
+  fireEvent.click(screen.getByRole("link", { name: "shp2imdf, projects" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Recolour a station/ }));
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await screen.findByRole("heading", { level: 1, name: "Recolour shinjuku" });
+
+  await waitFor(() => expect(tilesRegion()).toHaveTextContent("A vector tile build started from this tab is still running"));
+  expect(tilesOption()).toBeDisabled();
+  expect(startTileBuild).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("status", { name: "Building vector tiles" })).toBeInTheDocument();
+});
+
 test("reloading while a build is active resumes its job and reports the result", async () => {
   vi.mocked(fetchTileJob).mockImplementationOnce(() => new Promise(() => {}));
   const app = await startVisibleTileBuild();
@@ -1050,7 +1064,7 @@ test("in Japanese the option, its note and the build's progress read in Japanese
   expect(within(region).getByRole("button", { name: "レイヤーを選ぶ…" })).toBeInTheDocument();
   fireEvent.click(within(screen.getByRole("region", { name: "次のステップ" })).getByRole("button", { name: "ダウンロード" }));
 
-  expect(await within(region).findByRole("status")).toHaveTextContent("ほかの作成の完了を待っています · 2 番目");
+  await waitFor(() => expect(within(region).getByRole("status")).toHaveTextContent("ほかの作成の完了を待っています · 2 番目"));
 });
 
 test("ticking vector tiles opens the layer list: saved visibility less the patterns, explained row by row", async () => {
@@ -1141,7 +1155,8 @@ test("the chosen layers are sent in drawing order, Cancel keeps the previous cho
   vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
   vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
   vi.mocked(startTileBuild).mockResolvedValue({ job_id: "a1b2c3" });
-  vi.mocked(fetchTileJob).mockResolvedValue({ state: "queued", position: 1 });
+  // Ended, so the second drop is not refused for a build still running.
+  vi.mocked(fetchTileJob).mockResolvedValue({ state: "failed", reason: "stopped" });
   renderPage();
   pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
   await waitFor(() => expect(tilesOption()).toBeEnabled());

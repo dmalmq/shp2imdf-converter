@@ -263,8 +263,16 @@ export function ColorThemePage() {
   const tileLayers = tileMaps && tileSelection ? tileMap(tileMaps, tileSelection.map).layers : null;
   const tileBuild =
     tileSelection && tileLayers ? { map: tileSelection.map, layers: choiceInOrder(tileLayers, tileSelection.layers) } : null;
+  // The monitor outlives this page: coming back mid-build resets the page, and a second build would replace the one followed.
+  const followingOther = tileBuildMonitor.build.state === "active" && tileBuildMonitor.build.jobId !== buildingJob;
   const tilesBlocked = inspection
     ? (vectorTilesBlockedReason(tilesAvailability, inspection, t) ??
+      (followingOther
+        ? t(
+            "A vector tile build started from this tab is still running. Wait for it to finish, as the notice at the top shows.",
+            "このタブで開始したベクタータイルの作成がまだ実行中です。上部の通知で完了を確認してから作成してください。"
+          )
+        : null) ??
       (tileBuild
         ? null
         : t("The project’s layers could not be listed, so there are none to tile.", "プロジェクトのレイヤーを一覧にできないため、タイルにするレイヤーがありません。")))
