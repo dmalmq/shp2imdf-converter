@@ -261,8 +261,8 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   Only `CIMFeatureLayer`s are listed: Tokyo's tiled map draws an empty Graphics Layer as saved,
   which failed the index with ERROR 001852 (Shinjuku's is saved hidden and built). The worker
   switches off every visible layer the plan does not name, so a basemap or graphics layer never
-  reaches the GP tools. That Graphics Layer is the cause is inferred from the two projects, not yet
-  confirmed by a Tokyo build.
+  reaches the GP tools. Confirmed on 2026-10-15: Tokyo then built in 10:26 (z15 9 tiles, z16 24),
+  its log naming the Graphics Layer it switched off.
   The page does not follow a build itself: `TileBuildProvider` (`TileBuildMonitor.tsx`), mounted
   above the routes in `App.tsx`, polls the job and shows `TileBuildNotice` on every route until
   the operator dismisses it. Builds end minutes after Download, often with the operator elsewhere,
