@@ -24,7 +24,6 @@ import {
   DialogFooter,
   DialogTitle,
   DisabledHint,
-  ScrollArea,
   Select,
   SelectContent,
   SelectItem,
@@ -124,13 +123,14 @@ function Chooser({
       <p aria-live="polite" className="border-b border-border px-6 py-2.5 text-[12.5px] font-medium text-foreground">
         {tileLayerSummary(counts, t)}
       </p>
-      <ScrollArea className="min-h-0 flex-1">
+      {/* Native scrolling: the dialog only has a max-height, so Radix ScrollArea's h-full viewport grew to the whole list and was clipped. */}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <ul aria-label={t("Layers", "レイヤー")} className="flex flex-col py-1.5">
           {layers.map((node) => (
             <Row key={node.uri} node={node} depth={0} draft={draft.layers} setDraft={setLayers} open={open} toggle={toggle} />
           ))}
         </ul>
-      </ScrollArea>
+      </div>
       <DialogFooter className="justify-between border-t border-border px-6 py-4">
         <Button variant="ghost" onClick={() => reset(defaultTileSelection(maps))}>
           {t("Reset to defaults", "既定に戻す")}
