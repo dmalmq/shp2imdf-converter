@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -254,3 +255,31 @@ def test_the_plan_draws_exactly_the_chosen_layers_and_the_groups_above_them(excl
 def test_a_choice_naming_anything_but_the_maps_layers_is_refused(selected, message) -> None:
     with pytest.raises(SelectionError, match=message):
         visibility_plan(_map(), selected)
+
+
+def test_only_feature_layers_are_offered_so_a_visible_graphics_layer_is_never_tiled() -> None:
+    """Tokyo's map draws an empty Graphics Layer as saved; tiled, it failed the index with ERROR 001852."""
+    docs = {
+        "map/map.json": {"type": "CIMMap", "name": "マップ レイヤー11", "layers": ["CIMPATH=map/g.json", "CIMPATH=map/1f.json"]},
+        "map/g.json": {"type": "CIMGraphicsLayer", "name": "Graphics Layer", "uRI": "CIMPATH=map/g.json", "visibility": True},
+        "map/1f.json": {
+            "type": "CIMGroupLayer",
+            "name": "1F",
+            "uRI": "CIMPATH=map/1f.json",
+            "visibility": True,
+            "layers": ["CIMPATH=map/space.json", "CIMPATH=map/hillshade.json"],
+        },
+        "map/space.json": {"type": "CIMFeatureLayer", "name": "Space", "uRI": "CIMPATH=map/space.json", "visibility": True},
+        "map/hillshade.json": {"type": "CIMTiledServiceLayer", "name": "Hillshade", "uRI": "CIMPATH=map/hillshade.json", "visibility": True},
+        "GISProject.json": {
+            "type": "CIMGISProject",
+            "projectItems": [{"type": "CIMProjectItem", "name": "マップ レイヤー11", "itemType": "Map", "catalogPath": "CIMPATH=map/map.json"}],
+        },
+    }
+    project = make_project([(name, json.dumps(doc).encode(), zipfile.ZIP_DEFLATED) for name, doc in docs.items()])
+    maps = read_project_layers(project, NO_EXCLUSIONS, max_bytes=LIMIT)
+    assert isinstance(maps, ProjectMaps)
+
+    the_map = maps.chosen(None)
+    assert [long_name for _, long_name in walk(the_map.layers)] == ["1F", "1F\\Space"]
+    assert default_selection(the_map) == {"CIMPATH=map/space.json"}

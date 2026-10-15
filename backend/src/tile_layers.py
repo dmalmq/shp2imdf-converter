@@ -32,6 +32,8 @@ import zipfile
 import zlib
 
 _CIMPATH = "CIMPATH="
+_TILEABLE = "CIMFeatureLayer"
+"""The one kind of layer a vector tile package takes. A visible Graphics Layer fails the index with ERROR 001852."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,9 +206,11 @@ class _Reader:
         uris = parent.get("layers")
         if not isinstance(uris, list):
             raise _Unreadable(f"{parent.get('name')!r} lists its layers in an unknown form")
-        return tuple(self.node(uri, inherited=inherited, drawn=drawn) for uri in uris)
+        nodes = (self.node(uri, inherited=inherited, drawn=drawn) for uri in uris)
+        return tuple(node for node in nodes if node is not None)
 
-    def node(self, uri: Any, *, inherited: str | None, drawn: bool) -> LayerNode:
+    def node(self, uri: Any, *, inherited: str | None, drawn: bool) -> LayerNode | None:
+        """None for a layer no tile package can hold; the worker switches off whatever the plan leaves out."""
         member = _member(uri)
         if member.casefold() in self.opened:
             raise _Unreadable(f"{uri} is listed twice in the map")
@@ -220,6 +224,8 @@ class _Reader:
             children = self.layers(doc, inherited=excluded_by or inherited, drawn=drawn and visible)
             tiled = any(child.tiled_by_default for child in children)
             return LayerNode(uri, name, True, visible, excluded_by, tiled, children)
+        if doc.get("type") != _TILEABLE:
+            return None
         tiled = drawn and visible and excluded_by is None and inherited is None
         return LayerNode(uri, name, False, visible, excluded_by, tiled, ())
 

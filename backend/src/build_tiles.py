@@ -299,6 +299,13 @@ def apply_layers(m, plan: list[dict]) -> None:
     missing = [line["name"] for line in plan if line["uri"] not in by_uri]
     if missing:
         raise BuildFailed(f"{len(missing)} layers chosen on the page are not in the map arcpy opened: {', '.join(missing)}")
+    planned = {line["uri"] for line in plan}
+    # The page lists feature layers only; a Graphics Layer or basemap drawn as saved fails the index (ERROR 001852).
+    unlisted = [layer for uri, layer in by_uri.items() if uri not in planned and layer.visible]
+    for layer in unlisted:
+        layer.visible = False
+    if unlisted:
+        log("Switched off, not a layer vector tiles can hold: " + ", ".join(layer.longName for layer in unlisted))
     switched: dict[bool, list[str]] = {True: [], False: []}
     for line in plan:
         layer = by_uri[line["uri"]]

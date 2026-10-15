@@ -378,6 +378,19 @@ def test_the_chosen_visibility_is_set_and_logged_with_empty_groups_warned(worker
     ]
 
 
+def test_a_visible_layer_the_page_did_not_list_is_switched_off(worker, tmp_path, capsys) -> None:
+    layers, plan = _station(tmp_path)
+    graphics = _Layer("Graphics Layer", None, broken=False)
+
+    worker.apply_layers(_map([graphics, *layers]), plan)
+
+    assert graphics.visible is False
+    assert _lines(capsys.readouterr().out)[0] == {
+        "event": "message",
+        "text": "Switched off, not a layer vector tiles can hold: Graphics Layer",
+    }
+
+
 def test_a_chosen_layer_arcpy_does_not_find_fails_the_build_by_name(worker, tmp_path) -> None:
     layers, plan = _station(tmp_path)
     plan += [{"uri": "CIMPATH=map/gone.json", "name": "Floors\\2F", "group": False, "visible": True}]

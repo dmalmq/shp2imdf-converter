@@ -258,6 +258,11 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   (no localStorage, no server state): every build starts from the uploaded project and the
   pattern file. A group left with nothing chosen is a log warning. Shutdown kills a running
   worker (`TileJobs.close` in the lifespan), since the next server empties `TILE_JOBS_DIR`.
+  Only `CIMFeatureLayer`s are listed: Tokyo's tiled map draws an empty Graphics Layer as saved,
+  which failed the index with ERROR 001852 (Shinjuku's is saved hidden and built). The worker
+  switches off every visible layer the plan does not name, so a basemap or graphics layer never
+  reaches the GP tools. That Graphics Layer is the cause is inferred from the two projects, not yet
+  confirmed by a Tokyo build.
   The page does not follow a build itself: `TileBuildProvider` (`TileBuildMonitor.tsx`), mounted
   above the routes in `App.tsx`, polls the job and shows `TileBuildNotice` on every route until
   the operator dismisses it. Builds end minutes after Download, often with the operator elsewhere,
