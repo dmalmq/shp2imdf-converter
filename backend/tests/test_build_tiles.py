@@ -94,6 +94,20 @@ def test_levels_ending_at_maxzoom_are_not_a_problem(worker, tmp_path) -> None:
     assert worker.check(vtiles, 16) == []
 
 
+def test_an_empty_level_folder_does_not_count_as_stored(worker, tmp_path) -> None:
+    vtiles = _vtiles(tmp_path, levels=range(1, 16), maxzoom=16, bom=False)
+    (vtiles / "tile" / "16" / "0").mkdir(parents=True)
+
+    assert worker.check(vtiles, 16) == ["the deepest stored level is z15, below the style's maxzoom 16"]
+
+
+def test_level_folders_without_a_tile_are_no_tiles(worker, tmp_path) -> None:
+    vtiles = _vtiles(tmp_path, levels=(), maxzoom=16, bom=False)
+    (vtiles / "tile" / "15").mkdir(parents=True)
+
+    assert worker.check(vtiles, 16) == [f"no tiles in {vtiles / 'tile'}"]
+
+
 def test_a_boolean_maxzoom_is_not_sixteen(worker, tmp_path) -> None:
     vtiles = _vtiles(tmp_path, maxzoom=True, bom=False)
 
