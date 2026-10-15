@@ -10,8 +10,9 @@ from typing import Any
 import geopandas as gpd
 import pytest
 from fastapi.testclient import TestClient
-from shapely.geometry import Point, Polygon, box, mapping
+from shapely.geometry import MultiPolygon, Point, Polygon, box, mapping
 
+from backend.src import split as split_module
 from backend.src.session import SessionSummary
 
 pytestmark = pytest.mark.phase1
@@ -200,3 +201,50 @@ def test_a_split_project_exports_its_own_building_as_shapefiles(
     manager._delete_session_record(SessionSummary(parent.session_id, parent.last_accessed, parent.upload_artifact_dir))
     again = test_client.post(f"/api/session/{east_id}/export/shapefiles", json={})
     assert again.status_code == 200, again.text
+
+
+def test_a_multipart_row_goes_whole_to_the_building_holding_its_centroid(
+    test_client: TestClient, two_buildings: Path, tmp_path: Path
+) -> None:
+    # One row, a large part in the west building and a small one in the east.
+    spanning = MultiPolygon([_square(_WEST, 40, 40, 30), _square(_EAST, 20, 70, 10)])
+    _write(two_buildings, "Site_1F_Fixture", [spanning, _square(_EAST, 60, 10, 5)])
+    session_id = _import(test_client, two_buildings)
+
+    preview = test_client.post(f"/api/session/{session_id}/split/preview", json={"shapes": _shapes()}).json()
+
+    west, east = preview["shapes"]
+    assert west["files"]["Site_1F_Fixture"] == 2
+    assert east["files"]["Site_1F_Fixture"] == 1
+
+    projects = test_client.post(f"/api/session/{session_id}/split", json={"shapes": _shapes()}).json()["projects"]
+    exported = [
+        _exported_names(test_client.post(f"/api/session/{item['session_id']}/export/shapefiles", json={}).content, tmp_path / item["name"])
+        for item in projects
+    ]
+    assert "Site_1F_Fixture-0" in exported[0]
+    assert "Site_1F_Fixture-0" not in exported[1]
+    assert "Site_1F_Fixture-1" in exported[1]
+
+
+def test_a_split_that_fails_part_way_leaves_no_projects_behind(
+    test_client: TestClient, two_buildings: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session_id = _import(test_client, two_buildings)
+    real_copy = split_module.shutil.copy2
+    targets: list[Path] = []
+
+    def copy_until_the_second_building(source: Path, target: Path) -> None:
+        if target.parent not in targets:
+            targets.append(target.parent)
+        if len(targets) > 1:
+            raise OSError("disk full")
+        real_copy(source, target)
+
+    monkeypatch.setattr(split_module.shutil, "copy2", copy_until_the_second_building)
+
+    with pytest.raises(OSError, match="disk full"):
+        test_client.post(f"/api/session/{session_id}/split", json={"shapes": _shapes()})
+
+    assert [item["id"] for item in test_client.get("/api/projects").json()["projects"]] == [session_id]
+    assert [path.name for path in (tmp_path / "session_uploads").iterdir()] == [session_id]

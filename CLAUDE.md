@@ -97,8 +97,11 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   both.
 - Splitting an import by building (`backend/src/split.py`, `/p/:id/bring-in/split`) is
   opt-in: a Bring in checkbox, unticked by default, sends the operator there instead of Set
-  up. A feature goes to the drawn polygon holding its centroid, the Illustrator rule; shapes
-  may not overlap, and what falls outside every shape is reported, not dropped silently.
+  up. A source row goes to the drawn polygon holding its centroid, the Illustrator rule. The
+  importer makes one feature per part of a multipart row, and the row is assigned whole
+  (centroid of all its parts), or the shapefile export would hand a row to two buildings.
+  Shapes may not overlap, and what falls outside every shape is reported, not dropped
+  silently. A split that fails part way deletes the projects it already made.
   Each shape becomes a new standard project made through `create_session` from the filtered
   source features and the parent's confirmed files, named by `SessionRecord.split_from`; the
   parent is never written. Downstream (wizard, generator, validator) sees an ordinary

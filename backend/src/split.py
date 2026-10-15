@@ -1,8 +1,8 @@
 """Split one brought-in import into a project per building.
 
-A feature belongs to the drawn shape that contains its centroid, the same
-rule the Illustrator floor boxes use. Shapes may not overlap, so a feature
-has at most one owner; features outside every shape stay behind.
+A source row belongs to the drawn shape that contains its centroid, the same
+rule the Illustrator floor boxes use. Shapes may not overlap, so a row has at
+most one owner; rows outside every shape stay behind.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from shapely import make_valid
-from shapely.geometry import shape
+from shapely.geometry import GeometryCollection, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.prepared import prep
 
@@ -67,21 +67,46 @@ def _parse_shapes(shapes: list[SplitShape]) -> list[BaseGeometry]:
     return polygons
 
 
+def _row_key(feature: dict[str, Any], index: int) -> tuple[Any, ...]:
+    properties = feature.get("properties") or {}
+    stem, row = properties.get("source_file"), properties.get("source_row_index")
+    return ("row", stem, row) if isinstance(stem, str) and isinstance(row, int) else ("feature", index)
+
+
+def _centroid(features: list[dict[str, Any]]) -> BaseGeometry | None:
+    parts = []
+    for feature in features:
+        if not feature.get("geometry"):
+            continue
+        try:
+            parts.append(shape(feature["geometry"]))
+        except (ValueError, TypeError, IndexError):
+            continue
+    if not parts:
+        return None
+    centroid = GeometryCollection(parts).centroid
+    return None if centroid.is_empty else centroid
+
+
 def assign_features(source_collection: dict[str, Any], shapes: list[SplitShape]) -> SplitAssignment:
+    """Assign each source row, with all its parts, to the shape holding the row's centroid.
+
+    The importer turns a multipart row into one feature per part; a row is kept
+    whole so the round-trip shapefile export can give each building whole rows.
+    """
     polygons = [prep(polygon) for polygon in _parse_shapes(shapes)]
+    rows: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for index, feature in enumerate(source_collection.get("features") or []):
+        rows.setdefault(_row_key(feature, index), []).append(feature)
+
     buckets: list[list[dict[str, Any]]] = [[] for _ in polygons]
     unassigned: list[dict[str, Any]] = []
-    for feature in source_collection.get("features") or []:
-        geometry = feature.get("geometry")
+    for parts in rows.values():
+        centroid = _centroid(parts)
         owner = None
-        if geometry:
-            try:
-                centroid = shape(geometry).centroid
-            except (ValueError, TypeError, IndexError):
-                centroid = None
-            if centroid is not None and not centroid.is_empty:
-                owner = next((index for index, polygon in enumerate(polygons) if polygon.covers(centroid)), None)
-        (buckets[owner] if owner is not None else unassigned).append(feature)
+        if centroid is not None:
+            owner = next((index for index, polygon in enumerate(polygons) if polygon.covers(centroid)), None)
+        (buckets[owner] if owner is not None else unassigned).extend(parts)
     return SplitAssignment(names=[item.name.strip() for item in shapes], features=buckets, unassigned=unassigned)
 
 
@@ -129,6 +154,43 @@ def _copy_source_files(parent: SessionRecord, stems: set[str], target: Path) -> 
     return target
 
 
+def _create_child(
+    manager: SessionManager,
+    parent: SessionRecord,
+    name: str,
+    features: list[dict[str, Any]],
+    uploads_root: Path,
+) -> SessionRecord:
+    counts = _counts_by_file(features)
+    files = [
+        item.model_copy(update={"feature_count": counts[item.stem]}, deep=True)
+        for item in parent.files
+        if item.stem in counts
+    ]
+    source = sync_feature_types({"type": "FeatureCollection", "features": copy.deepcopy(features)}, files)
+    normalized, files, _ = rebuild_normalized_feature_collection(source, files)
+    child = manager.create_session(
+        files=files,
+        cleanup_summary=parent.cleanup_summary,
+        feature_collection=normalized,
+        source_feature_collection=source,
+        warnings=list(parent.warnings),
+        learned_keywords=dict(parent.learned_keywords),
+    )
+    child.split_from = SplitOrigin(parent_session_id=parent.session_id, name=name)
+    target = uploads_root / child.session_id
+    # Set before copying, so a failed copy is cleaned up with the child.
+    child.upload_artifact_dir = str(target)
+    try:
+        if not _copy_source_files(parent, set(counts), target):
+            child.upload_artifact_dir = None
+        manager.save_session(child)
+    except Exception:
+        manager.delete_session(child)
+        raise
+    return child
+
+
 def split_session(
     manager: SessionManager, parent: SessionRecord, shapes: list[SplitShape], uploads_root: Path
 ) -> tuple[list[SessionRecord], int]:
@@ -144,29 +206,12 @@ def split_session(
         raise ValueError(f"No features fall inside: {', '.join(empty)}.")
 
     children: list[SessionRecord] = []
-    for name, features in zip(assignment.names, assignment.features):
-        counts = _counts_by_file(features)
-        files = [
-            item.model_copy(update={"feature_count": counts[item.stem]}, deep=True)
-            for item in parent.files
-            if item.stem in counts
-        ]
-        source = sync_feature_types(
-            {"type": "FeatureCollection", "features": copy.deepcopy(features)},
-            files,
-        )
-        normalized, files, _ = rebuild_normalized_feature_collection(source, files)
-        child = manager.create_session(
-            files=files,
-            cleanup_summary=parent.cleanup_summary,
-            feature_collection=normalized,
-            source_feature_collection=source,
-            warnings=list(parent.warnings),
-            learned_keywords=dict(parent.learned_keywords),
-        )
-        child.split_from = SplitOrigin(parent_session_id=parent.session_id, name=name)
-        copied = _copy_source_files(parent, set(counts), uploads_root / child.session_id)
-        child.upload_artifact_dir = str(copied) if copied else None
-        manager.save_session(child)
-        children.append(child)
+    try:
+        for name, features in zip(assignment.names, assignment.features):
+            children.append(_create_child(manager, parent, name, features, uploads_root))
+    except Exception:
+        # A half-made split would list some buildings, and a retry would duplicate them.
+        for child in children:
+            manager.delete_session(child)
+        raise
     return children, len(assignment.unassigned)
