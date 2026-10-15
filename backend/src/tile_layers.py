@@ -12,11 +12,14 @@ beside the empty one the project template made. The default is the map with
 the most layers, the first in project order on a tie; a map without a layer
 cannot be chosen.
 
-The default choice is what the project would draw as saved (a layer and
-every group above it switched on), less every layer whose own name, or a
-group's above it, matches a pattern in ``vector_tile_exclusions.json``.
-Nothing about a choice is kept: every build starts from the uploaded project
-and the pattern file.
+The default choice is every layer, whatever visibility the project saved,
+less every layer whose own name, or a group's above it, matches a pattern in
+``vector_tile_exclusions.json``, and less every layer that draws points. A
+layer draws points when every symbol its renderer holds is a
+``CIMPointSymbol``; the CIM of a layer names no geometry type, and a
+renderer with no symbols or mixed ones leaves the layer in. Nothing about a
+choice is kept: every build starts from the uploaded project and the pattern
+file.
 """
 
 from __future__ import annotations
@@ -79,8 +82,10 @@ class LayerNode:
     """Its own visibility as the project was saved."""
     excluded_by: str | None
     """The pattern its own name matched, if any."""
+    draws_points: bool
+    """A layer whose renderer draws only point symbols. False for a group, and when the renderer does not say."""
     tiled_by_default: bool
-    """A layer: drawn as saved and matched by no pattern, its own or a group's above it. A group: any layer in it is."""
+    """A layer: matched by no pattern, its own or a group's above it, and not drawing points. A group: any layer in it is."""
     children: tuple[LayerNode, ...]
 
 
@@ -200,16 +205,16 @@ class _Reader:
     def map(self, uri: Any) -> MapLayers:
         doc = self.document(_member(uri))
         self.opened = set()
-        return MapLayers(id=uri, name=str(doc.get("name", "")), layers=self.layers(doc, inherited=None, drawn=True))
+        return MapLayers(id=uri, name=str(doc.get("name", "")), layers=self.layers(doc, inherited=None))
 
-    def layers(self, parent: dict[str, Any], *, inherited: str | None, drawn: bool) -> tuple[LayerNode, ...]:
+    def layers(self, parent: dict[str, Any], *, inherited: str | None) -> tuple[LayerNode, ...]:
         uris = parent.get("layers")
         if not isinstance(uris, list):
             raise _Unreadable(f"{parent.get('name')!r} lists its layers in an unknown form")
-        nodes = (self.node(uri, inherited=inherited, drawn=drawn) for uri in uris)
+        nodes = (self.node(uri, inherited=inherited) for uri in uris)
         return tuple(node for node in nodes if node is not None)
 
-    def node(self, uri: Any, *, inherited: str | None, drawn: bool) -> LayerNode | None:
+    def node(self, uri: Any, *, inherited: str | None) -> LayerNode | None:
         """None for a layer no tile package can hold; the worker switches off whatever the plan leaves out."""
         member = _member(uri)
         if member.casefold() in self.opened:
@@ -221,13 +226,28 @@ class _Reader:
         visible = doc.get("visibility", False) is True
         excluded_by = self.exclusions.match(name)
         if isinstance(doc.get("layers"), list):
-            children = self.layers(doc, inherited=excluded_by or inherited, drawn=drawn and visible)
+            children = self.layers(doc, inherited=excluded_by or inherited)
             tiled = any(child.tiled_by_default for child in children)
-            return LayerNode(uri, name, True, visible, excluded_by, tiled, children)
+            return LayerNode(uri, name, True, visible, excluded_by, False, tiled, children)
         if doc.get("type") != _TILEABLE:
             return None
-        tiled = drawn and visible and excluded_by is None and inherited is None
-        return LayerNode(uri, name, False, visible, excluded_by, tiled, ())
+        points = _symbol_types(doc.get("renderer")) == {"CIMPointSymbol"}
+        tiled = excluded_by is None and inherited is None and not points
+        return LayerNode(uri, name, False, visible, excluded_by, points, tiled, ())
+
+
+_SYMBOLS = frozenset({"CIMPointSymbol", "CIMLineSymbol", "CIMPolygonSymbol", "CIMMeshSymbol", "CIMTextSymbol"})
+
+
+def _symbol_types(cim: Any) -> set[str]:
+    """The types of the outermost symbols in ``cim``: a marker inside a polygon symbol is part of the polygon."""
+    if isinstance(cim, dict):
+        if cim.get("type") in _SYMBOLS:
+            return {cim["type"]}
+        return set().union(*map(_symbol_types, cim.values()))
+    if isinstance(cim, list):
+        return set().union(*map(_symbol_types, cim))
+    return set()
 
 
 def _member(uri: Any) -> str:

@@ -144,7 +144,7 @@ def test_builds_run_one_at_a_time_and_download_the_conversion_plus_tiles(test_cl
     assert done == {
         "state": "done",
         "filename": "東京_new-colors.zip",
-        "warnings": ["These groups have no layer chosen and are switched off: ordinal_-1, WiFi"],
+        "warnings": ["These groups have no layer chosen and are switched off: WiFi"],
         "problems": [],
     }
     assert _wait(test_client, second_id, _finished)["state"] == "done"
@@ -176,7 +176,7 @@ def test_builds_run_one_at_a_time_and_download_the_conversion_plus_tiles(test_cl
         "5 root.json",
         "Total",
     ]
-    assert "WARNING: These groups have no layer chosen and are switched off: ordinal_-1, WiFi" in log
+    assert "WARNING: These groups have no layer chosen and are switched off: WiFi" in log
     assert "arcpy prose that is not JSON" in log
 
 
@@ -240,7 +240,7 @@ def test_without_a_choice_the_build_tiles_the_projects_defaults(test_client, job
     response = _post(test_client, _upload({}), vector_tiles="true")
 
     assert response.status_code == 202, response.text
-    assert "Tiled: ordinal_1\\JRSta_1F\\JRSta_1_Space, 背景\r\n" in _log(test_client, response.json()["job_id"])
+    assert "Tiled: ordinal_1\\JRSta_1F\\JRSta_1_Space, ordinal_-1\\JRSta_B1_Space, 背景\r\n" in _log(test_client, response.json()["job_id"])
 
 
 def test_the_chosen_layers_are_what_the_worker_is_told_to_tile(test_client, jobs) -> None:
@@ -290,7 +290,7 @@ def test_without_a_map_the_build_tiles_the_default_map(test_client, jobs) -> Non
     assert response.status_code == 202, response.text
     log = _log(test_client, response.json()["job_id"])
     assert f"Map: マップ レイヤー ({tile_map_uri(1)})\r\n" in log
-    assert "Tiled: ordinal_1\\JRSta_1F\\JRSta_1_Space, 背景\r\n" in log
+    assert "Tiled: ordinal_1\\JRSta_1F\\JRSta_1_Space, ordinal_-1\\JRSta_B1_Space, 背景\r\n" in log
 
 
 def test_the_chosen_map_and_its_layers_are_what_the_worker_is_told_to_tile(test_client, jobs) -> None:
@@ -307,7 +307,7 @@ def test_a_chosen_map_without_layers_tiles_that_maps_defaults(test_client, jobs)
     response = _post(test_client, _upload({}, maps=SHINJUKU), vector_tiles="true", tile_map=tile_map_uri(2))
 
     assert response.status_code == 202, response.text
-    assert "Tiled: ホーム\\Platform_1\r\n" in _log(test_client, response.json()["job_id"])
+    assert "Tiled: ホーム\\Platform_1, ホーム\\Platform_2\r\n" in _log(test_client, response.json()["job_id"])
 
 
 @pytest.mark.parametrize(
