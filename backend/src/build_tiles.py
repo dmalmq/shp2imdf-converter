@@ -249,10 +249,11 @@ def _broken(m) -> list:
     return [layer for layer in m.listLayers() if not layer.isGroupLayer and layer.isBroken]
 
 
-def repair_sources(aprx, m, root: Path) -> None:
+def repair_sources(aprx, m, root: Path, tiled: set[str]) -> None:
     """Point layers whose data moved with the project at the same-named folder under ``root``.
 
-    A layer still broken would silently drop out of the tiles, so any left raises.
+    A layer in ``tiled`` (the uRIs chosen on the page) still broken would silently drop out of
+    the tiles, so any such layer raises; one the operator left out is only logged.
     """
     moved: dict[str, str] = {}
     for layer in _broken(m):
@@ -268,9 +269,12 @@ def repair_sources(aprx, m, root: Path) -> None:
         log(f"Data source {old} -> {new}")
         aprx.updateConnectionProperties(old, new)
     still = _broken(m)
+    chosen = [layer for layer in still if _uri(layer) in tiled]
+    if chosen:
+        names = ", ".join(layer.longName for layer in chosen)
+        raise BuildFailed(f"{len(chosen)} layers have no data in the upload and would be left out of the tiles: {names}")
     if still:
-        names = ", ".join(layer.longName for layer in still)
-        raise BuildFailed(f"{len(still)} layers have no data in the upload and would be left out of the tiles: {names}")
+        warn("Broken but not chosen for tiling, so left out: " + ", ".join(layer.longName for layer in still))
     if moved:
         aprx.save()
 
@@ -373,7 +377,8 @@ def build(aprx_path: Path, root: Path, out_dir: Path, plan: dict) -> tuple[Path,
     log(f"Map: {m.name} -> {out_dir}")
     if localise(m, out_dir / "data"):
         aprx.save()
-    repair_sources(aprx, m, root)
+    tiled = {line["uri"] for line in plan["layers"] if line["visible"] and not line["group"]}
+    repair_sources(aprx, m, root, tiled)
     apply_layers(m, plan["layers"])
 
     # The project's default geodatabase may be a path on the machine it was saved on.
