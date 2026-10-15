@@ -63,6 +63,8 @@ type T = (english: string, japanese: string) => string;
 export const TILE_POLL_MS = 1000;
 /** How often to ask again while the server is still finding out whether arcpy is licensed. */
 const AVAILABILITY_RETRY_MS = 3000;
+/** A build ends minutes after Download, often with the operator in another window, so its outcome outstays a toast's usual 4 s. */
+const BUILD_TOAST_MS = 20000;
 
 type Mapping = { state: "loading" } | { state: "failed"; message: string } | { state: "loaded"; report: ColorThemeReport };
 
@@ -157,40 +159,49 @@ export function ColorThemePage() {
     let next: ReturnType<typeof setTimeout> | undefined;
     const upload = buildingUpload;
     const poll = async () => {
+      const fail = (message: string) => {
+        pushToast({ title: t("Download failed", "ダウンロード失敗"), description: message, variant: "error", durationMs: BUILD_TOAST_MS });
+        dispatch({ type: "convertFailed", upload, message });
+      };
       let job: TileJobStatus;
       try {
         job = await fetchTileJob(buildingJob, request.signal);
       } catch (caught) {
         if (request.signal.aborted) return;
-        const message =
+        fail(
           caught instanceof ApiClientError && caught.status === 404
             ? t(
                 "The server no longer has this vector tile build: it was restarted, or the build expired. Download again to start a new one.",
                 "サーバーにこのベクタータイルの作成がありません。サーバーが再起動したか、期限が切れました。もう一度ダウンロードして作成し直してください。"
               )
             : handleApiError(caught, t("Could not follow the vector tile build", "ベクタータイルの作成状況を取得できませんでした"), {
-                title: t("Download failed", "ダウンロード失敗")
-              });
-        dispatch({ type: "convertFailed", upload, message });
+                suppressToast: true
+              })
+        );
         return;
       }
       if (request.signal.aborted) return;
       switch (job.state) {
-        case "done":
+        case "done": {
           saveUrl(tileJobDownloadUrl(buildingJob), job.filename);
           dispatch({ type: "converted", upload, filename: job.filename, notes: [...job.problems, ...job.warnings] });
+          const found = job.problems.length;
           pushToast({
             title: t(`Created ${job.filename} with vector tiles`, `ベクタータイル付きの ${job.filename} を作成しました`),
-            description: t("It is in your browser’s downloads.", "ブラウザのダウンロードに保存されます。"),
-            variant: "success"
+            description:
+              found > 0
+                ? t(
+                    `It is in your browser’s downloads, but the checks found ${plural(found, "problem", "problems")} with the tiles, listed under Vector tiles.`,
+                    `ブラウザのダウンロードに保存されますが、タイルの確認で問題が ${formatCount(found)} 件見つかりました。ベクタータイルの欄に表示しています。`
+                  )
+                : t("It is in your browser’s downloads.", "ブラウザのダウンロードに保存されます。"),
+            variant: "success",
+            durationMs: found > 0 ? BUILD_TOAST_MS : undefined
           });
           return;
+        }
         case "failed":
-          dispatch({
-            type: "convertFailed",
-            upload,
-            message: t(`Vector tiles failed: ${job.reason}`, `ベクタータイルの作成に失敗しました: ${job.reason}`)
-          });
+          fail(t(`Vector tiles failed: ${job.reason}`, `ベクタータイルの作成に失敗しました: ${job.reason}`));
           return;
         default:
           dispatch({ type: "buildProgress", upload, jobId: buildingJob, job });
@@ -507,7 +518,9 @@ function nextStep(
       ? t("Building vector tiles", "ベクタータイルを作成中")
       : delivered
         ? t(`Downloaded ${delivered}`, `${delivered} をダウンロードしました`)
-        : changes.join(" · ");
+        : error
+          ? t("Download failed", "ダウンロード失敗")
+          : changes.join(" · ");
   // GDAL rewrites a geodatabase's changed rows whole (Shape_Area recomputed), so only shapefiles get the stronger promise.
   const unchanged =
     inspection.dataset.geodatabases > 0

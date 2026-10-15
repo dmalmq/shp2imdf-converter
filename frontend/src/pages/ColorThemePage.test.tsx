@@ -812,6 +812,78 @@ test("a build the server no longer knows says so", async () => {
   await waitFor(() => expect(bar).toHaveTextContent("The server no longer has this vector tile build"));
 });
 
+/** The toast with this title, not the Next step bar, which can carry the same words. */
+const toastTitled = (title: string) =>
+  screen.queryAllByRole("status").find((element) => element.querySelector("p")?.textContent === title) ?? null;
+
+const TOKYO_FAILURE = "1 layers have no data in the upload and would be left out of the tiles: 2F\\背景_グレー_2F";
+
+async function buildThatEndsWith(job: () => Promise<unknown>, language: "en" | "ja" = "en") {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  vi.mocked(startTileBuild).mockResolvedValue({ job_id: "a1b2c3" });
+  vi.mocked(fetchTileJob).mockImplementation(job as typeof fetchTileJob);
+  renderPage();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await tickTilesKeepingDefaults();
+  act(() => useAppStore.setState({ uiLanguage: language }));
+  const bar = screen.getByRole("region", { name: /Next step|次のステップ/ });
+  fireEvent.click(within(bar).getByRole("button", { name: /^(Download|ダウンロード)$/ }));
+  return bar;
+}
+
+test("a failed build raises an error toast with the worker's whole reason, and the bar says the download failed", async () => {
+  const bar = await buildThatEndsWith(async () => ({ state: "failed", reason: TOKYO_FAILURE }));
+
+  await waitFor(() => expect(toastTitled("Download failed")).not.toBeNull());
+  expect(toastTitled("Download failed")).toHaveTextContent(`Vector tiles failed: ${TOKYO_FAILURE}`);
+  expect(bar).toHaveTextContent("Download failed");
+  expect(bar).toHaveTextContent(`Vector tiles failed: ${TOKYO_FAILURE}`);
+  expect(saved).toEqual([]);
+});
+
+test("in Japanese a failed build raises the toast in Japanese", async () => {
+  const bar = await buildThatEndsWith(async () => ({ state: "failed", reason: TOKYO_FAILURE }), "ja");
+
+  await waitFor(() => expect(toastTitled("ダウンロード失敗")).not.toBeNull());
+  expect(toastTitled("ダウンロード失敗")).toHaveTextContent(`ベクタータイルの作成に失敗しました: ${TOKYO_FAILURE}`);
+  expect(bar).toHaveTextContent("ダウンロード失敗");
+});
+
+test("a build the server no longer knows raises an error toast", async () => {
+  await buildThatEndsWith(async () => {
+    throw new ApiClientError(404, "TILE_JOB_NOT_FOUND", "not on the server");
+  });
+
+  await waitFor(() => expect(toastTitled("Download failed")).not.toBeNull());
+  expect(toastTitled("Download failed")).toHaveTextContent("The server no longer has this vector tile build");
+});
+
+test("losing the server while following a build raises an error toast", async () => {
+  const bar = await buildThatEndsWith(async () => {
+    throw new TypeError("Failed to fetch");
+  });
+
+  await waitFor(() => expect(toastTitled("Download failed")).not.toBeNull());
+  expect(toastTitled("Download failed")).toHaveTextContent("Failed to fetch");
+  expect(bar).toHaveTextContent("Failed to fetch");
+  expect(screen.queryAllByRole("status").filter((element) => element.textContent?.includes("Failed to fetch"))).toHaveLength(1);
+});
+
+test("a build whose checks found problems says so in its toast, not only in the list under Vector tiles", async () => {
+  await buildThatEndsWith(async () => ({
+    state: "done",
+    filename: "shinjuku_new-colors.zip",
+    warnings: [],
+    problems: ["missing zoom levels [21]", "no tiles at z18"]
+  }));
+
+  await waitFor(() => expect(toastTitled("Created shinjuku_new-colors.zip with vector tiles")).not.toBeNull());
+  expect(toastTitled("Created shinjuku_new-colors.zip with vector tiles")).toHaveTextContent(
+    "the checks found 2 problems with the tiles, listed under Vector tiles"
+  );
+});
+
 test("in Japanese the option, its note and the build's progress read in Japanese", async () => {
   useAppStore.setState({ uiLanguage: "ja" });
   vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
