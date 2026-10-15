@@ -5,11 +5,9 @@ import { useDropzone } from "react-dropzone";
 import {
   convertColorTheme,
   fetchColorTheme,
-  fetchTileJob,
   fetchVectorTilesAvailability,
   inspectColorTheme,
   startTileBuild,
-  tileJobDownloadUrl,
   type ColorThemeInspection,
   type ColorThemeLayer,
   type ColorThemeRenderer,
@@ -18,12 +16,13 @@ import {
   type TileJobStatus,
   type VectorTilesAvailability
 } from "../api/client";
-import { ApiClientError, toErrorMessage } from "../api/errors";
+import { toErrorMessage } from "../api/errors";
 import { NextBar } from "../components/bringIn/NextBar";
 import { SkeletonBlock } from "../components/shared/SkeletonBlock";
 import { useToast } from "../components/shared/ToastProvider";
 import { usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
 import { TileLayersDialog, tileLayerSummary } from "../components/colorTheme/TileLayersDialog";
+import { useTileBuild } from "../components/colorTheme/TileBuildMonitor";
 import { tileViewerPath } from "../components/shell/stages";
 import { Button, Checkbox, DisabledHint, Metric } from "../components/ui";
 import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
@@ -47,7 +46,7 @@ import {
   type ColorThemeState,
   type DatasetUpload
 } from "../lib/colorTheme";
-import { saveBlob, saveUrl } from "../lib/download";
+import { saveBlob } from "../lib/download";
 import {
   choiceInOrder,
   defaultTileSelection,
@@ -60,12 +59,8 @@ import { cn } from "@/lib/utils";
 
 type T = (english: string, japanese: string) => string;
 
-/** How often a running vector tile build is asked where it has got to. */
-export const TILE_POLL_MS = 1000;
 /** How often to ask again while the server is still finding out whether arcpy is licensed. */
 const AVAILABILITY_RETRY_MS = 3000;
-/** A build ends minutes after Download, often with the operator in another window, so its outcome outstays a toast's usual 4 s. */
-const BUILD_TOAST_MS = 20000;
 
 type Mapping = { state: "loading" } | { state: "failed"; message: string } | { state: "loaded"; report: ColorThemeReport };
 
@@ -102,6 +97,7 @@ function skipDetail({ id, reason }: ColorThemeReport["skipped"][number], field: 
 export function ColorThemePage() {
   const { t } = useUiLanguage();
   const pushToast = useToast();
+  const tileBuildMonitor = useTileBuild();
   const handleApiError = useApiErrorHandler();
   const [state, dispatch] = useReducer(colorThemeReducer, initialColorThemeState);
   const [mapping, setMapping] = useState<Mapping>({ state: "loading" });
@@ -156,67 +152,19 @@ export function ColorThemePage() {
   const buildingUpload = building?.upload ?? null;
   useEffect(() => {
     if (buildingJob === null || buildingUpload === null) return;
-    const request = new AbortController();
-    let next: ReturnType<typeof setTimeout> | undefined;
-    const upload = buildingUpload;
-    const poll = async () => {
-      const fail = (message: string) => {
-        pushToast({ title: t("Download failed", "ダウンロード失敗"), description: message, variant: "error", durationMs: BUILD_TOAST_MS });
-        dispatch({ type: "convertFailed", upload, message });
-      };
-      let job: TileJobStatus;
-      try {
-        job = await fetchTileJob(buildingJob, request.signal);
-      } catch (caught) {
-        if (request.signal.aborted) return;
-        fail(
-          caught instanceof ApiClientError && caught.status === 404
-            ? t(
-                "The server no longer has this vector tile build: it was restarted, or the build expired. Download again to start a new one.",
-                "サーバーにこのベクタータイルの作成がありません。サーバーが再起動したか、期限が切れました。もう一度ダウンロードして作成し直してください。"
-              )
-            : handleApiError(caught, t("Could not follow the vector tile build", "ベクタータイルの作成状況を取得できませんでした"), {
-                suppressToast: true
-              })
-        );
-        return;
-      }
-      if (request.signal.aborted) return;
-      switch (job.state) {
-        case "done": {
-          saveUrl(tileJobDownloadUrl(buildingJob), job.filename);
-          dispatch({ type: "converted", upload, filename: job.filename, notes: [...job.problems, ...job.warnings] });
-          const found = job.problems.length;
-          pushToast({
-            title: t(`Created ${job.filename} with vector tiles`, `ベクタータイル付きの ${job.filename} を作成しました`),
-            description:
-              found > 0
-                ? t(
-                    `It is in your browser’s downloads, but the checks found ${plural(found, "problem", "problems")} with the tiles, listed under Vector tiles.`,
-                    `ブラウザのダウンロードに保存されますが、タイルの確認で問題が ${formatCount(found)} 件見つかりました。ベクタータイルの欄に表示しています。`
-                  )
-                : t("It is in your browser’s downloads.", "ブラウザのダウンロードに保存されます。"),
-            variant: "success",
-            durationMs: found > 0 ? BUILD_TOAST_MS : undefined
-          });
-          return;
-        }
-        case "failed":
-          fail(t(`Vector tiles failed: ${job.reason}`, `ベクタータイルの作成に失敗しました: ${job.reason}`));
-          return;
-        default:
-          dispatch({ type: "buildProgress", upload, jobId: buildingJob, job });
-          next = setTimeout(() => void poll(), TILE_POLL_MS);
-      }
-    };
-    void poll();
-    return () => {
-      request.abort();
-      clearTimeout(next);
-    };
-    // Follows one build; the language or the toast handler changing must not restart it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildingJob, buildingUpload]);
+    const current = tileBuildMonitor.build;
+    if (current.state === "idle" || current.jobId !== buildingJob) return;
+    if (current.state === "active" && current.job) {
+      dispatch({ type: "buildProgress", upload: buildingUpload, jobId: buildingJob, job: current.job });
+    } else if (current.state === "done") {
+      dispatch({ type: "converted", upload: buildingUpload, filename: current.job.filename, notes: [...current.job.problems, ...current.job.warnings] });
+    } else if (current.state === "failed") {
+      const message = current.kind === "missing"
+        ? t("The server no longer has this vector tile build: it was restarted, or the build expired. Download again to start a new one.", "サーバーにこのベクタータイルの作成がありません。サーバーが再起動したか、期限が切れました。もう一度ダウンロードして作成し直してください。")
+        : t(`Vector tiles failed: ${current.reason}`, `ベクタータイルの作成に失敗しました: ${current.reason}`);
+      dispatch({ type: "convertFailed", upload: buildingUpload, message });
+    }
+  }, [buildingJob, buildingUpload, tileBuildMonitor.build, t]);
 
   // React has no prop for it; the folder picker is what keeps the folder layout on a click-browse.
   useEffect(() => {
@@ -260,6 +208,7 @@ export function ColorThemePage() {
           signal,
           onProgress: (percent) => dispatch({ type: "progress", upload, percent })
         });
+        tileBuildMonitor.start(job_id);
         dispatch({ type: "buildQueued", upload, jobId: job_id });
         return;
       }

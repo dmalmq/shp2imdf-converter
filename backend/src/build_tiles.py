@@ -272,7 +272,14 @@ def repair_sources(aprx, m, root: Path, tiled: set[str]) -> None:
     chosen = [layer for layer in still if _uri(layer) in tiled]
     if chosen:
         names = ", ".join(layer.longName for layer in chosen)
-        raise BuildFailed(f"{len(chosen)} layers have no data in the upload and would be left out of the tiles: {names}")
+        count = len(chosen)
+        label = "layer" if count == 1 else "layers"
+        possessive = "its" if count == 1 else "their"
+        source_label = "source" if count == 1 else "sources"
+        raise BuildFailed(
+            f"{count} selected {label} cannot read {possessive} data and would be left out of the tiles: {names}. "
+            f"Fix {possessive} data {source_label} in the ArcGIS project or deselect the affected {label} under Vector tiles, then try again."
+        )
     if still:
         warn("Broken but not chosen for tiling, so left out: " + ", ".join(layer.longName for layer in still))
     if moved:

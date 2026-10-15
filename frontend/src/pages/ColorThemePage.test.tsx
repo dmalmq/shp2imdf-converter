@@ -1,19 +1,23 @@
 import React from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import App from "../App";
 
 import {
   convertColorTheme,
   fetchColorTheme,
+  fetchProjects,
   fetchTileJob,
   fetchVectorTilesAvailability,
   inspectColorTheme,
   startTileBuild,
   type ColorThemeInspection,
+  type TileJobStatus,
   type VectorTilesAvailability
 } from "../api/client";
 import { ApiClientError } from "../api/errors";
 import { ToastProvider } from "../components/shared/ToastProvider";
+import { TileBuildNotice, TileBuildProvider } from "../components/colorTheme/TileBuildMonitor";
 import { AppShell } from "../components/shell/AppShell";
 import {
   colorThemeReport,
@@ -38,6 +42,7 @@ import { ColorThemePage } from "./ColorThemePage";
 vi.mock("../api/client", () => ({
   convertColorTheme: vi.fn(),
   fetchColorTheme: vi.fn(),
+  fetchProjects: vi.fn(),
   fetchTileJob: vi.fn(),
   fetchVectorTilesAvailability: vi.fn(),
   inspectColorTheme: vi.fn(),
@@ -56,10 +61,21 @@ function renderPage() {
   return render(
     <MemoryRouter initialEntries={["/color-theme"]}>
       <ToastProvider>
-        <AppShell>
-          <ColorThemePage />
-        </AppShell>
+        <TileBuildProvider>
+          <AppShell>
+            <TileBuildNotice />
+            <ColorThemePage />
+          </AppShell>
+        </TileBuildProvider>
       </ToastProvider>
+    </MemoryRouter>
+  );
+}
+
+function renderApp() {
+  return render(
+    <MemoryRouter initialEntries={["/color-theme"]}>
+      <App />
     </MemoryRouter>
   );
 }
@@ -85,8 +101,10 @@ let followed: string[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sessionStorage.clear();
   useAppStore.setState({ uiLanguage: "en" });
   vi.mocked(fetchColorTheme).mockResolvedValue(colorThemeReport());
+  vi.mocked(fetchProjects).mockResolvedValue({ projects: [], total: 0, limits: { sessions: { idle_days: 1, max_projects: 1 }, artwork: { idle_days: 1, max_projects: 1 } } });
   vi.mocked(inspectColorTheme).mockResolvedValue(tokyoInspection());
   vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(NOT_LICENSED);
   saved = [];
@@ -97,6 +115,88 @@ beforeEach(() => {
   });
   URL.createObjectURL = vi.fn(() => "blob:new-colors");
   URL.revokeObjectURL = vi.fn();
+});
+
+async function startVisibleTileBuild() {
+  vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
+  vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
+  vi.mocked(startTileBuild).mockResolvedValue({ job_id: "a1b2c3" });
+  const app = renderApp();
+  pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
+  await tickTilesKeepingDefaults();
+  fireEvent.click(within(screen.getByRole("region", { name: "Next step" })).getByRole("button", { name: "Download" }));
+  await waitFor(() => expect(fetchTileJob).toHaveBeenCalled());
+  return app;
+}
+
+test("a delayed vector tile failure remains visible after the usual toast lifetime", async () => {
+  const pending: { finish?: (job: TileJobStatus) => void } = {};
+  vi.mocked(fetchTileJob).mockImplementation(() => new Promise((resolve) => { pending.finish = resolve; }));
+  await startVisibleTileBuild();
+  vi.useFakeTimers();
+  act(() => vi.advanceTimersByTime(21_000));
+  vi.useRealTimers();
+  if (!pending.finish) throw new Error("The build was not polled");
+  await act(async () => pending.finish?.({ state: "failed", reason: "2F\\背景_グレー_2F is missing" }));
+  const notice = await screen.findByRole("alert", { name: "Download failed" });
+  expect(notice).toHaveTextContent("2F\\背景_グレー_2F is missing");
+  vi.useFakeTimers();
+  act(() => vi.advanceTimersByTime(21_000));
+  expect(screen.getByRole("alert", { name: "Download failed" })).toHaveTextContent("2F\\背景_グレー_2F is missing");
+  vi.useRealTimers();
+});
+
+test("the build keeps polling after navigation and its failure remains visible on return", async () => {
+  let finish: ((job: { state: "failed"; reason: string }) => void) | null = null;
+  vi.mocked(fetchTileJob).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  await startVisibleTileBuild();
+  fireEvent.click(screen.getByRole("link", { name: "shp2imdf, projects" }));
+  await screen.findByRole("button", { name: /Recolour a station/ });
+  if (finish === null) throw new Error("The build was not polled");
+  await act(async () => finish({ state: "failed", reason: "Layer missing after navigation" }));
+  expect(screen.getByRole("alert", { name: "Download failed" })).toHaveTextContent("Layer missing after navigation");
+  fireEvent.click(screen.getByRole("button", { name: /Recolour a station/ }));
+  expect(screen.getByRole("alert", { name: "Download failed" })).toHaveTextContent("Layer missing after navigation");
+});
+
+test("reloading while a build is active resumes its job and reports the result", async () => {
+  vi.mocked(fetchTileJob).mockImplementationOnce(() => new Promise(() => {}));
+  const app = await startVisibleTileBuild();
+  app.unmount();
+  vi.mocked(fetchTileJob).mockResolvedValue({ state: "failed", reason: "Layer missing after reload" });
+  renderApp();
+  await waitFor(() => expect(fetchTileJob).toHaveBeenCalledTimes(2));
+  expect(await screen.findByRole("alert", { name: "Download failed" })).toHaveTextContent("Layer missing after reload");
+});
+
+test("a finished build keeps its download link after reload without downloading twice", async () => {
+  vi.mocked(fetchTileJob).mockResolvedValue({ state: "done", filename: "shinjuku_new-colors.zip", warnings: [], problems: [] });
+  const app = await startVisibleTileBuild();
+  await waitFor(() => expect(saved).toEqual(["shinjuku_new-colors.zip"]));
+  app.unmount();
+  renderApp();
+  const notice = await screen.findByRole("status", { name: "Created shinjuku_new-colors.zip with vector tiles" });
+  expect(within(notice).getByRole("link", { name: "Download again" })).toHaveAttribute("href", "/api/color-theme/jobs/a1b2c3/download");
+  expect(saved).toEqual(["shinjuku_new-colors.zip"]);
+  expect(fetchTileJob).toHaveBeenCalledTimes(1);
+});
+
+test("a failed build remains visible after reload until dismissed", async () => {
+  vi.mocked(fetchTileJob).mockResolvedValue({ state: "failed", reason: "Layer missing after reload" });
+  const app = await startVisibleTileBuild();
+  await screen.findByRole("alert", { name: "Download failed" });
+  app.unmount();
+  renderApp();
+  expect(screen.getByRole("alert", { name: "Download failed" })).toHaveTextContent("Layer missing after reload");
+});
+
+test("a restarted server turns the remembered job into a dismissible explanation", async () => {
+  vi.mocked(fetchTileJob).mockRejectedValue(new ApiClientError(404, "TILE_JOB_NOT_FOUND", "not on the server"));
+  await startVisibleTileBuild();
+  const notice = await screen.findByRole("alert", { name: "Download failed" });
+  expect(notice).toHaveTextContent("The server no longer has this vector tile build");
+  fireEvent.click(within(notice).getByRole("button", { name: "Dismiss" }));
+  expect(screen.queryByRole("alert", { name: "Download failed" })).toBeNull();
 });
 
 test("shows the whole mapping before anything is uploaded", async () => {
@@ -824,17 +924,16 @@ test("a build the server no longer knows says so", async () => {
   await waitFor(() => expect(bar).toHaveTextContent("The server no longer has this vector tile build"));
 });
 
-/** The toast with this title, not the Next step bar, which can carry the same words. */
-const toastTitled = (title: string) =>
-  screen.queryAllByRole("status").find((element) => element.querySelector("p")?.textContent === title) ?? null;
+const noticeTitled = (title: string) =>
+  screen.queryByRole("alert", { name: title }) ?? screen.queryByRole("status", { name: title });
 
 const TOKYO_FAILURE = "1 layers have no data in the upload and would be left out of the tiles: 2F\\背景_グレー_2F";
 
-async function buildThatEndsWith(job: () => Promise<unknown>, language: "en" | "ja" = "en") {
+async function buildThatEndsWith(job: () => Promise<TileJobStatus>, language: "en" | "ja" = "en") {
   vi.mocked(fetchVectorTilesAvailability).mockResolvedValue(LICENSED);
   vi.mocked(inspectColorTheme).mockResolvedValue(shinjukuProjectInspection());
   vi.mocked(startTileBuild).mockResolvedValue({ job_id: "a1b2c3" });
-  vi.mocked(fetchTileJob).mockImplementation(job as typeof fetchTileJob);
+  vi.mocked(fetchTileJob).mockImplementation(job);
   renderPage();
   pickFolder([inFolder("shinjuku.aprx", "shinjuku")]);
   await tickTilesKeepingDefaults();
@@ -844,45 +943,47 @@ async function buildThatEndsWith(job: () => Promise<unknown>, language: "en" | "
   return bar;
 }
 
-test("a failed build raises an error toast with the worker's whole reason, and the bar says the download failed", async () => {
+test("a failed build shows the worker's whole reason in the global notice and the bar", async () => {
   const bar = await buildThatEndsWith(async () => ({ state: "failed", reason: TOKYO_FAILURE }));
 
-  await waitFor(() => expect(toastTitled("Download failed")).not.toBeNull());
-  expect(toastTitled("Download failed")).toHaveTextContent(`Vector tiles failed: ${TOKYO_FAILURE}`);
+  await waitFor(() => expect(noticeTitled("Download failed")).not.toBeNull());
+  expect(noticeTitled("Download failed")).toHaveTextContent(`Vector tiles failed: ${TOKYO_FAILURE}`);
   expect(bar).toHaveTextContent("Download failed");
   expect(bar).toHaveTextContent(`Vector tiles failed: ${TOKYO_FAILURE}`);
   expect(saved).toEqual([]);
 });
 
-test("in Japanese a failed build raises the toast in Japanese", async () => {
+test("in Japanese a failed build shows the global notice in Japanese", async () => {
   const bar = await buildThatEndsWith(async () => ({ state: "failed", reason: TOKYO_FAILURE }), "ja");
 
-  await waitFor(() => expect(toastTitled("ダウンロード失敗")).not.toBeNull());
-  expect(toastTitled("ダウンロード失敗")).toHaveTextContent(`ベクタータイルの作成に失敗しました: ${TOKYO_FAILURE}`);
+  await waitFor(() => expect(noticeTitled("ダウンロード失敗")).not.toBeNull());
+  expect(noticeTitled("ダウンロード失敗")).toHaveTextContent(`ベクタータイルの作成に失敗しました: ${TOKYO_FAILURE}`);
   expect(bar).toHaveTextContent("ダウンロード失敗");
 });
 
-test("a build the server no longer knows raises an error toast", async () => {
+test("a build the server no longer knows shows the global notice", async () => {
   await buildThatEndsWith(async () => {
     throw new ApiClientError(404, "TILE_JOB_NOT_FOUND", "not on the server");
   });
 
-  await waitFor(() => expect(toastTitled("Download failed")).not.toBeNull());
-  expect(toastTitled("Download failed")).toHaveTextContent("The server no longer has this vector tile build");
+  await waitFor(() => expect(noticeTitled("Download failed")).not.toBeNull());
+  expect(noticeTitled("Download failed")).toHaveTextContent("The server no longer has this vector tile build");
 });
 
-test("losing the server while following a build raises an error toast", async () => {
-  const bar = await buildThatEndsWith(async () => {
-    throw new TypeError("Failed to fetch");
+test("losing the server while following a build shows the interruption and retries", async () => {
+  let requests = 0;
+  await buildThatEndsWith(async () => {
+    requests += 1;
+    if (requests === 1) throw new TypeError("Failed to fetch");
+    return { state: "done", filename: "shinjuku_new-colors.zip", warnings: [], problems: [] };
   });
 
-  await waitFor(() => expect(toastTitled("Download failed")).not.toBeNull());
-  expect(toastTitled("Download failed")).toHaveTextContent("Failed to fetch");
-  expect(bar).toHaveTextContent("Failed to fetch");
-  expect(screen.queryAllByRole("status").filter((element) => element.textContent?.includes("Failed to fetch"))).toHaveLength(1);
+  await waitFor(() => expect(noticeTitled("Building vector tiles")).toHaveTextContent("Failed to fetch"));
+  await waitFor(() => expect(noticeTitled("Created shinjuku_new-colors.zip with vector tiles")).not.toBeNull(), { timeout: 2500 });
+  expect(saved).toEqual(["shinjuku_new-colors.zip"]);
 });
 
-test("a build whose checks found problems says so in its toast, not only in the list under Vector tiles", async () => {
+test("a build whose checks found problems says so in the global notice", async () => {
   await buildThatEndsWith(async () => ({
     state: "done",
     filename: "shinjuku_new-colors.zip",
@@ -890,10 +991,8 @@ test("a build whose checks found problems says so in its toast, not only in the 
     problems: ["missing zoom levels [21]", "no tiles at z18"]
   }));
 
-  await waitFor(() => expect(toastTitled("Created shinjuku_new-colors.zip with vector tiles")).not.toBeNull());
-  expect(toastTitled("Created shinjuku_new-colors.zip with vector tiles")).toHaveTextContent(
-    "the checks found 2 problems with the tiles, listed under Vector tiles"
-  );
+  await waitFor(() => expect(noticeTitled("Created shinjuku_new-colors.zip with vector tiles")).not.toBeNull());
+  expect(noticeTitled("Created shinjuku_new-colors.zip with vector tiles")).toHaveTextContent("tile checks found 2 problems");
 });
 
 test("ticked but unbuildable, Download is disabled with the reason and sends nothing until the box is unticked", async () => {
