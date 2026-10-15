@@ -276,6 +276,7 @@ function BroughtIn() {
   const [hovered, setHovered] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [guessing, setGuessing] = useState(false);
+  const [splitting, setSplitting] = useState(false);
 
   const loadFeatures = useCallback(async () => {
     if (!sessionId) return;
@@ -295,7 +296,20 @@ function BroughtIn() {
     // IMDF-schema files are taken as they are; nothing about them is a guess.
     return profile === "imdf_shapefile" ? { ...read, needsYou: [], looksRight: [...read.needsYou, ...read.looksRight] } : read;
   }, [files, profile]);
-  const step = projectNextStep(view, profile);
+  const canSplit = profile === "standard";
+  const nextStep = projectNextStep(view, profile);
+  const step: NextStep =
+    canSplit && splitting
+      ? {
+          ...nextStep,
+          title: { en: "Split into buildings", ja: "建物ごとに分割" },
+          detail: {
+            en: "Next: draw a shape over each building. Each one becomes its own project.",
+            ja: "次は建物ごとに図形を描きます。建物ごとに別のプロジェクトになります。"
+          },
+          action: { en: "Split into buildings", ja: "建物ごとに分割" }
+        }
+      : nextStep;
 
   const resolve = async (stem: string, payload: UpdateFileRequest) => {
     if (!sessionId) return;
@@ -349,7 +363,8 @@ function BroughtIn() {
   };
 
   const go = () => {
-    if (sessionId && !step.blocked && step.goes !== "import") navigate(projectPath(sessionId, step.goes));
+    if (!sessionId || step.blocked || step.goes === "import") return;
+    navigate(canSplit && splitting ? `${projectPath(sessionId, "bring-in")}/split` : projectPath(sessionId, step.goes));
   };
   const anchor = useNextAction(step, go, saving.size > 0);
   usePageShell({ bringInNeeds: view.needsYou.length });
@@ -415,6 +430,27 @@ function BroughtIn() {
                 {t("Dismiss", "閉じる")}
               </Button>
             </div>
+          ) : null}
+          {canSplit ? (
+            <label className="flex items-start gap-3 rounded-[10px] border border-border bg-card p-4 text-[13px]">
+              <input
+                type="checkbox"
+                className="mt-0.5 accent-primary"
+                checked={splitting}
+                onChange={(event) => setSplitting(event.target.checked)}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="font-medium text-foreground">
+                  {t("These files hold more than one building", "このファイルには複数の建物が含まれている")}
+                </span>
+                <span className="text-muted-foreground">
+                  {t(
+                    "Draw a shape over each building next, and make a separate project of each. This import stays as it is.",
+                    "次に建物ごとに図形を描き、それぞれを別のプロジェクトにします。この取り込みはそのまま残ります。"
+                  )}
+                </span>
+              </span>
+            </label>
           ) : null}
           <p className="text-[13px] text-muted-foreground">
             {t("Other files are a new project: ", "別のファイルは新しいプロジェクトになります：")}

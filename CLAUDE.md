@@ -95,6 +95,15 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   23 cm out. The cross-language golden fixture in `test_illustrator_georeference.py` and
   `similarity.test.ts` is what keeps the two implementations honest; if you change one, run
   both.
+- Splitting an import by building (`backend/src/split.py`, `/p/:id/bring-in/split`) is
+  opt-in: a Bring in checkbox, unticked by default, sends the operator there instead of Set
+  up. A feature goes to the drawn polygon holding its centroid, the Illustrator rule; shapes
+  may not overlap, and what falls outside every shape is reported, not dropped silently.
+  Each shape becomes a new standard project made through `create_session` from the filtered
+  source features and the parent's confirmed files, named by `SessionRecord.split_from`; the
+  parent is never written. Downstream (wizard, generator, validator) sees an ordinary
+  project, which is the point: keep it that way rather than teaching the generator about
+  buildings. IMDF-schema imports are not offered the split.
 - Illustrator multi-floor placement: assignment is by box on the artwork preview, membership
   is `centroid ∈ box` plus an optional layer restriction, re-verified server-side at export
   (the preview filter is display-only). Linked floors share scale/rotation; dragging a floor

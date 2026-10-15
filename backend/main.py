@@ -26,6 +26,7 @@ from backend.routers.handover_router import router as handover_router
 from backend.routers.import_router import router as import_router
 from backend.routers.projects_router import router as projects_router
 from backend.routers.reference_router import router as reference_router
+from backend.routers.split_router import router as split_router
 from backend.routers.wizard_router import router as wizard_router
 from backend.src.arcgis_pro import ArcpyProbe, find_arcpy_python
 from backend.src.color_theme import load_color_theme
@@ -296,6 +297,7 @@ app.include_router(export_router)
 app.include_router(projects_router)
 app.include_router(handover_router)
 app.include_router(color_theme_router)
+app.include_router(split_router)
 
 
 @app.get("/api/health")

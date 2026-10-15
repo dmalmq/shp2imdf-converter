@@ -410,6 +410,64 @@ class DeliveryRecord(BaseModel):
     blockers: int | None = None
 
 
+class SplitOrigin(BaseModel):
+    """Where a project split off by building came from."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    parent_session_id: str
+    name: str
+
+
+class SplitShape(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    # A GeoJSON Polygon in WGS84, as drawn on the map.
+    polygon: dict[str, Any]
+
+
+class SplitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shapes: list[SplitShape]
+
+
+class SplitShapeCounts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    total: int
+    # Features per source file stem; files with none are left out.
+    files: dict[str, int]
+
+
+class SplitPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shapes: list[SplitShapeCounts]
+    unassigned_total: int
+    unassigned: dict[str, int]
+    # The shape index each assigned feature goes to, keyed by source_feature_ref,
+    # which survives the multipart split that gives later parts new ids.
+    owners: dict[str, int]
+
+
+class SplitProject(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    name: str
+    feature_count: int
+
+
+class SplitResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    projects: list[SplitProject]
+    unassigned_total: int
+
+
 class SessionRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -436,6 +494,7 @@ class SessionRecord(BaseModel):
     validation_rev: int | None = None
     delivered: DeliveryRecord | None = None
     handover: Handover = Field(default_factory=Handover)
+    split_from: SplitOrigin | None = None
 
     @classmethod
     def from_stored(cls, payload: Any, dropped: list[str] | None = None) -> SessionRecord:

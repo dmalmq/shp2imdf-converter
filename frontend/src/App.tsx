@@ -9,7 +9,7 @@ import { COLOR_THEME_PATH } from "./components/shell/stages";
 import { ArtworkRoute } from "./pages/ArtworkRoute";
 import { ColorThemePage } from "./pages/ColorThemePage";
 import { HubPage } from "./pages/HubPage";
-import { LegacyStageRedirect, ProjectLayout, ProjectStage } from "./pages/ProjectRoutes";
+import { LegacyStageRedirect, ProjectLayout, ProjectStage, SplitStage } from "./pages/ProjectRoutes";
 import { TileViewerPage } from "./pages/TileViewerPage";
 import { UploadPage } from "./pages/UploadPage";
 
@@ -26,6 +26,7 @@ export default function App() {
               <Route path="/p/:sessionId" element={<ProjectLayout />}>
                 <Route index element={<ProjectStage />} />
                 <Route path=":stage" element={<ProjectStage />} />
+                <Route path="bring-in/split" element={<SplitStage />} />
               </Route>
               <Route path="/wizard" element={<LegacyStageRedirect stage="set-up" />} />
               <Route path="/review" element={<LegacyStageRedirect stage="check" />} />
