@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
-from backend.routers.common import attachment_response, max_upload_bytes, read_uploads
+from backend.routers.common import FORM_PARTS, attachment_response, max_upload_bytes, read_uploads
 from backend.src.arcgis_pro import ArcpyAvailable, ArcpyChecking, ArcpyProbe, ArcpyStatus
 from backend.src.color_theme import ColorTheme, ThemeReport, plan
 from backend.src.errors import ApiError, NotFoundError
@@ -42,11 +42,6 @@ from backend.src.tile_layers import (
 )
 
 router = APIRouter(prefix="/api/color-theme", tags=["color-theme"])
-
-# A station folder runs to about 500 files, each sent with its path, which is
-# already half of Starlette's default 1,000 files and 1,000 fields.
-_FORM_PARTS = 20_000
-
 
 def _theme(request: Request) -> ColorTheme:
     return request.app.state.color_theme
@@ -79,7 +74,7 @@ _FLAGS = {"true": True, "false": False}
 
 async def _station(request: Request) -> _Station:
     """``files`` parts with a ``paths`` part each, in the same order; paths may be left out for bare names."""
-    async with request.form(max_files=_FORM_PARTS, max_fields=_FORM_PARTS) as form:
+    async with request.form(max_files=FORM_PARTS, max_fields=FORM_PARTS) as form:
         files = form.getlist("files")
         paths = form.getlist("paths")
         if not all(isinstance(item, UploadFile) for item in files) or not all(isinstance(item, str) for item in paths):

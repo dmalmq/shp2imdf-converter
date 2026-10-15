@@ -73,6 +73,16 @@ def load_tile_exclusions(path: Path) -> TileExclusions:
 
 
 @dataclass(frozen=True, slots=True)
+class LayerSource:
+    """Where a feature layer reads its features: the workspace's last path segment and the dataset in it."""
+
+    database: str
+    """``JRShinjukuSta.gdb`` for a geodatabase, the folder's name for shapefiles."""
+    dataset: str
+    """A feature class name, or ``Space.shp``."""
+
+
+@dataclass(frozen=True, slots=True)
 class LayerNode:
     uri: str
     name: str
@@ -87,6 +97,8 @@ class LayerNode:
     tiled_by_default: bool
     """A layer: matched by no pattern, its own or a group's above it, and not drawing points. A group: any layer in it is."""
     children: tuple[LayerNode, ...]
+    source: LayerSource | None = None
+    """A layer's own data source; None for a group, a join, or a connection the CIM does not spell out."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,7 +245,7 @@ class _Reader:
             return None
         points = _symbol_types(doc.get("renderer")) == {"CIMPointSymbol"}
         tiled = excluded_by is None and inherited is None and not points
-        return LayerNode(uri, name, False, visible, excluded_by, points, tiled, ())
+        return LayerNode(uri, name, False, visible, excluded_by, points, tiled, (), _layer_source(doc))
 
 
 _SYMBOLS = frozenset({"CIMPointSymbol", "CIMLineSymbol", "CIMPolygonSymbol", "CIMMeshSymbol", "CIMTextSymbol"})
@@ -248,6 +260,22 @@ def _symbol_types(cim: Any) -> set[str]:
     if isinstance(cim, list):
         return set().union(*map(_symbol_types, cim))
     return set()
+
+
+def _layer_source(doc: dict[str, Any]) -> LayerSource | None:
+    table = doc.get("featureTable")
+    connection = table.get("dataConnection") if isinstance(table, dict) else None
+    if not isinstance(connection, dict):
+        return None
+    workspace, dataset = connection.get("workspaceConnectionString"), connection.get("dataset")
+    if not isinstance(workspace, str) or not isinstance(dataset, str) or not dataset:
+        return None
+    database = next(
+        (value for key, _, value in (part.partition("=") for part in workspace.split(";")) if key.strip().upper() == "DATABASE"),
+        "",
+    )
+    folder = database.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    return LayerSource(database=folder, dataset=dataset) if folder else None
 
 
 def _member(uri: Any) -> str:

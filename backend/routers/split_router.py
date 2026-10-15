@@ -8,8 +8,8 @@ from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 
 from backend.routers.common import get_session_or_raise, session_manager, session_uploads_dir
-from backend.src.schemas import SplitPreviewResponse, SplitProject, SplitRequest, SplitResponse
-from backend.src.split import preview_split, source_collection, split_session
+from backend.src.schemas import LayerGroupsResponse, SplitPreviewResponse, SplitProject, SplitRequest, SplitResponse
+from backend.src.split import layer_groups, preview_split, source_collection, split_session
 
 router = APIRouter(prefix="/api/session/{session_id}", tags=["split"])
 
@@ -23,9 +23,14 @@ def features(session_id: str, request: Request) -> dict[str, Any]:
     return source_collection(get_session_or_raise(session_id, request))
 
 
+@router.get("/split/groups", response_model=LayerGroupsResponse)
+def groups(session_id: str, request: Request) -> LayerGroupsResponse:
+    return LayerGroupsResponse(groups=layer_groups(get_session_or_raise(session_id, request)))
+
+
 @router.post("/split/preview", response_model=SplitPreviewResponse)
 def preview(session_id: str, payload: SplitRequest, request: Request) -> SplitPreviewResponse:
-    return preview_split(source_collection(get_session_or_raise(session_id, request)), payload.shapes)
+    return preview_split(get_session_or_raise(session_id, request), payload.shapes)
 
 
 @router.post("/split", response_model=SplitResponse, status_code=201)

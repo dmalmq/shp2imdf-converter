@@ -103,12 +103,23 @@ describe("shapefile import upload", () => {
     const request = lastRequest();
     expect([request.method, request.url]).toEqual(["POST", "/api/import"]);
     expect((request.body as FormData).getAll("files")).toEqual(files);
+    expect((request.body as FormData).getAll("paths")).toEqual(["JRTokyoSta_1_Space.shp", "JRTokyoSta_1_Space.dbf"]);
     request.upload.onprogress?.({ lengthComputable: true, loaded: 1, total: 3 });
     request.upload.onprogress?.({ lengthComputable: false, loaded: 2, total: 0 });
     request.respond(200, JSON.stringify(imported));
 
     await expect(pending).resolves.toEqual(imported);
     expect(progress).toEqual([33]);
+  });
+
+  it("sends each file's path inside a dropped folder, so a .gdb arrives whole", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeRequest);
+    const table = new File(["t"], "a00000001.gdbtable");
+    Object.defineProperty(table, "webkitRelativePath", { value: "Shinjuku/JRShinjukuSta.gdb/a00000001.gdbtable" });
+
+    void importShapefiles([table]);
+
+    expect((lastRequest().body as FormData).getAll("paths")).toEqual(["Shinjuku/JRShinjukuSta.gdb/a00000001.gdbtable"]);
   });
 
   it("rejects with the server's detail and code, so the toast says what went wrong", async () => {

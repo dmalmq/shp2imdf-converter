@@ -1,5 +1,5 @@
 import type { ImportedFile } from "../api/client";
-import { bringInView, floorChoices, floorLabel, queueNextStep, queuedDatasets, toRow } from "./bringIn";
+import { addToQueue, bringInView, floorChoices, floorLabel, isAccepted, queueNextStep, queuedDatasets, toRow } from "./bringIn";
 
 function file(stem: string, overrides: Partial<ImportedFile> = {}): ImportedFile {
   return {
@@ -75,4 +75,45 @@ test("parts without a .shp are passed over, and do not hold up the import", () =
   expect(datasets.find((dataset) => dataset.name === "Stray")).toMatchObject({ skipped: true, missing: [] });
   expect(queueNextStep(datasets, "standard")).toMatchObject({ blocked: null, title: { en: "1 file ready to read" } });
   expect(queueNextStep(queuedDatasets([named("Stray.cpg")]), "standard").blocked).not.toBeNull();
+});
+
+/** A file the way a folder drop or a folder picker hands it over, with its path inside the folder. */
+const inFolder = (path: string) => {
+  const file = new File(["x"], path.split("/").pop() ?? path);
+  Object.defineProperty(file, "webkitRelativePath", { value: path });
+  return file;
+};
+
+test("a .gdb folder queues as one geodatabase without its lock files, and a project rides along", () => {
+  const dropped = [
+    "Shinjuku/JRShinjukuSta.gdb/a00000001.gdbtable",
+    "Shinjuku/JRShinjukuSta.gdb/a00000001.gdbtablx",
+    "Shinjuku/JRShinjukuSta.gdb/gdb",
+    "Shinjuku/JRShinjukuSta.gdb/a00000009.gdbtable.sr.lock",
+    "Shinjuku/Shinjuku.aprx",
+    "Shinjuku/ラベル.xlsx"
+  ].map(inFolder);
+  const accepted = dropped.filter(isAccepted);
+  expect(accepted.map((file) => file.name)).toEqual(["a00000001.gdbtable", "a00000001.gdbtablx", "gdb", "Shinjuku.aprx"]);
+
+  const datasets = queuedDatasets(accepted);
+  expect(datasets.map(({ name, kind }) => ({ name, kind }))).toEqual([
+    { name: "JRShinjukuSta.gdb", kind: "gdb" },
+    { name: "Shinjuku.aprx", kind: "project" }
+  ]);
+  expect(queueNextStep(datasets, "standard")).toMatchObject({ blocked: null, title: { en: "1 file ready to read" } });
+  expect(queueNextStep(datasets, "imdf_shapefile").blocked?.en).toMatch(/not GeoPackages or geodatabases/);
+});
+
+test("a project alone has nothing to read", () => {
+  expect(queueNextStep(queuedDatasets([named("Shinjuku.aprx")]), "standard").blocked).not.toBeNull();
+});
+
+test("two geodatabases with the same table names stay apart in the queue", () => {
+  const queued = addToQueue(
+    [inFolder("A.gdb/a00000001.gdbtable")],
+    [inFolder("B.gdb/a00000001.gdbtable"), inFolder("A.gdb/a00000001.gdbtable")]
+  );
+  expect(queued.map((file) => file.webkitRelativePath)).toEqual(["B.gdb/a00000001.gdbtable", "A.gdb/a00000001.gdbtable"]);
+  expect(queuedDatasets(queued).map((dataset) => dataset.name)).toEqual(["A.gdb", "B.gdb"]);
 });

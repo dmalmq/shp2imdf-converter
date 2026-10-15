@@ -27,6 +27,7 @@ import pyogrio
 from backend.src.dbf_table import cpg_codec, record_text, sniff_codec
 from backend.src.detector import detect_files, load_keyword_map
 from backend.src.schemas import CleanupSummary, DroppedRow, ImportedFile
+from backend.src.upload_tree import gdb_root, is_gdb_lock_file, tree_path
 
 # dropped_rows is a sample; empty_features_dropped and other counts stay authoritative.
 DROPPED_ROWS_SAMPLE_LIMIT = 50
@@ -83,6 +84,8 @@ class LoadedSource:
     # Features in the file itself. The bbox pushdown can leave ``gdf`` with a
     # subset, so the display layer counts against the file, not the read.
     source_feature_count: int | None = None
+    source_container: str | None = None
+    feature_dataset: str | None = None
 
 
 # Enough records to see the text; a regional extract's DBF runs to hundreds of MB.
@@ -158,11 +161,12 @@ def flatten_member_paths(paths: Sequence[str]) -> list[str]:
     return flat
 
 
-def _expand_archives(
+def _expand_archive_members(
     file_blobs: Sequence[tuple[str, bytes]],
     *,
     skip_dbf_stems: frozenset[str] = frozenset(),
 ) -> list[tuple[str, bytes]]:
+    """Every file, with each zip's members under a folder named after the zip; paths are kept."""
     expanded: list[tuple[str, bytes]] = []
     skipped = {stem.lower() for stem in skip_dbf_stems}
     for name, content in file_blobs:
@@ -183,8 +187,48 @@ def _expand_archives(
         if suffix == ".dbf" and stem in skipped:
             continue
         expanded.append((name, content))
-    flat_names = flatten_member_paths([name for name, _ in expanded])
-    return [(flat_name, content) for flat_name, (_, content) in zip(flat_names, expanded)]
+    return expanded
+
+
+def _flattened(blobs: Sequence[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
+    flat_names = flatten_member_paths([name for name, _ in blobs])
+    return [(flat_name, content) for flat_name, (_, content) in zip(flat_names, blobs)]
+
+
+def _expand_archives(
+    file_blobs: Sequence[tuple[str, bytes]],
+    *,
+    skip_dbf_stems: frozenset[str] = frozenset(),
+) -> list[tuple[str, bytes]]:
+    return _flattened(_expand_archive_members(file_blobs, skip_dbf_stems=skip_dbf_stems))
+
+
+def _split_geodatabases(
+    blobs: Sequence[tuple[str, bytes]],
+) -> tuple[dict[str, list[tuple[str, bytes]]], list[tuple[str, bytes]]]:
+    """Files inside a ``*.gdb`` folder, by that folder and relative to it, and everything else.
+
+    A geodatabase's files mean something only together and under their own
+    names, so they never go through ``flatten_member_paths``. Stale lock files
+    are left out, as the colour tool leaves them out.
+    """
+    geodatabases: dict[str, list[tuple[str, bytes]]] = {}
+    rest: list[tuple[str, bytes]] = []
+    for name, content in blobs:
+        path = tree_path(name)
+        root = gdb_root(path)
+        if root is None:
+            rest.append((name, content))
+        elif not is_gdb_lock_file(path):
+            geodatabases.setdefault(root, []).append((path[len(root) + 1 :], content))
+    return geodatabases, rest
+
+
+def stored_upload_layout(file_blobs: Sequence[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
+    """The upload as a session keeps it: shapefile parts under the flat names the import gave them, geodatabases whole."""
+    geodatabases, rest = _split_geodatabases(_expand_archive_members(file_blobs))
+    kept = [(f"{root}/{relative}", content) for root, members in geodatabases.items() for relative, content in members]
+    return _flattened(rest) + kept
 
 
 def _group_shapefile_components(file_blobs: Sequence[tuple[str, bytes]]) -> dict[str, dict[str, bytes]]:
@@ -233,6 +277,9 @@ def _close_ring(coords: list[tuple[float, float]], summary: CleanupSummary) -> l
 
 
 def _normalize_polygon(polygon: Polygon, summary: CleanupSummary) -> Polygon:
+    # A geodatabase multipolygon can carry an empty part; _clean_geometry drops it.
+    if polygon.is_empty:
+        return polygon
     exterior = _close_ring(list(polygon.exterior.coords), summary)
     interiors = [_close_ring(list(ring.coords), summary) for ring in polygon.interiors]
     rebuilt = Polygon(exterior, interiors)
@@ -759,6 +806,110 @@ def _read_geopackage_blob(
     return loaded_sources, warnings
 
 
+def _gdb_layer_stem(name: str) -> str:
+    """Detection reads the stem, so Japanese feature class names keep their words."""
+    return re.sub(r"[^\w]+", "_", name.strip(), flags=re.UNICODE).strip("_") or "layer"
+
+
+def _feature_datasets(path: Path) -> dict[str, str]:
+    """Feature class name (casefolded) to the feature dataset holding it, from the ``GDB_Items`` system table.
+
+    A geodatabase that will not show it gives no groups rather than failing the import.
+    """
+    try:
+        items = pyogrio.read_dataframe(path, layer="GDB_Items", read_geometry=False, columns=["Name", "Path"])
+    except Exception:
+        return {}
+    datasets: dict[str, str] = {}
+    for name, item_path in zip(items["Name"], items["Path"]):
+        parts = [part for part in str(item_path or "").split("\\") if part]
+        if len(parts) == 2 and name:
+            datasets[str(name).casefold()] = parts[0]
+    return datasets
+
+
+def _table_files(path: Path) -> dict[str, Path]:
+    """Table name (casefolded) to its ``.gdbtable`` file: row N of ``GDB_SystemCatalog`` is ``a<N in hex>.gdbtable``.
+
+    OpenFileGDB opens one table file on its own. Opening the geodatabase reads
+    every table's header instead, which on Shinjuku's 266 feature classes made
+    the import take minutes rather than seconds.
+    """
+    try:
+        catalog = pyogrio.read_dataframe(
+            path, layer="GDB_SystemCatalog", read_geometry=False, columns=["Name"], fid_as_index=True
+        )
+    except Exception:
+        return {}
+    files = {str(name).casefold(): path / f"a{int(fid):08x}.gdbtable" for fid, name in zip(catalog.index, catalog["Name"])}
+    return {name: file for name, file in files.items() if file.is_file()}
+
+
+def _read_geodatabase(
+    root: str,
+    members: Sequence[tuple[str, bytes]],
+    used_stems: set[str],
+) -> tuple[list[LoadedSource], list[str]]:
+    """Each feature class of one ``*.gdb`` folder, read through GDAL's OpenFileGDB driver.
+
+    Only reading is needed, which pyogrio does; the osgeo worker in ``gdb.py``
+    exists because pyogrio cannot update a geodatabase. A stem is the feature
+    class name, prefixed with the geodatabase's when another file has it.
+    """
+    container = PurePosixPath(root).name
+    gdb_stem = _sanitize_layer_name(PurePosixPath(root).stem)
+    loaded_sources: list[LoadedSource] = []
+    warnings: list[str] = []
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        directory = Path(tmpdir) / "upload.gdb"
+        for relative, content in members:
+            target = directory / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        try:
+            layers = pyogrio.list_layers(directory)
+        except Exception as error:
+            raise ValueError(f"{container} is not a readable File Geodatabase: {error}") from error
+        datasets = _feature_datasets(directory)
+        table_files = _table_files(directory)
+        tables = 0
+        for layer_name, geometry_type in layers:
+            layer_name = str(layer_name)
+            if not geometry_type:
+                tables += 1
+                continue
+            stem = _gdb_layer_stem(layer_name)
+            if stem.lower() in used_stems:
+                stem = f"{gdb_stem}__{stem}"
+            stem = _make_unique_stem(stem, used_stems)
+            table = table_files.get(layer_name.casefold())
+            if table is None:
+                gdf = gpd.read_file(directory, layer=layer_name, engine="pyogrio")
+            else:
+                gdf = gpd.read_file(table, engine="pyogrio")
+            gdf, layer_warnings, crs_detected = _reproject_to_wgs84(
+                gdf,
+                missing_crs_warning=f"{container}: feature class '{layer_name}' is missing CRS metadata.",
+            )
+            loaded_sources.append(
+                LoadedSource(
+                    stem=stem,
+                    source_format="gdb",
+                    source_layer=layer_name,
+                    gdf=gdf,
+                    warnings=layer_warnings,
+                    crs_detected=crs_detected,
+                    source_container=container,
+                    feature_dataset=datasets.get(layer_name.casefold()),
+                )
+            )
+        if tables:
+            warnings.append(f"{container}: skipped {tables} table(s) without geometry.")
+        if not loaded_sources:
+            warnings.append(f"{container}: no feature classes with geometry.")
+    return loaded_sources, warnings
+
+
 @dataclass(slots=True)
 class ReferenceLayer:
     """Display-only overlay geometry, in WGS84, for the placement map."""
@@ -937,11 +1088,12 @@ def import_file_blobs(
     if not file_blobs:
         raise ValueError("No files provided.")
 
-    expanded = _expand_archives(file_blobs)
+    geodatabases, expanded = _split_geodatabases(_expand_archive_members(file_blobs))
+    expanded = _flattened(expanded)
     shapefile_groups = _group_shapefile_components(expanded)
     geopackages = _collect_geopackage_blobs(expanded)
-    if not shapefile_groups and not geopackages:
-        raise ValueError("No shapefile components or GeoPackages found in upload.")
+    if not shapefile_groups and not geopackages and not geodatabases:
+        raise ValueError("No shapefile components, GeoPackages or File Geodatabases found in upload.")
 
     summary = CleanupSummary()
     warnings: list[str] = []
@@ -960,6 +1112,11 @@ def import_file_blobs(
         package_sources, package_warnings = _read_geopackage_blob(package_stem, content, used_stems)
         loaded_sources.extend(package_sources)
         warnings.extend(package_warnings)
+
+    for root, members in sorted(geodatabases.items()):
+        gdb_sources, gdb_warnings = _read_geodatabase(root, members, used_stems)
+        loaded_sources.extend(gdb_sources)
+        warnings.extend(gdb_warnings)
 
     if not loaded_sources:
         raise ValueError("No spatial data layers found in upload.")
@@ -980,6 +1137,8 @@ def import_file_blobs(
                 attribute_columns=columns,
                 source_format=loaded_source.source_format,
                 source_layer=loaded_source.source_layer,
+                source_container=loaded_source.source_container,
+                feature_dataset=loaded_source.feature_dataset,
                 crs_detected=loaded_source.crs_detected,
                 warnings=loaded_source.warnings,
             )

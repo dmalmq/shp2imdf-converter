@@ -38,6 +38,11 @@ def max_upload_bytes(request: Request) -> int:
     return int(getattr(request.app.state, "max_upload_bytes", 1024 * 1024 * 1024))
 
 
+# A station folder runs to about 500 files and a geodatabase to thousands (Shinjuku's
+# is 1,361), each sent with its path; Starlette's default is 1,000 files and 1,000 fields.
+FORM_PARTS = 20_000
+
+
 async def read_uploads(
     request: Request,
     files: Sequence[UploadFile],

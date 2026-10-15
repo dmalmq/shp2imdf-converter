@@ -1,8 +1,15 @@
 """Split one brought-in import into a project per building.
 
-A source row belongs to the drawn shape that contains its centroid, the same
-rule the Illustrator floor boxes use. Shapes may not overlap, so a row has at
-most one owner; rows outside every shape stay behind.
+A building is a drawn shape, a set of picked files, or both. A source row of
+a picked file goes to the building that picked it, and a file may be picked
+by one building only. Any other row belongs to the drawn shape that contains
+its centroid, the same rule the Illustrator floor boxes use. Shapes may not
+overlap, so a row has at most one owner; rows that go to no building stay
+behind. A row is assigned whole, all its parts together.
+
+Files are picked one by one or by group: a geodatabase's feature datasets,
+and the group layers of an ``.aprx`` that came with the import, read from
+its CIM without arcpy and matched to the import's files by data source.
 """
 
 from __future__ import annotations
@@ -10,6 +17,7 @@ from __future__ import annotations
 import copy
 import shutil
 from collections import Counter
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,6 +30,8 @@ from shapely.prepared import prep
 from backend.src.detector import sync_feature_types
 from backend.src.importer import rebuild_normalized_feature_collection
 from backend.src.schemas import (
+    ImportedFile,
+    LayerGroup,
     SessionRecord,
     SplitOrigin,
     SplitPreviewResponse,
@@ -29,6 +39,8 @@ from backend.src.schemas import (
     SplitShapeCounts,
 )
 from backend.src.session import SessionManager
+from backend.src.tile_layers import NO_EXCLUSIONS, LayerNode, LayerSource, ProjectMaps, read_project_layers, walk
+from backend.src.upload_tree import gdb_root
 
 
 @dataclass(frozen=True)
@@ -39,17 +51,23 @@ class SplitAssignment:
     unassigned: list[dict[str, Any]]
 
 
-def _parse_shapes(shapes: list[SplitShape]) -> list[BaseGeometry]:
+def _parse_shapes(shapes: list[SplitShape], stems: Collection[str]) -> tuple[list[BaseGeometry | None], dict[str, int]]:
+    """Each building's polygon, None for one defined by files alone, and the building each picked file goes to."""
     if not shapes:
-        raise ValueError("Draw at least one building to split by.")
+        raise ValueError("Draw or pick at least one building to split by.")
     names = [item.name.strip() for item in shapes]
     if any(not name for name in names):
         raise ValueError("Every building needs a name.")
     if len(set(names)) != len(names):
         raise ValueError("Building names must be different from each other.")
 
-    polygons: list[BaseGeometry] = []
+    polygons: list[BaseGeometry | None] = []
     for name, item in zip(names, shapes):
+        if item.polygon is None:
+            if not item.files:
+                raise ValueError(f"“{name}” has neither a shape nor picked layers.")
+            polygons.append(None)
+            continue
         if item.polygon.get("type") != "Polygon":
             raise ValueError(f"“{name}” is not a polygon.")
         try:
@@ -60,11 +78,22 @@ def _parse_shapes(shapes: list[SplitShape]) -> list[BaseGeometry]:
             raise ValueError(f"“{name}” has no area; draw at least three corners.")
         polygons.append(polygon)
 
-    for i, first in enumerate(polygons):
-        for j in range(i + 1, len(polygons)):
-            if first.intersection(polygons[j]).area > 0:
+    drawn = [(index, polygon) for index, polygon in enumerate(polygons) if polygon is not None]
+    for position, (i, first) in enumerate(drawn):
+        for j, second in drawn[position + 1 :]:
+            if first.intersection(second).area > 0:
                 raise ValueError(f"“{names[i]}” and “{names[j]}” overlap; a feature can only go to one building.")
-    return polygons
+
+    known = set(stems)
+    picked: dict[str, int] = {}
+    for index, item in enumerate(shapes):
+        for stem in item.files:
+            if stem not in known:
+                raise ValueError(f"“{names[index]}” picks {stem}, which is not a file of this import.")
+            owner = picked.setdefault(stem, index)
+            if owner != index:
+                raise ValueError(f"{stem} is picked by both “{names[owner]}” and “{names[index]}”; a file can only go to one building.")
+    return polygons, picked
 
 
 def _row_key(feature: dict[str, Any], index: int) -> tuple[Any, ...]:
@@ -88,24 +117,27 @@ def _centroid(features: list[dict[str, Any]]) -> BaseGeometry | None:
     return None if centroid.is_empty else centroid
 
 
-def assign_features(source_collection: dict[str, Any], shapes: list[SplitShape]) -> SplitAssignment:
-    """Assign each source row, with all its parts, to the shape holding the row's centroid.
+def assign_features(
+    source_collection: dict[str, Any], shapes: list[SplitShape], stems: Collection[str]
+) -> SplitAssignment:
+    """Assign each source row, with all its parts: to the building that picked its file, else to the shape holding its centroid.
 
     The importer turns a multipart row into one feature per part; a row is kept
     whole so the round-trip shapefile export can give each building whole rows.
+    ``stems`` are the import's files, which picks must name.
     """
-    polygons = [prep(polygon) for polygon in _parse_shapes(shapes)]
+    parsed, picked = _parse_shapes(shapes, stems)
+    polygons = [(index, prep(polygon)) for index, polygon in enumerate(parsed) if polygon is not None]
     rows: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
     for index, feature in enumerate(source_collection.get("features") or []):
         rows.setdefault(_row_key(feature, index), []).append(feature)
 
-    buckets: list[list[dict[str, Any]]] = [[] for _ in polygons]
+    buckets: list[list[dict[str, Any]]] = [[] for _ in shapes]
     unassigned: list[dict[str, Any]] = []
     for parts in rows.values():
-        centroid = _centroid(parts)
-        owner = None
-        if centroid is not None:
-            owner = next((index for index, polygon in enumerate(polygons) if polygon.covers(centroid)), None)
+        owner = picked.get(str((parts[0].get("properties") or {}).get("source_file") or ""))
+        if owner is None and polygons and (centroid := _centroid(parts)) is not None:
+            owner = next((index for index, polygon in polygons if polygon.covers(centroid)), None)
         (buckets[owner] if owner is not None else unassigned).extend(parts)
     return SplitAssignment(names=[item.name.strip() for item in shapes], features=buckets, unassigned=unassigned)
 
@@ -115,8 +147,8 @@ def _counts_by_file(features: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
-def preview_split(source_collection: dict[str, Any], shapes: list[SplitShape]) -> SplitPreviewResponse:
-    assignment = assign_features(source_collection, shapes)
+def preview_split(record: SessionRecord, shapes: list[SplitShape]) -> SplitPreviewResponse:
+    assignment = assign_features(source_collection(record), shapes, [item.stem for item in record.files])
     return SplitPreviewResponse(
         shapes=[
             SplitShapeCounts(name=name, total=len(features), files=_counts_by_file(features))
@@ -200,11 +232,11 @@ def split_session(
     The parent is read, never changed.
     """
     if parent.import_profile != "standard":
-        raise ValueError("Only a shapefile or GeoPackage import can be split by building.")
-    assignment = assign_features(source_collection(parent), shapes)
+        raise ValueError("Only a shapefile, GeoPackage or geodatabase import can be split by building.")
+    assignment = assign_features(source_collection(parent), shapes, [item.stem for item in parent.files])
     empty = [name for name, features in zip(assignment.names, assignment.features) if not features]
     if empty:
-        raise ValueError(f"No features fall inside: {', '.join(empty)}.")
+        raise ValueError(f"No features go to: {', '.join(empty)}.")
 
     children: list[SessionRecord] = []
     try:
@@ -216,3 +248,74 @@ def split_session(
             manager.delete_session(child)
         raise
     return children, len(assignment.unassigned)
+
+
+def layer_groups(record: SessionRecord) -> list[LayerGroup]:
+    """The import's feature datasets, then the project's group layers."""
+    datasets: dict[tuple[str, str], list[str]] = {}
+    for item in record.files:
+        if item.feature_dataset:
+            datasets.setdefault((item.source_container or "", item.feature_dataset), []).append(item.stem)
+    containers = {container for container, _ in datasets}
+    return [
+        LayerGroup(
+            id=f"feature_dataset:{container}/{name}",
+            name=f"{container} › {name}" if len(containers) > 1 else name,
+            kind="feature_dataset",
+            stems=stems,
+        )
+        for (container, name), stems in sorted(datasets.items())
+    ] + list(record.project_groups)
+
+
+def project_groups(blobs: Sequence[tuple[str, bytes]], files: Sequence[ImportedFile], *, max_bytes: int) -> list[LayerGroup]:
+    """Every group layer of every map in the upload's ``.aprx`` files that holds a layer drawn from one of ``files``.
+
+    A project that cannot be read gives no groups; the import does not need it.
+    """
+    maps = [
+        the_map
+        for name, content in blobs
+        if name.lower().endswith(".aprx") and gdb_root(name.replace("\\", "/")) is None
+        and isinstance(project := read_project_layers(content, NO_EXCLUSIONS, max_bytes=max_bytes), ProjectMaps)
+        for the_map in project.maps
+    ]
+    found: list[tuple[str, str, str, list[str]]] = []
+    for the_map in maps:
+        for node, long_name in walk(the_map.layers):
+            if not node.group:
+                continue
+            stems = list(dict.fromkeys(stem for layer in _layers_in(node) if (stem := _file_of(layer.source, files))))
+            if stems:
+                found.append((the_map.name, f"project_group:{the_map.id}:{node.uri}", long_name, stems))
+    several_maps = len({map_name for map_name, *_ in found}) > 1
+    return [
+        LayerGroup(
+            id=group_id,
+            name=" › ".join(([map_name] if several_maps else []) + long_name.split("\\")),
+            kind="project_group",
+            stems=stems,
+        )
+        for map_name, group_id, long_name, stems in found
+    ]
+
+
+def _layers_in(node: LayerNode) -> list[LayerNode]:
+    return [layer for child in node.children for layer in (_layers_in(child) if child.group else [child])]
+
+
+def _file_of(source: LayerSource | None, files: Sequence[ImportedFile]) -> str | None:
+    """The import's file a layer draws: the same feature class of a geodatabase of the same name, else the shapefile of that name."""
+    if source is None:
+        return None
+    dataset = source.dataset.casefold()
+    for item in files:
+        if (
+            item.source_format == "gdb"
+            and (item.source_layer or "").casefold() == dataset
+            and (item.source_container or "").casefold() == source.database.casefold()
+        ):
+            return item.stem
+    shapefile = dataset.removesuffix(".shp")
+    matches = [item for item in files if item.source_format == "shapefile" and item.stem.casefold() == shapefile]
+    return matches[0].stem if len(matches) == 1 else None

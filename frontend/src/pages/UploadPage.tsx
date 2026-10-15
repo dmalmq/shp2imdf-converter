@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useDropzone } from "react-dropzone";
 import { Link, useNavigate } from "react-router-dom";
+import { FolderOpen } from "lucide-react";
 
 import {
   detectAllFiles,
@@ -23,6 +24,7 @@ import { useDroppedFiles } from "../hooks/useDroppedFiles";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import {
   ACCEPTED_EXTENSIONS,
+  ACCEPTED_LABELS,
   TYPE_LABELS,
   addToQueue,
   bringInView,
@@ -37,12 +39,6 @@ import {
 import { useAppStore, useSessionAction, type ImportProfile } from "../store/useAppStore";
 import { cn } from "@/lib/utils";
 
-const DROPZONE_ACCEPT = {
-  "application/octet-stream": [".shp", ".dbf", ".shx", ".prj", ".cpg", ".qix"],
-  "application/geopackage+sqlite3": [".gpkg"],
-  "application/x-sqlite3": [".gpkg"],
-  "application/zip": [".zip"]
-} as const;
 
 type UploadPageProps = {
   /** A project's Bring in, showing what was read. Otherwise `/p/new`, which starts from no project. */
@@ -142,18 +138,23 @@ function NewBringIn() {
       pushToast({
         title: t("Some files were left out", "一部のファイルを除外しました"),
         description: t(
-          `${skipped} file(s) are not shapefile parts, GeoPackages or zip archives.`,
-          `${skipped} 件はシェープファイルの構成ファイル・GeoPackage・zip ではありません。`
+          `${skipped} file(s) are not shapefile parts, GeoPackages, geodatabase files, projects or zip archives.`,
+          `${skipped} 件はシェープファイルの構成ファイル・GeoPackage・ジオデータベース・プロジェクト・zip ではありません。`
         ),
         variant: "info"
       });
     }
   };
+  // No accept filter: a .gdb folder's files have no extension to list. isAccepted sorts the drop instead.
   const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop,
-    multiple: true,
-    accept: DROPZONE_ACCEPT
+    multiple: true
   });
+  const folderInput = useRef<HTMLInputElement>(null);
+  // React has no prop for it; the folder picker is what keeps a .gdb's layout on a click-browse.
+  useEffect(() => {
+    if (folderInput.current) folderInput.current.webkitdirectory = true;
+  }, []);
 
   const datasets = useMemo(() => queuedDatasets(queued), [queued]);
   const step = queueNextStep(datasets, profile);
@@ -210,13 +211,30 @@ function NewBringIn() {
               isDragActive ? "border-primary bg-accent" : "border-input bg-card hover:border-primary/50"
             )}
           >
-            <input {...getInputProps()} />
+            <input {...getInputProps({ accept: ACCEPTED_EXTENSIONS.join(",") })} />
             <p className="text-sm font-medium text-foreground">
               {isDragActive
                 ? t("Drop to add them", "ドロップして追加")
-                : t("Drop files here or click to browse", "ファイルをドロップまたはクリックして選択")}
+                : t("Drop files or folders here, or click to browse", "ファイルやフォルダをドロップ、またはクリックして選択")}
             </p>
-            <p className="font-mono text-xs text-muted-foreground">{ACCEPTED_EXTENSIONS.join(" ")}</p>
+            <p className="font-mono text-xs text-muted-foreground">{ACCEPTED_LABELS.join(" ")}</p>
+          </div>
+          <div>
+            <Button variant="outline" size="sm" onClick={() => folderInput.current?.click()}>
+              <FolderOpen aria-hidden="true" />
+              {t("Choose a folder (.gdb)", "フォルダを選択（.gdb）")}
+            </Button>
+            <input
+              ref={folderInput}
+              type="file"
+              multiple
+              className="hidden"
+              data-testid="bring-in-folder-input"
+              onChange={(event) => {
+                onDrop(Array.from(event.target.files ?? []), []);
+                event.target.value = "";
+              }}
+            />
           </div>
           {datasets.length > 0 ? (
             <QueuedTable

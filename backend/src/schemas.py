@@ -75,8 +75,11 @@ class ImportedFile(BaseModel):
     geometry_type: str
     feature_count: int
     attribute_columns: list[str]
-    source_format: Literal["shapefile", "gpkg"] = "shapefile"
+    source_format: Literal["shapefile", "gpkg", "gdb"] = "shapefile"
     source_layer: str | None = None
+    # The *.gdb folder a feature class came from, and the feature dataset holding it.
+    source_container: str | None = None
+    feature_dataset: str | None = None
     detected_type: str | None = None
     detected_level: int | None = None
     level_name: str | None = None
@@ -420,11 +423,32 @@ class SplitOrigin(BaseModel):
 
 
 class SplitShape(BaseModel):
+    """One building: a drawn shape, picked files, or both."""
+
     model_config = ConfigDict(extra="forbid")
 
     name: str
     # A GeoJSON Polygon in WGS84, as drawn on the map.
-    polygon: dict[str, Any]
+    polygon: dict[str, Any] | None = None
+    # File stems picked for this building, from layers or groups; every feature in them goes to it.
+    files: list[str] = Field(default_factory=list)
+
+
+class LayerGroup(BaseModel):
+    """Files that belong together in the source: a geodatabase feature dataset or a group layer of an .aprx map."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    kind: Literal["feature_dataset", "project_group"]
+    stems: list[str]
+
+
+class LayerGroupsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    groups: list[LayerGroup]
 
 
 class SplitRequest(BaseModel):
@@ -495,6 +519,8 @@ class SessionRecord(BaseModel):
     delivered: DeliveryRecord | None = None
     handover: Handover = Field(default_factory=Handover)
     split_from: SplitOrigin | None = None
+    # Group layers of the .aprx that came with the import, as files of this import.
+    project_groups: list[LayerGroup] = Field(default_factory=list)
 
     @classmethod
     def from_stored(cls, payload: Any, dropped: list[str] | None = None) -> SessionRecord:

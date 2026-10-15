@@ -16,8 +16,10 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from backend.routers.common import (
+    FORM_PARTS,
     UPLOAD_LIMIT_MESSAGE,
     attachment_response,
     max_upload_bytes,
@@ -52,8 +54,8 @@ from backend.src.imdf_reader import read_imdf_zip
 from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
 from backend.src.importer import (
     ReferenceLayer,
-    flatten_member_paths,
     import_file_blobs,
+    stored_upload_layout,
     read_reference_layers,
     zip_member_name,
 )
@@ -88,6 +90,8 @@ from backend.src.schemas import (
     IllustratorSurveySnapResponse,
     TransformPayload,
 )
+from backend.src.split import project_groups
+from backend.src.upload_tree import tree_path
 
 
 router = APIRouter(prefix="/api", tags=["import"])
@@ -128,15 +132,14 @@ def _persist_session_upload_artifacts(
         shutil.rmtree(target, ignore_errors=True)
     target.mkdir(parents=True, exist_ok=True)
 
-    for filename, payload in file_blobs:
-        source_name = Path(filename).name
-        candidate = source_name
+    for filename, payload in stored_upload_layout(file_blobs):
+        relative = Path(tree_path(filename))
+        candidate = relative
         collision_index = 1
         while (target / candidate).exists():
-            stem = Path(source_name).stem
-            suffix = Path(source_name).suffix
-            candidate = f"{stem}_{collision_index}{suffix}"
+            candidate = relative.with_name(f"{relative.stem}_{collision_index}{relative.suffix}")
             collision_index += 1
+        (target / candidate).parent.mkdir(parents=True, exist_ok=True)
         (target / candidate).write_bytes(payload)
     return target
 
@@ -153,18 +156,20 @@ def _expand_upload(name: str, payload: bytes) -> list[tuple[str, bytes]]:
     return [(name, payload)]
 
 
-async def _read_uploaded_blobs(request: Request, files: list[UploadFile]) -> list[tuple[str, bytes]]:
+async def _read_uploaded_blobs(
+    request: Request, files: list[UploadFile], paths: list[str] | None = None
+) -> list[tuple[str, bytes]]:
+    """Every uploaded file under its path, zips expanded. ``paths`` carries a folder upload's layout, as on the colour page."""
     limit = max_upload_bytes(request)
     expanded_total = 0
     raw_blobs: list[tuple[str, bytes]] = []
-    for name, payload in await read_uploads(request, files):
+    for name, payload in await read_uploads(request, files, names=paths or None):
         expanded = _expand_upload(name, payload)
         expanded_total += sum(len(content) for _, content in expanded)
         if expanded_total > limit:
             raise ValueError("Expanded upload exceeds configured limit (MAX_UPLOAD_MB).")
         raw_blobs.extend(expanded)
-    flat_names = flatten_member_paths([name for name, _ in raw_blobs])
-    return [(flat_name, content) for flat_name, (_, content) in zip(flat_names, raw_blobs)]
+    return raw_blobs
 
 
 @router.post("/import/imdf", response_model=ImportImdfResponse, status_code=201)
@@ -745,11 +750,19 @@ def delete_placement(placement_id: int, request: Request) -> Response:
 
 
 @router.post("/import", response_model=ImportResponse, status_code=201)
-async def import_files(
-    request: Request,
-    files: Annotated[list[UploadFile], File(description="Shapefile components, GeoPackages, or a zip file")],
-) -> ImportResponse:
-    raw_blobs = await _read_uploaded_blobs(request, files)
+async def import_files(request: Request) -> ImportResponse:
+    """``files`` parts: shapefile components, GeoPackages, File Geodatabase folders, an ``.aprx``, or zips.
+
+    A folder upload sends a ``paths`` part per file, in the same order, as the
+    colour page does. The form is read here because a geodatabase passes
+    Starlette's default limit of 1,000 parts.
+    """
+    async with request.form(max_files=FORM_PARTS, max_fields=FORM_PARTS) as form:
+        files = form.getlist("files")
+        paths = form.getlist("paths")
+        if not all(isinstance(item, StarletteUploadFile) for item in files) or not all(isinstance(item, str) for item in paths):
+            raise ValueError("Send each file as a 'files' file part, and its path as a 'paths' text part.")
+        raw_blobs = await _read_uploaded_blobs(request, files, paths or None)
     return await run_in_threadpool(_create_import_session, request, raw_blobs)
 
 
@@ -771,6 +784,7 @@ def _create_import_session(request: Request, raw_blobs: list[tuple[str, bytes]])
         uploads_root=session_uploads_dir(request),
     )
     session.upload_artifact_dir = str(artifact_directory)
+    session.project_groups = project_groups(raw_blobs, artifacts.files, max_bytes=max_upload_bytes(request))
     manager.save_session(session)
     return ImportResponse(
         session_id=session.session_id,

@@ -1,11 +1,15 @@
-import type { ImportedFile, SplitPreviewResponse, SplitShape } from "../api/client";
+import type { ImportedFile, LayerGroup, SplitPreviewResponse, SplitShape } from "../api/client";
 import type { Bilingual } from "../components/shell/stages";
 import { floorLabel } from "./bringIn";
 
 export type LngLat = [number, number];
 
-/** A building as drawn: its corners, open (the first corner is not repeated). */
-export type DrawnBuilding = { key: string; name: string; corners: LngLat[] };
+/**
+ * A building of the split: the corners of a drawn shape, open (the first corner is not repeated), or null
+ * for none; and the files and groups picked for it. Every feature of a picked file goes to it; any other
+ * feature goes to the shape holding its centre.
+ */
+export type Building = { key: string; name: string; corners: LngLat[] | null; files: string[]; groups: string[] };
 
 /** Which floor each file is on; files with no floor (venue, buildings) count on every floor. */
 export function floorOfStem(files: ReadonlyArray<ImportedFile>): Map<string, number | null> {
@@ -43,29 +47,75 @@ export function countsByFloor(
   return out;
 }
 
-export function toPolygon(corners: ReadonlyArray<LngLat>): SplitShape["polygon"] {
+export function toPolygon(corners: ReadonlyArray<LngLat>): NonNullable<SplitShape["polygon"]> {
   return { type: "Polygon", coordinates: [[...corners, corners[0]]] };
+}
+
+/** The files a building picks, one by one or through its groups, each once. */
+export function pickedStems(building: Building, groups: ReadonlyArray<LayerGroup>): string[] {
+  const byId = new Map(groups.map((group) => [group.id, group]));
+  const fromGroups = building.groups.flatMap((id) => byId.get(id)?.stems ?? []);
+  return [...new Set([...building.files, ...fromGroups])];
+}
+
+/** Each picked file and the buildings (by index) picking it. */
+export function pickOwners(buildings: ReadonlyArray<Building>, groups: ReadonlyArray<LayerGroup>): Map<string, number[]> {
+  const owners = new Map<string, number[]>();
+  buildings.forEach((building, index) => {
+    for (const stem of pickedStems(building, groups)) owners.set(stem, [...(owners.get(stem) ?? []), index]);
+  });
+  return owners;
+}
+
+function toShape(building: Building, groups: ReadonlyArray<LayerGroup>, name: string): SplitShape {
+  const files = pickedStems(building, groups);
+  return {
+    name,
+    ...(building.corners ? { polygon: toPolygon(building.corners) } : {}),
+    ...(files.length ? { files } : {})
+  };
 }
 
 /**
  * What the preview is asked: the names are placeholders, so counts show while
  * a building is still unnamed or shares a name; the split itself sends the real ones.
  */
-export function previewShapes(buildings: ReadonlyArray<DrawnBuilding>): SplitShape[] {
-  return buildings.map((building, index) => ({ name: `#${index + 1}`, polygon: toPolygon(building.corners) }));
+export function previewShapes(buildings: ReadonlyArray<Building>, groups: ReadonlyArray<LayerGroup>): SplitShape[] {
+  return buildings.map((building, index) => toShape(building, groups, `#${index + 1}`));
 }
 
-export function splitShapes(buildings: ReadonlyArray<DrawnBuilding>): SplitShape[] {
-  return buildings.map((building) => ({ name: building.name.trim(), polygon: toPolygon(building.corners) }));
+export function splitShapes(buildings: ReadonlyArray<Building>, groups: ReadonlyArray<LayerGroup>): SplitShape[] {
+  return buildings.map((building) => toShape(building, groups, building.name.trim()));
+}
+
+/** Why the preview cannot be asked yet, or null when it can: the server would refuse it for the same reason. */
+export function previewBlocked(buildings: ReadonlyArray<Building>, groups: ReadonlyArray<LayerGroup>): Bilingual | null {
+  if (buildings.length === 0) return { en: "Draw a building or pick its layers first.", ja: "まず建物を描くか、レイヤーを選んでください。" };
+  const empty = buildings.findIndex((building) => !building.corners && pickedStems(building, groups).length === 0);
+  if (empty >= 0) {
+    const label = buildings[empty].name.trim() || `#${empty + 1}`;
+    return {
+      en: `${label} has neither a shape nor picked layers.`,
+      ja: `${label} には図形も選択したレイヤーもありません。`
+    };
+  }
+  for (const [stem, owners] of pickOwners(buildings, groups)) {
+    if (owners.length < 2) continue;
+    const names = owners.map((index) => buildings[index].name.trim() || `#${index + 1}`).join(", ");
+    return { en: `${stem} is picked by ${names}; a file can go to one building only.`, ja: `${stem} が ${names} で重複して選択されています。ファイルは 1 つの建物にしか入れられません。` };
+  }
+  return null;
 }
 
 /** Why the split cannot run yet, or null when it can. */
 export function splitBlocked(
-  buildings: ReadonlyArray<DrawnBuilding>,
+  buildings: ReadonlyArray<Building>,
+  groups: ReadonlyArray<LayerGroup>,
   preview: SplitPreviewResponse | null,
   previewError: string | null
 ): Bilingual | null {
-  if (buildings.length === 0) return { en: "Draw a building first.", ja: "まず建物を描いてください。" };
+  const local = previewBlocked(buildings, groups);
+  if (local) return local;
   if (previewError) return { en: previewError, ja: previewError };
   const names = buildings.map((building) => building.name.trim());
   if (names.some((name) => !name)) return { en: "Give every building a name.", ja: "すべての建物に名前を付けてください。" };
@@ -76,7 +126,21 @@ export function splitBlocked(
   const empty = buildings.filter((_, index) => preview.shapes[index].total === 0).map((building) => building.name.trim());
   if (empty.length) {
     const list = empty.join(", ");
-    return { en: `Nothing falls inside ${list}.`, ja: `${list} の中に図形がありません。` };
+    return { en: `Nothing goes to ${list}.`, ja: `${list} に入る図形がありません。` };
   }
   return null;
+}
+
+/** Files whose stem, layer or feature dataset contains `query`, ignoring case; all of them for a blank query. */
+export function filterFiles(files: ReadonlyArray<ImportedFile>, query: string): ImportedFile[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [...files];
+  return files.filter((file) =>
+    [file.stem, file.source_layer, file.feature_dataset].some((text) => text?.toLowerCase().includes(needle))
+  );
+}
+
+export function filterGroups(groups: ReadonlyArray<LayerGroup>, query: string): LayerGroup[] {
+  const needle = query.trim().toLowerCase();
+  return needle ? groups.filter((group) => group.name.toLowerCase().includes(needle)) : [...groups];
 }
