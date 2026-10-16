@@ -298,7 +298,11 @@ export function QueuedTable({ datasets, onAddParts, onLeaveOut }: QueuedProps) {
       ? t("Shapefile", "シェープファイル")
       : dataset.kind === "gpkg"
         ? t("GeoPackage", "GeoPackage")
-        : t("Zip archive", "Zip アーカイブ");
+        : dataset.kind === "gdb"
+          ? t("File Geodatabase", "ファイル ジオデータベース")
+          : dataset.kind === "project"
+            ? t("ArcGIS Pro project", "ArcGIS Pro プロジェクト")
+            : t("Zip archive", "Zip アーカイブ");
   const leaveOut = (dataset: QueuedDataset) => (
     <Button variant="outline" size="sm" onClick={() => onLeaveOut(dataset.key)} aria-label={t(`Leave out ${dataset.name}`, `${dataset.name} を除外`)}>
       {t("Leave it out", "除外する")}

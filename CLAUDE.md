@@ -110,6 +110,42 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   of the parent's uploaded files for its stems (each project deletes its upload folder when
   it goes, so it cannot borrow the parent's); the copies still hold every building's rows,
   and the round-trip shapefile export keeps only the source rows the child's features name.
+  A building can also be picked files instead of, or as well as, a shape: a row whose file a
+  building picked goes to it wherever it lies, any other row falls back to the centroid rule,
+  and a file may be picked by one building only. The page resolves picked groups to file
+  stems and sends `files`; `assign_features` checks the stems against the import and refuses a
+  file picked twice, for preview and split alike. Groups (`GET .../split/groups`) are the
+  geodatabase feature datasets (`ImportedFile.feature_dataset`) and the group layers of every
+  map of an `.aprx` uploaded with the import, read once at import by `read_project_layers` into
+  `SessionRecord.project_groups`. A layer joins its group by data source: the same feature
+  class in a `.gdb` of the same folder name, or the shapefile of that stem. Two uploaded
+  geodatabases of one name (`A/Station.gdb`, `B/Station.gdb`) are kept apart by
+  `ImportedFile.source_container`, the geodatabase's path within the upload; a layer goes to
+  the one sharing the longest path tail with its `DATABASE=` path resolved against the
+  project's folder, and to neither on a tie. A project group's id names its `.aprx`, since
+  projects copied from one template reuse CIM uRIs. Shinjuku's
+  `JRShinjukuSta.gdb` has no feature datasets at all (266 feature classes at the root), so its
+  buildings come from the project's groups or from the page's layer filter with "Tick all shown".
+  Only `.aprx` groups are read; an `.mxd` is a binary format nothing here parses without arcpy
+  (Pro's Insert → Import Map turns one into an `.aprx` map). Checked on 2026-10-15 with a copy
+  of `Shinjuku Station 2 local.aprx` and the 2026-10-01 `JRShinjukuSta.gdb`: 197 groups, one
+  per building and floor under `ordinal_<n>` (`ordinal_-1 › JRShinjukuSta_B1` → its 5 layers),
+  and splitting by them into JR新宿駅, ルミネ1 and ヨドバシカメラ generated all three. Display
+  copies such as `地下背景 › 他地下階表示用ordinal_-1 › JRShinjukuSta_B1` hold a subset of the
+  same layers, so the same file sits in several groups; picking two of them for one building
+  is fine, for two buildings it is refused. Projects hold no whole-building group.
+- The standard import reads File Geodatabases: a zipped `*.gdb` folder, or a folder upload
+  whose relative paths travel in `paths` parts as on the colour page. Each feature class is an
+  `ImportedFile` with `source_format="gdb"`, its stem the class name (Japanese kept, since
+  detection reads the stem; prefixed with the geodatabase's name only on a clash). Reading goes
+  through pyogrio's OpenFileGDB, never the osgeo worker, and opens each class's own
+  `a<id>.gdbtable` (id from `GDB_SystemCatalog`): opening the geodatabase per class read every
+  table header each time and took Shinjuku 186 s against 15 s. The upload-tree helpers
+  (`upload_tree.py`: `gdb_root`, lock files) are shared with the colour tool. The session's
+  stored upload keeps shapefile parts under their flat import names, which the shapefile
+  exporter looks them up by, and each geodatabase whole under its own path. `/api/import`
+  reads its own form with `FORM_PARTS` (as the colour page does): a geodatabase is more than
+  Starlette's default 1,000 parts (Shinjuku's is 1,361 files).
 - Illustrator multi-floor placement: assignment is by box on the artwork preview, membership
   is `centroid ∈ box` plus an optional layer restriction, re-verified server-side at export
   (the preview filter is display-only). Linked floors share scale/rotation; dragging a floor

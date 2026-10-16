@@ -40,7 +40,7 @@ from pathlib import Path, PurePosixPath
 import re
 from tempfile import TemporaryDirectory
 import time
-from typing import Any, NewType
+from typing import Any
 import zipfile
 import zlib
 
@@ -67,6 +67,7 @@ from backend.src.gdb import GdbRead, apply_edits, read_layers
 from backend.src.importer import zip_member_name
 from backend.src.qgis_style import layer_style_xml
 from backend.src.tile_layers import NO_EXCLUSIONS, ProjectLayers, TileExclusions, read_project_layers
+from backend.src.upload_tree import TreePath, gdb_root, is_gdb_lock_file, tree_path
 
 DOWNLOAD_SUFFIX = "_new-colors"
 """The archive is ``<station><suffix>.zip``."""
@@ -171,10 +172,6 @@ def _workspace() -> TemporaryDirectory[str]:
     return TemporaryDirectory(prefix="color-theme-", ignore_cleanup_errors=True)
 
 
-TreePath = NewType("TreePath", str)
-"""Relative POSIX path: no drive, no leading slash, no ``.`` or ``..`` segments. Directories end in ``/``."""
-
-
 @dataclass(frozen=True, slots=True)
 class TreeEntry:
     path: TreePath
@@ -190,20 +187,8 @@ class FileTree:
     entries: tuple[TreeEntry, ...]
 
 
-_DRIVE = re.compile(r"^[A-Za-z]:")
 _CONTAINER_SUFFIX = re.compile(r"\.(shp|gdb)$", re.IGNORECASE)
 EXPANDED_LIMIT_MESSAGE = "Expanded upload exceeds configured limit (MAX_UPLOAD_MB)."
-
-
-def _tree_path(raw: str) -> TreePath:
-    """Normalise the forms browsers report (``/Folder/a.dbf``, ``./a.dbf``); refuse anything that could escape."""
-    path = raw.replace("\\", "/")
-    if path.startswith("//") or _DRIVE.match(path) or any(ord(ch) < 0x20 for ch in path):
-        raise ValueError(f"Unsafe path in upload: {raw!r}")
-    segments = [segment for segment in path.split("/") if segment not in ("", ".")]
-    if not segments or ".." in segments:
-        raise ValueError(f"Unsafe path in upload: {raw!r}")
-    return TreePath("/".join(segments) + ("/" if path.endswith("/") else ""))
 
 
 def _container_name(name: str) -> str:
@@ -221,7 +206,7 @@ def _tree_from_upload(blobs: Sequence[tuple[str, bytes]], *, max_bytes: int) -> 
     """
     if not blobs:
         raise ValueError("No files were uploaded.")
-    paths = [_tree_path(name) for name, _ in blobs]
+    paths = [tree_path(name) for name, _ in blobs]
     if len(blobs) == 1 and "/" not in paths[0] and paths[0].lower().endswith(".zip"):
         return _tree_from_zip(PurePosixPath(paths[0]).stem, blobs[0][1], max_bytes=max_bytes)
     entries = tuple(TreeEntry(path=path, data=data, source=None) for path, (_, data) in zip(paths, blobs))
@@ -235,7 +220,7 @@ def _tree_from_zip(stem: str, payload: bytes, *, max_bytes: int) -> FileTree:
             raise ValueError(EXPANDED_LIMIT_MESSAGE)
         entries: list[TreeEntry] = []
         for info in members:
-            path = _tree_path(zip_member_name(info))
+            path = tree_path(zip_member_name(info))
             try:
                 data = None if info.is_dir() else archive.read(info)
             except (RuntimeError, NotImplementedError, zipfile.BadZipFile) as exc:
@@ -269,18 +254,8 @@ def _folder_name(paths: Sequence[TreePath]) -> str:
     return "_".join(shared) or "station"
 
 
-def _gdb_root(path: TreePath) -> TreePath | None:
-    """The outermost folder named ``*.gdb`` holding this entry; None outside a geodatabase."""
-    segments = path.rstrip("/").split("/")
-    for depth, segment in enumerate(segments[:-1]):
-        if segment.lower().endswith(".gdb"):
-            return TreePath("/".join(segments[: depth + 1]))
-    return None
-
-
 def _is_lock_file(entry: TreeEntry) -> bool:
-    """ArcGIS leaves ``*.sr.lock`` files in a .gdb (Tokyo's held 1,057 of 3,022 files); a copy is locked by none of them."""
-    return entry.data is not None and entry.path.lower().endswith(".lock") and _gdb_root(entry.path) is not None
+    return entry.data is not None and is_gdb_lock_file(entry.path)
 
 
 def _write_zip(tree: FileTree, replaced: Mapping[TreePath, bytes]) -> bytes:
@@ -368,13 +343,13 @@ def _survey(
     uploaded = _tree_from_upload(blobs, max_bytes=max_bytes)
     tree = replace(uploaded, entries=tuple(entry for entry in uploaded.entries if not _is_lock_file(entry)))
     files = {entry.path.casefold(): entry.data for entry in tree.entries if entry.data is not None}
-    in_gdb = [root for entry in tree.entries if entry.data is not None and (root := _gdb_root(entry.path)) is not None]
+    in_gdb = [root for entry in tree.entries if entry.data is not None and (root := gdb_root(entry.path)) is not None]
     roots = list(dict.fromkeys(in_gdb))
     tables: dict[str, _Table] = {}
     layers: list[LayerInput | SkippedLayer] = []
     read_tables = category_only = 0
     for entry in tree.entries:
-        if entry.data is None or not entry.path.lower().endswith(".dbf") or _gdb_root(entry.path) is not None:
+        if entry.data is None or not entry.path.lower().endswith(".dbf") or gdb_root(entry.path) is not None:
             continue
         try:
             table = DbfTable.parse(entry.data)
@@ -413,7 +388,7 @@ def _survey(
     )
     for entry in tree.entries:
         kind = _symbology_kind(entry.path)
-        if entry.data is None or kind is None or _gdb_root(entry.path) is not None:
+        if entry.data is None or kind is None or gdb_root(entry.path) is not None:
             continue
         line, data = _retheme_file(theme, entry.path, entry.data, kind, max_bytes=remaining)
         if kind == "aprx":
@@ -486,7 +461,7 @@ def _style_files(
     lines: list[StyleFileLine] = []
     added: list[_StyleFile] = []
     for entry in tree.entries:
-        if entry.data is None or not entry.path.lower().endswith(".shp") or _gdb_root(entry.path) is not None:
+        if entry.data is None or not entry.path.lower().endswith(".shp") or gdb_root(entry.path) is not None:
             continue
         stem = entry.path[:-4]
         dbf = files.get(stem.casefold() + ".dbf")
@@ -620,7 +595,7 @@ _SYMBOLOGY_SUFFIXES: dict[str, SymbologyKind] = {".lyrx": "lyrx", ".aprx": "aprx
 
 def is_project(path: str) -> bool:
     """An ArcGIS Pro project outside a geodatabase: the only kind a vector tile build can open."""
-    return _symbology_kind(path) == "aprx" and _gdb_root(TreePath(path)) is None
+    return _symbology_kind(path) == "aprx" and gdb_root(TreePath(path)) is None
 
 
 def _symbology_kind(path: str) -> SymbologyKind | None:

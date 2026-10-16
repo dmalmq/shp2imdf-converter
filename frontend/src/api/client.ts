@@ -1,6 +1,7 @@
 import type { Feature, Geometry } from "geojson";
 
 import type { Bilingual } from "../components/shell/stages";
+import { datasetPath } from "../lib/colorTheme";
 import { ApiClientError, buildApiClientError } from "./errors";
 
 export type CleanupSummary = {
@@ -16,8 +17,11 @@ export type ImportedFile = {
   geometry_type: string;
   feature_count: number;
   attribute_columns: string[];
-  source_format: "shapefile" | "gpkg";
+  source_format: "shapefile" | "gpkg" | "gdb";
   source_layer: string | null;
+  /** The `*.gdb` folder a feature class came from, and the feature dataset holding it. */
+  source_container?: string | null;
+  feature_dataset?: string | null;
   detected_type: string | null;
   detected_level: number | null;
   level_name: string | null;
@@ -530,7 +534,9 @@ export async function importShapefiles(
   files: File[],
   onProgress?: (percent: number) => void
 ): Promise<ImportResponse> {
-  return sendForm<ImportResponse>("/api/import", filesForm(files), { onProgress });
+  return sendForm<ImportResponse>("/api/import", datasetForm(files.map((file) => ({ file, path: datasetPath(file) }))), {
+    onProgress
+  });
 }
 
 export async function importImdfShapefiles(
@@ -944,11 +950,28 @@ export async function detectAllFiles(sessionId: string): Promise<DetectResponse>
   return handleJson<DetectResponse>(response);
 }
 
-/** A building drawn on the split map: a WGS84 GeoJSON polygon and the name its project gets. */
+/**
+ * A building of the split: a WGS84 GeoJSON polygon drawn on the map, the stems of files picked for it, or both,
+ * and the name its project gets.
+ */
 export type SplitShape = {
   name: string;
-  polygon: { type: "Polygon"; coordinates: number[][][] };
+  polygon?: { type: "Polygon"; coordinates: number[][][] };
+  files?: string[];
 };
+
+/** Files that belong together in the source: a geodatabase feature dataset or a group layer of the `.aprx`. */
+export type LayerGroup = {
+  id: string;
+  name: string;
+  kind: "feature_dataset" | "project_group";
+  stems: string[];
+};
+
+export async function fetchSplitGroups(sessionId: string): Promise<LayerGroup[]> {
+  const response = await fetch(`/api/session/${sessionId}/split/groups`);
+  return (await handleJson<{ groups: LayerGroup[] }>(response)).groups;
+}
 
 export type SplitPreviewResponse = {
   shapes: Array<{ name: string; total: number; files: Record<string, number> }>;

@@ -1,6 +1,7 @@
 import type { ImportedFile } from "../api/client";
 import type { Bilingual } from "../components/shell/stages";
 import type { ImportProfile } from "../store/useAppStore";
+import { datasetPath, inGeodatabase } from "./colorTheme";
 
 /** Types whose features sit on one floor, so a file of them needs one. */
 export const LEVEL_REQUIRED_TYPES = new Set(["unit", "opening", "fixture", "detail", "kiosk", "section"]);
@@ -90,7 +91,7 @@ export function toRow(file: ImportedFile): BringInRow {
     floor,
     shapes: file.feature_count,
     geometry: file.geometry_type,
-    layer: file.source_format === "gpkg" ? file.source_layer : null,
+    layer: file.source_format === "shapefile" ? null : file.source_layer,
     reasons,
     warnings: file.warnings
   };
@@ -126,16 +127,19 @@ export function floorChoices(floors: ReadonlyArray<FloorFound>): number[] {
 const SHAPEFILE_PARTS = [".shp", ".dbf", ".shx", ".prj", ".cpg", ".qix"];
 const SIDECARS_REQUIRED = [".shx", ".dbf"];
 
-export const ACCEPTED_EXTENSIONS = [...SHAPEFILE_PARTS, ".gpkg", ".zip"];
+export const ACCEPTED_EXTENSIONS = [...SHAPEFILE_PARTS, ".gpkg", ".zip", ".aprx"];
+/** A File Geodatabase is a folder, so it is named here but matched by path. */
+export const ACCEPTED_LABELS = [...ACCEPTED_EXTENSIONS, ".gdb/"];
 
 /**
- * One thing the operator thinks of as a file: a shapefile's parts together, a GeoPackage, or a zip.
+ * One thing the operator thinks of as a file: a shapefile's parts together, a GeoPackage, a zip,
+ * a File Geodatabase folder, or an ArcGIS Pro project, whose group layers the split step offers.
  * Parts group the way the importer groups them: by the exact stem, with the extension's case ignored.
  */
 export type QueuedDataset = {
   key: string;
   name: string;
-  kind: "shapefile" | "gpkg" | "archive";
+  kind: "shapefile" | "gpkg" | "archive" | "gdb" | "project";
   /** Extensions present, for a shapefile. */
   parts: string[];
   /** Sidecars a `.shp` still lacks; the import refuses it without them. */
@@ -150,14 +154,38 @@ export function fileExtension(name: string): string {
   return index < 0 ? "" : name.slice(index).toLowerCase();
 }
 
+/** The `*.gdb` folder a path lies in, with the folders above it; null outside one. */
+export function geodatabaseFolder(path: string): string | null {
+  const segments = path.split("/");
+  const index = segments.findIndex((segment, position) => position < segments.length - 1 && segment.toLowerCase().endsWith(".gdb"));
+  return index < 0 ? null : segments.slice(0, index + 1).join("/");
+}
+
+/** Shapefile parts, GeoPackages, zips and projects by extension; every file of a `.gdb` folder but its stale locks. */
 export function isAccepted(file: File): boolean {
+  const path = datasetPath(file);
+  if (inGeodatabase(path)) return !path.toLowerCase().endsWith(".lock");
   return ACCEPTED_EXTENSIONS.includes(fileExtension(file.name));
 }
 
+/** The folders above a file inside what was dropped or picked, with a trailing slash; "" for a loose file. */
+function folderOf(file: File): string {
+  const segments = datasetPath(file)
+    .split("/")
+    .filter((segment) => segment !== "" && segment !== ".");
+  return segments.slice(0, -1).map((segment) => `${segment}/`).join("");
+}
+
+/**
+ * A dataset is one only within one folder: the importer keeps `A/Space.shp` and
+ * `B/Space.shp`, or `A/map.gpkg` and `B/map.gpkg`, apart, so the queue does too.
+ */
 export function datasetKey(file: File): string {
+  const folder = geodatabaseFolder(datasetPath(file));
+  if (folder) return `gdb:${folder}`;
   const extension = fileExtension(file.name);
-  if (SHAPEFILE_PARTS.includes(extension)) return `shp:${file.name.slice(0, -extension.length)}`;
-  return `file:${file.name}`;
+  if (SHAPEFILE_PARTS.includes(extension)) return `shp:${folderOf(file)}${file.name.slice(0, -extension.length)}`;
+  return `file:${folderOf(file)}${file.name}`;
 }
 
 export function queuedDatasets(files: ReadonlyArray<File>): QueuedDataset[] {
@@ -166,10 +194,19 @@ export function queuedDatasets(files: ReadonlyArray<File>): QueuedDataset[] {
     const extension = fileExtension(file.name);
     const key = datasetKey(file);
     const shapefile = key.startsWith("shp:");
+    const folder = key.startsWith("gdb:") ? key.slice(4) : null;
     const dataset = byKey.get(key) ?? {
       key,
-      name: shapefile ? file.name.slice(0, -extension.length) : file.name,
-      kind: shapefile ? "shapefile" : extension === ".gpkg" ? "gpkg" : "archive",
+      name: folder ? folder.split("/").pop() ?? folder : shapefile ? file.name.slice(0, -extension.length) : file.name,
+      kind: folder
+        ? "gdb"
+        : shapefile
+          ? "shapefile"
+          : extension === ".gpkg"
+            ? "gpkg"
+            : extension === ".aprx"
+              ? "project"
+              : "archive",
       parts: [],
       missing: [],
       skipped: false,
@@ -178,6 +215,14 @@ export function queuedDatasets(files: ReadonlyArray<File>): QueuedDataset[] {
     if (shapefile && !dataset.parts.includes(extension)) dataset.parts.push(extension);
     dataset.bytes += file.size;
     byKey.set(key, dataset);
+  }
+  // A name in two folders is shown with its folder, so the two rows can be told apart.
+  const names = new Map<string, number>();
+  for (const dataset of byKey.values()) {
+    if (dataset.kind !== "gdb") names.set(dataset.name, (names.get(dataset.name) ?? 0) + 1);
+  }
+  for (const dataset of byKey.values()) {
+    if (dataset.kind !== "gdb" && (names.get(dataset.name) ?? 0) > 1) dataset.name = dataset.key.slice(dataset.key.indexOf(":") + 1);
   }
   const datasets = [...byKey.values()].sort((left, right) => left.name.localeCompare(right.name));
   for (const dataset of datasets) {
@@ -189,10 +234,10 @@ export function queuedDatasets(files: ReadonlyArray<File>): QueuedDataset[] {
   return datasets;
 }
 
-/** Adds `incoming` to `queued`; a file with the name of one already queued replaces it. */
+/** Adds `incoming` to `queued`; a file at the path of one already queued replaces it. */
 export function addToQueue(queued: ReadonlyArray<File>, incoming: ReadonlyArray<File>): File[] {
-  const names = new Set(incoming.map((file) => file.name));
-  return [...queued.filter((file) => !names.has(file.name)), ...incoming];
+  const paths = new Set(incoming.map(datasetPath));
+  return [...queued.filter((file) => !paths.has(datasetPath(file))), ...incoming];
 }
 
 /** What the bar under Bring in says, and whether its button can run. */
@@ -230,19 +275,20 @@ export function queueNextStep(datasets: ReadonlyArray<QueuedDataset>, profile: I
     action: imdf ? { en: "Import to Check", ja: "チェックへ取り込む" } : { en: "Read the files", ja: "ファイルを読み込む" },
     goes: "import" as const
   };
-  if (datasets.every((dataset) => dataset.skipped)) {
+  // A project only lends its group layers to the split step; the shapes come from the other files.
+  if (datasets.every((dataset) => dataset.skipped || dataset.kind === "project")) {
     const blocked = { en: "Add at least one floor file first", ja: "フロアのファイルを 1 つ以上追加してください" };
     return { ...base, title: { en: "Add the floor files to begin", ja: "フロアのファイルを追加してください" }, blocked };
   }
   if (incomplete > 0) return { ...base, title: needDecision(incomplete), blocked: needDecision(incomplete) };
-  if (imdf && datasets.some((dataset) => dataset.kind === "gpkg")) {
+  if (imdf && datasets.some((dataset) => dataset.kind === "gpkg" || dataset.kind === "gdb")) {
     const blocked = {
-      en: "IMDF-schema import takes shapefiles or zip archives, not GeoPackages",
-      ja: "IMDF スキーマの取り込みはシェープファイルか zip のみで、GeoPackage は使えません"
+      en: "IMDF-schema import takes shapefiles or zip archives, not GeoPackages or geodatabases",
+      ja: "IMDF スキーマの取り込みはシェープファイルか zip のみで、GeoPackage やジオデータベースは使えません"
     };
     return { ...base, title: blocked, blocked };
   }
-  const readable = datasets.filter((dataset) => !dataset.skipped).length;
+  const readable = datasets.filter((dataset) => !dataset.skipped && dataset.kind !== "project").length;
   const title =
     readable === 1
       ? { en: "1 file ready to read", ja: "読み込めるファイル 1 件" }

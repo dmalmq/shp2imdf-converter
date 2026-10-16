@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layer, type MapLayerMouseEvent, type MapRef, Source } from "react-map-gl/maplibre";
 import { Link } from "react-router-dom";
-import { Pencil, Trash2 } from "lucide-react";
+import { Layers, Pencil, Trash2 } from "lucide-react";
 
 import {
   fetchSplitFeatures,
+  fetchSplitGroups,
   previewSplit,
   splitSession,
+  type ImportedFile,
+  type LayerGroup,
   type SplitPreviewResponse,
   type SplitResponse
 } from "../api/client";
@@ -22,13 +25,18 @@ import { useUiLanguage } from "../hooks/useUiLanguage";
 import { TYPE_LABELS } from "../lib/bringIn";
 import {
   countsByFloor,
+  filterFiles,
+  filterGroups,
   floorOfStem,
   onFloor,
+  pickedStems,
+  pickOwners,
+  previewBlocked,
   previewShapes,
   splitBlocked,
   splitFloors,
   splitShapes,
-  type DrawnBuilding,
+  type Building,
   type LngLat
 } from "../lib/split";
 import { useAppStore } from "../store/useAppStore";
@@ -63,7 +71,7 @@ function boundsOf(features: BasicFeature[]): [[number, number], [number, number]
   return Number.isFinite(minX) ? [[minX, minY], [maxX, maxY]] : null;
 }
 
-/** Bring in → split: draw a shape over each building and make a project of each. */
+/** Bring in → split: draw a shape over each building or pick its layers, and make a project of each. */
 export function SplitPage() {
   const sessionId = useAppStore((state) => state.sessionId) ?? "";
   const files = useAppStore((state) => state.files);
@@ -72,8 +80,10 @@ export function SplitPage() {
   const mapRef = useRef<MapRef | null>(null);
 
   const [features, setFeatures] = useState<BasicFeature[] | null>(null);
-  const [buildings, setBuildings] = useState<DrawnBuilding[]>([]);
+  const [buildings, setBuildings] = useState<Building[]>([]);
+  const [groups, setGroups] = useState<LayerGroup[]>([]);
   const [active, setActive] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
   const [draft, setDraft] = useState<LngLat[] | null>(null);
   const [floor, setFloor] = useState<number | null>(null);
   const [preview, setPreview] = useState<SplitPreviewResponse | null>(null);
@@ -97,18 +107,30 @@ export function SplitPage() {
     };
   }, [sessionId]);
 
+  useEffect(() => {
+    let live = true;
+    fetchSplitGroups(sessionId).then(
+      (response) => live && setGroups(response),
+      () => live && setGroups([])
+    );
+    return () => {
+      live = false;
+    };
+  }, [sessionId]);
+
   const floors = useMemo(() => splitFloors(files), [files]);
   const floorOf = useMemo(() => floorOfStem(files), [files]);
 
+  const notYet = previewBlocked(buildings, groups);
   useEffect(() => {
-    if (buildings.length === 0) {
+    if (notYet) {
       setPreview(null);
       setPreviewError(null);
       return;
     }
     let live = true;
     const timer = window.setTimeout(() => {
-      previewSplit(sessionId, previewShapes(buildings)).then(
+      previewSplit(sessionId, previewShapes(buildings, groups)).then(
         (response) => {
           if (!live) return;
           setPreview(response);
@@ -126,7 +148,11 @@ export function SplitPage() {
       window.clearTimeout(timer);
     };
     // Names are placeholders in the preview, so renaming must not recount.
-  }, [sessionId, buildings.map((building) => JSON.stringify(building.corners)).join("|")]);
+  }, [
+    sessionId,
+    notYet?.en,
+    buildings.map((building) => JSON.stringify([building.corners, pickedStems(building, groups)])).join("|")
+  ]);
 
   const fitted = useRef(false);
   const fitAll = useCallback(() => {
@@ -158,11 +184,17 @@ export function SplitPage() {
   const outlines = useMemo(
     () => ({
       type: "FeatureCollection",
-      features: buildings.map((building, index) => ({
-        type: "Feature",
-        properties: { active: index === activeIndex },
-        geometry: { type: "Polygon", coordinates: [[...building.corners, building.corners[0]]] }
-      }))
+      features: buildings.flatMap((building, index) =>
+        building.corners
+          ? [
+              {
+                type: "Feature",
+                properties: { active: index === activeIndex },
+                geometry: { type: "Polygon", coordinates: [[...building.corners, building.corners[0]]] }
+              }
+            ]
+          : []
+      )
     }),
     [buildings, activeIndex]
   );
@@ -183,10 +215,20 @@ export function SplitPage() {
   const finishDraft = useCallback(() => {
     if (!draft || draft.length < 3) return;
     const key = `b${nextKey.current++}`;
-    setBuildings((previous) => [...previous, { key, name: "", corners: draft }]);
+    setBuildings((previous) => [...previous, { key, name: "", corners: draft, files: [], groups: [] }]);
     setActive(key);
+    setPicking(false);
     setDraft(null);
   }, [draft]);
+
+  const addPickedBuilding = () => {
+    const key = `b${nextKey.current++}`;
+    setBuildings((previous) => [...previous, { key, name: "", corners: null, files: [], groups: [] }]);
+    setActive(key);
+    setPicking(true);
+  };
+  const updateBuilding = (key: string, change: (building: Building) => Building) =>
+    setBuildings((previous) => previous.map((item) => (item.key === key ? change(item) : item)));
 
   useEffect(() => {
     if (!draft) return;
@@ -215,13 +257,13 @@ export function SplitPage() {
     setDraft([...draft, corner]);
   };
 
-  const blocked = splitBlocked(buildings, preview, previewError);
+  const blocked = splitBlocked(buildings, groups, preview, previewError);
   const unassigned = preview?.unassigned_total ?? 0;
   const run = async () => {
     if (blocked || running) return;
     setRunning(true);
     try {
-      setResult(await splitSession(sessionId, splitShapes(buildings)));
+      setResult(await splitSession(sessionId, splitShapes(buildings, groups)));
     } catch (error) {
       handleApiError(error, t("Could not split the import", "取り込みを分割できませんでした"), {
         title: t("Not split", "分割できませんでした")
@@ -260,8 +302,8 @@ export function SplitPage() {
           </h1>
           <p className="max-w-[46rem] text-[15px] leading-[1.55] text-muted-foreground">
             {t(
-              "Draw a shape over each building. A shape takes every feature whose centre falls inside it, on every floor; step through the floors to check. Each building becomes its own project, set up and delivered on its own. This import stays as it is.",
-              "建物ごとに図形を描いてください。図形は中心がその中にあるすべての図形を、すべての階で受け持ちます。階を切り替えて確認してください。建物ごとに別のプロジェクトになり、それぞれ設定・納品します。この取り込みはそのまま残ります。"
+              "Draw a shape over each building, or pick its layers or groups. A picked layer goes wholly to its building; any other feature goes to the shape its centre falls inside, on every floor. Step through the floors to check. Each building becomes its own project, set up and delivered on its own. This import stays as it is.",
+              "建物ごとに図形を描くか、レイヤーやグループを選んでください。選んだレイヤーはすべてその建物に入り、それ以外の図形は中心がある図形の建物に、すべての階で入ります。階を切り替えて確認してください。建物ごとに別のプロジェクトになり、それぞれ設定・納品します。この取り込みはそのまま残ります。"
             )}
           </p>
           <div className="flex flex-wrap items-center gap-2">
@@ -290,10 +332,16 @@ export function SplitPage() {
                   </Button>
                 </>
               ) : (
-                <Button size="sm" onClick={() => setDraft([])}>
-                  <Pencil aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
-                  {t("Draw a building", "建物を描く")}
-                </Button>
+                <>
+                  <Button size="sm" variant="outline" onClick={addPickedBuilding}>
+                    <Layers aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
+                    {t("Pick layers for a building", "レイヤーで建物を指定")}
+                  </Button>
+                  <Button size="sm" onClick={() => setDraft([])}>
+                    <Pencil aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
+                    {t("Draw a building", "建物を描く")}
+                  </Button>
+                </>
               )}
             </div>
           </div>
@@ -363,7 +411,10 @@ export function SplitPage() {
             <h2 className="text-[15px] font-semibold text-foreground">{t("Buildings", "建物")}</h2>
             {count === 0 ? (
               <p className="text-xs leading-[1.45] text-muted-foreground">
-                {t("Draw a shape over a building to start.", "建物の上に図形を描いて始めます。")}
+                {t(
+                  "Draw a shape over a building, or pick its layers, to start.",
+                  "建物の上に図形を描くか、そのレイヤーを選んで始めます。"
+                )}
               </p>
             ) : (
               <ul className="flex flex-col gap-2">
@@ -371,6 +422,7 @@ export function SplitPage() {
                   const counts = preview?.shapes[index];
                   const perFloor = counts ? countsByFloor(counts.files, floorOf) : null;
                   const isActive = building.key === active;
+                  const picked = pickedStems(building, groups);
                   return (
                     <li
                       key={building.key}
@@ -404,11 +456,30 @@ export function SplitPage() {
                           <Trash2 aria-hidden="true" className="h-4 w-4" />
                         </Button>
                       </div>
-                      <p className="font-mono text-xs text-muted-foreground">
-                        {counts
-                          ? t(featureCount(counts.total), `${counts.total} 件`)
-                          : t("Counting…", "集計中…")}
-                      </p>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-mono text-xs text-muted-foreground">
+                          {[
+                            building.corners ? t("shape", "図形") : null,
+                            picked.length ? t(`${picked.length} picked`, `選択 ${picked.length}`) : null,
+                            counts ? t(featureCount(counts.total), `${counts.total} 件`) : notYet ? null : t("Counting…", "集計中…")
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                        <Button
+                          size="sm"
+                          variant={isActive && picking ? "secondary" : "ghost"}
+                          aria-pressed={isActive && picking}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setActive(building.key);
+                            setPicking(!(isActive && picking));
+                          }}
+                        >
+                          <Layers aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
+                          {t("Layers", "レイヤー")}
+                        </Button>
+                      </div>
                       {perFloor && perFloor.size > 0 ? (
                         <ul className="flex flex-wrap gap-1.5">
                           {[...perFloor.entries()]
@@ -429,6 +500,16 @@ export function SplitPage() {
               </ul>
             )}
           </section>
+          {picking && activeIndex >= 0 ? (
+            <LayerPicker
+              index={activeIndex}
+              buildings={buildings}
+              files={files}
+              groups={groups}
+              onChange={(change) => updateBuilding(buildings[activeIndex].key, change)}
+              onClose={() => setPicking(false)}
+            />
+          ) : null}
           {preview && unassigned > 0 ? (
             <section
               aria-label={t("Left out", "対象外")}
@@ -439,8 +520,8 @@ export function SplitPage() {
               </h2>
               <p className="text-xs leading-[1.45] text-muted-foreground">
                 {t(
-                  "Their centres are outside every building, so no new project gets them. Widen a shape if they belong to one.",
-                  "中心がどの建物の外にもあるため、どのプロジェクトにも入りません。必要なら図形を広げてください。"
+                  "No building picked their layer and their centres are outside every shape, so no new project gets them. Widen a shape or pick the layer if they belong to one.",
+                  "どの建物もそのレイヤーを選んでおらず、中心がどの図形の外にもあるため、どのプロジェクトにも入りません。必要なら図形を広げるか、レイヤーを選んでください。"
                 )}
               </p>
               <ul className="flex flex-col gap-1 text-xs">
@@ -468,7 +549,7 @@ export function SplitPage() {
         step={{
           title:
             count === 0
-              ? { en: "No buildings drawn yet", ja: "まだ建物が描かれていません" }
+              ? { en: "No buildings yet", ja: "まだ建物がありません" }
               : { en: `${count} ${count === 1 ? "project" : "projects"} will be made`, ja: `${count} 件のプロジェクトを作成します` },
           detail: {
             en: "Each opens at Bring in, with this import’s files and floors already confirmed.",
@@ -490,6 +571,151 @@ export function SplitPage() {
 
 function featureCount(n: number): string {
   return `${n} ${n === 1 ? "feature" : "features"}`;
+}
+
+/** The layers and groups picked for one building; a file another building picked cannot be ticked here. */
+function LayerPicker({
+  index,
+  buildings,
+  files,
+  groups,
+  onChange,
+  onClose
+}: {
+  index: number;
+  buildings: ReadonlyArray<Building>;
+  files: ReadonlyArray<ImportedFile>;
+  groups: ReadonlyArray<LayerGroup>;
+  onChange: (change: (building: Building) => Building) => void;
+  onClose: () => void;
+}) {
+  const { t } = useUiLanguage();
+  const [query, setQuery] = useState("");
+  const building = buildings[index];
+  const label = building.name.trim() || `#${index + 1}`;
+  const owners = useMemo(() => pickOwners(buildings, groups), [buildings, groups]);
+  const viaGroup = useMemo(
+    () => new Set(pickedStems({ ...building, files: [] }, groups)),
+    [building, groups]
+  );
+  const shownGroups = filterGroups(groups, query);
+  const shownFiles = filterFiles(files, query);
+  const takenBy = (stem: string) =>
+    (owners.get(stem) ?? []).filter((owner) => owner !== index).map((owner) => buildings[owner].name.trim() || `#${owner + 1}`);
+  const free = shownFiles.filter((file) => takenBy(file.stem).length === 0 && !viaGroup.has(file.stem));
+  const toggle = (key: "files" | "groups", id: string) =>
+    onChange((item) => ({
+      ...item,
+      [key]: item[key].includes(id) ? item[key].filter((value) => value !== id) : [...item[key], id]
+    }));
+
+  return (
+    <section
+      aria-label={t(`Layers for ${label}`, `${label} のレイヤー`)}
+      className="flex flex-col gap-3 rounded-[14px] border border-border bg-card p-5"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-[15px] font-semibold text-foreground">{t(`Layers for ${label}`, `${label} のレイヤー`)}</h2>
+        <Button size="sm" variant="ghost" onClick={onClose}>
+          {t("Done", "完了")}
+        </Button>
+      </div>
+      <p className="text-xs leading-[1.45] text-muted-foreground">
+        {t(
+          "Every feature of a ticked layer goes to this building, wherever it lies. A layer can go to one building only.",
+          "チェックしたレイヤーの図形は、位置に関係なくすべてこの建物に入ります。1 つのレイヤーは 1 つの建物にしか入れられません。"
+        )}
+      </p>
+      <Input
+        aria-label={t("Filter layers", "レイヤーを絞り込む")}
+        placeholder={t("Filter, e.g. JRShinjukuSta", "絞り込み（例: JRShinjukuSta）")}
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+      {shownGroups.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <h3 className="text-xs font-semibold text-foreground">{t("Groups", "グループ")}</h3>
+          <ul className="flex max-h-[200px] flex-col gap-0.5 overflow-auto">
+            {shownGroups.map((group) => (
+              <li key={group.id}>
+                <label className="flex items-start gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 accent-primary"
+                    checked={building.groups.includes(group.id)}
+                    onChange={() => toggle("groups", group.id)}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-foreground" title={group.name}>
+                    {group.name}
+                  </span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {group.kind === "feature_dataset" ? t("dataset", "データセット") : t("map group", "マップのグループ")} ·{" "}
+                    {group.stems.length}
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold text-foreground">
+            {t(`Layers · ${shownFiles.length}`, `レイヤー · ${shownFiles.length}`)}
+          </h3>
+          <span className="flex gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={free.every((file) => building.files.includes(file.stem))}
+              onClick={() =>
+                onChange((item) => ({ ...item, files: [...new Set([...item.files, ...free.map((file) => file.stem)])] }))
+              }
+            >
+              {t("Tick all shown", "表示中をすべて選択")}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!shownFiles.some((file) => building.files.includes(file.stem))}
+              onClick={() => {
+                const shown = new Set(shownFiles.map((file) => file.stem));
+                onChange((item) => ({ ...item, files: item.files.filter((stem) => !shown.has(stem)) }));
+              }}
+            >
+              {t("Untick shown", "表示中を解除")}
+            </Button>
+          </span>
+        </div>
+        <ul className="flex max-h-[320px] flex-col gap-0.5 overflow-auto">
+          {shownFiles.map((file) => {
+            const others = takenBy(file.stem);
+            const inGroup = viaGroup.has(file.stem);
+            return (
+              <li key={file.stem}>
+                <label className={cn("flex items-start gap-2 text-xs", others.length > 0 && "opacity-60")}>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 accent-primary"
+                    checked={inGroup || building.files.includes(file.stem)}
+                    disabled={inGroup || (others.length > 0 && !building.files.includes(file.stem))}
+                    onChange={() => toggle("files", file.stem)}
+                  />
+                  <span className="min-w-0 flex-1 truncate font-mono text-foreground" title={file.stem}>
+                    {file.stem}
+                  </span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {inGroup ? `${t("in a group", "グループ内")} · ` : others.length ? `${others.join(", ")} · ` : ""}
+                    {file.feature_count}
+                  </span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </section>
+  );
 }
 
 function FloorChip({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: React.ReactNode }) {

@@ -191,3 +191,21 @@ def test_same_named_shapefiles_persist_and_export_under_their_own_stems(test_cli
         report = json.loads(archive.read("export_report.json"))
     rows_by_stem = {item["stem"]: item["rows_total"] for item in report["stems_processed"]}
     assert rows_by_stem == {"1F_Space": 2, "2F_Space": 3}
+
+
+@pytest.mark.phase1
+def test_same_named_zips_in_different_folders_keep_their_own_components(test_client) -> None:
+    uploads = [
+        ("A/station.zip", _floor_zip({"Space": (2, "EPSG:6677")})),
+        ("B/station.zip", _floor_zip({"Space": (3, "EPSG:6677")})),
+    ]
+
+    response = test_client.post(
+        "/api/import",
+        files=[("files", ("station.zip", payload, "application/zip")) for _, payload in uploads],
+        data={"paths": [path for path, _ in uploads]},
+    )
+
+    assert response.status_code == 201, response.text
+    counts = {item["stem"]: item["feature_count"] for item in response.json()["files"]}
+    assert counts == {"A_Space": 2, "B_Space": 3}
