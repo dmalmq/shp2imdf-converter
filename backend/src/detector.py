@@ -11,6 +11,8 @@ import re
 from backend.src.schemas import ImportedFile, LearningSuggestion
 
 
+SURROUNDINGS_TYPE = "surroundings"
+
 FEATURE_TYPE_VALUES = {
     "unit",
     "opening",
@@ -27,6 +29,9 @@ FEATURE_TYPE_VALUES = {
     "relationship",
     "section",
     "facility",
+    # Not an IMDF type: the generator and the exports pass over a file of a type
+    # they do not know, so this leaves a file out until the operator picks a real one.
+    SURROUNDINGS_TYPE,
 }
 
 

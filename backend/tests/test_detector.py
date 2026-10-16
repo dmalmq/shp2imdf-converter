@@ -147,3 +147,27 @@ def test_load_keyword_map(config_path="backend/config/filename_keywords.json") -
     assert "space" in loaded["unit"]
     assert "amenity" in loaded
     assert "amenity" in loaded["amenity"]
+
+
+@pytest.mark.phase2
+@pytest.mark.parametrize(
+    ("stem", "geometry"),
+    [
+        ("新宿周辺_街区", "Polygon"),
+        ("新宿周辺_軌道の中心線_JR", "LineString"),
+        ("新宿周辺_その他の構造物_歩道橋_跨線橋", "Polygon"),
+        ("新宿周辺_建物", "Mixed"),
+        ("Shinjuku_surrounding_roads", "Polygon"),
+    ],
+)
+def test_surrounding_map_layers_are_settled_as_left_out(stem: str, geometry: str) -> None:
+    keyword_map = load_keyword_map("backend/config/filename_keywords.json")
+
+    assert detect_feature_type(stem, geometry, keyword_map) == ("surroundings", "green")
+
+
+@pytest.mark.phase2
+def test_a_floor_layer_that_mentions_its_surroundings_keeps_its_type() -> None:
+    keyword_map = load_keyword_map("backend/config/filename_keywords.json")
+
+    assert detect_feature_type("JRShinjukuSta_1_改札周辺_Space", "Polygon", keyword_map) == ("unit", "green")
