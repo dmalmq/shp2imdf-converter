@@ -78,7 +78,7 @@ def test_each_feature_class_becomes_a_file_with_its_feature_dataset(station_gdb:
     assert (space.source_format, space.source_layer, space.source_container, space.feature_dataset) == (
         "gdb",
         "West_1F_Space",
-        "Station.gdb",
+        "Station/Station.gdb",
         "West",
     )
     assert files["背景_1F_Space"].feature_dataset is None
@@ -168,7 +168,9 @@ def test_split_refuses_picks_it_cannot_honour(
         assert message in response.json()["detail"]
 
 
-def _layer(name: str, dataset: str, database: str = "Station.gdb") -> dict[str, Any]:
+def _layer(name: str, dataset: str, database: str = "Station.gdb", workspace: str | None = None) -> dict[str, Any]:
+    """``workspace`` is the DATABASE path as Pro wrote it; left out, a sibling ``data`` folder's ``database``."""
+    workspace = workspace or f"..\\..\\data\\{database}"
     return {
         "type": "CIMFeatureLayer",
         "name": name,
@@ -177,7 +179,7 @@ def _layer(name: str, dataset: str, database: str = "Station.gdb") -> dict[str, 
             "type": "CIMFeatureTable",
             "dataConnection": {
                 "type": "CIMStandardDataConnection",
-                "workspaceConnectionString": f"DATABASE=..\\..\\data\\{database}",
+                "workspaceConnectionString": f"DATABASE={workspace}",
                 "workspaceFactory": "FileGDB",
                 "dataset": dataset,
                 "datasetType": "esriDTFeatureClass",
@@ -236,3 +238,58 @@ def test_the_projects_group_layers_become_groups_of_the_files_they_draw(test_cli
         "1F › JREast_1F": ["East_1F_Space"],
         # Another geodatabase's layer of the same name is not this import's file.
     }
+
+
+def test_two_projects_copied_from_one_template_keep_their_own_groups(test_client: TestClient, station_gdb: Path) -> None:
+    # The builder numbers uRIs the same way every time, as two copies of one project would.
+    west = _aprx([("1F", [("Building", [("Space", _layer("Space", "West_1F_Space"))])])])
+    east = _aprx([("1F", [("Building", [("Space", _layer("Space", "East_1F_Space"))])])])
+    session_id = _upload_folder(
+        test_client,
+        _members(station_gdb, "Shinjuku/") + [("Shinjuku/West.aprx", west), ("Shinjuku/East copy.aprx", east)],
+    )
+
+    groups = test_client.get(f"/api/session/{session_id}/split/groups").json()["groups"]
+
+    from_project = [group for group in groups if group["kind"] == "project_group"]
+    assert len({group["id"] for group in from_project}) == len(from_project) == 4
+    assert {group["name"]: group["stems"] for group in from_project} == {
+        "West › 1F": ["West_1F_Space"],
+        "West › 1F › Building": ["West_1F_Space"],
+        "East copy › 1F": ["East_1F_Space"],
+        "East copy › 1F › Building": ["East_1F_Space"],
+    }
+
+
+def test_same_named_geodatabases_stay_apart_in_groups_and_layer_matching(test_client: TestClient, tmp_path: Path) -> None:
+    for folder, count in (("A", 2), ("B", 3)):
+        (tmp_path / folder).mkdir()
+        _write(tmp_path / folder / "Station.gdb", "Space_1F", _squares(_WEST, count), "Building")
+    project = _aprx(
+        [
+            ("Here", [("Space", _layer("Space", "Space_1F", workspace=".\\Station.gdb"))]),
+            ("There", [("Space", _layer("Space", "Space_1F", workspace="..\\B\\Station.gdb"))]),
+        ]
+    )
+    members = [
+        (f"Upload/{folder}/{file.relative_to(tmp_path / folder).as_posix()}", file.read_bytes())
+        for folder in ("A", "B")
+        for file in sorted((tmp_path / folder).rglob("*"))
+        if file.is_file()
+    ]
+    session_id = _upload_folder(test_client, members + [("Upload/A/Station.aprx", project)])
+
+    files = test_client.get(f"/api/session/{session_id}/files").json()["files"]
+    assert {item["stem"]: (item["source_container"], item["feature_count"]) for item in files} == {
+        "Space_1F": ("Upload/A/Station.gdb", 2),
+        "Station__Space_1F": ("Upload/B/Station.gdb", 3),
+    }
+
+    groups = test_client.get(f"/api/session/{session_id}/split/groups").json()["groups"]
+    assert len({group["id"] for group in groups}) == len(groups)
+    assert [(group["name"], group["stems"]) for group in groups if group["kind"] == "feature_dataset"] == [
+        ("Upload/A/Station.gdb › Building", ["Space_1F"]),
+        ("Upload/B/Station.gdb › Building", ["Station__Space_1F"]),
+    ]
+    from_project = {group["name"]: group["stems"] for group in groups if group["kind"] == "project_group"}
+    assert from_project == {"Here": ["Space_1F"], "There": ["Station__Space_1F"]}

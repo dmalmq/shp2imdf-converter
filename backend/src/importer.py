@@ -856,7 +856,8 @@ def _read_geodatabase(
     exists because pyogrio cannot update a geodatabase. A stem is the feature
     class name, prefixed with the geodatabase's when another file has it.
     """
-    container = PurePosixPath(root).name
+    # The whole path, so A/Station.gdb and B/Station.gdb stay two geodatabases.
+    container = root
     gdb_stem = _sanitize_layer_name(PurePosixPath(root).stem)
     loaded_sources: list[LoadedSource] = []
     warnings: list[str] = []

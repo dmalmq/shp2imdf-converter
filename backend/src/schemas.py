@@ -77,7 +77,7 @@ class ImportedFile(BaseModel):
     attribute_columns: list[str]
     source_format: Literal["shapefile", "gpkg", "gdb"] = "shapefile"
     source_layer: str | None = None
-    # The *.gdb folder a feature class came from, and the feature dataset holding it.
+    # The *.gdb folder a feature class came from, as its path within the upload, and the feature dataset holding it.
     source_container: str | None = None
     feature_dataset: str | None = None
     detected_type: str | None = None

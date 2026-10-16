@@ -15,11 +15,12 @@ its CIM without arcpy and matched to the import's files by data source.
 from __future__ import annotations
 
 import copy
+import posixpath
 import shutil
 from collections import Counter
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from shapely import make_valid
@@ -271,32 +272,41 @@ def layer_groups(record: SessionRecord) -> list[LayerGroup]:
 def project_groups(blobs: Sequence[tuple[str, bytes]], files: Sequence[ImportedFile], *, max_bytes: int) -> list[LayerGroup]:
     """Every group layer of every map in the upload's ``.aprx`` files that holds a layer drawn from one of ``files``.
 
+    Projects copied from one template reuse CIM uRIs, so a group's id names its project too.
     A project that cannot be read gives no groups; the import does not need it.
     """
-    maps = [
-        the_map
+    projects = [
+        (path, project)
         for name, content in blobs
-        if name.lower().endswith(".aprx") and gdb_root(name.replace("\\", "/")) is None
+        if (path := name.replace("\\", "/")).lower().endswith(".aprx") and gdb_root(path) is None
         and isinstance(project := read_project_layers(content, NO_EXCLUSIONS, max_bytes=max_bytes), ProjectMaps)
-        for the_map in project.maps
     ]
-    found: list[tuple[str, str, str, list[str]]] = []
-    for the_map in maps:
-        for node, long_name in walk(the_map.layers):
-            if not node.group:
-                continue
-            stems = list(dict.fromkeys(stem for layer in _layers_in(node) if (stem := _file_of(layer.source, files))))
-            if stems:
-                found.append((the_map.name, f"project_group:{the_map.id}:{node.uri}", long_name, stems))
-    several_maps = len({map_name for map_name, *_ in found}) > 1
+    found: list[tuple[str, str, str, str, list[str]]] = []
+    for path, project in projects:
+        folder = posixpath.dirname(path)
+        for the_map in project.maps:
+            for node, long_name in walk(the_map.layers):
+                if not node.group:
+                    continue
+                layers = _layers_in(node)
+                stems = list(dict.fromkeys(stem for layer in layers if (stem := _file_of(layer.source, files, folder))))
+                if stems:
+                    group_id = f"project_group:{path}:{the_map.id}:{node.uri}"
+                    found.append((path, the_map.name, group_id, long_name, stems))
+    several_projects = len({path for path, *_ in found}) > 1
+    several_maps = len({(path, map_name) for path, map_name, *_ in found}) > len({path for path, *_ in found})
     return [
         LayerGroup(
             id=group_id,
-            name=" › ".join(([map_name] if several_maps else []) + long_name.split("\\")),
+            name=" › ".join(
+                ([PurePosixPath(path).stem] if several_projects else [])
+                + ([map_name] if several_maps else [])
+                + long_name.split("\\")
+            ),
             kind="project_group",
             stems=stems,
         )
-        for map_name, group_id, long_name, stems in found
+        for path, map_name, group_id, long_name, stems in found
     ]
 
 
@@ -304,18 +314,43 @@ def _layers_in(node: LayerNode) -> list[LayerNode]:
     return [layer for child in node.children for layer in (_layers_in(child) if child.group else [child])]
 
 
-def _file_of(source: LayerSource | None, files: Sequence[ImportedFile]) -> str | None:
-    """The import's file a layer draws: the same feature class of a geodatabase of the same name, else the shapefile of that name."""
+def _shared_tail(left: str, right: str) -> int:
+    """How many trailing path segments two paths share, ignoring case."""
+    count = 0
+    for a, b in zip(reversed(left.casefold().split("/")), reversed(right.casefold().split("/"))):
+        if a != b:
+            break
+        count += 1
+    return count
+
+
+def _file_of(source: LayerSource | None, files: Sequence[ImportedFile], project_folder: str) -> str | None:
+    """The import's file a layer draws: the same feature class of a geodatabase of that folder name, else the shapefile of that name.
+
+    Two uploaded geodatabases of one name (A/Station.gdb, B/Station.gdb) are told apart by
+    the layer's workspace path, resolved against the project's folder when relative: the one
+    sharing the longest tail of path with it. A tie matches neither.
+    """
     if source is None:
         return None
     dataset = source.dataset.casefold()
-    for item in files:
-        if (
-            item.source_format == "gdb"
-            and (item.source_layer or "").casefold() == dataset
-            and (item.source_container or "").casefold() == source.database.casefold()
-        ):
-            return item.stem
+    candidates = [
+        item
+        for item in files
+        if item.source_format == "gdb"
+        and (item.source_layer or "").casefold() == dataset
+        and PurePosixPath(item.source_container or "").name.casefold() == source.folder.casefold()
+    ]
+    if len(candidates) > 1:
+        absolute = source.database.startswith("/") or (len(source.database) > 1 and source.database[1] == ":")
+        workspace = source.database if absolute else posixpath.normpath(posixpath.join(project_folder, source.database))
+        scores = [_shared_tail(item.source_container or "", workspace) for item in candidates]
+        best = max(scores)
+        candidates = [item for item, score in zip(candidates, scores) if score == best]
+    if len(candidates) == 1:
+        return candidates[0].stem
+    if candidates:
+        return None
     shapefile = dataset.removesuffix(".shp")
     matches = [item for item in files if item.source_format == "shapefile" and item.stem.casefold() == shapefile]
     return matches[0].stem if len(matches) == 1 else None

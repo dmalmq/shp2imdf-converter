@@ -74,12 +74,17 @@ def load_tile_exclusions(path: Path) -> TileExclusions:
 
 @dataclass(frozen=True, slots=True)
 class LayerSource:
-    """Where a feature layer reads its features: the workspace's last path segment and the dataset in it."""
+    """Where a feature layer reads its features: the workspace path as the project wrote it, and the dataset in it."""
 
     database: str
-    """``JRShinjukuSta.gdb`` for a geodatabase, the folder's name for shapefiles."""
+    """With forward slashes: ``../data/JRShinjukuSta.gdb``, ``C:/GIS/JRShinjukuSta.gdb``, or a shapefile folder."""
     dataset: str
     """A feature class name, or ``Space.shp``."""
+
+    @property
+    def folder(self) -> str:
+        """The workspace's last segment: ``JRShinjukuSta.gdb``."""
+        return self.database.rsplit("/", 1)[-1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,8 +279,8 @@ def _layer_source(doc: dict[str, Any]) -> LayerSource | None:
         (value for key, _, value in (part.partition("=") for part in workspace.split(";")) if key.strip().upper() == "DATABASE"),
         "",
     )
-    folder = database.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
-    return LayerSource(database=folder, dataset=dataset) if folder else None
+    path = database.replace("\\", "/").rstrip("/")
+    return LayerSource(database=path, dataset=dataset) if path else None
 
 
 def _member(uri: Any) -> str:

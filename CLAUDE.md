@@ -118,7 +118,12 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   geodatabase feature datasets (`ImportedFile.feature_dataset`) and the group layers of every
   map of an `.aprx` uploaded with the import, read once at import by `read_project_layers` into
   `SessionRecord.project_groups`. A layer joins its group by data source: the same feature
-  class in a `.gdb` of the same folder name, or the shapefile of that stem. Shinjuku's
+  class in a `.gdb` of the same folder name, or the shapefile of that stem. Two uploaded
+  geodatabases of one name (`A/Station.gdb`, `B/Station.gdb`) are kept apart by
+  `ImportedFile.source_container`, the geodatabase's path within the upload; a layer goes to
+  the one sharing the longest path tail with its `DATABASE=` path resolved against the
+  project's folder, and to neither on a tie. A project group's id names its `.aprx`, since
+  projects copied from one template reuse CIM uRIs. Shinjuku's
   `JRShinjukuSta.gdb` has no feature datasets at all (266 feature classes at the root), so its
   buildings come from the project's groups or from the page's layer filter with "Tick all shown".
   Only `.aprx` groups are read; an `.mxd` is a binary format nothing here parses without arcpy
