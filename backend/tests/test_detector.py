@@ -7,7 +7,9 @@ import pytest
 from backend.src.detector import (
     detect_feature_type,
     detect_files,
+    detect_floor_label,
     detect_level_ordinal,
+    detect_levels,
     infer_learning_suggestion,
     load_keyword_map,
     merge_learned_keywords,
@@ -147,3 +149,82 @@ def test_load_keyword_map(config_path="backend/config/filename_keywords.json") -
     assert "space" in loaded["unit"]
     assert "amenity" in loaded
     assert "amenity" in loaded["amenity"]
+
+
+@pytest.mark.phase2
+@pytest.mark.parametrize(
+    ("stem", "label"),
+    [
+        ("Site_M1F_Space", "M1F"),
+        ("Site_M1_Space", "M1F"),
+        ("Site_M2FL_Space", "M2F"),
+        ("JRTokyoSta_M2_Space", "M2F"),
+        ("Site_RF_Space", "RF"),
+        ("Site_R_Space", "RF"),
+        ("Site_PH_Space", "RF"),
+        ("Site_屋上_Space", "RF"),
+        ("Site_2F_Space", None),
+        ("Site_B1_Space", None),
+        ("Site_Room_Space", None),
+    ],
+)
+def test_detect_floor_label_names_mezzanines_and_the_roof(stem: str, label: str | None) -> None:
+    assert detect_floor_label(stem) == label
+
+
+def _levels(stems: list[str]) -> dict[str, tuple[int, str | None, bool]]:
+    return {stem: (level.ordinal, level.short_name, level.outdoor) for stem, level in detect_levels(stems).items()}
+
+
+@pytest.mark.phase2
+def test_a_mezzanine_stacks_between_its_floors_and_moves_the_floors_above_up() -> None:
+    # Shinjuku and Tokyo: M2F lies over 1F and under 2F, so 1F 0, M2F 1, 2F 2.
+    assert _levels(["S_B1_Space", "S_1F_Space", "S_M2F_Space", "S_2F_Space", "S_3F_Space", "S_RF_Space"]) == {
+        "S_B1_Space": (-1, None, False),
+        "S_1F_Space": (0, None, False),
+        "S_M2F_Space": (1, "M2F", False),
+        "S_2F_Space": (2, "2F", False),
+        "S_3F_Space": (3, "3F", False),
+        "S_RF_Space": (4, "RF", True),
+    }
+
+
+@pytest.mark.phase2
+def test_m1f_shares_the_slot_above_the_ground_floor() -> None:
+    assert _levels(["S_1F_Space", "S_M1F_Space", "S_M2F_Space", "S_2F_Space"]) == {
+        "S_1F_Space": (0, None, False),
+        "S_M1F_Space": (1, "M1F", False),
+        "S_M2F_Space": (2, "M2F", False),
+        "S_2F_Space": (3, "2F", False),
+    }
+
+
+@pytest.mark.phase2
+def test_without_a_mezzanine_ordinals_are_unchanged_and_the_roof_goes_on_top() -> None:
+    assert _levels(["S_B1_Space", "S_1_Space", "S_2_Space", "S_屋上_Space", "S_Building"]) == {
+        "S_B1_Space": (-1, None, False),
+        "S_1_Space": (0, None, False),
+        "S_2_Space": (1, None, False),
+        "S_屋上_Space": (2, "RF", True),
+    }
+
+
+@pytest.mark.phase2
+def test_detect_files_labels_a_mezzanine_and_keeps_manual_levels() -> None:
+    keywords = {"unit": {"space"}}
+    files = [
+        ImportedFile(stem=stem, geometry_type="Polygon", feature_count=1, attribute_columns=[])
+        for stem in ["S_1F_Space", "S_M2F_Space", "S_2F_Space", "S_RF_Space"]
+    ]
+    detected = {item.stem: item for item in detect_files(files, keywords, preserve_manual_levels=False)}
+    assert [(detected[stem].detected_level, detected[stem].short_name, detected[stem].outdoor) for stem in detected] == [
+        (0, None, False),
+        (1, "M2F", False),
+        (2, "2F", False),
+        (3, "RF", True),
+    ]
+
+    detected["S_2F_Space"].detected_level = 7
+    detected["S_2F_Space"].short_name = "Upper"
+    again = {item.stem: item for item in detect_files(list(detected.values()), keywords, preserve_manual_levels=True)}
+    assert (again["S_2F_Space"].detected_level, again["S_2F_Space"].short_name) == (7, "Upper")

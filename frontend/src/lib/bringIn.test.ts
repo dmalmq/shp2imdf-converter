@@ -45,8 +45,26 @@ test("floors found are ordered, and two names at one height are kept apart", () 
     { ordinal: -1, labels: ["B1F"] },
     { ordinal: 1, labels: ["2F", "M2F"] }
   ]);
-  expect(floorChoices(view.floors)).toEqual([-2, -1, 1, 2]);
-  expect(floorChoices([])).toEqual([-1, 0, 1, 2]);
+  expect(floorChoices(view.floors).map((choice) => choice.ordinal)).toEqual([-2, -1, 1, 2]);
+  expect(floorChoices([]).map((choice) => choice.label)).toEqual(["B1F", "1F", "2F", "3F"]);
+});
+
+test("a mezzanine and the floors it moved up are offered by their own labels", () => {
+  const view = bringInView([
+    file("s_1F", { detected_level: 0 }),
+    file("s_M2F", { detected_level: 1, short_name: "M2F" }),
+    file("s_2F", { detected_level: 2, short_name: "2F" }),
+    file("s_RF", { detected_level: 3, short_name: "RF", outdoor: true })
+  ]);
+  expect(view.floors.map((floor) => floor.labels)).toEqual([["1F"], ["M2F"], ["2F"], ["RF"]]);
+  expect(floorChoices(view.floors)).toEqual([
+    { ordinal: -1, label: "B1F" },
+    { ordinal: 0, label: "1F" },
+    { ordinal: 1, label: "M2F", shortName: "M2F" },
+    { ordinal: 2, label: "2F", shortName: "2F" },
+    { ordinal: 3, label: "RF", shortName: "RF" },
+    { ordinal: 4, label: "5F" }
+  ]);
 });
 
 test("a shapefile's parts queue as one dataset that knows what it lacks", () => {

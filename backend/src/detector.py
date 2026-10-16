@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 import copy
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
@@ -38,7 +40,7 @@ def _is_level_token(token: str) -> bool:
         return True
     if lowered in {"g", "gf", "gh"}:
         return True
-    return False
+    return detect_floor_label(token) is not None
 
 
 def stem_suffix_token(stem: str) -> str | None:
@@ -147,21 +149,117 @@ def detect_level_ordinal(stem: str) -> int | None:
     return None
 
 
+ROOF_LABEL = "RF"
+_ROOF_TOKENS = {"RF", "R", "PH"}
+
+
+def canonical_floor_label(text: str | None) -> str | None:
+    """Canonical floor code for floor-label text: "2FL"/"2F" -> "2F", "B1FL"/"B1" -> "B1F",
+    "M2FL"/"M2" -> "M2F". Bare digits are not a label, so a year such as 2024 is not a floor."""
+    if not text:
+        return None
+    match = re.fullmatch(r"\s*(B|M)?(\d+)FL?\s*", text, re.IGNORECASE) or re.fullmatch(
+        r"\s*(B|M)(\d+)\s*", text, re.IGNORECASE
+    )
+    if not match:
+        return None
+    return f"{(match.group(1) or '').upper()}{int(match.group(2))}F"
+
+
+def detect_floor_label(stem: str) -> str | None:
+    """The mezzanine ("M2F") or roof ("RF") label a stem names, else None. Plain floors
+    need no label: `detect_level_ordinal` numbers them."""
+    if "屋上" in stem:
+        return ROOF_LABEL
+    for token in re.findall(r"[A-Za-z0-9]+", stem):
+        if token.upper() in _ROOF_TOKENS:
+            return ROOF_LABEL
+        code = canonical_floor_label(token)
+        if code and code.startswith("M"):
+            return code
+    return None
+
+
+def default_short_name(ordinal: int) -> str:
+    """Japanese floor convention, the inverse of `detect_level_ordinal`: 0 is 1F, -1 is B1F."""
+    return f"B{abs(ordinal)}F" if ordinal < 0 else f"{ordinal + 1}F"
+
+
+@dataclass(frozen=True)
+class DetectedLevel:
+    ordinal: int
+    short_name: str | None
+    outdoor: bool = False
+
+
+def _mezzanine_slot(label: str) -> tuple[int, int]:
+    # M<n>F sits between floors n-1 and n (中n階), so M2F is between 1F and 2F. M1F
+    # takes the same slot rather than going under the ground floor, below any M2F.
+    number = int(label[1:-1])
+    return max(number, 2), number
+
+
+def detect_levels(stems: Iterable[str]) -> dict[str, DetectedLevel]:
+    """Ordinals for a set of per-floor files, decided together. Each mezzanine gets
+    its own ordinal directly above floor n-1, so every floor above it moves up one
+    and keeps its label as short_name; the roof goes one above the top floor and is
+    outdoor. short_name is None where the ordinal's default label is already right."""
+    plain: dict[str, int] = {}
+    mezzanines: dict[str, str] = {}
+    roofs: list[str] = []
+    for stem in stems:
+        label = detect_floor_label(stem)
+        if label == ROOF_LABEL:
+            roofs.append(stem)
+        elif label is not None:
+            mezzanines[stem] = label
+        else:
+            ordinal = detect_level_ordinal(stem)
+            if ordinal is not None:
+                plain[stem] = ordinal
+
+    slots = sorted({_mezzanine_slot(label) for label in mezzanines.values()})
+
+    def stacked(ordinal: int) -> int:
+        if ordinal < 0:
+            return ordinal
+        floor = ordinal + 1
+        return ordinal + sum(1 for slot, _ in slots if slot <= floor)
+
+    levels: dict[str, DetectedLevel] = {}
+    for stem, ordinal in plain.items():
+        shifted = stacked(ordinal)
+        levels[stem] = DetectedLevel(shifted, default_short_name(ordinal) if shifted != ordinal else None)
+    for stem, label in mezzanines.items():
+        slot = _mezzanine_slot(label)
+        below = sum(1 for other in slots if other[0] == slot[0] and other < slot)
+        levels[stem] = DetectedLevel(stacked(slot[0] - 2) + 1 + below, label)
+    top = max((level.ordinal for level in levels.values()), default=-1)
+    for stem in roofs:
+        levels[stem] = DetectedLevel(top + 1, ROOF_LABEL, outdoor=True)
+    return levels
+
+
 def detect_files(
     files: list[ImportedFile],
     keywords: dict[str, set[str]],
     preserve_manual_levels: bool = True,
 ) -> list[ImportedFile]:
+    levels = detect_levels(item.stem for item in files)
     detected: list[ImportedFile] = []
     for item in files:
         inferred_type, confidence = detect_feature_type(item.stem, item.geometry_type, keywords)
-        inferred_level = detect_level_ordinal(item.stem)
 
         updated = item.model_copy(deep=True)
         updated.detected_type = inferred_type
         updated.confidence = confidence
         if not preserve_manual_levels or updated.detected_level is None:
-            updated.detected_level = inferred_level
+            level = levels.get(item.stem)
+            updated.detected_level = level.ordinal if level else None
+            if level and level.short_name and not updated.short_name:
+                updated.short_name = level.short_name
+            if level and level.outdoor:
+                updated.outdoor = True
         detected.append(updated)
     return detected
 

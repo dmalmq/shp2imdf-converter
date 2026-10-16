@@ -116,12 +116,27 @@ export function bringInView(files: ReadonlyArray<ImportedFile>): BringInView {
   };
 }
 
+/**
+ * A floor a file can be put on. `shortName` is sent with the choice when the
+ * ordinal's default label would be wrong: a mezzanine, the roof, or a floor that a
+ * mezzanine below it moved up one ordinal.
+ */
+export type FloorChoice = { ordinal: number; label: string; shortName?: string };
+
 /** The floors a file can be put on: those found, and one either side. */
-export function floorChoices(floors: ReadonlyArray<FloorFound>): number[] {
-  if (floors.length === 0) return [-1, 0, 1, 2];
+export function floorChoices(floors: ReadonlyArray<FloorFound>): FloorChoice[] {
+  if (floors.length === 0) return [-1, 0, 1, 2].map((ordinal) => ({ ordinal, label: floorLabel(ordinal) }));
+  const found = new Map(floors.map((floor) => [floor.ordinal, floor.labels]));
   const ordinals = floors.map((floor) => floor.ordinal);
   const choices = new Set([Math.min(...ordinals) - 1, ...ordinals, Math.max(...ordinals) + 1]);
-  return [...choices].sort((left, right) => left - right);
+  return [...choices]
+    .sort((left, right) => left - right)
+    .map((ordinal) => {
+      const labels = found.get(ordinal) ?? [];
+      if (labels.length === 0) return { ordinal, label: floorLabel(ordinal) };
+      const label = labels.join(" / ");
+      return labels.length === 1 && label !== floorLabel(ordinal) ? { ordinal, label, shortName: label } : { ordinal, label };
+    });
 }
 
 const SHAPEFILE_PARTS = [".shp", ".dbf", ".shx", ".prj", ".cpg", ".qix"];

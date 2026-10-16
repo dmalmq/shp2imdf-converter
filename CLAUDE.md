@@ -95,6 +95,17 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   23 cm out. The cross-language golden fixture in `test_illustrator_georeference.py` and
   `similarity.test.ts` is what keeps the two implementations honest; if you change one, run
   both.
+- Floor ordinals in the standard flow are decided for the whole import at once
+  (`detect_levels` in `detector.py`), because a mezzanine moves the floors above it.
+  1F is 0 and B1F is -1 as before. `M<n>`/`M<n>F`/`M<n>FL` is a mezzanine **between
+  floors n-1 and n** (中n階): Shinjuku's and Tokyo's M2F lie over 1F and under 2F, so
+  1F 0, M2F 1, 2F 2, 3F 3. Every floor above a mezzanine moves up one ordinal and keeps
+  its label as `short_name` ("2F" stays "2F"); M1F takes the slot above 1F, below any M2F.
+  `RF`, `R`, `PH` and `屋上` are the roof: one ordinal above the top floor, outdoor.
+  The generator stays one level per ordinal and takes names from `short_name`, so a
+  mezzanine is its own level feature. Tokyo's own Floor table gives M2F ordinal 2, the
+  same as 2F, which IMDF allows, but 43% of M2F overlaps 2F, so they can't share a plane.
+  Floor-code parsing (`canonical_floor_label`) is shared with the IMDF-schema importer.
 - Splitting an import by building (`backend/src/split.py`, `/p/:id/bring-in/split`) is
   opt-in: a Bring in checkbox, unticked by default, sends the operator there instead of Set
   up. A source row goes to the drawn polygon holding its centroid, the Illustrator rule. The
