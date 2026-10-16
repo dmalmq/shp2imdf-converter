@@ -963,6 +963,12 @@ export type SplitResponse = {
   unassigned_total: number;
 };
 
+/** The features as brought in, which is what a split assigns, not the generated set `/features` holds after Set up. */
+export async function fetchSplitFeatures(sessionId: string): Promise<SessionFeatureCollection> {
+  const response = await fetch(`/api/session/${sessionId}/split/features`);
+  return handleJson<SessionFeatureCollection>(response);
+}
+
 export async function previewSplit(sessionId: string, shapes: SplitShape[]): Promise<SplitPreviewResponse> {
   const response = await fetch(`/api/session/${sessionId}/split/preview`, {
     method: "POST",

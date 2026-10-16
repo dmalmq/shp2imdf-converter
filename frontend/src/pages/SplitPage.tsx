@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { Pencil, Trash2 } from "lucide-react";
 
 import {
-  fetchSessionFeatures,
+  fetchSplitFeatures,
   previewSplit,
   splitSession,
   type SplitPreviewResponse,
@@ -84,7 +84,7 @@ export function SplitPage() {
 
   useEffect(() => {
     let live = true;
-    fetchSessionFeatures(sessionId).then(
+    fetchSplitFeatures(sessionId).then(
       (response) => live && setFeatures(response.features as BasicFeature[]),
       (error: unknown) => {
         if (!live) return;

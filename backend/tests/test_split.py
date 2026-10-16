@@ -248,3 +248,30 @@ def test_a_split_that_fails_part_way_leaves_no_projects_behind(
 
     assert [item["id"] for item in test_client.get("/api/projects").json()["projects"]] == [session_id]
     assert [path.name for path in (tmp_path / "session_uploads").iterdir()] == [session_id]
+
+
+def test_the_split_map_draws_the_features_as_brought_in_even_after_set_up(
+    test_client: TestClient, two_buildings: Path
+) -> None:
+    session_id = _import(test_client, two_buildings)
+    brought_in = test_client.get(f"/api/session/{session_id}/split/features").json()["features"]
+    assert test_client.patch(
+        f"/api/session/{session_id}/wizard/project",
+        json={
+            "project_name": "Site",
+            "venue_name": "Site",
+            "venue_category": "shoppingcenter",
+            "language": "en",
+            "address": {"address": "1-1", "locality": "Chuo-ku", "country": "JP"},
+        },
+    ).status_code == 200
+    assert test_client.post(f"/api/session/{session_id}/generate").status_code == 200
+
+    generated = test_client.get(f"/api/session/{session_id}/features").json()["features"]
+    drawn = test_client.get(f"/api/session/{session_id}/split/features").json()["features"]
+
+    assert drawn == brought_in
+    assert {"venue", "footprint"} <= {feature["feature_type"] for feature in generated}
+    assert not {"venue", "footprint"} & {feature["feature_type"] for feature in drawn}
+    preview = test_client.post(f"/api/session/{session_id}/split/preview", json={"shapes": _shapes()}).json()
+    assert set(preview["owners"]) <= {feature["properties"]["source_feature_ref"] for feature in drawn}

@@ -133,7 +133,8 @@ def preview_split(source_collection: dict[str, Any], shapes: list[SplitShape]) -
     )
 
 
-def _source_collection(record: SessionRecord) -> dict[str, Any]:
+def source_collection(record: SessionRecord) -> dict[str, Any]:
+    """What a split assigns: the features as brought in, before Set up or any edit."""
     return record.source_feature_collection or record.feature_collection
 
 
@@ -200,7 +201,7 @@ def split_session(
     """
     if parent.import_profile != "standard":
         raise ValueError("Only a shapefile or GeoPackage import can be split by building.")
-    assignment = assign_features(_source_collection(parent), shapes)
+    assignment = assign_features(source_collection(parent), shapes)
     empty = [name for name, features in zip(assignment.names, assignment.features) if not features]
     if empty:
         raise ValueError(f"No features fall inside: {', '.join(empty)}.")
