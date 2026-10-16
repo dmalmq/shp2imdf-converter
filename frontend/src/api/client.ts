@@ -944,6 +944,49 @@ export async function detectAllFiles(sessionId: string): Promise<DetectResponse>
   return handleJson<DetectResponse>(response);
 }
 
+/** A building drawn on the split map: a WGS84 GeoJSON polygon and the name its project gets. */
+export type SplitShape = {
+  name: string;
+  polygon: { type: "Polygon"; coordinates: number[][][] };
+};
+
+export type SplitPreviewResponse = {
+  shapes: Array<{ name: string; total: number; files: Record<string, number> }>;
+  unassigned_total: number;
+  unassigned: Record<string, number>;
+  /** Shape index per assigned feature, keyed by `source_feature_ref`. */
+  owners: Record<string, number>;
+};
+
+export type SplitResponse = {
+  projects: Array<{ session_id: string; name: string; feature_count: number }>;
+  unassigned_total: number;
+};
+
+/** The features as brought in, which is what a split assigns, not the generated set `/features` holds after Set up. */
+export async function fetchSplitFeatures(sessionId: string): Promise<SessionFeatureCollection> {
+  const response = await fetch(`/api/session/${sessionId}/split/features`);
+  return handleJson<SessionFeatureCollection>(response);
+}
+
+export async function previewSplit(sessionId: string, shapes: SplitShape[]): Promise<SplitPreviewResponse> {
+  const response = await fetch(`/api/session/${sessionId}/split/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ shapes })
+  });
+  return handleJson<SplitPreviewResponse>(response);
+}
+
+export async function splitSession(sessionId: string, shapes: SplitShape[]): Promise<SplitResponse> {
+  const response = await fetch(`/api/session/${sessionId}/split`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ shapes })
+  });
+  return handleJson<SplitResponse>(response);
+}
+
 export async function updateSessionFile(
   sessionId: string,
   stem: string,

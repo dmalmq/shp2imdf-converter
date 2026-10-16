@@ -402,6 +402,9 @@ class SessionManager:
                 describe_duration(PROTECTED_SECONDS),
             )
 
+    def delete_session(self, session: SessionRecord) -> None:
+        self._delete_session_record(SessionSummary.of(session))
+
     def _delete_session_record(self, session: SessionSummary) -> None:
         self._remove_upload_artifacts(session.upload_artifact_dir)
         self.backend.delete(session.session_id)

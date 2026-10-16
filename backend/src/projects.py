@@ -145,6 +145,9 @@ def _project_name(record: SessionRecord) -> str | None:
         for candidate in (project.project_name, project.venue_name):
             if text := _text(candidate):
                 return text
+    # A split project's venue feature, if any, still names the whole import.
+    if record.split_from is not None:
+        return record.split_from.name
     if venue_name := _venue_feature_name(record.feature_collection):
         return venue_name
     stems = [item.stem for item in record.files if item.stem]

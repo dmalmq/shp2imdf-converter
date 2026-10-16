@@ -291,6 +291,30 @@ describe("a project's Bring in", () => {
     expect(stems).toContainEqual(["zzyx", "fixture", "green"]);
   });
 
+  test("a split by building is opt-in; unticked, Continue still goes to Set up", () => {
+    const resolved = brought.map((item) => (item.stem === "qwzx" ? { ...item, confidence: "green", detected_level: 1 } : item));
+    useAppStore.setState({ files: resolved });
+    renderPage(true, "/p/s1/bring-in");
+    const box = screen.getByRole("checkbox", { name: /hold more than one building/ });
+    expect(box).not.toBeChecked();
+
+    fireEvent.click(box);
+    fireEvent.click(nextButton(/Split into buildings/));
+    expect(screen.getByTestId("where")).toHaveTextContent("/p/s1/bring-in/split");
+  });
+
+  test("the split stays blocked while a file needs you", () => {
+    renderPage(true, "/p/s1/bring-in");
+    fireEvent.click(screen.getByRole("checkbox", { name: /hold more than one building/ }));
+    expect(nextButton(/Split into buildings/)).toBeDisabled();
+  });
+
+  test("an IMDF-schema import offers no split", () => {
+    useAppStore.setState({ importProfile: "imdf_shapefile" });
+    renderPage(true, "/p/s1/bring-in");
+    expect(screen.queryByRole("checkbox", { name: /hold more than one building/ })).not.toBeInTheDocument();
+  });
+
   test("shows the project's profile without offering to change it", () => {
     useAppStore.setState({ importProfile: "imdf_shapefile" });
     renderPage(true, "/p/s1/bring-in");

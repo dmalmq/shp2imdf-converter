@@ -23,6 +23,7 @@ from backend.routers.common import (
     max_upload_bytes,
     read_uploads,
     session_manager,
+    session_uploads_dir,
 )
 from backend.src.artwork_draft import MAX_DRAFT_BYTES, SaveDraftRequest
 from backend.src.artwork_projects import ArtworkProject, derive_artwork_stage
@@ -115,13 +116,6 @@ def _validate_ai_upload(request: Request, file: UploadFile, payload: bytes) -> s
             "Not a PDF-based Illustrator file. Re-save the .ai with 'Create PDF Compatible File' enabled."
         )
     return name
-
-
-def _session_uploads_dir(request: Request) -> Path:
-    path = getattr(request.app.state, "session_uploads_dir", Path("./data/session_uploads"))
-    directory = Path(path)
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory
 
 
 def _persist_session_upload_artifacts(
@@ -774,7 +768,7 @@ def _create_import_session(request: Request, raw_blobs: list[tuple[str, bytes]])
     artifact_directory = _persist_session_upload_artifacts(
         session_id=session.session_id,
         file_blobs=raw_blobs,
-        uploads_root=_session_uploads_dir(request),
+        uploads_root=session_uploads_dir(request),
     )
     session.upload_artifact_dir = str(artifact_directory)
     manager.save_session(session)
@@ -820,7 +814,7 @@ def _create_imdf_shapefile_session(
     artifact_directory = _persist_session_upload_artifacts(
         session_id=session.session_id,
         file_blobs=raw_blobs,
-        uploads_root=_session_uploads_dir(request),
+        uploads_root=session_uploads_dir(request),
     )
     session.upload_artifact_dir = str(artifact_directory)
     manager.save_session(session)

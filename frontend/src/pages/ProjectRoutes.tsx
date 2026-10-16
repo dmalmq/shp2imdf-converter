@@ -18,6 +18,7 @@ import { useUiLanguage } from "../hooks/useUiLanguage";
 import { useAppStore } from "../store/useAppStore";
 import { DeliverPage } from "./DeliverPage";
 import { ReviewPage } from "./ReviewPage";
+import { SplitPage } from "./SplitPage";
 import { UploadPage } from "./UploadPage";
 import { WizardPage } from "./WizardPage";
 
@@ -145,6 +146,14 @@ export function ProjectStage() {
   if (stage === "set-up") return <WizardPage />;
   if (stage === "deliver") return <DeliverPage />;
   return <ReviewPage />;
+}
+
+/** Bring in's split by building; an IMDF-schema import has nothing to split. */
+export function SplitStage() {
+  const { sessionId = "" } = useParams();
+  const importProfile = useAppStore((state) => state.importProfile);
+  if (importProfile !== "standard") return <Navigate replace to={projectPath(sessionId, "bring-in")} />;
+  return <SplitPage />;
 }
 
 /** The pre-project routes, kept so bookmarks and muscle memory still land. */

@@ -188,6 +188,21 @@ def _group_artifact_files(upload_artifact_dir: Path) -> dict[str, dict[str, Path
     return grouped
 
 
+def _split_rows(session: SessionRecord) -> dict[str, set[int]]:
+    """The source rows a project split off by building holds, per stem.
+
+    Its uploaded files are copies of the whole import, other buildings included.
+    """
+    rows: dict[str, set[int]] = {}
+    for feature in (session.source_feature_collection or session.feature_collection).get("features") or []:
+        properties = feature.get("properties") or {}
+        stem = properties.get("source_file")
+        row = properties.get("source_row_index")
+        if isinstance(stem, str) and isinstance(row, int):
+            rows.setdefault(stem, set()).add(row)
+    return rows
+
+
 def _detected_type_by_stem(session: SessionRecord) -> dict[str, str]:
     return {
         item.stem: (item.detected_type or "").strip().lower()
@@ -1548,6 +1563,7 @@ def build_shapefile_export_archive(
         raise ValueError("Shapefile export unavailable: uploaded source files are not available for this session.")
 
     grouped_files = _group_artifact_files(upload_artifact_dir)
+    split_rows = _split_rows(session) if session.split_from is not None else None
     shapefile_groups = {
         stem: components
         for stem, components in grouped_files.items()
@@ -1704,6 +1720,8 @@ def build_shapefile_export_archive(
                         }
                     )
 
+            if split_rows is not None:
+                gdf = gdf[gdf.index.isin(split_rows.get(stem, set()))]
             output_stem = _make_unique_stem(output_stem, used_output_stems)
             destination = output_dir / f"{output_stem}.shp"
             write_kwargs: dict[str, Any] = {"driver": "ESRI Shapefile", "index": False}
