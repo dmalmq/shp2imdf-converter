@@ -177,15 +177,15 @@ function folderOf(file: File): string {
 }
 
 /**
- * A shapefile's parts are one dataset only within one folder: the importer keeps
- * `A/Space.shp` and `B/Space.shp` apart, so the queue does too.
+ * A dataset is one only within one folder: the importer keeps `A/Space.shp` and
+ * `B/Space.shp`, or `A/map.gpkg` and `B/map.gpkg`, apart, so the queue does too.
  */
 export function datasetKey(file: File): string {
   const folder = geodatabaseFolder(datasetPath(file));
   if (folder) return `gdb:${folder}`;
   const extension = fileExtension(file.name);
   if (SHAPEFILE_PARTS.includes(extension)) return `shp:${folderOf(file)}${file.name.slice(0, -extension.length)}`;
-  return `file:${file.name}`;
+  return `file:${folderOf(file)}${file.name}`;
 }
 
 export function queuedDatasets(files: ReadonlyArray<File>): QueuedDataset[] {
@@ -216,13 +216,13 @@ export function queuedDatasets(files: ReadonlyArray<File>): QueuedDataset[] {
     dataset.bytes += file.size;
     byKey.set(key, dataset);
   }
-  // A stem in two folders is named with its folder, so the two rows can be told apart.
-  const stems = new Map<string, number>();
+  // A name in two folders is shown with its folder, so the two rows can be told apart.
+  const names = new Map<string, number>();
   for (const dataset of byKey.values()) {
-    if (dataset.kind === "shapefile") stems.set(dataset.name, (stems.get(dataset.name) ?? 0) + 1);
+    if (dataset.kind !== "gdb") names.set(dataset.name, (names.get(dataset.name) ?? 0) + 1);
   }
   for (const dataset of byKey.values()) {
-    if (dataset.kind === "shapefile" && (stems.get(dataset.name) ?? 0) > 1) dataset.name = dataset.key.slice(4);
+    if (dataset.kind !== "gdb" && (names.get(dataset.name) ?? 0) > 1) dataset.name = dataset.key.slice(dataset.key.indexOf(":") + 1);
   }
   const datasets = [...byKey.values()].sort((left, right) => left.name.localeCompare(right.name));
   for (const dataset of datasets) {

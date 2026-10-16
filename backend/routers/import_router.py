@@ -53,6 +53,7 @@ from backend.src.illustrator_survey_snap import match_survey_consensus
 from backend.src.imdf_reader import read_imdf_zip
 from backend.src.imdf_shapefile_importer import import_imdf_shapefile_blobs
 from backend.src.importer import (
+    archive_folder,
     ReferenceLayer,
     import_file_blobs,
     stored_upload_layout,
@@ -151,7 +152,7 @@ def _expand_upload(name: str, payload: bytes) -> list[tuple[str, bytes]]:
             for info in archive.infolist():
                 if info.is_dir():
                     continue
-                blobs.append((f"{Path(name).stem}/{zip_member_name(info)}", archive.read(info)))
+                blobs.append((f"{archive_folder(name)}/{zip_member_name(info)}", archive.read(info)))
         return blobs
     return [(name, payload)]
 

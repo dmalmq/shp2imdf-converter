@@ -161,6 +161,11 @@ def flatten_member_paths(paths: Sequence[str]) -> list[str]:
     return flat
 
 
+def archive_folder(name: str) -> str:
+    """Where a zip's members go: its own path without ``.zip``, so A/station.zip and B/station.zip stay apart."""
+    return str(PurePosixPath(tree_path(name)).with_suffix(""))
+
+
 def _expand_archive_members(
     file_blobs: Sequence[tuple[str, bytes]],
     *,
@@ -180,7 +185,7 @@ def _expand_archive_members(
                     stem = Path(member).stem.lower()
                     if suffix == ".dbf" and stem in skipped:
                         continue
-                    expanded.append((f"{Path(name).stem}/{member}", archive.read(info.filename)))
+                    expanded.append((f"{archive_folder(name)}/{member}", archive.read(info.filename)))
             continue
         suffix = Path(name).suffix.lower()
         stem = Path(name).stem.lower()

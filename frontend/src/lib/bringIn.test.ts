@@ -133,3 +133,21 @@ test("same-named shapefiles in two folders queue apart, each with its own parts,
 test("a stem in one folder keeps its bare name", () => {
   expect(queuedDatasets(["Station/1F/Space.shp", "Station/1F/Space.dbf"].map(inFolder)).map((dataset) => dataset.name)).toEqual(["Space"]);
 });
+
+test("same-named GeoPackages or projects in two folders queue as two rows, and leave out apart", () => {
+  const queued = ["Station/A/map.gpkg", "Station/B/map.gpkg", "Station/A/新宿.aprx", "Station/B/新宿.aprx"].map(inFolder);
+  const datasets = queuedDatasets(queued);
+  expect(datasets.map(({ name, kind }) => ({ name, kind }))).toEqual([
+    { name: "Station/A/map.gpkg", kind: "gpkg" },
+    { name: "Station/A/新宿.aprx", kind: "project" },
+    { name: "Station/B/map.gpkg", kind: "gpkg" },
+    { name: "Station/B/新宿.aprx", kind: "project" }
+  ]);
+  const leftOut = datasets.find((dataset) => dataset.name === "Station/A/map.gpkg")!.key;
+  expect(queued.filter((file) => datasetKey(file) !== leftOut).map((file) => file.webkitRelativePath)).toEqual([
+    "Station/B/map.gpkg",
+    "Station/A/新宿.aprx",
+    "Station/B/新宿.aprx"
+  ]);
+  expect(queuedDatasets([inFolder("Station/A/map.gpkg")])[0].name).toBe("map.gpkg");
+});
