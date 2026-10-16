@@ -1,5 +1,5 @@
 import type { ImportedFile } from "../api/client";
-import { addToQueue, bringInView, floorChoices, floorLabel, isAccepted, queueNextStep, queuedDatasets, toRow } from "./bringIn";
+import { addToQueue, bringInView, datasetKey, floorChoices, floorLabel, isAccepted, queueNextStep, queuedDatasets, toRow } from "./bringIn";
 
 function file(stem: string, overrides: Partial<ImportedFile> = {}): ImportedFile {
   return {
@@ -116,4 +116,20 @@ test("two geodatabases with the same table names stay apart in the queue", () =>
   );
   expect(queued.map((file) => file.webkitRelativePath)).toEqual(["B.gdb/a00000001.gdbtable", "A.gdb/a00000001.gdbtable"]);
   expect(queuedDatasets(queued).map((dataset) => dataset.name)).toEqual(["A.gdb", "B.gdb"]);
+});
+
+test("same-named shapefiles in two folders queue apart, each with its own parts, and leave out apart", () => {
+  const queued = ["Station/A/Space.shp", "Station/A/Space.shx", "Station/A/Space.dbf", "Station/B/Space.shp"].map(inFolder);
+  const datasets = queuedDatasets(queued);
+  expect(datasets.map(({ name, missing }) => ({ name, missing }))).toEqual([
+    { name: "Station/A/Space", missing: [] },
+    { name: "Station/B/Space", missing: [".shx", ".dbf"] }
+  ]);
+  expect(queueNextStep(datasets, "standard").blocked).not.toBeNull();
+  const kept = queued.filter((file) => datasetKey(file) !== datasets[1].key);
+  expect(kept.map((file) => file.webkitRelativePath)).toEqual(["Station/A/Space.shp", "Station/A/Space.shx", "Station/A/Space.dbf"]);
+});
+
+test("a stem in one folder keeps its bare name", () => {
+  expect(queuedDatasets(["Station/1F/Space.shp", "Station/1F/Space.dbf"].map(inFolder)).map((dataset) => dataset.name)).toEqual(["Space"]);
 });

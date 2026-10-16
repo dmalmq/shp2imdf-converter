@@ -325,7 +325,7 @@ def _shared_tail(left: str, right: str) -> int:
 
 
 def _file_of(source: LayerSource | None, files: Sequence[ImportedFile], project_folder: str) -> str | None:
-    """The import's file a layer draws: the same feature class of a geodatabase of that folder name, else the shapefile of that name.
+    """The import's file a layer draws: the same feature class of a geodatabase of that folder name, or for a layer outside a geodatabase, the shapefile of that name.
 
     Two uploaded geodatabases of one name (A/Station.gdb, B/Station.gdb) are told apart by
     the layer's workspace path, resolved against the project's folder when relative: the one
@@ -349,7 +349,8 @@ def _file_of(source: LayerSource | None, files: Sequence[ImportedFile], project_
         candidates = [item for item, score in zip(candidates, scores) if score == best]
     if len(candidates) == 1:
         return candidates[0].stem
-    if candidates:
+    # A layer of a geodatabase the upload lacks is no loose shapefile's, whatever their names.
+    if candidates or source.folder.casefold().endswith(".gdb"):
         return None
     shapefile = dataset.removesuffix(".shp")
     matches = [item for item in files if item.source_format == "shapefile" and item.stem.casefold() == shapefile]

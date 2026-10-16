@@ -293,3 +293,27 @@ def test_same_named_geodatabases_stay_apart_in_groups_and_layer_matching(test_cl
     ]
     from_project = {group["name"]: group["stems"] for group in groups if group["kind"] == "project_group"}
     assert from_project == {"Here": ["Space_1F"], "There": ["Station__Space_1F"]}
+
+
+def test_a_layer_of_a_missing_geodatabase_never_claims_a_loose_shapefile(
+    test_client: TestClient, station_gdb: Path, tmp_path: Path
+) -> None:
+    loose = tmp_path / "loose"
+    loose.mkdir()
+    gpd.GeoDataFrame({"name": ["x"]}, geometry=_squares(_EAST, 1), crs=_CRS).to_file(loose / "Loose_1F_Space.shp")
+    project = _aprx(
+        [
+            ("Elsewhere", [("Space", _layer("Space", "Loose_1F_Space", database="NotUploaded.gdb"))]),
+            ("Shapefiles", [("Space", _layer("Space", "Loose_1F_Space.shp", workspace="..\shapes"))]),
+        ]
+    )
+    shapefile = [(f"Shinjuku/shapes/{file.name}", file.read_bytes()) for file in sorted(loose.iterdir())]
+    session_id = _upload_folder(
+        test_client, _members(station_gdb, "Shinjuku/") + shapefile + [("Shinjuku/Station.aprx", project)]
+    )
+
+    groups = test_client.get(f"/api/session/{session_id}/split/groups").json()["groups"]
+
+    assert {group["name"]: group["stems"] for group in groups if group["kind"] == "project_group"} == {
+        "Shapefiles": ["Loose_1F_Space"]
+    }
