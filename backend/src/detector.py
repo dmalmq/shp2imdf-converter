@@ -88,7 +88,9 @@ def detect_feature_type(stem: str, geometry_type: str, keywords: dict[str, set[s
     if re.search(r"(^|[^a-z0-9])drawing$", lowered):
         return "detail", "green"
 
-    best_match: tuple[str, int] | None = None
+    # Ranked by: an exact suffix rule, then any IMDF type over "surroundings"
+    # (Station_1_surrounding_Space is a unit layer), then the longest keyword.
+    best_match: tuple[str, tuple[bool, bool, int]] | None = None
     for feature_type, values in keywords.items():
         for keyword in values:
             candidate = keyword.lower().strip()
@@ -97,17 +99,15 @@ def detect_feature_type(stem: str, geometry_type: str, keywords: dict[str, set[s
 
             if candidate.startswith("suffix:"):
                 expected_suffix = candidate[len("suffix:") :]
-                if suffix_token == expected_suffix:
-                    # Prefer explicit suffix rules over substring matches.
-                    keyword_len = len(expected_suffix) + 1000
-                    if best_match is None or keyword_len > best_match[1]:
-                        best_match = (feature_type, keyword_len)
+                if suffix_token != expected_suffix:
+                    continue
+                rank = (True, feature_type != SURROUNDINGS_TYPE, len(expected_suffix))
+            elif candidate in lowered:
+                rank = (False, feature_type != SURROUNDINGS_TYPE, len(candidate))
+            else:
                 continue
-
-            if candidate in lowered:
-                keyword_len = len(candidate)
-                if best_match is None or keyword_len > best_match[1]:
-                    best_match = (feature_type, keyword_len)
+            if best_match is None or rank > best_match[1]:
+                best_match = (feature_type, rank)
 
     if best_match:
         return best_match[0], "green"

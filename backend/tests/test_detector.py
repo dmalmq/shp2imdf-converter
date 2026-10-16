@@ -171,3 +171,15 @@ def test_a_floor_layer_that_mentions_its_surroundings_keeps_its_type() -> None:
     keyword_map = load_keyword_map("backend/config/filename_keywords.json")
 
     assert detect_feature_type("JRShinjukuSta_1_改札周辺_Space", "Polygon", keyword_map) == ("unit", "green")
+    # "surrounding" is the longer keyword here, and must still lose to the IMDF one.
+    assert detect_feature_type("Station_1_surrounding_Space", "Polygon", keyword_map) == ("unit", "green")
+    assert detect_feature_type("Station_1_surrounding_Opening", "LineString", keyword_map) == ("opening", "green")
+
+
+@pytest.mark.phase2
+def test_a_learned_suffix_for_surroundings_still_wins() -> None:
+    keyword_map = merge_learned_keywords(
+        load_keyword_map("backend/config/filename_keywords.json"), {"suffix:bg": "surroundings"}
+    )
+
+    assert detect_feature_type("Station_1_Space_bg", "Polygon", keyword_map) == ("surroundings", "green")

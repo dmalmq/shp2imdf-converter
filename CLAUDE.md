@@ -151,7 +151,9 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   import with a warning. A layer named for the surroundings (`周辺`, `surrounding`, as in
   `新宿周辺_街区`) is detected as `surroundings`: not an IMDF type, so the generator and every
   export pass over it, and Bring in lists it under "Look right" with no floor instead of
-  guessing Units or Openings from its shapes. Picking a real type brings it in; picking
+  guessing Units or Openings from its shapes. Any IMDF keyword in the name beats the
+  surroundings one, however short (`Station_1_surrounding_Space` is a unit); only an exact
+  learned suffix rule outranks that. Picking a real type brings it in; picking
   "Surroundings (left out)" leaves any other file out the same way.
 - Illustrator multi-floor placement: assignment is by box on the artwork preview, membership
   is `centroid ∈ box` plus an optional layer restriction, re-verified server-side at export
