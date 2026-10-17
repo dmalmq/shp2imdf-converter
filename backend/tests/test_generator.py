@@ -9,7 +9,10 @@ from uuid import UUID, uuid4
 import pytest
 from shapely.geometry import Polygon, mapping, shape
 
+from backend.src.detector import detect_files
 from backend.src.generator import _carve_column_units, generate_feature_collection
+from backend.src.validator import validate_feature_collection
+from backend.src.wizard import seed_wizard_state
 from backend.src.schemas import (
     AddressInput,
     CleanupSummary,
@@ -199,6 +202,46 @@ def _multi_level_session(level_ordinals: list[int]) -> SessionRecord:
     )
     session.wizard.mappings.unit.code_column = "CATEGORY"
     return session
+
+
+
+@pytest.mark.phase5
+def test_a_mezzanine_and_roof_become_their_own_levels() -> None:
+    stems = ["Sta_1F_Space", "Sta_M2F_Space", "Sta_2F_Space", "Sta_RF_Space"]
+    session = _multi_level_session([0, 0, 0, 0])
+    session.files = detect_files(
+        [item.model_copy(update={"stem": stem, "detected_level": None}) for item, stem in zip(session.files, stems)],
+        {"unit": {"space"}},
+        preserve_manual_levels=False,
+    )
+    rows = session.source_feature_collection["features"]
+    for row, stem in zip(rows, stems):
+        row["properties"]["source_file"] = stem
+        row["properties"]["source_feature_ref"] = f"{stem}:0:0"
+    seed_wizard_state(session)
+
+    generated = generate_feature_collection(session, unit_categories_path=_UNIT_CATEGORIES_PATH)
+
+    levels = sorted(
+        (item for item in generated["features"] if item["feature_type"] == "level"),
+        key=lambda item: item["properties"]["ordinal"],
+    )
+    assert [
+        (
+            level["properties"]["ordinal"],
+            level["properties"]["short_name"]["en"],
+            level["properties"]["name"]["en"],
+            level["properties"]["outdoor"],
+        )
+        for level in levels
+    ] == [(0, "1F", "1F", False), (1, "M2F", "M2F", False), (2, "2F", "2F", False), (3, "RF", "RF", True)]
+    level_of_unit = {
+        item["properties"]["source_file"]: item["properties"]["level_id"]
+        for item in generated["features"]
+        if item["feature_type"] == "unit"
+    }
+    assert level_of_unit["Sta_M2F_Space"] == levels[1]["id"]
+    assert validate_feature_collection(generated).errors == []
 
 
 @pytest.mark.phase4

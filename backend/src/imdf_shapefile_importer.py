@@ -14,6 +14,7 @@ from shapely.errors import GEOSException
 from shapely.geometry import mapping, shape
 from shapely.ops import unary_union
 
+from backend.src.detector import canonical_floor_label
 from backend.src.importer import ImportArtifacts, import_file_blobs
 
 
@@ -547,33 +548,8 @@ def _synthesize_levels(
     return levels, level_id_by_ordinal
 
 
-def _floor_code(value: Any) -> str | None:
-    """Normalize a floor label ("2FL"/"2F"/"B1FL"/"M2FL") to a canonical code
-    ("2F", "B1F", "M2F"). Returns None for non-floor text such as a year
-    ("2024"), which has no trailing F."""
-    text = _label_text(value)
-    if not text:
-        return None
-    match = re.fullmatch(r"\s*(B|M)?(\d+)FL?\s*", text, re.IGNORECASE)
-    if not match:
-        return None
-    prefix = (match.group(1) or "").upper()
-    return f"{prefix}{int(match.group(2))}F"
-
-
 def _canonical_floor_label(value: object) -> str | None:
-    code = _floor_code(value)
-    if code:
-        return code
-    text = _label_text(value) if not isinstance(value, str) else value
-    if not text:
-        return None
-    # Basement/mezzanine tokens such as B2 / M2 (no trailing F). Bare digits stay
-    # rejected so years like 2024 are not treated as floors.
-    match = re.fullmatch(r"(B|M)(\d+)", str(text), re.IGNORECASE)
-    if match:
-        return f"{match.group(1).upper()}{int(match.group(2))}F"
-    return None
+    return canonical_floor_label(_label_text(value))
 
 
 def _floor_label_from_stem(stem: str) -> str | None:
