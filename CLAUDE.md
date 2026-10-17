@@ -146,6 +146,16 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   exporter looks them up by, and each geodatabase whole under its own path. `/api/import`
   reads its own form with `FORM_PARTS` (as the colour page does): a geodatabase is more than
   Starlette's default 1,000 parts (Shinjuku's is 1,361 files).
+- Two kinds of station layer are not floor plans. A feature class whose name ends in `_nw`
+  (`O_3_NW`, `ShinjukuYodobashi_Camera_1_nw`) is pedestrian network and is skipped at GDB
+  import with a warning. A layer named for the surroundings (`周辺`, `surrounding`, as in
+  `新宿周辺_街区`) is detected as `surroundings`: not an IMDF type, so the generator and the
+  exports built from it pass over it, and the round-trip shapefile export, which copies the
+  uploaded files, filters it by name (`stems_left_out` in its report), and Bring in lists it under "Look right" with no floor instead of
+  guessing Units or Openings from its shapes. Any IMDF keyword in the name beats the
+  surroundings one, however short (`Station_1_surrounding_Space` is a unit); only an exact
+  learned suffix rule outranks that. Picking a real type brings it in; picking
+  "Surroundings (left out)" leaves any other file out the same way.
 - Illustrator multi-floor placement: assignment is by box on the artwork preview, membership
   is `centroid ∈ box` plus an optional layer restriction, re-verified server-side at export
   (the preview filter is display-only). Linked floors share scale/rotation; dragging a floor

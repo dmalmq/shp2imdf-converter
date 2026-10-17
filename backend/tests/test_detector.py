@@ -147,3 +147,39 @@ def test_load_keyword_map(config_path="backend/config/filename_keywords.json") -
     assert "space" in loaded["unit"]
     assert "amenity" in loaded
     assert "amenity" in loaded["amenity"]
+
+
+@pytest.mark.phase2
+@pytest.mark.parametrize(
+    ("stem", "geometry"),
+    [
+        ("新宿周辺_街区", "Polygon"),
+        ("新宿周辺_軌道の中心線_JR", "LineString"),
+        ("新宿周辺_その他の構造物_歩道橋_跨線橋", "Polygon"),
+        ("新宿周辺_建物", "Mixed"),
+        ("Shinjuku_surrounding_roads", "Polygon"),
+    ],
+)
+def test_surrounding_map_layers_are_settled_as_left_out(stem: str, geometry: str) -> None:
+    keyword_map = load_keyword_map("backend/config/filename_keywords.json")
+
+    assert detect_feature_type(stem, geometry, keyword_map) == ("surroundings", "green")
+
+
+@pytest.mark.phase2
+def test_a_floor_layer_that_mentions_its_surroundings_keeps_its_type() -> None:
+    keyword_map = load_keyword_map("backend/config/filename_keywords.json")
+
+    assert detect_feature_type("JRShinjukuSta_1_改札周辺_Space", "Polygon", keyword_map) == ("unit", "green")
+    # "surrounding" is the longer keyword here, and must still lose to the IMDF one.
+    assert detect_feature_type("Station_1_surrounding_Space", "Polygon", keyword_map) == ("unit", "green")
+    assert detect_feature_type("Station_1_surrounding_Opening", "LineString", keyword_map) == ("opening", "green")
+
+
+@pytest.mark.phase2
+def test_a_learned_suffix_for_surroundings_still_wins() -> None:
+    keyword_map = merge_learned_keywords(
+        load_keyword_map("backend/config/filename_keywords.json"), {"suffix:bg": "surroundings"}
+    )
+
+    assert detect_feature_type("Station_1_Space_bg", "Polygon", keyword_map) == ("surroundings", "green")

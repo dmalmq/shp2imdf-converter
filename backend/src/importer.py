@@ -811,6 +811,11 @@ def _read_geopackage_blob(
     return loaded_sources, warnings
 
 
+# Station geodatabases keep their pedestrian network beside the floor plans
+# (O_3_NW, ShinjukuYodobashi_Camera_1_nw), and a network is no IMDF feature.
+_NETWORK_LAYER = re.compile(r"_nw$", re.IGNORECASE)
+
+
 def _gdb_layer_stem(name: str) -> str:
     """Detection reads the stem, so Japanese feature class names keep their words."""
     return re.sub(r"[^\w]+", "_", name.strip(), flags=re.UNICODE).strip("_") or "layer"
@@ -879,10 +884,14 @@ def _read_geodatabase(
         datasets = _feature_datasets(directory)
         table_files = _table_files(directory)
         tables = 0
+        networks = 0
         for layer_name, geometry_type in layers:
             layer_name = str(layer_name)
             if not geometry_type:
                 tables += 1
+                continue
+            if _NETWORK_LAYER.search(layer_name):
+                networks += 1
                 continue
             stem = _gdb_layer_stem(layer_name)
             if stem.lower() in used_stems:
@@ -911,6 +920,8 @@ def _read_geodatabase(
             )
         if tables:
             warnings.append(f"{container}: skipped {tables} table(s) without geometry.")
+        if networks:
+            warnings.append(f"{container}: skipped {networks} network layer(s) ending in _nw.")
         if not loaded_sources:
             warnings.append(f"{container}: no feature classes with geometry.")
     return loaded_sources, warnings
