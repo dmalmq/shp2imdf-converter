@@ -275,16 +275,20 @@ def _stack(files: list[ImportedFile], types: dict[str, str | None]) -> dict[str,
 def restack_levels(before: list[ImportedFile], after: list[ImportedFile]) -> list[ImportedFile]:
     """Re-stack after a type change: a file moving into or out of `LEVEL_FILE_TYPES`
     adds or removes a floor (a mezzanine moves every floor above it). A file whose
-    level, short_name or outdoor flag still holds what the old stack gave it takes the
-    new stack's; anything else was set by hand and is kept."""
+    level still holds what the old stack gave it takes the new stack's, and so do its
+    short_name and outdoor flag where they too still hold the old stack's. Anything else
+    was set by hand and is kept, and a floor moved by hand keeps its label: 2F moved to
+    ordinal 5 stays "2F" rather than reading as 6F."""
     old = _stack(before, {item.stem: item.detected_type for item in before})
     new = _stack(after, {item.stem: item.detected_type for item in after})
     restacked: list[ImportedFile] = []
     for item in after:
         was, now = old.get(item.stem), new.get(item.stem)
         updated = item.model_copy(deep=True)
-        if updated.detected_level == (was.ordinal if was else None):
-            updated.detected_level = now.ordinal if now else None
+        if updated.detected_level != (was.ordinal if was else None):
+            restacked.append(updated)
+            continue
+        updated.detected_level = now.ordinal if now else None
         if updated.short_name == (was.short_name if was else None):
             updated.short_name = now.short_name if now else None
         if updated.outdoor == (was.outdoor if was else False):
@@ -300,12 +304,18 @@ def detect_files(
 ) -> list[ImportedFile]:
     types = {item.stem: detect_feature_type(item.stem, item.geometry_type, keywords) for item in files}
     levels = _stack(files, {stem: feature_type for stem, (feature_type, _) in types.items()})
-    detected: list[ImportedFile] = []
+    typed: list[ImportedFile] = []
     for item in files:
         updated = item.model_copy(deep=True)
         updated.detected_type, updated.confidence = types[item.stem]
+        typed.append(updated)
+    if preserve_manual_levels:
+        # New types can add or remove a floor; levels the old stack gave must follow.
+        typed = restack_levels(files, typed)
+    detected: list[ImportedFile] = []
+    for updated in typed:
         if not preserve_manual_levels or updated.detected_level is None:
-            level = levels.get(item.stem)
+            level = levels.get(updated.stem)
             updated.detected_level = level.ordinal if level else None
             if level and level.short_name and not updated.short_name:
                 updated.short_name = level.short_name
