@@ -147,8 +147,8 @@ export function filterGroups(groups: ReadonlyArray<LayerGroup>, query: string): 
 
 /**
  * One colour per building, kept when others are added or removed. Every hue stays 30°
- * or more from the terracotta (about 10°) that marks what falls outside every building. Mid tones, so each reads on the light map and
- * against both themes' panels.
+ * or more from the terracotta (about 10°) that marks what falls outside every building.
+ * Mid tones, so each reads on the light map and against both themes' panels.
  */
 export const BUILDING_COLOURS = ["#2563eb", "#ca8a04", "#7c3aed", "#16a34a", "#db2777", "#0891b2", "#65a30d", "#c026d3"] as const;
 

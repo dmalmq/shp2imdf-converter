@@ -282,7 +282,6 @@ export function SplitPage() {
     }
   };
 
-
   if (result) {
     return <SplitDone sessionId={sessionId} result={result} />;
   }
