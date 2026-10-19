@@ -382,6 +382,8 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
     if payload.apply_learning and not feature_type:
         raise ValueError("detected_type is required when apply_learning=true")
 
+    # The stack as it stood, for re-stacking once the new type is in.
+    before = list(session.files)
     session.files[file_index] = updated
     learning_suggestion = None
 
@@ -389,11 +391,9 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
         learned_key = keyword if keyword.startswith("suffix:") else f"suffix:{keyword}"
         session.learned_keywords[learned_key] = feature_type
         merged = _merged_keyword_map(request, session.learned_keywords)
-        session.files = detect_files(session.files, merged, preserve_manual_levels=True)
+        session.files = detect_files(session.files, merged, preserve_manual_levels=True, stacked_from=before)
     else:
         if (current.detected_type in LEVEL_FILE_TYPES) != (updated.detected_type in LEVEL_FILE_TYPES):
-            before = list(session.files)
-            before[file_index] = current
             session.files = restack_levels(before, session.files)
         if payload.detected_type and payload.detected_type != current.detected_type:
             merged = _merged_keyword_map(request, session.learned_keywords)
