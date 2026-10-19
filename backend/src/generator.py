@@ -12,6 +12,7 @@ from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, mapping,
 from shapely.ops import unary_union
 from shapely.validation import make_valid
 
+from backend.src.detector import LEVEL_FILE_TYPES, default_short_name
 from backend.src.feature_types import load_category_set, load_occupant_category_pattern
 from backend.src.mapper import load_unit_categories, resolve_unit_category, wrap_labels
 from backend.src.schemas import BuildingWizardState, LevelWizardItem, SessionRecord
@@ -28,7 +29,7 @@ OPENING_CATEGORIES = {
     "pedestrian.transit",
     "service",
 }
-LEVEL_LINKED_SOURCE_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section"}
+LEVEL_LINKED_SOURCE_TYPES = LEVEL_FILE_TYPES
 SUPPORTED_SOURCE_FEATURE_TYPES = {
     "unit",
     "opening",
@@ -79,15 +80,6 @@ GEOFENCE_CATEGORIES = load_category_set("geofence_categories.json")
 SECTION_CATEGORIES = load_category_set("section_categories.json")
 RELATIONSHIP_CATEGORIES = load_category_set("relationship_categories.json")
 OCCUPANT_CATEGORY_PATTERN = load_occupant_category_pattern()
-
-
-def _default_short_name(ordinal: int) -> str:
-    # Japanese floor convention (inverse of detect_level_ordinal): ordinal 0 =
-    # ground = "1F", ordinal 1 = "2F", ordinal -1 = "B1F". Used for both the
-    # level name and short name.
-    if ordinal < 0:
-        return f"B{abs(ordinal)}F"
-    return f"{ordinal + 1}F"
 
 
 def _display_point(geom: Any) -> dict[str, Any] | None:
@@ -585,8 +577,8 @@ def generate_feature_collection(session: SessionRecord, unit_categories_path: st
                 linked_buildings = [building_uuid_by_id[building_rows[0].id]]
         level_building_ids[ordinal] = linked_buildings
 
-        level_name = group["name"] or _default_short_name(ordinal)
-        level_short_name = group["short_name"] or _default_short_name(ordinal)
+        level_name = group["name"] or default_short_name(ordinal)
+        level_short_name = group["short_name"] or default_short_name(ordinal)
         level_features.append(
             {
                 "type": "Feature",

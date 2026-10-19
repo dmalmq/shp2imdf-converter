@@ -6,7 +6,7 @@ import { useUiLanguage } from "../../hooks/useUiLanguage";
 import {
   TYPE_LABELS,
   TYPE_OPTIONS,
-  floorLabel,
+  type FloorChoice,
   type BringInRow,
   type NeedReason,
   type QueuedDataset
@@ -119,7 +119,7 @@ function reasonText(row: BringInRow, t: T): string {
 type DetectedProps = {
   needsYou: BringInRow[];
   looksRight: BringInRow[];
-  floorChoices: number[];
+  floorChoices: FloorChoice[];
   /** Files with a choice on its way to the server. */
   saving: ReadonlySet<string>;
   onResolve: (stem: string, payload: UpdateFileRequest) => void;
@@ -155,15 +155,22 @@ export function DetectedTable({
       <Select
         value=""
         disabled={saving.has(row.stem)}
-        onValueChange={(value) => onResolve(row.stem, { detected_level: Number(value) })}
+        onValueChange={(value) => {
+          const choice = floorChoices.find((item) => String(item.ordinal) === value);
+          if (!choice) return;
+          onResolve(row.stem, {
+            detected_level: choice.ordinal,
+            ...(choice.shortName ? { short_name: choice.shortName } : {})
+          });
+        }}
       >
         <SelectTrigger className="h-8 bg-card text-[13px]" aria-label={t(`Floor of ${row.stem}`, `${row.stem} の階`)}>
           <SelectValue placeholder={t("Choose…", "選択…")} />
         </SelectTrigger>
         <SelectContent>
-          {floorChoices.map((ordinal) => (
-            <SelectItem key={ordinal} value={String(ordinal)}>
-              {floorLabel(ordinal)}
+          {floorChoices.map((choice) => (
+            <SelectItem key={choice.ordinal} value={String(choice.ordinal)}>
+              {choice.label}
             </SelectItem>
           ))}
         </SelectContent>

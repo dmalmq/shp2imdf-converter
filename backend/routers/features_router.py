@@ -14,10 +14,12 @@ from shapely.ops import unary_union
 from backend.routers.common import get_session_or_raise, session_manager
 from backend.src.errors import NotFoundError, RevisionStaleError
 from backend.src.detector import (
+    LEVEL_FILE_TYPES,
     detect_files,
     infer_learning_suggestion,
     load_keyword_map,
     merge_learned_keywords,
+    restack_levels,
     sync_feature_types,
 )
 from backend.src.feature_types import (
@@ -389,6 +391,10 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
         merged = _merged_keyword_map(request, session.learned_keywords)
         session.files = detect_files(session.files, merged, preserve_manual_levels=True)
     else:
+        if (current.detected_type in LEVEL_FILE_TYPES) != (updated.detected_type in LEVEL_FILE_TYPES):
+            before = list(session.files)
+            before[file_index] = current
+            session.files = restack_levels(before, session.files)
         if payload.detected_type and payload.detected_type != current.detected_type:
             merged = _merged_keyword_map(request, session.learned_keywords)
             learning_suggestion = infer_learning_suggestion(

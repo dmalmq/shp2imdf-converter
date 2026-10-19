@@ -38,6 +38,12 @@ function makeFloorLabel(ordinal: number | null): string {
 }
 
 
+/** The labels a level goes by, e.g. "M2F", falling back to the ordinal's default. */
+function levelLabels(bucket: LevelBucket): string {
+  const labels = new Set(bucket.names.map((name) => name.trim()).filter(Boolean));
+  return labels.size > 0 ? [...labels].join(" / ") : makeFloorLabel(bucket.ordinal);
+}
+
 export function LevelMapStep({ files, onPatchFile }: Props) {
   const { t } = useUiLanguage();
   const levelFiles = useMemo(
@@ -145,7 +151,7 @@ export function LevelMapStep({ files, onPatchFile }: Props) {
                     <Input
                       className="h-8 w-full"
                       aria-label={t(`Level name of ${file.stem}`, `${file.stem} のレベル名`)}
-                      value={file.level_name ?? makeFloorLabel(file.detected_level)}
+                      value={file.level_name ?? file.short_name ?? makeFloorLabel(file.detected_level)}
                       onChange={(event) => onPatchFile(file.stem, { level_name: event.target.value })}
                     />
                   </td>
@@ -202,7 +208,10 @@ export function LevelMapStep({ files, onPatchFile }: Props) {
             const labelClass = hasDuplicate ? "border-destructive bg-destructive/10 text-destructive" : "border-border bg-muted text-foreground";
             return (
               <div key={bucket.ordinal} className={`rounded border px-3 py-2 text-sm ${labelClass}`}>
-                <div className="font-semibold">{t(`Ordinal ${bucket.ordinal}`, `階層 ${bucket.ordinal}`)}</div>
+                <div className="font-semibold">
+                  {t(`Ordinal ${bucket.ordinal}`, `階層 ${bucket.ordinal}`)}
+                  <span className="ml-2 font-normal">{levelLabels(bucket)}</span>
+                </div>
                 <div className="text-xs">{t(`${bucket.files.length} file(s)`, `${bucket.files.length} ファイル`)}</div>
               </div>
             );

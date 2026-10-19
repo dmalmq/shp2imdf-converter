@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
+from backend.src.detector import LEVEL_FILE_TYPES, default_short_name
 from backend.src.mapper import wrap_labels
 from backend.src.schemas import (
     AddressInput,
@@ -15,28 +16,9 @@ from backend.src.schemas import (
 )
 
 
-LEVEL_FILE_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section"}
-
 
 def _floor_label(ordinal: int | None) -> str | None:
-    """Japanese floor convention, inverse of detect_level_ordinal.
-
-    ordinal 0 = ground = "1F", ordinal 1 = "2F", ordinal -1 = "B1F". The level
-    name and short name use the same label.
-    """
-    if ordinal is None:
-        return None
-    if ordinal < 0:
-        return f"B{abs(ordinal)}F"
-    return f"{ordinal + 1}F"
-
-
-def _default_level_name(ordinal: int | None) -> str | None:
-    return _floor_label(ordinal)
-
-
-def _default_short_name(ordinal: int | None) -> str | None:
-    return _floor_label(ordinal)
+    return None if ordinal is None else default_short_name(ordinal)
 
 
 def seed_wizard_state(session: SessionRecord) -> None:
@@ -59,8 +41,8 @@ def seed_wizard_state(session: SessionRecord) -> None:
                     stem=file.stem,
                     detected_type=file.detected_type,
                     ordinal=file.detected_level,
-                    name=file.level_name or _default_level_name(file.detected_level),
-                    short_name=file.short_name or _default_short_name(file.detected_level),
+                    name=file.level_name or file.short_name or _floor_label(file.detected_level),
+                    short_name=file.short_name or _floor_label(file.detected_level),
                     outdoor=file.outdoor,
                     category=file.level_category,
                 )
@@ -69,10 +51,10 @@ def seed_wizard_state(session: SessionRecord) -> None:
     else:
         # Backfill empty names/short_names for existing items
         for item in session.wizard.levels.items:
-            if not item.name and item.ordinal is not None:
-                item.name = _default_level_name(item.ordinal)
             if not item.short_name and item.ordinal is not None:
-                item.short_name = _default_short_name(item.ordinal)
+                item.short_name = _floor_label(item.ordinal)
+            if not item.name and item.ordinal is not None:
+                item.name = item.short_name
 
 
 def build_address_feature(address: AddressInput, fallback_name: str | None = None) -> dict[str, Any]:
