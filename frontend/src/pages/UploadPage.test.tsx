@@ -303,10 +303,17 @@ describe("a project's Bring in", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/p/s1/bring-in/split");
   });
 
-  test("the split stays blocked while a file needs you", () => {
+  test("the split goes ahead while a file still needs you; Set up still waits for it", () => {
     renderPage(true, "/p/s1/bring-in");
+    expect(nextButton(/Continue to Set up/)).toBeDisabled();
+
     fireEvent.click(screen.getByRole("checkbox", { name: /hold more than one building/ }));
-    expect(nextButton(/Split into buildings/)).toBeDisabled();
+    expect(nextStep()).toHaveTextContent("Files that still need you are decided in each building's own project");
+    fireEvent.click(nextButton(/Split into buildings/));
+    expect(screen.getByTestId("where")).toHaveTextContent("/p/s1/bring-in/split");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /hold more than one building/ }));
+    expect(nextButton(/Continue to Set up/)).toBeDisabled();
   });
 
   test("an IMDF-schema import offers no split", () => {

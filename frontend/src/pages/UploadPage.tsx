@@ -321,11 +321,20 @@ function BroughtIn() {
       ? {
           ...nextStep,
           title: { en: "Split into buildings", ja: "建物ごとに分割" },
-          detail: {
-            en: "Next: draw a shape over each building. Each one becomes its own project.",
-            ja: "次は建物ごとに図形を描きます。建物ごとに別のプロジェクトになります。"
-          },
-          action: { en: "Split into buildings", ja: "建物ごとに分割" }
+          detail:
+            view.needsYou.length > 0
+              ? {
+                  en: "Next: draw a shape over each building. Files that still need you are decided in each building's own project.",
+                  ja: "次は建物ごとに図形を描きます。未確認のファイルは、建物ごとのプロジェクトで決めます。"
+                }
+              : {
+                  en: "Next: draw a shape over each building. Each one becomes its own project.",
+                  ja: "次は建物ごとに図形を描きます。建物ごとに別のプロジェクトになります。"
+                },
+          action: { en: "Split into buildings", ja: "建物ごとに分割" },
+          // Each building's project opens at its own Bring in with these files, so a file
+          // still needing a decision is decided there, and only if the building took it.
+          blocked: null
         }
       : nextStep;
 
