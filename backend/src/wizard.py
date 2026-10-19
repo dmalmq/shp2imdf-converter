@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from backend.src.detector import default_short_name
+from backend.src.detector import LEVEL_FILE_TYPES, default_short_name
 from backend.src.mapper import wrap_labels
 from backend.src.schemas import (
     AddressInput,
@@ -15,8 +15,6 @@ from backend.src.schemas import (
     SessionRecord,
 )
 
-
-LEVEL_FILE_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section"}
 
 
 def _floor_label(ordinal: int | None) -> str | None:

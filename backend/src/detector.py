@@ -14,6 +14,8 @@ from backend.src.schemas import ImportedFile, LearningSuggestion
 
 
 UNKNOWN_TYPE = "unknown"
+# Types whose geometry is drawn on one floor; the generator builds levels from these.
+LEVEL_FILE_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section"}
 
 FEATURE_TYPE_VALUES = {
     "unit",
@@ -204,11 +206,48 @@ def _mezzanine_slot(label: str) -> tuple[int, int]:
     return max(number, 2), number
 
 
-def detect_levels(stems: Iterable[str]) -> dict[str, DetectedLevel]:
-    """Ordinals for a set of per-floor files, decided together. Each mezzanine gets
-    its own ordinal directly above floor n-1, so every floor above it moves up one
-    and keeps its label as short_name; the roof goes one above the top floor and is
-    outdoor. short_name is None where the ordinal's default label is already right."""
+def detect_levels(stems: Iterable[str], placed: Iterable[str] = ()) -> dict[str, DetectedLevel]:
+    """Ordinals for a set of per-floor files, decided together. `stems` are the files
+    whose geometry makes the floors (`LEVEL_FILE_TYPES`); only they decide the stack.
+    Each mezzanine among them gets its own ordinal directly above floor n-1, so every
+    floor above it moves up one and keeps its label as short_name; the roof goes one
+    above the top floor and is outdoor. short_name is None where the ordinal's default
+    label is already right. `placed` files (a building outline, amenities, a surroundings
+    layer) get the ordinal their label has in that stack but never add or move a floor:
+    `Station_10_Building` must not lift the roof, and a mezzanine label on a file that
+    draws no floor is placed only when the stack holds that mezzanine."""
+    plain, mezzanines, roofs = _floor_labels(stems)
+    placed_plain, placed_mezzanines, placed_roofs = _floor_labels(placed)
+
+    slots = sorted({_mezzanine_slot(label) for label in mezzanines.values()})
+
+    def stacked(ordinal: int) -> int:
+        if ordinal < 0:
+            return ordinal
+        floor = ordinal + 1
+        return ordinal + sum(1 for slot, _ in slots if slot <= floor)
+
+    def mezzanine(label: str) -> DetectedLevel:
+        slot = _mezzanine_slot(label)
+        below = sum(1 for other in slots if other[0] == slot[0] and other < slot)
+        return DetectedLevel(stacked(slot[0] - 2) + 1 + below, label)
+
+    levels: dict[str, DetectedLevel] = {}
+    for stem, ordinal in (plain | placed_plain).items():
+        shifted = stacked(ordinal)
+        levels[stem] = DetectedLevel(shifted, default_short_name(ordinal) if shifted != ordinal else None)
+    for stem, label in mezzanines.items():
+        levels[stem] = mezzanine(label)
+    for stem, label in placed_mezzanines.items():
+        if _mezzanine_slot(label) in slots:
+            levels[stem] = mezzanine(label)
+    top = max((levels[stem].ordinal for stem in [*plain, *mezzanines]), default=-1)
+    for stem in [*roofs, *placed_roofs]:
+        levels[stem] = DetectedLevel(top + 1, ROOF_LABEL, outdoor=True)
+    return levels
+
+
+def _floor_labels(stems: Iterable[str]) -> tuple[dict[str, int], dict[str, str], list[str]]:
     plain: dict[str, int] = {}
     mezzanines: dict[str, str] = {}
     roofs: list[str] = []
@@ -222,27 +261,7 @@ def detect_levels(stems: Iterable[str]) -> dict[str, DetectedLevel]:
             ordinal = detect_level_ordinal(stem)
             if ordinal is not None:
                 plain[stem] = ordinal
-
-    slots = sorted({_mezzanine_slot(label) for label in mezzanines.values()})
-
-    def stacked(ordinal: int) -> int:
-        if ordinal < 0:
-            return ordinal
-        floor = ordinal + 1
-        return ordinal + sum(1 for slot, _ in slots if slot <= floor)
-
-    levels: dict[str, DetectedLevel] = {}
-    for stem, ordinal in plain.items():
-        shifted = stacked(ordinal)
-        levels[stem] = DetectedLevel(shifted, default_short_name(ordinal) if shifted != ordinal else None)
-    for stem, label in mezzanines.items():
-        slot = _mezzanine_slot(label)
-        below = sum(1 for other in slots if other[0] == slot[0] and other < slot)
-        levels[stem] = DetectedLevel(stacked(slot[0] - 2) + 1 + below, label)
-    top = max((level.ordinal for level in levels.values()), default=-1)
-    for stem in roofs:
-        levels[stem] = DetectedLevel(top + 1, ROOF_LABEL, outdoor=True)
-    return levels
+    return plain, mezzanines, roofs
 
 
 def detect_files(
@@ -250,14 +269,16 @@ def detect_files(
     keywords: dict[str, set[str]],
     preserve_manual_levels: bool = True,
 ) -> list[ImportedFile]:
-    levels = detect_levels(item.stem for item in files)
+    types = {item.stem: detect_feature_type(item.stem, item.geometry_type, keywords) for item in files}
+    floor_bound = {stem for stem, (feature_type, _) in types.items() if feature_type in LEVEL_FILE_TYPES}
+    levels = detect_levels(
+        (item.stem for item in files if item.stem in floor_bound),
+        placed=(item.stem for item in files if item.stem not in floor_bound),
+    )
     detected: list[ImportedFile] = []
     for item in files:
-        inferred_type, confidence = detect_feature_type(item.stem, item.geometry_type, keywords)
-
         updated = item.model_copy(deep=True)
-        updated.detected_type = inferred_type
-        updated.confidence = confidence
+        updated.detected_type, updated.confidence = types[item.stem]
         if not preserve_manual_levels or updated.detected_level is None:
             level = levels.get(item.stem)
             updated.detected_level = level.ordinal if level else None

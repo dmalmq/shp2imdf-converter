@@ -265,3 +265,69 @@ def test_a_learned_suffix_for_unknown_still_wins() -> None:
 
     assert detect_feature_type("Station_1_Space_bg", "Polygon", keyword_map) == ("unknown", "green")
 
+
+def _detected_levels(stems_and_geometry: list[tuple[str, str]]) -> dict[str, tuple[str | None, int | None, str | None]]:
+    keywords = {"unit": {"space"}, "building": {"building"}, "amenity": {"amenity"}}
+    files = [
+        ImportedFile(stem=stem, geometry_type=geometry, feature_count=1, attribute_columns=[])
+        for stem, geometry in stems_and_geometry
+    ]
+    return {
+        item.stem: (item.detected_type, item.detected_level, item.short_name)
+        for item in detect_files(files, keywords, preserve_manual_levels=False)
+    }
+
+
+@pytest.mark.phase2
+def test_a_file_that_draws_no_floor_does_not_lift_the_roof() -> None:
+    detected = _detected_levels(
+        [("Station_1F_Space", "Polygon"), ("Station_2F_Space", "Polygon"), ("Station_RF_Space", "Polygon"), ("Station_10_Building", "Polygon")]
+    )
+    assert detected == {
+        "Station_1F_Space": ("unit", 0, None),
+        "Station_2F_Space": ("unit", 1, None),
+        "Station_RF_Space": ("unit", 2, "RF"),
+        "Station_10_Building": ("building", 9, None),
+    }
+
+
+@pytest.mark.phase2
+def test_a_stray_mezzanine_label_moves_no_floor() -> None:
+    detected = _detected_levels(
+        [
+            ("Station_1F_Space", "Polygon"),
+            ("Station_2F_Space", "Polygon"),
+            ("Station_3F_Space", "Polygon"),
+            ("Station_2F_Amenity", "Point"),
+            ("Station_M2F_Amenity", "Point"),
+        ]
+    )
+    assert detected == {
+        "Station_1F_Space": ("unit", 0, None),
+        "Station_2F_Space": ("unit", 1, None),
+        "Station_3F_Space": ("unit", 2, None),
+        "Station_2F_Amenity": ("amenity", 1, None),
+        "Station_M2F_Amenity": ("amenity", None, None),
+    }
+
+
+@pytest.mark.phase2
+def test_files_that_draw_no_floor_follow_a_real_mezzanine() -> None:
+    detected = _detected_levels(
+        [
+            ("Station_1F_Space", "Polygon"),
+            ("Station_M2F_Space", "Polygon"),
+            ("Station_2F_Space", "Polygon"),
+            ("Station_M2F_Amenity", "Point"),
+            ("Station_2F_Amenity", "Point"),
+            ("Station_RF_Amenity", "Point"),
+        ]
+    )
+    assert detected == {
+        "Station_1F_Space": ("unit", 0, None),
+        "Station_M2F_Space": ("unit", 1, "M2F"),
+        "Station_2F_Space": ("unit", 2, "2F"),
+        "Station_M2F_Amenity": ("amenity", 1, "M2F"),
+        "Station_2F_Amenity": ("amenity", 2, "2F"),
+        "Station_RF_Amenity": ("amenity", 3, "RF"),
+    }

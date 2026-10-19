@@ -12,7 +12,7 @@ from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, mapping,
 from shapely.ops import unary_union
 from shapely.validation import make_valid
 
-from backend.src.detector import default_short_name
+from backend.src.detector import LEVEL_FILE_TYPES, default_short_name
 from backend.src.feature_types import load_category_set, load_occupant_category_pattern
 from backend.src.mapper import load_unit_categories, resolve_unit_category, wrap_labels
 from backend.src.schemas import BuildingWizardState, LevelWizardItem, SessionRecord
@@ -29,7 +29,7 @@ OPENING_CATEGORIES = {
     "pedestrian.transit",
     "service",
 }
-LEVEL_LINKED_SOURCE_TYPES = {"unit", "opening", "fixture", "detail", "kiosk", "section"}
+LEVEL_LINKED_SOURCE_TYPES = LEVEL_FILE_TYPES
 SUPPORTED_SOURCE_FEATURE_TYPES = {
     "unit",
     "opening",
