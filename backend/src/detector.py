@@ -264,17 +264,42 @@ def _floor_labels(stems: Iterable[str]) -> tuple[dict[str, int], dict[str, str],
     return plain, mezzanines, roofs
 
 
+def _stack(files: list[ImportedFile], types: dict[str, str | None]) -> dict[str, DetectedLevel]:
+    floor_bound = {item.stem for item in files if types.get(item.stem) in LEVEL_FILE_TYPES}
+    return detect_levels(
+        (item.stem for item in files if item.stem in floor_bound),
+        placed=(item.stem for item in files if item.stem not in floor_bound),
+    )
+
+
+def restack_levels(before: list[ImportedFile], after: list[ImportedFile]) -> list[ImportedFile]:
+    """Re-stack after a type change: a file moving into or out of `LEVEL_FILE_TYPES`
+    adds or removes a floor (a mezzanine moves every floor above it). A file whose
+    level, short_name or outdoor flag still holds what the old stack gave it takes the
+    new stack's; anything else was set by hand and is kept."""
+    old = _stack(before, {item.stem: item.detected_type for item in before})
+    new = _stack(after, {item.stem: item.detected_type for item in after})
+    restacked: list[ImportedFile] = []
+    for item in after:
+        was, now = old.get(item.stem), new.get(item.stem)
+        updated = item.model_copy(deep=True)
+        if updated.detected_level == (was.ordinal if was else None):
+            updated.detected_level = now.ordinal if now else None
+        if updated.short_name == (was.short_name if was else None):
+            updated.short_name = now.short_name if now else None
+        if updated.outdoor == (was.outdoor if was else False):
+            updated.outdoor = now.outdoor if now else False
+        restacked.append(updated)
+    return restacked
+
+
 def detect_files(
     files: list[ImportedFile],
     keywords: dict[str, set[str]],
     preserve_manual_levels: bool = True,
 ) -> list[ImportedFile]:
     types = {item.stem: detect_feature_type(item.stem, item.geometry_type, keywords) for item in files}
-    floor_bound = {stem for stem, (feature_type, _) in types.items() if feature_type in LEVEL_FILE_TYPES}
-    levels = detect_levels(
-        (item.stem for item in files if item.stem in floor_bound),
-        placed=(item.stem for item in files if item.stem not in floor_bound),
-    )
+    levels = _stack(files, {stem: feature_type for stem, (feature_type, _) in types.items()})
     detected: list[ImportedFile] = []
     for item in files:
         updated = item.model_copy(deep=True)
