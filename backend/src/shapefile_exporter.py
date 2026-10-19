@@ -18,6 +18,7 @@ import pandas as pd
 from shapely.geometry import mapping, shape
 from shapely.ops import unary_union
 
+from backend.src.detector import UNKNOWN_TYPE
 from backend.src.importer import detect_dbf_encoding
 from backend.src.schemas import SessionRecord, ShapefileExportRequest
 
@@ -1564,16 +1565,20 @@ def build_shapefile_export_archive(
 
     grouped_files = _group_artifact_files(upload_artifact_dir)
     split_rows = _split_rows(session) if session.split_from is not None else None
+    detected_type_by_stem = _detected_type_by_stem(session)
+    # "Unknown, decide later" files are left out of the map, and so of this export too.
+    left_out = sorted(stem for stem in grouped_files if detected_type_by_stem.get(stem) == UNKNOWN_TYPE)
     shapefile_groups = {
         stem: components
         for stem, components in grouped_files.items()
-        if REQUIRED_SHAPEFILE_EXTENSIONS.issubset(components.keys())
+        if REQUIRED_SHAPEFILE_EXTENSIONS.issubset(components.keys()) and stem not in left_out
     }
     if not shapefile_groups:
         raise ValueError("Shapefile export unavailable: no complete source shapefile groups found.")
 
     updates_by_row, unapplied_features = _collect_unit_row_updates(session.feature_collection)
     report = _build_export_report(request)
+    report["stems_left_out"] = left_out
     report["rows_requested"] = len(updates_by_row)
     report["unapplied_features"] = unapplied_features
 
@@ -1593,7 +1598,6 @@ def build_shapefile_export_archive(
 
     handled_update_keys: set[tuple[str, int]] = set()
     write_encoding = _encoding_for_write(request.encoding)
-    detected_type_by_stem = _detected_type_by_stem(session)
     normalize_unit_schema = _should_normalize_unit_schema(session, imdf_field)
 
     with tempfile.TemporaryDirectory() as tmpdir:

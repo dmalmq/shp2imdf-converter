@@ -146,6 +146,20 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   exporter looks them up by, and each geodatabase whole under its own path. `/api/import`
   reads its own form with `FORM_PARTS` (as the colour page does): a geodatabase is more than
   Starlette's default 1,000 parts (Shinjuku's is 1,361 files).
+- Two kinds of station layer are not floor plans. A feature class whose name ends in `_nw`
+  (`O_3_NW`, `ShinjukuYodobashi_Camera_1_nw`) is pedestrian network and is skipped at GDB
+  import with a warning. A layer named for the surroundings (`周辺`, `surrounding`, as in
+  `新宿周辺_街区`) is detected as `unknown`, the type the Bring in dropdown calls "Unknown —
+  decide later". It is not an IMDF type, so the generator and the exports built from it pass
+  over it, and the round-trip shapefile export, which copies the uploaded files, filters it
+  (`stems_left_out` in its report). Bring in lists it under "Look right" with no floor, and
+  picking a real type brings it in. The dropdown once cleared the type to null for this
+  option, which reset the control and put the file back under "Needs you"; null now only
+  means "not detected". A type or floor changed in Bring in after generating throws the
+  generated draft away (`_drop_stale_draft`, as a Set up change does), because export reads the
+  generated features as they stand and once delivered a left-out file's units; renaming a
+  floor keeps it. Any IMDF keyword in the name beats the unknown one, however short
+  (`Station_1_surrounding_Space` is a unit); only an exact learned suffix rule outranks that.
 - Illustrator multi-floor placement: assignment is by box on the artwork preview, membership
   is `centroid ∈ box` plus an optional layer restriction, re-verified server-side at export
   (the preview filter is display-only). Linked floors share scale/rotation; dragging a floor

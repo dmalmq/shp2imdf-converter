@@ -12,7 +12,7 @@ import geopandas as gpd
 import pyogrio
 import pytest
 from fastapi.testclient import TestClient
-from shapely.geometry import Point, box, mapping
+from shapely.geometry import LineString, Point, box, mapping
 
 from backend.src.importer import import_file_blobs
 
@@ -88,6 +88,24 @@ def test_each_feature_class_becomes_a_file_with_its_feature_dataset(station_gdb:
     assert any("1 table(s) without geometry" in warning for warning in artifacts.warnings)
     lon, lat = artifacts.source_feature_collection["features"][0]["geometry"]["coordinates"][0][0][:2]
     assert 139 < lon < 140 and 35 < lat < 36
+
+
+def test_network_layers_are_left_out(tmp_path: Path) -> None:
+    gdb = tmp_path / "Station.gdb"
+    _write(gdb, "West_1F_Space", _squares(_WEST, 2))
+    _write(gdb, "West_1F_nw", [LineString([_WEST, (_WEST[0] + 50, _WEST[1])])])
+    _write(gdb, "O_3_NW", [LineString([_EAST, (_EAST[0] + 50, _EAST[1])])])
+    # "_nw" only ends a network layer's name; elsewhere in a name it means nothing.
+    _write(gdb, "Midtown_nw_1F_Space", _squares(_EAST, 1))
+
+    artifacts = import_file_blobs([("Station.zip", _zipped(_members(gdb, "")))], _KEYWORDS)
+
+    assert {item.stem for item in artifacts.files} == {"West_1F_Space", "Midtown_nw_1F_Space"}
+    assert {feature["properties"]["source_file"] for feature in artifacts.source_feature_collection["features"]} == {
+        "West_1F_Space",
+        "Midtown_nw_1F_Space",
+    }
+    assert any("2 network layer(s)" in warning for warning in artifacts.warnings)
 
 
 def test_a_feature_class_named_like_a_shapefile_keeps_both(station_gdb: Path, tmp_path: Path) -> None:
