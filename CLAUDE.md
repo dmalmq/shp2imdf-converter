@@ -155,7 +155,10 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   (`stems_left_out` in its report). Bring in lists it under "Look right" with no floor, and
   picking a real type brings it in. The dropdown once cleared the type to null for this
   option, which reset the control and put the file back under "Needs you"; null now only
-  means "not detected". Any IMDF keyword in the name beats the unknown one, however short
+  means "not detected". A type or floor changed in Bring in after generating throws the
+  generated draft away (`_drop_stale_draft`, as a Set up change does), because export reads the
+  generated features as they stand and once delivered a left-out file's units; renaming a
+  floor keeps it. Any IMDF keyword in the name beats the unknown one, however short
   (`Station_1_surrounding_Space` is a unit); only an exact learned suffix rule outranks that.
 - Illustrator multi-floor placement: assignment is by box on the artwork preview, membership
   is `centroid ∈ box` plus an optional layer restriction, re-verified server-side at export
