@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections import OrderedDict
 import copy
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 import json
 import logging
@@ -43,8 +43,7 @@ class SessionSummary:
     session_id: str
     last_accessed: datetime
     upload_artifact_dir: str | None = None
-    # None when only a version-1 meta file has been read: the project is unknown
-    # until the record is next loaded or saved.
+    # Rebuilt from the record when the meta file is missing or of another version.
     project: ProjectFields | None = None
 
     @classmethod
@@ -156,12 +155,21 @@ class FileSystemSessionBackend(SessionBackend):
                         project=ProjectFields.from_meta(payload),
                     )
                 else:
-                    # Missing or written by an older version: rebuild it from the record once,
-                    # so a field added since (split_parent_id in 3) is filled in for old projects.
+                    # Missing or written by an older version: rebuild the project fields from the
+                    # record once, so a field added since (split_parent_id in 3) is filled in for
+                    # old projects. The meta's own time and upload folder win, since the time
+                    # decides when the project expires.
                     session = self._read(session_id)
                     if session is not None:
-                        index[session_id] = SessionSummary.of(session)
-                        self._write_meta(index[session_id])
+                        rebuilt = SessionSummary.of(session)
+                        if payload is not None:
+                            rebuilt = replace(
+                                rebuilt,
+                                last_accessed=datetime.fromisoformat(payload["last_accessed"]),
+                                upload_artifact_dir=payload.get("upload_artifact_dir", rebuilt.upload_artifact_dir),
+                            )
+                        index[session_id] = rebuilt
+                        self._write_meta(rebuilt)
             except (OSError, ValueError, KeyError):
                 logger.exception("Skipping unreadable session file %s", file)
         return index

@@ -135,10 +135,12 @@ describe("split shapes", () => {
 });
 
 describe("building colours", () => {
-  test("a building keeps its colour whatever happens to the others, and the palette wraps", () => {
+  test("a building keeps its colour whatever happens to the others, and twenty buildings get twenty colours", () => {
     expect(buildingColour("b2")).toBe(BUILDING_COLOURS[1]);
-    expect(buildingColour("b9")).toBe(BUILDING_COLOURS[0]);
-    expect(new Set(["b1", "b2", "b3", "b4"].map(buildingColour)).size).toBe(4);
+    expect(buildingColour("b8")).toBe(BUILDING_COLOURS[7]);
+    const twenty = Array.from({ length: 20 }, (_, index) => buildingColour(`b${index + 1}`));
+    expect(new Set(twenty).size).toBe(20);
+    for (const colour of twenty) expect(colour).toMatch(/^#[0-9a-f]{6}$/);
   });
 
   test("every building hue stays well away from the terracotta that marks outside every building", () => {
@@ -150,7 +152,7 @@ describe("building colours", () => {
       return (h * 60 + 360) % 360;
     };
     // --destructive is hsl(10°, …) in both themes.
-    for (const colour of BUILDING_COLOURS) {
+    for (const colour of Array.from({ length: 30 }, (_, index) => buildingColour(`b${index + 1}`))) {
       const apart = Math.abs(hue(colour) - 10);
       expect(Math.min(apart, 360 - apart), colour).toBeGreaterThanOrEqual(30);
     }

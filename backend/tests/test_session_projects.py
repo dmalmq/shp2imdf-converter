@@ -20,7 +20,7 @@ from backend.src.schemas import (
     ValidationResponse,
     ValidationSummary,
 )
-from backend.src.session import META_VERSION, FileSystemSessionBackend, SessionManager
+from backend.src.session import META_VERSION, FileSystemSessionBackend, SessionManager, _aware
 from backend.tests.test_api import _upload_payload
 
 _PROJECT = {
@@ -614,6 +614,28 @@ def test_an_older_meta_is_rebuilt_from_its_record_at_restart(tmp_path: Path) -> 
     assert summary.project is not None
     assert summary.project.stage == "bring-in"
     assert json.loads(meta_path.read_text(encoding="utf-8"))["meta_version"] == META_VERSION
+
+
+@pytest.mark.phase1
+def test_a_rebuilt_meta_keeps_its_own_newer_time_and_upload_folder(tmp_path: Path) -> None:
+    manager = SessionManager(backend=FileSystemSessionBackend(tmp_path), ttl_hours=24)
+    session = _create(manager)
+    newer = _aware(session.last_accessed) + timedelta(hours=5)
+    meta_path = tmp_path / f"{session.session_id}.meta.json"
+    meta_path.write_text(
+        json.dumps(
+            {"session_id": session.session_id, "last_accessed": newer.isoformat(), "upload_artifact_dir": "kept/here"}
+        ),
+        encoding="utf-8",
+    )
+
+    (summary,) = FileSystemSessionBackend(tmp_path).list_summaries()
+
+    assert summary.last_accessed == newer
+    assert summary.upload_artifact_dir == "kept/here"
+    assert summary.project is not None
+    rewritten = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert (rewritten["last_accessed"], rewritten["meta_version"]) == (newer.isoformat(), META_VERSION)
 
 
 @pytest.mark.phase1

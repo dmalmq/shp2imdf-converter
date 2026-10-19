@@ -152,8 +152,24 @@ export function filterGroups(groups: ReadonlyArray<LayerGroup>, query: string): 
  */
 export const BUILDING_COLOURS = ["#2563eb", "#ca8a04", "#7c3aed", "#16a34a", "#db2777", "#0891b2", "#65a30d", "#c026d3"] as const;
 
-/** A building's colour, from the number in its key (`b1`, `b2`, …), so it never changes. */
+function hslHex(hue: number, saturation: number, lightness: number): string {
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const channel = (n: number) => {
+    const k = (n + hue / 30) % 12;
+    const value = lightness - chroma / 2 * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(value * 255).toString(16).padStart(2, "0");
+  };
+  return `#${channel(0)}${channel(8)}${channel(4)}`;
+}
+
+/**
+ * A building's colour, from the number in its key (`b1`, `b2`, …), so it never changes. Past
+ * the palette, hues step by the golden angle through 40°–340°, which keeps clear of the
+ * terracotta and keeps each new colour far from the ones just before it.
+ */
 export function buildingColour(key: string): string {
-  const n = Number(/\d+/.exec(key)?.[0] ?? 1);
-  return BUILDING_COLOURS[(Math.max(n, 1) - 1) % BUILDING_COLOURS.length];
+  const n = Math.max(Number(/\d+/.exec(key)?.[0] ?? 1), 1);
+  if (n <= BUILDING_COLOURS.length) return BUILDING_COLOURS[n - 1];
+  const hue = 40 + ((n - BUILDING_COLOURS.length) * 137.508) % 300;
+  return hslHex(hue, 0.7, 0.45);
 }

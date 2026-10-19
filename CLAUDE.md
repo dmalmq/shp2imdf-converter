@@ -124,10 +124,12 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   it goes, so it cannot borrow the parent's); the copies still hold every building's rows,
   and the round-trip shapefile export keeps only the source rows the child's features name.
   A child's project summary carries `split_parent_id` (meta version 3; an older meta file is
-  rebuilt from its record at startup), so Deliver lists the import's other buildings
+  rebuilt from its record at startup, keeping the meta's own time and upload folder, since the
+  time decides expiry), so Deliver lists the import's other buildings
   (`OtherBuildings`, `lib/splitFamily.ts`) with a way back to the import. On the split map each
   building has its own colour from `BUILDING_COLOURS`, keyed by its `b<n>` key so it survives
-  other buildings being removed; every hue stays 30° or more from the terracotta of "outside".
+  other buildings being removed; past the eight, hues step by the golden angle through
+  40°–340°. Every hue stays 30° or more from the terracotta of "outside".
   A building can also be picked files instead of, or as well as, a shape: a row whose file a
   building picked goes to it wherever it lies, any other row falls back to the centroid rule,
   and a file may be picked by one building only. The page resolves picked groups to file
