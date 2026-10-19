@@ -24,6 +24,7 @@ import { useApiErrorHandler } from "../hooks/useApiErrorHandler";
 import { useUiLanguage } from "../hooks/useUiLanguage";
 import { TYPE_LABELS } from "../lib/bringIn";
 import {
+  buildingColour,
   countsByFloor,
   filterFiles,
   filterGroups,
@@ -165,6 +166,12 @@ export function SplitPage() {
   useEffect(fitAll, [fitAll]);
 
   const activeIndex = buildings.findIndex((building) => building.key === active);
+  const colours = {
+    outside: tokenColour("--destructive", "#b14a2d"),
+    unknown: tokenColour("--muted-foreground", "#68645b")
+  };
+  const featureColour = ["get", "split_colour"] as unknown as string;
+  const draftColour = buildingColour(`b${nextKey.current}`);
   const shownFeatures = useMemo(() => {
     if (!features) return { type: "FeatureCollection", features: [] };
     const owners = preview?.owners ?? {};
@@ -176,10 +183,12 @@ export function SplitPage() {
           const ref = feature.properties?.source_feature_ref;
           const owner = typeof ref === "string" ? owners[ref] : undefined;
           const role = owner === undefined ? (preview ? "outside" : "unknown") : owner === activeIndex ? "active" : "other";
-          return { ...feature, properties: { ...feature.properties, split_role: role } };
+          const colour =
+            owner === undefined ? (preview ? colours.outside : colours.unknown) : buildingColour(buildings[owner]?.key ?? "");
+          return { ...feature, properties: { ...feature.properties, split_role: role, split_colour: colour } };
         })
     };
-  }, [features, floor, floorOf, preview, activeIndex]);
+  }, [features, floor, floorOf, preview, activeIndex, buildings, colours.outside, colours.unknown]);
 
   const outlines = useMemo(
     () => ({
@@ -189,7 +198,7 @@ export function SplitPage() {
           ? [
               {
                 type: "Feature",
-                properties: { active: index === activeIndex },
+                properties: { active: index === activeIndex, colour: buildingColour(building.key) },
                 geometry: { type: "Polygon", coordinates: [[...building.corners, building.corners[0]]] }
               }
             ]
@@ -273,20 +282,6 @@ export function SplitPage() {
     }
   };
 
-  const colours = {
-    active: tokenColour("--primary", "#1d5c50"),
-    other: tokenColour("--muted-foreground", "#68645b"),
-    outside: tokenColour("--destructive", "#b14a2d")
-  };
-  const roleColour = [
-    "match",
-    ["get", "split_role"],
-    "active",
-    colours.active,
-    "outside",
-    colours.outside,
-    colours.other
-  ] as unknown as string;
 
   if (result) {
     return <SplitDone sessionId={sessionId} result={result} />;
@@ -360,19 +355,19 @@ export function SplitPage() {
                   id="split-fill"
                   type="fill"
                   filter={["==", ["geometry-type"], "Polygon"]}
-                  paint={{ "fill-color": roleColour, "fill-opacity": ["match", ["get", "split_role"], "other", 0.18, 0.4] }}
+                  paint={{ "fill-color": featureColour, "fill-opacity": ["match", ["get", "split_role"], "active", 0.45, "other", 0.22, 0.35] }}
                 />
                 <Layer
                   id="split-line"
                   type="line"
                   filter={["!=", ["geometry-type"], "Point"]}
-                  paint={{ "line-color": roleColour, "line-width": 1.2 }}
+                  paint={{ "line-color": featureColour, "line-width": 1.2 }}
                 />
                 <Layer
                   id="split-point"
                   type="circle"
                   filter={["==", ["geometry-type"], "Point"]}
-                  paint={{ "circle-color": roleColour, "circle-radius": 3.5, "circle-stroke-color": "#ffffff", "circle-stroke-width": 1 }}
+                  paint={{ "circle-color": featureColour, "circle-radius": 3.5, "circle-stroke-color": "#ffffff", "circle-stroke-width": 1 }}
                 />
               </Source>
               <Source id="split-outlines" type="geojson" data={outlines as never}>
@@ -380,26 +375,29 @@ export function SplitPage() {
                   id="split-outline"
                   type="line"
                   paint={{
-                    "line-color": ["case", ["get", "active"], colours.active, colours.other],
-                    "line-width": ["case", ["get", "active"], 3, 2],
+                    "line-color": ["get", "colour"],
+                    "line-width": ["case", ["get", "active"], 4, 2.5],
                     "line-dasharray": [3, 2]
                   }}
                 />
               </Source>
               <Source id="split-draft" type="geojson" data={draftData as never}>
-                <Layer id="split-draft-line" type="line" paint={{ "line-color": colours.active, "line-width": 2 }} />
+                <Layer id="split-draft-line" type="line" paint={{ "line-color": draftColour, "line-width": 2 }} />
                 <Layer
                   id="split-draft-corner"
                   type="circle"
                   filter={["==", ["geometry-type"], "Point"]}
-                  paint={{ "circle-color": colours.active, "circle-radius": 4, "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5 }}
+                  paint={{ "circle-color": draftColour, "circle-radius": 4, "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5 }}
                 />
               </Source>
             </MapView>
           </div>
           <p className="text-xs text-muted-foreground">
-            <Legend colour={colours.active}>{t("Selected building", "選択中の建物")}</Legend>
-            <Legend colour={colours.other}>{t("Other buildings", "ほかの建物")}</Legend>
+            {buildings.map((building, index) => (
+              <Legend key={building.key} colour={buildingColour(building.key)}>
+                {building.name.trim() || `#${index + 1}`}
+              </Legend>
+            ))}
             <Legend colour={colours.outside}>{t("Outside every building", "どの建物にも入らない")}</Legend>
           </p>
         </main>
@@ -427,9 +425,11 @@ export function SplitPage() {
                     <li
                       key={building.key}
                       className={cn(
-                        "flex flex-col gap-2 rounded-[10px] border p-3",
-                        isActive ? "border-primary bg-accent/40" : "border-border"
+                        "flex flex-col gap-2 rounded-[10px] border border-l-4 p-3",
+                        isActive ? "bg-accent/40 ring-1 ring-primary" : "border-border"
                       )}
+                      style={{ borderLeftColor: buildingColour(building.key) }}
+                      data-colour={buildingColour(building.key)}
                       onClick={() => setActive(building.key)}
                     >
                       <div className="flex items-center gap-2">

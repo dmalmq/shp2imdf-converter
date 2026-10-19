@@ -144,3 +144,16 @@ export function filterGroups(groups: ReadonlyArray<LayerGroup>, query: string): 
   const needle = query.trim().toLowerCase();
   return needle ? groups.filter((group) => group.name.toLowerCase().includes(needle)) : [...groups];
 }
+
+/**
+ * One colour per building, kept when others are added or removed. Every hue stays 30°
+ * or more from the terracotta (about 10°) that marks what falls outside every building. Mid tones, so each reads on the light map and
+ * against both themes' panels.
+ */
+export const BUILDING_COLOURS = ["#2563eb", "#ca8a04", "#7c3aed", "#16a34a", "#db2777", "#0891b2", "#65a30d", "#c026d3"] as const;
+
+/** A building's colour, from the number in its key (`b1`, `b2`, …), so it never changes. */
+export function buildingColour(key: string): string {
+  const n = Number(/\d+/.exec(key)?.[0] ?? 1);
+  return BUILDING_COLOURS[(Math.max(n, 1) - 1) % BUILDING_COLOURS.length];
+}

@@ -1,16 +1,18 @@
 import type { ImportedFile, LayerGroup, SplitPreviewResponse } from "../api/client";
 import {
+  type Building,
+  BUILDING_COLOURS,
+  buildingColour,
   countsByFloor,
   filterFiles,
   floorOfStem,
-  onFloor,
   pickedStems,
+  onFloor,
   previewBlocked,
   previewShapes,
   splitBlocked,
   splitFloors,
-  splitShapes,
-  type Building
+  splitShapes
 } from "./split";
 
 function file(stem: string, detected_level: number | null, short_name: string | null = null): ImportedFile {
@@ -129,5 +131,28 @@ describe("split shapes", () => {
     expect(filterFiles(gdb, "odakyu").map((item) => item.stem)).toEqual(["OdakyuShinjukuSta_B1_level"]);
     expect(filterFiles(gdb, "背景 B1").map((item) => item.stem)).toEqual(["背景_B1_Space"]);
     expect(filterFiles(gdb, " ")).toHaveLength(3);
+  });
+});
+
+describe("building colours", () => {
+  test("a building keeps its colour whatever happens to the others, and the palette wraps", () => {
+    expect(buildingColour("b2")).toBe(BUILDING_COLOURS[1]);
+    expect(buildingColour("b9")).toBe(BUILDING_COLOURS[0]);
+    expect(new Set(["b1", "b2", "b3", "b4"].map(buildingColour)).size).toBe(4);
+  });
+
+  test("every building hue stays well away from the terracotta that marks outside every building", () => {
+    const hue = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+      const max = Math.max(r, g, b);
+      const d = max - Math.min(r, g, b);
+      const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return (h * 60 + 360) % 360;
+    };
+    // --destructive is hsl(10°, …) in both themes.
+    for (const colour of BUILDING_COLOURS) {
+      const apart = Math.abs(hue(colour) - 10);
+      expect(Math.min(apart, 360 - apart), colour).toBeGreaterThanOrEqual(30);
+    }
   });
 });
