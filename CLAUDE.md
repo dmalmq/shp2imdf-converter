@@ -97,7 +97,9 @@ pytest -m vectortiles # colour tool vector tile builds (worker logic, arcpy prob
   both.
 - Splitting an import by building (`backend/src/split.py`, `/p/:id/bring-in/split`) is
   opt-in: a Bring in checkbox, unticked by default, sends the operator there instead of Set
-  up. A source row goes to the drawn polygon holding its centroid, the Illustrator rule. The
+  up. It does not wait for "Needs you": each child opens at its own Bring in with the files
+  it took, types and confidence copied, so an undecided file is decided there, and only by
+  the building that took it. A source row goes to the drawn polygon holding its centroid, the Illustrator rule. The
   importer makes one feature per part of a multipart row, and the row is assigned whole
   (centroid of all its parts), or the shapefile export would hand a row to two buildings.
   Shapes may not overlap, and what falls outside every shape is reported, not dropped
