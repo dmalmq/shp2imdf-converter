@@ -321,7 +321,7 @@ def test_unknown_flow_is_rejected(test_client) -> None:
     assert response.json()["code"] == "VALIDATION_ERROR"
 
 
-def test_a_version_1_meta_session_lists_with_nulls(test_client, sample_dir: Path) -> None:
+def test_a_version_1_meta_session_lists_with_its_fields_rebuilt(test_client, sample_dir: Path) -> None:
     session_id = _session(test_client, sample_dir, "Old")
     data_dir = test_client.app.state.session_manager.backend.data_dir
     meta_path = data_dir / f"{session_id}.meta.json"
@@ -336,7 +336,10 @@ def test_a_version_1_meta_session_lists_with_nulls(test_client, sample_dir: Path
 
     assert item["id"] == session_id
     assert item["flow"] == "shapefiles"
-    for key in ("name", "stage", "import_profile", "updated_at", "blockers", "can_wait", "delivered_at"):
+    # An older meta is rebuilt from the session's record at startup, so nothing is unknown.
+    assert (item["name"], item["stage"], item["import_profile"]) == ("Old", "set-up", "standard")
+    assert item["updated_at"] is not None
+    for key in ("blockers", "can_wait", "delivered_at", "split_parent_id"):
         assert item[key] is None, key
     assert item["changed_since_delivery"] is False
     assert datetime.fromisoformat(item["last_opened"]) == datetime.fromisoformat(meta["last_accessed"])

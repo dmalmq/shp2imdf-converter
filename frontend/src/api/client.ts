@@ -514,6 +514,8 @@ export type ProjectSummary = {
   delivered_at: string | null;
   changed_since_delivery: boolean;
   expires_at: string;
+  /** The import a shapefile project was split off from; null otherwise. */
+  split_parent_id?: string | null;
 };
 
 export type ProjectLimits = { idle_days: number; max_projects: number };

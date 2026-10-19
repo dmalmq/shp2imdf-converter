@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ from fastapi.testclient import TestClient
 from shapely.geometry import MultiPolygon, Point, Polygon, box, mapping
 
 from backend.src import split as split_module
-from backend.src.session import SessionSummary
+from backend.src.session import FileSystemSessionBackend, SessionSummary
 
 pytestmark = pytest.mark.phase1
 
@@ -275,3 +276,35 @@ def test_the_split_map_draws_the_features_as_brought_in_even_after_set_up(
     assert not {"venue", "footprint"} & {feature["feature_type"] for feature in drawn}
     preview = test_client.post(f"/api/session/{session_id}/split/preview", json={"shapes": _shapes()}).json()
     assert set(preview["owners"]) <= {feature["properties"]["source_feature_ref"] for feature in drawn}
+
+
+def test_the_project_list_names_the_import_each_building_came_from(
+    test_client: TestClient, two_buildings: Path
+) -> None:
+    session_id = _import(test_client, two_buildings)
+    projects = test_client.post(f"/api/session/{session_id}/split", json={"shapes": _shapes()}).json()["projects"]
+
+    listed = {item["id"]: item for item in test_client.get("/api/projects").json()["projects"]}
+
+    assert listed[session_id]["split_parent_id"] is None
+    assert [listed[item["session_id"]]["split_parent_id"] for item in projects] == [session_id, session_id]
+
+
+def test_a_building_split_before_the_link_was_kept_gets_it_at_the_next_start(
+    test_client: TestClient, two_buildings: Path, tmp_path: Path
+) -> None:
+    session_id = _import(test_client, two_buildings)
+    child = test_client.post(f"/api/session/{session_id}/split", json={"shapes": _shapes()}).json()["projects"][0]
+    meta = tmp_path / "sessions" / f"{child['session_id']}.meta.json"
+    old = json.loads(meta.read_text(encoding="utf-8"))
+    old["meta_version"] = 2
+    del old["split_parent_id"]
+    meta.write_text(json.dumps(old), encoding="utf-8")
+
+    restarted = FileSystemSessionBackend(tmp_path / "sessions")
+
+    summary = restarted.summary(child["session_id"])
+    assert summary is not None and summary.project is not None
+    assert summary.project.split_parent_id == session_id
+    assert summary.project.name == child["name"]
+    assert json.loads(meta.read_text(encoding="utf-8"))["meta_version"] == 3

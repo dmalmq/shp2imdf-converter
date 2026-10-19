@@ -8,10 +8,12 @@ import {
   exportSessionShapefiles,
   fetchExportContents,
   fetchHandover,
+  fetchProjects,
   fetchStoredValidation,
   saveHandoverNote,
   validateSession,
   type ExportContents,
+  type ProjectSummary,
   type ImportedFile,
   type ValidationResponse,
   type WizardState
@@ -27,6 +29,7 @@ vi.mock("../api/client", () => ({
   exportSessionShapefiles: vi.fn(),
   fetchExportContents: vi.fn(),
   fetchHandover: vi.fn(),
+  fetchProjects: vi.fn(),
   fetchStoredValidation: vi.fn(),
   saveHandoverNote: vi.fn(),
   validateSession: vi.fn()
@@ -66,6 +69,30 @@ function file(stem: string, sourceFormat: "shapefile" | "gpkg" = "shapefile"): I
   return { stem, source_format: sourceFormat } as ImportedFile;
 }
 
+const LIMITS = {
+  sessions: { idle_days: 30, max_projects: 200 },
+  artwork: { idle_days: 30, max_projects: 200 }
+};
+
+function listed(id: string, name: string, overrides: Partial<ProjectSummary> = {}): ProjectSummary {
+  return {
+    id,
+    flow: "shapefiles",
+    name,
+    import_profile: "standard",
+    stage: "set-up",
+    updated_at: null,
+    last_opened: "2026-10-19T00:00:00Z",
+    blockers: null,
+    can_wait: null,
+    delivered_at: null,
+    changed_since_delivery: false,
+    expires_at: "2026-11-19T00:00:00Z",
+    split_parent_id: "import-1",
+    ...overrides
+  };
+}
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={["/p/session-123/deliver"]}>
@@ -100,6 +127,7 @@ beforeEach(() => {
   vi.mocked(fetchExportContents).mockResolvedValue(CONTENTS);
   vi.mocked(fetchHandover).mockResolvedValue({ visit_started_at: null, last_visit: null, note: null });
   vi.mocked(fetchStoredValidation).mockResolvedValue(summary(0, 5));
+  vi.mocked(fetchProjects).mockResolvedValue({ projects: [], total: 0, limits: LIMITS });
   vi.mocked(exportSessionArchive).mockResolvedValue({ blob: new Blob(), filename: "Tokyo_Station.imdf" });
   vi.mocked(exportSessionShapefiles).mockResolvedValue({ blob: new Blob(), filename: "JRTokyoSta_odc2026_shapefiles.zip" });
   vi.mocked(exportSessionQgisProject).mockResolvedValue({ blob: new Blob(), filename: "JRTokyoSta_qgis_project.zip" });
@@ -227,4 +255,35 @@ test("the handover slot keeps an unsigned note for whoever opens the project nex
   await waitFor(() => expect(saveHandoverNote).toHaveBeenCalledWith("session-123", "屋外 still provisional"));
   expect(await screen.findByText(/^Saved · /)).toBeInTheDocument();
   expect(saveHandoverNote).toHaveBeenCalledTimes(1);
+});
+
+test("a building split off an import lists the import's other buildings and leads back to it", async () => {
+  vi.mocked(fetchProjects).mockResolvedValue({
+    projects: [
+      listed("import-1", "Shinjuku", { split_parent_id: null, stage: "bring-in" }),
+      listed("session-123", "JR"),
+      listed("lumine", "ルミネ1", { stage: "deliver", delivered_at: "2026-10-19T01:00:00Z" }),
+      listed("yodobashi", "ヨドバシカメラ", { stage: "check" })
+    ],
+    total: 4,
+    limits: LIMITS
+  });
+  renderPage();
+
+  const card = await screen.findByRole("region", { name: "Other buildings from Shinjuku" });
+  const rows = within(card).getAllByRole("listitem");
+  expect(rows.map((row) => row.textContent)).toEqual([
+    expect.stringContaining("ヨドバシカメラ"),
+    expect.stringContaining("ルミネ1")
+  ]);
+  expect(within(rows[0]).getByRole("link", { name: "Continue" })).toHaveAttribute("href", "/p/yodobashi/check");
+  expect(within(rows[1]).getByText("Delivered")).toBeInTheDocument();
+  expect(within(card).getByRole("link", { name: "Back to the import (Shinjuku)" })).toHaveAttribute("href", "/p/import-1/bring-in");
+});
+
+test("a project that was not split off shows no other buildings", async () => {
+  renderPage();
+  expect(await screen.findByRole("heading", { level: 1, name: "Deliver Tokyo Station" })).toBeInTheDocument();
+  await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
+  expect(screen.queryByRole("region", { name: /Other buildings/ })).not.toBeInTheDocument();
 });

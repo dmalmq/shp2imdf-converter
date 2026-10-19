@@ -35,6 +35,8 @@ class ProjectFields:
     delivered_at: datetime | None
     delivered_format: str | None
     delivered_blockers: int | None
+    # The import this project was split off from, so its buildings can be listed together.
+    split_parent_id: str | None = None
 
     def to_meta(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -57,6 +59,7 @@ class ProjectFields:
             delivered_at=_timestamp(payload.get("delivered_at")),
             delivered_format=_text(payload.get("delivered_format")),
             delivered_blockers=_count(payload.get("delivered_blockers")),
+            split_parent_id=_text(payload.get("split_parent_id")),
         )
 
 
@@ -75,6 +78,7 @@ def derive_session_project(record: SessionRecord) -> ProjectFields:
         delivered_at=delivered.at if delivered is not None else None,
         delivered_format=delivered.format if delivered is not None else None,
         delivered_blockers=delivered.blockers if delivered is not None else None,
+        split_parent_id=record.split_from.parent_session_id if record.split_from is not None else None,
     )
 
 

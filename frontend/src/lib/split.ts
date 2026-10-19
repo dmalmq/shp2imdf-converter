@@ -144,3 +144,46 @@ export function filterGroups(groups: ReadonlyArray<LayerGroup>, query: string): 
   const needle = query.trim().toLowerCase();
   return needle ? groups.filter((group) => group.name.toLowerCase().includes(needle)) : [...groups];
 }
+
+/**
+ * One colour per building, kept when others are added or removed. Every hue stays 30°
+ * or more from the terracotta (about 10°) that marks what falls outside every building.
+ * Mid tones, so each reads on the light map and against both themes' panels.
+ */
+export const BUILDING_COLOURS = ["#2563eb", "#ca8a04", "#7c3aed", "#16a34a", "#db2777", "#0891b2", "#65a30d", "#c026d3"] as const;
+
+function hslHex(hue: number, saturation: number, lightness: number): string {
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const channel = (n: number) => {
+    const k = (n + hue / 30) % 12;
+    const value = lightness - chroma / 2 * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(value * 255).toString(16).padStart(2, "0");
+  };
+  return `#${channel(0)}${channel(8)}${channel(4)}`;
+}
+
+// Generated colours, in order: entry i belongs to building BUILDING_COLOURS.length + 1 + i.
+const generated: string[] = [];
+const GENERATED_LIGHTNESS = [0.45, 0.36, 0.54] as const;
+
+/**
+ * A building's colour, from the number in its key (`b1`, `b2`, …), so it never changes. Past
+ * the palette, hues step by the golden angle through 40°–340°, which keeps clear of the
+ * terracotta and keeps each new colour far from the ones just before it; a step that rounds
+ * to a colour already used is skipped, so no two buildings ever share one.
+ */
+export function buildingColour(key: string): string {
+  const n = Math.max(Number(/\d+/.exec(key)?.[0] ?? 1), 1);
+  if (n <= BUILDING_COLOURS.length) return BUILDING_COLOURS[n - 1];
+  const used = new Set<string>([...BUILDING_COLOURS, ...generated]);
+  // Each lap of 300 steps takes the next lightness, so the supply never runs dry.
+  for (let step = generated.length + 1; generated.length < n - BUILDING_COLOURS.length; step++) {
+    const lightness = GENERATED_LIGHTNESS[Math.floor(step / 300) % GENERATED_LIGHTNESS.length];
+    const colour = hslHex(40 + ((step * 137.508) % 300), 0.7, lightness);
+    if (!used.has(colour) || step > 100_000) {
+      used.add(colour);
+      generated.push(colour);
+    }
+  }
+  return generated[n - BUILDING_COLOURS.length - 1];
+}

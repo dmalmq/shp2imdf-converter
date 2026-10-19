@@ -18,6 +18,7 @@ import {
   type ValidationSummary
 } from "../api/client";
 import { NextBar } from "../components/bringIn/NextBar";
+import { OtherBuildings } from "../components/deliver/OtherBuildings";
 import { HandoverNote } from "../components/handover/HandoverNote";
 import { useToast } from "../components/shared/ToastProvider";
 import { usePageShell, usePrimaryAction } from "../components/shell/ShellContext";
@@ -444,6 +445,7 @@ export function DeliverPage() {
             </ul>
           </section>
           {note.loaded ? <HandoverNote sessionId={sessionId} station={station} note={note.note} /> : null}
+          <OtherBuildings sessionId={sessionId} />
         </aside>
       </div>
       <NextBar

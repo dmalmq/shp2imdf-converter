@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections import OrderedDict
 import copy
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 import json
 import logging
@@ -31,7 +31,7 @@ from backend.src.schemas import SESSION_RECORD_SCHEMA_VERSION, CleanupSummary, I
 logger = logging.getLogger(__name__)
 
 _SESSION_ID_PATTERN = re.compile(r"[A-Za-z0-9-]+")
-META_VERSION = 2
+META_VERSION = 3
 
 
 def is_session_id(value: str) -> bool:
@@ -43,8 +43,7 @@ class SessionSummary:
     session_id: str
     last_accessed: datetime
     upload_artifact_dir: str | None = None
-    # None when only a version-1 meta file has been read: the project is unknown
-    # until the record is next loaded or saved.
+    # Rebuilt from the record when the meta file is missing or of another version.
     project: ProjectFields | None = None
 
     @classmethod
@@ -147,24 +146,30 @@ class FileSystemSessionBackend(SessionBackend):
             session_id = file.stem
             meta_path = self._meta_path_for(session_id)
             try:
-                if meta_path.exists():
-                    payload = json.loads(meta_path.read_text(encoding="utf-8"))
-                    meta_version = payload.get("meta_version")
+                payload = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else None
+                if payload is not None and payload.get("meta_version") == META_VERSION:
                     index[session_id] = SessionSummary(
                         session_id=session_id,
                         last_accessed=datetime.fromisoformat(payload["last_accessed"]),
                         upload_artifact_dir=payload.get("upload_artifact_dir"),
-                        project=(
-                            ProjectFields.from_meta(payload)
-                            if isinstance(meta_version, int) and meta_version >= 2
-                            else None
-                        ),
+                        project=ProjectFields.from_meta(payload),
                     )
                 else:
+                    # Missing or written by an older version: rebuild the project fields from the
+                    # record once, so a field added since (split_parent_id in 3) is filled in for
+                    # old projects. The meta's own time and upload folder win, since the time
+                    # decides when the project expires.
                     session = self._read(session_id)
                     if session is not None:
-                        index[session_id] = SessionSummary.of(session)
-                        self._write_meta(index[session_id])
+                        rebuilt = SessionSummary.of(session)
+                        if payload is not None:
+                            rebuilt = replace(
+                                rebuilt,
+                                last_accessed=datetime.fromisoformat(payload["last_accessed"]),
+                                upload_artifact_dir=payload.get("upload_artifact_dir", rebuilt.upload_artifact_dir),
+                            )
+                        index[session_id] = rebuilt
+                        self._write_meta(rebuilt)
             except (OSError, ValueError, KeyError):
                 logger.exception("Skipping unreadable session file %s", file)
         return index
