@@ -391,7 +391,7 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
         learned_key = keyword if keyword.startswith("suffix:") else f"suffix:{keyword}"
         session.learned_keywords[learned_key] = feature_type
         merged = _merged_keyword_map(request, session.learned_keywords)
-        session.files = restack_levels(before, detect_files(session.files, merged, preserve_manual_levels=True))
+        session.files = detect_files(session.files, merged, preserve_manual_levels=True, stacked_from=before)
     else:
         if (current.detected_type in LEVEL_FILE_TYPES) != (updated.detected_type in LEVEL_FILE_TYPES):
             session.files = restack_levels(before, session.files)

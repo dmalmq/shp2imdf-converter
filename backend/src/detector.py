@@ -301,7 +301,13 @@ def detect_files(
     files: list[ImportedFile],
     keywords: dict[str, set[str]],
     preserve_manual_levels: bool = True,
+    stacked_from: list[ImportedFile] | None = None,
 ) -> list[ImportedFile]:
+    """Detect each file's type and floor. Keeping manual levels, the files are re-stacked
+    once, from `stacked_from` (the files as they were before the request, default
+    `files`) to the detected types: a request that changed a type before detection must
+    pass the files from before it, or a level set by hand that happens to match the
+    in-between stack is taken for an automatic one and moved."""
     types = {item.stem: detect_feature_type(item.stem, item.geometry_type, keywords) for item in files}
     levels = _stack(files, {stem: feature_type for stem, (feature_type, _) in types.items()})
     typed: list[ImportedFile] = []
@@ -311,7 +317,7 @@ def detect_files(
         typed.append(updated)
     if preserve_manual_levels:
         # New types can add or remove a floor; levels the old stack gave must follow.
-        typed = restack_levels(files, typed)
+        typed = restack_levels(files if stacked_from is None else stacked_from, typed)
     detected: list[ImportedFile] = []
     for updated in typed:
         if not preserve_manual_levels or updated.detected_level is None:

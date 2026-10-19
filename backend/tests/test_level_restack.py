@@ -114,3 +114,26 @@ def test_guessing_the_types_again_restacks_the_floors(test_client: TestClient, t
 
     assert guessed.status_code == 200, guessed.text
     assert _levels(test_client, session_id) == STACKED
+
+
+def test_learning_keeps_a_level_set_by_hand_that_an_intermediate_stack_would_match(
+    test_client: TestClient, tmp_path: Path
+) -> None:
+    stems = ["S_1F_Space", "S_2F_Space", "S_M2F_Poi", "S_M3F_Poi", "S_3F_Space"]
+    session_id = _import(test_client, tmp_path / "upload", stems, points=("S_M2F_Poi", "S_M3F_Poi"))
+    assert _levels(test_client, session_id)["S_3F_Space"] == (2, None, False)
+    test_client.patch(f"/api/session/{session_id}/files/S_3F_Space", json={"detected_level": 3})
+
+    learned = test_client.patch(
+        f"/api/session/{session_id}/files/S_M2F_Poi",
+        json={"detected_type": "unit", "apply_learning": True, "learning_keyword": "poi"},
+    )
+
+    assert learned.status_code == 200, learned.text
+    assert _levels(test_client, session_id) == {
+        "S_1F_Space": (0, None, False),
+        "S_2F_Space": (2, "2F", False),
+        "S_M2F_Poi": (1, "M2F", False),
+        "S_M3F_Poi": (3, "M3F", False),
+        "S_3F_Space": (3, None, False),
+    }
