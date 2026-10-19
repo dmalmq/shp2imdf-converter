@@ -35,7 +35,7 @@ from backend.src.feature_undo import (
     undo_between,
 )
 from backend.src.importer import rebuild_normalized_feature_collection
-from backend.src.projects import current_validation, mark_changed, mark_validated
+from backend.src.projects import clear_generation, current_validation, generation_inputs, mark_changed, mark_validated
 from backend.src.schemas import (
     BulkPatchFeaturesRequest,
     BulkPatchFeaturesResponse,
@@ -281,6 +281,16 @@ def _revalidate_session(session: Any) -> ValidationResponse:
     return validation
 
 
+def _drop_stale_draft(session: Any, inputs_before: list[str]) -> None:
+    """A changed file type or floor makes the generated draft wrong, so it goes, as a Set up change does.
+
+    Left in place it would still be exported: a file set to "Unknown — decide
+    later" after generating kept delivering its units.
+    """
+    if session.wizard.generation_status != "not_started" and generation_inputs(session) != inputs_before:
+        clear_generation(session)
+
+
 def _refresh_source_views(session: Any) -> None:
     source_collection = session.source_feature_collection or session.feature_collection
     session.source_feature_collection = sync_feature_types(source_collection, session.files)
@@ -320,9 +330,11 @@ def detect_all(session_id: str, request: Request) -> DetectResponse:
 
     keyword_map = _merged_keyword_map(request, session.learned_keywords)
     before = session.files
+    inputs_before = generation_inputs(session)
     session.files = detect_files(session.files, keyword_map, preserve_manual_levels=True)
     if session.files != before:
         mark_changed(session, "files_detected")
+    _drop_stale_draft(session, inputs_before)
     _refresh_source_views(session)
     manager.save_session(session)
 
@@ -340,6 +352,7 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
 
     current: ImportedFile = session.files[file_index]
     files_before = [item.model_dump_json() for item in session.files]
+    inputs_before = generation_inputs(session)
     keywords_before = dict(session.learned_keywords)
     updated = current.model_copy(deep=True)
     changed_fields = payload.model_fields_set
@@ -385,6 +398,7 @@ def patch_file(stem: str, session_id: str, payload: UpdateFileRequest, request: 
                 keywords=merged,
             )
 
+    _drop_stale_draft(session, inputs_before)
     _refresh_source_views(session)
     if [item.model_dump_json() for item in session.files] != files_before or session.learned_keywords != keywords_before:
         mark_changed(session, "file_changed", stem=stem)

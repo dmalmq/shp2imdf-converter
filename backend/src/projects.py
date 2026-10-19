@@ -91,11 +91,21 @@ def mark_changed(record: SessionRecord, kind: HandoverEventKind, n: int = 1, **p
     record_event(record.handover, kind, now, n, **params)
 
 
-def reset_generation(record: SessionRecord, section: str) -> None:
+def clear_generation(record: SessionRecord) -> None:
+    """Throw the generated draft away, for a request that records its own change."""
     record.wizard.generation_status = "not_started"
     record.validation = None
     record.validation_rev = None
+
+
+def reset_generation(record: SessionRecord, section: str) -> None:
+    clear_generation(record)
     mark_changed(record, "setup_changed", section=section)
+
+
+def generation_inputs(record: SessionRecord) -> list[str]:
+    """What of the files generation reads: everything but the floor names, which Set up copies."""
+    return [item.model_dump_json(exclude={"level_name", "short_name"}) for item in record.files]
 
 
 def setup_snapshot(record: SessionRecord) -> str:
@@ -106,8 +116,7 @@ def setup_snapshot(record: SessionRecord) -> str:
     so the first sync of seeded names fills them without changing any output.
     """
     wizard = record.wizard.model_dump_json(exclude={"generation_status"})
-    files = "".join(item.model_dump_json(exclude={"level_name", "short_name"}) for item in record.files)
-    return wizard + files
+    return wizard + "".join(generation_inputs(record))
 
 
 def reset_generation_if_changed(record: SessionRecord, before: str, section: str) -> bool:

@@ -303,10 +303,17 @@ describe("a project's Bring in", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/p/s1/bring-in/split");
   });
 
-  test("the split stays blocked while a file needs you", () => {
+  test("the split goes ahead while a file still needs you; Set up still waits for it", () => {
     renderPage(true, "/p/s1/bring-in");
+    expect(nextButton(/Continue to Set up/)).toBeDisabled();
+
     fireEvent.click(screen.getByRole("checkbox", { name: /hold more than one building/ }));
-    expect(nextButton(/Split into buildings/)).toBeDisabled();
+    expect(nextStep()).toHaveTextContent("Files that still need you are decided in each building's own project");
+    fireEvent.click(nextButton(/Split into buildings/));
+    expect(screen.getByTestId("where")).toHaveTextContent("/p/s1/bring-in/split");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /hold more than one building/ }));
+    expect(nextButton(/Continue to Set up/)).toBeDisabled();
   });
 
   test("an IMDF-schema import offers no split", () => {
@@ -361,20 +368,21 @@ describe("a project's Bring in", () => {
     expect(nextButton(/Continue to Set up/)).toBeEnabled();
   });
 
-  test("a type can be cleared, and each file says its geometry and GeoPackage layer", async () => {
+  test("Unknown — decide later stays chosen, and each file says its geometry and GeoPackage layer", async () => {
     useAppStore.setState({
       files: [...brought, file("stations", { source_format: "gpkg", source_layer: "Station_pg", geometry_type: "MultiPolygon" })]
     });
-    updateSessionFileMock.mockResolvedValueOnce(saved({ ...brought[0], detected_type: null, confidence: "red" }));
+    updateSessionFileMock.mockResolvedValueOnce(saved({ ...brought[0], detected_type: "unknown", confidence: "green" }));
     renderPage(true, "/p/s1/bring-in");
     expect(screen.getByText("MultiPolygon · layer Station_pg")).toBeInTheDocument();
     expect(screen.getAllByText("LineString")).toHaveLength(1);
 
     await choose("What JRTokyoSta_B1_Space is", "Unknown — decide later");
-    expect(updateSessionFileMock).toHaveBeenCalledWith("s1", "JRTokyoSta_B1_Space", { detected_type: null });
-    await waitFor(() =>
-      expect(within(screen.getByRole("region", { name: "Needs you" })).getByText("JRTokyoSta_B1_Space")).toBeInTheDocument()
-    );
+    expect(updateSessionFileMock).toHaveBeenCalledWith("s1", "JRTokyoSta_B1_Space", { detected_type: "unknown" });
+    const trigger = await screen.findByRole("combobox", { name: "What JRTokyoSta_B1_Space is" });
+    await waitFor(() => expect(trigger).toHaveTextContent("Unknown — decide later"));
+    const looksRight = screen.getByRole("region", { name: "Look right" });
+    expect(within(looksRight).getByText("JRTokyoSta_B1_Space")).toBeInTheDocument();
   });
 
   test("guessing the types again takes the server's new reading of every file", async () => {

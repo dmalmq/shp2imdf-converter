@@ -169,3 +169,17 @@ test("same-named GeoPackages or projects in two folders queue as two rows, and l
   ]);
   expect(queuedDatasets([inFolder("Station/A/map.gpkg")])[0].name).toBe("map.gpkg");
 });
+
+describe("files of unknown type", () => {
+  test("look right with no floor, so they never hold up Continue", () => {
+    const view = bringInView([
+      file("新宿周辺_街区", { detected_type: "unknown", confidence: "green", detected_level: null }),
+      file("JRShinjukuSta_1_Space", { detected_type: "unit", confidence: "green", detected_level: 0 })
+    ]);
+
+    expect(view.needsYou).toEqual([]);
+    const row = view.looksRight.find((item) => item.stem === "新宿周辺_街区");
+    expect(row).toMatchObject({ type: "unknown", floor: { kind: "none" }, reasons: [] });
+    expect(view.floors).toEqual([{ ordinal: 0, labels: ["1F"] }]);
+  });
+});

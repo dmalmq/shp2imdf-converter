@@ -887,7 +887,8 @@ test("ticked, Download queues a build, shows its place in line and its steps, an
 
   await waitFor(() => expect(saved).toEqual(["shinjuku_new-colors.zip"]), { timeout: 2500 });
   expect(followed).toEqual(["/api/color-theme/jobs/a1b2c3/download"]);
-  expect(bar).toHaveTextContent("Downloaded shinjuku_new-colors.zip");
+  // The save lands before the page re-renders the finished build.
+  await waitFor(() => expect(bar).toHaveTextContent("Downloaded shinjuku_new-colors.zip"));
   expect(within(tilesRegion()).queryByRole("status")).toBeNull();
   expect(tilesRegion()).toHaveTextContent("missing zoom levels [21]");
   expect(tilesRegion()).toHaveTextContent("no layer chosen and are switched off: ordinal_-1, WiFi");

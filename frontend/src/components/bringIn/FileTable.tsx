@@ -17,8 +17,6 @@ import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue }
 const DETECTED_COLUMNS = "grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_7.5rem_4.5rem]";
 const QUEUED_COLUMNS = "grid-cols-[minmax(0,1.3fr)_8rem_5rem_minmax(0,1fr)]";
 const LOOK_RIGHT_SHOWN = 8;
-// Radix Select has no empty-string value, so clearing a type needs a sentinel.
-const NO_TYPE = "__unknown__";
 
 type T = (english: string, japanese: string) => string;
 
@@ -184,7 +182,7 @@ export function DetectedTable({
     <Select
       value={row.type ?? ""}
       disabled={saving.has(row.stem)}
-      onValueChange={(value) => onResolve(row.stem, { detected_type: value === NO_TYPE ? null : value })}
+      onValueChange={(value) => onResolve(row.stem, { detected_type: value })}
     >
       <SelectTrigger
         className={cn(
@@ -204,7 +202,6 @@ export function DetectedTable({
             {typeLabel(option, t)}
           </SelectItem>
         ))}
-        <SelectItem value={NO_TYPE}>{t("Unknown — decide later", "不明（あとで決める）")}</SelectItem>
       </SelectContent>
     </Select>
   );
