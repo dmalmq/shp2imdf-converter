@@ -25,7 +25,7 @@ export const TYPE_LABELS: Record<string, Bilingual> = {
   section: { en: "Sections", ja: "セクション" },
   facility: { en: "Facilities", ja: "施設" },
   // Not an IMDF type: nothing generated or exported takes these files, so picking it leaves a file out.
-  surroundings: { en: "Surroundings (left out)", ja: "周辺地図（含めない）" }
+  unknown: { en: "Unknown — decide later", ja: "不明（あとで決める）" }
 };
 
 export const TYPE_OPTIONS = Object.keys(TYPE_LABELS);

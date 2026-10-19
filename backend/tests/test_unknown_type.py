@@ -1,4 +1,4 @@
-"""Layers of the surrounding map are left out of everything delivered."""
+"""Files whose type is "unknown, decide later" are left out of everything delivered."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def _write(root: Path, stem: str, x: float) -> None:
     gpd.GeoDataFrame({"name": [stem]}, geometry=geometry, crs="EPSG:6677").to_file(root / f"{stem}.shp")
 
 
-def test_the_shapefile_export_leaves_out_surroundings(test_client: TestClient, tmp_path: Path) -> None:
+def test_the_shapefile_export_leaves_out_unknown_files(test_client: TestClient, tmp_path: Path) -> None:
     root = tmp_path / "upload"
     root.mkdir()
     _write(root, "Site_1F_Space", 0)
@@ -30,7 +30,7 @@ def test_the_shapefile_export_leaves_out_surroundings(test_client: TestClient, t
     upload = [("files", (path.name, path.read_bytes(), "application/octet-stream")) for path in root.iterdir()]
     session_id = test_client.post("/api/import", files=upload).json()["session_id"]
     files = {item["stem"]: item["detected_type"] for item in test_client.get(f"/api/session/{session_id}/files").json()["files"]}
-    assert files["新宿周辺_道路"] == "surroundings"
+    assert files["新宿周辺_道路"] == "unknown"
 
     response = test_client.post(f"/api/session/{session_id}/export/shapefiles", json={})
 

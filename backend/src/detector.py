@@ -11,7 +11,7 @@ import re
 from backend.src.schemas import ImportedFile, LearningSuggestion
 
 
-SURROUNDINGS_TYPE = "surroundings"
+UNKNOWN_TYPE = "unknown"
 
 FEATURE_TYPE_VALUES = {
     "unit",
@@ -29,9 +29,9 @@ FEATURE_TYPE_VALUES = {
     "relationship",
     "section",
     "facility",
-    # Not an IMDF type: the generator and the exports pass over a file of a type
-    # they do not know, so this leaves a file out until the operator picks a real one.
-    SURROUNDINGS_TYPE,
+    # "Unknown, decide later": not an IMDF type, and the generator and the exports pass
+    # over a file of a type they do not know, so it is left out until a real one is picked.
+    UNKNOWN_TYPE,
 }
 
 
@@ -88,7 +88,7 @@ def detect_feature_type(stem: str, geometry_type: str, keywords: dict[str, set[s
     if re.search(r"(^|[^a-z0-9])drawing$", lowered):
         return "detail", "green"
 
-    # Ranked by: an exact suffix rule, then any IMDF type over "surroundings"
+    # Ranked by: an exact suffix rule, then any IMDF type over "unknown"
     # (Station_1_surrounding_Space is a unit layer), then the longest keyword.
     best_match: tuple[str, tuple[bool, bool, int]] | None = None
     for feature_type, values in keywords.items():
@@ -101,9 +101,9 @@ def detect_feature_type(stem: str, geometry_type: str, keywords: dict[str, set[s
                 expected_suffix = candidate[len("suffix:") :]
                 if suffix_token != expected_suffix:
                     continue
-                rank = (True, feature_type != SURROUNDINGS_TYPE, len(expected_suffix))
+                rank = (True, feature_type != UNKNOWN_TYPE, len(expected_suffix))
             elif candidate in lowered:
-                rank = (False, feature_type != SURROUNDINGS_TYPE, len(candidate))
+                rank = (False, feature_type != UNKNOWN_TYPE, len(candidate))
             else:
                 continue
             if best_match is None or rank > best_match[1]:

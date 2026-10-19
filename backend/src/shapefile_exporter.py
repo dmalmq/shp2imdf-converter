@@ -18,7 +18,7 @@ import pandas as pd
 from shapely.geometry import mapping, shape
 from shapely.ops import unary_union
 
-from backend.src.detector import SURROUNDINGS_TYPE
+from backend.src.detector import UNKNOWN_TYPE
 from backend.src.importer import detect_dbf_encoding
 from backend.src.schemas import SessionRecord, ShapefileExportRequest
 
@@ -1566,8 +1566,8 @@ def build_shapefile_export_archive(
     grouped_files = _group_artifact_files(upload_artifact_dir)
     split_rows = _split_rows(session) if session.split_from is not None else None
     detected_type_by_stem = _detected_type_by_stem(session)
-    # Surroundings are left out of the map, and so of this export too.
-    left_out = sorted(stem for stem in grouped_files if detected_type_by_stem.get(stem) == SURROUNDINGS_TYPE)
+    # "Unknown, decide later" files are left out of the map, and so of this export too.
+    left_out = sorted(stem for stem in grouped_files if detected_type_by_stem.get(stem) == UNKNOWN_TYPE)
     shapefile_groups = {
         stem: components
         for stem, components in grouped_files.items()

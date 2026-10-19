@@ -160,10 +160,10 @@ def test_load_keyword_map(config_path="backend/config/filename_keywords.json") -
         ("Shinjuku_surrounding_roads", "Polygon"),
     ],
 )
-def test_surrounding_map_layers_are_settled_as_left_out(stem: str, geometry: str) -> None:
+def test_surrounding_map_layers_are_settled_as_unknown(stem: str, geometry: str) -> None:
     keyword_map = load_keyword_map("backend/config/filename_keywords.json")
 
-    assert detect_feature_type(stem, geometry, keyword_map) == ("surroundings", "green")
+    assert detect_feature_type(stem, geometry, keyword_map) == ("unknown", "green")
 
 
 @pytest.mark.phase2
@@ -177,9 +177,9 @@ def test_a_floor_layer_that_mentions_its_surroundings_keeps_its_type() -> None:
 
 
 @pytest.mark.phase2
-def test_a_learned_suffix_for_surroundings_still_wins() -> None:
+def test_a_learned_suffix_for_unknown_still_wins() -> None:
     keyword_map = merge_learned_keywords(
-        load_keyword_map("backend/config/filename_keywords.json"), {"suffix:bg": "surroundings"}
+        load_keyword_map("backend/config/filename_keywords.json"), {"suffix:bg": "unknown"}
     )
 
-    assert detect_feature_type("Station_1_Space_bg", "Polygon", keyword_map) == ("surroundings", "green")
+    assert detect_feature_type("Station_1_Space_bg", "Polygon", keyword_map) == ("unknown", "green")

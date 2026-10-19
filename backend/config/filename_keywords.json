@@ -15,6 +15,6 @@
     "relationship": ["relationship", "relation", "traversal"],
     "section": ["section"],
     "facility": ["facility"],
-    "surroundings": ["周辺", "surrounding"]
+    "unknown": ["周辺", "surrounding"]
   }
 }
