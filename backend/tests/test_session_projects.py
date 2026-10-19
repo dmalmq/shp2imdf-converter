@@ -20,7 +20,7 @@ from backend.src.schemas import (
     ValidationResponse,
     ValidationSummary,
 )
-from backend.src.session import FileSystemSessionBackend, SessionManager
+from backend.src.session import META_VERSION, FileSystemSessionBackend, SessionManager
 from backend.tests.test_api import _upload_payload
 
 _PROJECT = {
@@ -578,13 +578,13 @@ def _delivered_session(manager: SessionManager) -> SessionRecord:
 
 
 @pytest.mark.phase1
-def test_meta_v2_round_trips_the_derived_fields(tmp_path: Path) -> None:
+def test_meta_round_trips_the_derived_fields(tmp_path: Path) -> None:
     manager = SessionManager(backend=FileSystemSessionBackend(tmp_path), ttl_hours=24)
     session = _delivered_session(manager)
     expected = derive_session_project(session)
 
     meta = json.loads((tmp_path / f"{session.session_id}.meta.json").read_text(encoding="utf-8"))
-    assert meta["meta_version"] == 2
+    assert meta["meta_version"] == META_VERSION
     assert meta["name"] == "Shinjuku"
     assert meta["stage"] == "check"
     assert meta["changed_since_delivery"] is True
@@ -597,26 +597,23 @@ def test_meta_v2_round_trips_the_derived_fields(tmp_path: Path) -> None:
 
 
 @pytest.mark.phase1
-def test_version_1_meta_lists_with_an_unknown_project(tmp_path: Path) -> None:
+def test_an_older_meta_is_rebuilt_from_its_record_at_restart(tmp_path: Path) -> None:
     manager = SessionManager(backend=FileSystemSessionBackend(tmp_path), ttl_hours=24)
     session = _create(manager)
-    last_accessed = datetime.now(UTC) - timedelta(hours=3)
-    (tmp_path / f"{session.session_id}.meta.json").write_text(
+    meta_path = tmp_path / f"{session.session_id}.meta.json"
+    meta_path.write_text(
         json.dumps(
-            {"session_id": session.session_id, "last_accessed": last_accessed.isoformat(), "upload_artifact_dir": None}
+            {"session_id": session.session_id, "last_accessed": session.last_accessed.isoformat(), "upload_artifact_dir": None}
         ),
         encoding="utf-8",
     )
 
     restarted = FileSystemSessionBackend(tmp_path)
-    (summary,) = restarted.list_summaries()
-    assert summary.project is None
-    assert summary.last_accessed == last_accessed
 
-    assert restarted.get(session.session_id) is not None
     (summary,) = restarted.list_summaries()
     assert summary.project is not None
     assert summary.project.stage == "bring-in"
+    assert json.loads(meta_path.read_text(encoding="utf-8"))["meta_version"] == META_VERSION
 
 
 @pytest.mark.phase1

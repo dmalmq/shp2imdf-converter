@@ -1241,6 +1241,8 @@ class ProjectSummary(BaseModel):
     delivered_at: datetime | None
     changed_since_delivery: bool
     expires_at: datetime
+    # The import a shapefile project was split off from; null otherwise.
+    split_parent_id: str | None = None
 
 
 class ProjectListLimits(BaseModel):

@@ -101,6 +101,7 @@ def _session_project(summary: SessionSummary, manager: SessionManager) -> Projec
         delivered_at=project.delivered_at if project else None,
         changed_since_delivery=project.changed_since_delivery if project else False,
         expires_at=last_opened + manager.ttl,
+        split_parent_id=project.split_parent_id if project else None,
     )
 
 

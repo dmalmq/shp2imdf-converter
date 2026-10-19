@@ -31,7 +31,7 @@ from backend.src.schemas import SESSION_RECORD_SCHEMA_VERSION, CleanupSummary, I
 logger = logging.getLogger(__name__)
 
 _SESSION_ID_PATTERN = re.compile(r"[A-Za-z0-9-]+")
-META_VERSION = 2
+META_VERSION = 3
 
 
 def is_session_id(value: str) -> bool:
@@ -147,20 +147,17 @@ class FileSystemSessionBackend(SessionBackend):
             session_id = file.stem
             meta_path = self._meta_path_for(session_id)
             try:
-                if meta_path.exists():
-                    payload = json.loads(meta_path.read_text(encoding="utf-8"))
-                    meta_version = payload.get("meta_version")
+                payload = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else None
+                if payload is not None and payload.get("meta_version") == META_VERSION:
                     index[session_id] = SessionSummary(
                         session_id=session_id,
                         last_accessed=datetime.fromisoformat(payload["last_accessed"]),
                         upload_artifact_dir=payload.get("upload_artifact_dir"),
-                        project=(
-                            ProjectFields.from_meta(payload)
-                            if isinstance(meta_version, int) and meta_version >= 2
-                            else None
-                        ),
+                        project=ProjectFields.from_meta(payload),
                     )
                 else:
+                    # Missing or written by an older version: rebuild it from the record once,
+                    # so a field added since (split_parent_id in 3) is filled in for old projects.
                     session = self._read(session_id)
                     if session is not None:
                         index[session_id] = SessionSummary.of(session)
