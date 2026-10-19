@@ -135,12 +135,14 @@ describe("split shapes", () => {
 });
 
 describe("building colours", () => {
-  test("a building keeps its colour whatever happens to the others, and twenty buildings get twenty colours", () => {
+  test("a building keeps its colour whatever happens to the others, and no two buildings ever share one", () => {
     expect(buildingColour("b2")).toBe(BUILDING_COLOURS[1]);
     expect(buildingColour("b8")).toBe(BUILDING_COLOURS[7]);
-    const twenty = Array.from({ length: 20 }, (_, index) => buildingColour(`b${index + 1}`));
-    expect(new Set(twenty).size).toBe(20);
-    for (const colour of twenty) expect(colour).toMatch(/^#[0-9a-f]{6}$/);
+    const many = Array.from({ length: 1000 }, (_, index) => buildingColour(`b${index + 1}`));
+    expect(new Set(many).size).toBe(1000);
+    for (const colour of many) expect(colour).toMatch(/^#[0-9a-f]{6}$/);
+    // Asked out of order, a building still gets the colour it would in order.
+    expect(buildingColour("b35")).toBe(many[34]);
   });
 
   test("every building hue stays well away from the terracotta that marks outside every building", () => {
